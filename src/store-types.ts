@@ -14,6 +14,8 @@ export type LaneStatus = "working" | "waiting" | "ready" | "done" | "lost";
  * lane made no progress; one escalation per stall. `lastActivityAt`: the last sign of life (any report, a working pane).
  * `waitingFor`/`waitingSince`: what a waiting lane said it waits on (`report --status waiting --for`) and when it started
  * waiting; a waiting lane runs on the same clock, and its nudges and escalation name them.
+ * `noticeId`: this lane incarnation's persisted random identity. `progressEpoch`: its counter, advanced by new evidence
+ * and READY independently of wall time, so notice retries reuse an id and a new epoch or reused lane key gets a new one.
  */
 export type Lane = {
   key: string;
@@ -29,6 +31,8 @@ export type Lane = {
   createdAt: number;
   lastActivityAt: number;
   progressAt?: number;
+  noticeId?: string;
+  progressEpoch?: number;
   lastEvidence?: { ref: string; at: number };
   evidenceSeen?: string[];
   evidenceMtimes?: Record<string, number>;
@@ -61,7 +65,8 @@ export type DeliveryAttempt = {
 /** A flush lock from another host (or an unreadable one) older than this is taken over; on this host only a dead pid frees it (#108). */
 export const INBOX_LOCK_STALE_MS = 60_000;
 
-export type QueuedMessage = { at: number; from: string; text: string; attempt?: DeliveryAttempt };
+/** `id`: a duty notice's fixed incarnation/epoch name; one id is queued for a session only once. */
+export type QueuedMessage = { at: number; from: string; text: string; id?: string; attempt?: DeliveryAttempt };
 
 export type ReviewReceipt = {
   pr: string;

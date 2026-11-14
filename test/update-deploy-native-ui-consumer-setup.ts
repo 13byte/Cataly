@@ -1,4 +1,4 @@
-import { readFileSync, watch, writeFileSync } from "node:fs";
+import { readFileSync, utimesSync, watch, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { clearTimeout, setTimeout } from "node:timers";
 import { runtimeBinary } from "../src/update/deployment-config.ts";
@@ -107,6 +107,10 @@ console.log(JSON.stringify({ result }));
 `,
     { mode: 0o700 },
   );
+  // Publish admission after setup; /tmp can assign an mtime just before a same-millisecond clock sample.
+  const pulse = new Date();
+  writeFileSync(f.bootstrap.intake.path, String(pulse.getTime()), { mode: 0o600 });
+  utimesSync(f.bootstrap.intake.path, pulse, pulse);
   return {
     ...f,
     config,

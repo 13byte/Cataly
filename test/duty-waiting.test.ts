@@ -146,7 +146,7 @@ describe("a waiting lane", () => {
   });
 
   test.each(["missing", "directory"])(
-    "a %s waiting prompt does not consume a nudge and can be repaired before the next tick",
+    "a %s waiting override uses the default or errors without consuming a nudge, then can be repaired",
     async (kind) => {
       const { d, lane, pane, at } = await waitingLane({ waitingFor: "CI" });
       const dir = join(d.store.root, "custom-prompts");
@@ -157,17 +157,24 @@ describe("a waiting lane", () => {
       const previous = process.env["DORI_PROMPTS_DIR"];
       process.env["DORI_PROMPTS_DIR"] = dir;
       try {
-        expect(await at(10)).toEqual([
-          expect.objectContaining({ lane: "blocked", action: "lane-failed", detail: expect.any(String) }),
-        ]);
-        expect(d.store.lane("blocked")).toEqual(before);
-        expect(pane.received.filter((text) => text.startsWith("[duty -> blocked]"))).toEqual([]);
-        rmSync(path, { recursive: true, force: true });
-        writeFileSync(path, "custom waiting check {{key}}: {{target}} since {{waitingSince}}");
-        expect(await at(10)).toContainEqual({ lane: "blocked", action: "nudge-1" });
+        if (kind === "missing") {
+          expect(await at(10)).toContainEqual({ lane: "blocked", action: "nudge-1" });
+          expect(pane.received.at(-1)).toContain(`[duty -> blocked] Waiting on CI since ${hhmm(lane.createdAt)}`);
+          expect(await at(11)).toEqual([]);
+          expect(pane.received.filter((text) => text.startsWith("[duty -> blocked]"))).toHaveLength(1);
+        } else {
+          expect(await at(10)).toEqual([
+            expect.objectContaining({ lane: "blocked", action: "lane-failed", detail: expect.any(String) }),
+          ]);
+          expect(d.store.lane("blocked")).toEqual(before);
+          expect(pane.received.filter((text) => text.startsWith("[duty -> blocked]"))).toEqual([]);
+          rmSync(path, { recursive: true });
+          writeFileSync(path, "custom waiting check {{key}}: {{target}} since {{waitingSince}}");
+          expect(await at(10)).toContainEqual({ lane: "blocked", action: "nudge-1" });
+          expect(pane.received.at(-1)).toBe(`custom waiting check blocked: CI since ${hhmm(lane.createdAt)}`);
+        }
         expect(d.store.lane("blocked")!.nudges).toBe(1);
         expect(d.store.lane("blocked")!.log.filter((entry) => entry.kind === "nudge")).toHaveLength(1);
-        expect(pane.received.at(-1)).toBe(`custom waiting check blocked: CI since ${hhmm(lane.createdAt)}`);
       } finally {
         if (previous === undefined) delete process.env["DORI_PROMPTS_DIR"];
         else process.env["DORI_PROMPTS_DIR"] = previous;

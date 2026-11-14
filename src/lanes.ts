@@ -1,16 +1,20 @@
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { shq } from "./delivery.ts";
+import { oneLine } from "./fit.ts";
 import { agentCommand, prompt, type Deps } from "./harness.ts";
 import { settled, tellLead, type SendResult } from "./inbox.ts";
 import { Refusal } from "./refusal.ts";
 import { runHook } from "./hooks.ts";
-import { oneLine } from "./fit.ts";
 import { applyEvidence, blockerOf, waitingSinceOf, waitingTarget } from "./progress.ts";
 import { refText } from "./refs.ts";
 import { groupId } from "./runtime/group.ts";
 import { openSession } from "./runtime/types.ts";
 import { KEY_RE, reservedKey, type Lane } from "./store-types.ts";
+
+/** The lead's `evidence:` line: each reference is the lane's own input, so a line break or escape in it stays out. */
+const evidenceLine = (evidence: readonly string[]): string => `evidence: ${evidence.map(oneLine).join(" ")}`;
 
 export async function startLane(
   d: Deps,
@@ -56,6 +60,8 @@ export async function startLane(
     createdAt: now,
     lastActivityAt: now,
     progressAt: now,
+    noticeId: randomUUID(),
+    progressEpoch: 0,
     nudges: 0,
     log: [{ at: now, kind: "start", text: briefFile }],
   };
@@ -113,7 +119,7 @@ export async function report(
   d.store.saveLane(lane);
   void runHook(d, "onReport", { key, text, evidence: evidence.join(" ") });
   const head = `[REPORT ${key}${lane.status === "waiting" ? " WAITING" : ""}]`;
-  const tail = evidence.length ? `\nevidence: ${evidence.join(" ")}` : "";
+  const tail = evidence.length ? `\n${evidenceLine(evidence)}` : "";
   return { sent: await settled(tellLead(d, `${head} ${text}${tail}`, key)), progress };
 }
 
@@ -131,11 +137,12 @@ export async function ready(
   lane.final = { text, evidence: [...evidence], at: now };
   lane.lastActivityAt = now;
   lane.progressAt = now;
+  lane.progressEpoch = (lane.progressEpoch ?? 0) + 1;
   lane.nudges = 0;
   delete lane.escalatedAt;
   lane.log.push({ at: now, kind: "ready", text });
   d.store.saveLane(lane);
-  const sent = await settled(tellLead(d, `[READY ${key}] ${text}\nevidence: ${evidence.join(" ")}`, key));
+  const sent = await settled(tellLead(d, `[READY ${key}] ${text}\n${evidenceLine(evidence)}`, key));
   void runHook(d, "onReady", { key, text, evidence: evidence.join(" ") });
   d.usage.record({
     name: "dori.lane_ready",
