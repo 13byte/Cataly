@@ -3,7 +3,7 @@
 // that keeps saying "still waiting" is escalated to the lead like a silent one.
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
-import { ageText, fitEnd, fitStart, hhmm, indented, referenceLine } from "./fit.ts";
+import { ageText, fitEnd, fitStart, hhmm, indented, oneName } from "./fit.ts";
 import type { Lane } from "./store-types.ts";
 
 /** Minutes without progress before the duty loop tells the lead, once per stall. */
@@ -48,7 +48,7 @@ export function applyEvidence(lane: Lane, evidence: readonly string[], now: numb
   for (const ref of evidence) {
     const c = counted(lane, ref, since);
     if ("why" in c) {
-      const full = referenceLine(ref);
+      const full = oneName(ref);
       const shown = fitStart(full, 60);
       skipped.push(...withWhole(`  not counted: ${shown} (${c.why})`, shown, full));
       continue;
@@ -67,7 +67,7 @@ export function applyEvidence(lane: Lane, evidence: readonly string[], now: numb
   lane.nudges = 0;
   delete lane.escalatedAt;
   lane.lastEvidence = { ref: moved, at: now };
-  const full = referenceLine(moved);
+  const full = oneName(moved);
   const shown = fitStart(full, 80);
   return [...withWhole(`PROGRESS ${hhmm(now)}: ${shown}`, shown, full), ...skipped];
 }
@@ -82,20 +82,19 @@ export const stalled = (lane: Lane, now: number): boolean => {
   return now - since >= ESCALATE_MINUTES * 60_000 && (lane.escalatedAt === undefined || lane.escalatedAt <= since);
 };
 
-/** A blocker named in report text: its first line (a CR or line separator ends one too) without a leading `WAITING:`. */
+/**
+ * A blocker named in report text: its first line (a CR or line separator ends one too) without a leading `WAITING:`,
+ * trimmed. A name keeps the spaces inside it (`oneName`).
+ */
 export const blockerOf = (text: string): string =>
-  referenceLine(text.split(/[\n\r\u2028\u2029]/)[0]!.replace(/^\s*WAITING:\s*/i, "")).trim() || "?";
+  oneName(text.split(/[\n\r\u2028\u2029]/)[0]!.replace(/^\s*WAITING:\s*/i, "")).trim() || "?";
 
 /**
  * What a waiting lane waits on, on one line; a record from before `--for` names its last report's blocker. A target is
  * stored one-line, and one stored before that is made so here.
  */
-export const waitingTarget = (lane: Lane): string => {
-  const target = referenceLine(
-    lane.waitingFor ?? blockerOf(lane.log.findLast((e) => e.kind === "report")?.text ?? "?"),
-  );
-  return target.trim() ? target : "?";
-};
+export const waitingTarget = (lane: Lane): string =>
+  oneName(lane.waitingFor ?? blockerOf(lane.log.findLast((e) => e.kind === "report")?.text ?? "?")).trim() || "?";
 
 /** What a waiting lane waits on, cut to 40 columns, or to `cols` when a line leaves it fewer. */
 export const waitingOn = (lane: Lane, cols = 40): string => fitEnd(waitingTarget(lane), Math.min(40, cols));
@@ -103,7 +102,7 @@ export const waitingOn = (lane: Lane, cols = 40): string => fitEnd(waitingTarget
 /** When the lane started waiting; a record from before `waitingSince` counts from its last progress. */
 export const waitingSinceOf = (lane: Lane): number => lane.waitingSince ?? progressOf(lane);
 
-/** `line` alone when the `shown` part of it is `full` whole, else `line` and `full` on indented lines below it. */
+/** `line` alone when the `shown` part of it is `full` whole, else `line` and `full` on one indented line below it. */
 const withWhole = (line: string, shown: string, full: string): string[] =>
   shown === full ? [line] : [line, ...indented(full)];
 
@@ -119,7 +118,7 @@ export function escalation(lane: Lane, pane: string, now: number): string {
   const head = `[ESCALATE ${lane.key}${waiting ? " WAITING" : ""}] no new evidence for ${ageText(now - since)} (since ${hhmm(since)})`;
   const counts = `pane ${pane}, ${lane.nudges} nudges, ${talk} reports without evidence`;
   const next = waiting ? "check it is alive, or reassign the lane" : "check the lane, re-brief it, or close it";
-  const ref = lane.lastEvidence ? referenceLine(lane.lastEvidence.ref) : "";
+  const ref = lane.lastEvidence ? oneName(lane.lastEvidence.ref) : "";
   const shown = fitStart(ref, 48);
   const last = lane.lastEvidence
     ? withWhole(`last evidence: ${shown} @ ${hhmm(lane.lastEvidence.at)}. Next: ${next}.`, shown, ref)

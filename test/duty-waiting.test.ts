@@ -166,8 +166,7 @@ describe("a waiting lane", () => {
         const lines = pane.received.at(-1)!.split("\n");
         expect(lines[0]).toContain(`… since ${hhmm(lane.createdAt)}`);
         expect(Bun.stringWidth(lines[0]!)).toBeLessThanOrEqual(120);
-        const whole = lines.slice(2);
-        expect(whole).toEqual([`  ${target}`]);
+        expect(lines.slice(1)).toEqual([`  ${target}`, expect.stringMatching(/^Check .*…\.$/)]);
         expect(lines.filter((line) => Bun.stringWidth(line) > 120)).toEqual([`  ${target}`]);
         expect(await at(11)).toEqual([]);
         expect(pane.received.filter((text) => text.startsWith("[custom blocked]"))).toHaveLength(1);

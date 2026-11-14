@@ -109,9 +109,9 @@ describe("the lane board", () => {
       expect(lines[1]).toContain("  progress 45m ");
       expect(lines[1]).toContain("waiting: ");
       expect(lines[1]).toContain(` since ${hhmm(waiting.waitingSince)}`);
-      // The short target fits its line; a clipped reference follows on one line, even when it contains spaces.
+      // The short target fits its line and adds none; the wide one is cut there and follows whole on one indented line.
       const below = lines.slice(2);
-      expect(below).toEqual(target === "CI 812" ? [] : [`  ${target}`]);
+      expect(below).toEqual(target === "CI 812" ? [] : [`  ${target.trim()}`]);
       for (const line of lines.slice(0, 2)) expect(Bun.stringWidth(line)).toBeLessThanOrEqual(120);
     },
   );

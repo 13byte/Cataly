@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { shq } from "./delivery.ts";
-import { referenceLine } from "./fit.ts";
+import { oneName } from "./fit.ts";
 import { agentCommand, prompt, type Deps } from "./harness.ts";
 import { settled, tellLead, type SendResult } from "./inbox.ts";
 import { Refusal } from "./refusal.ts";
@@ -13,8 +13,11 @@ import { groupId } from "./runtime/group.ts";
 import { openSession } from "./runtime/types.ts";
 import { KEY_RE, reservedKey, type Lane } from "./store-types.ts";
 
-/** The lead's `evidence:` line: each reference is the lane's own input, so a line break or escape in it stays out. */
-const evidenceLine = (evidence: readonly string[]): string => `evidence: ${evidence.map(referenceLine).join(" ")}`;
+/**
+ * The lead's `evidence:` line: each reference is the lane's own input, so a line break or escape in it stays out; the
+ * spaces inside one stay, so it names the file the lane gave.
+ */
+const evidenceLine = (evidence: readonly string[]): string => `evidence: ${evidence.map(oneName).join(" ")}`;
 
 export async function startLane(
   d: Deps,
@@ -108,10 +111,9 @@ export async function report(
   // target, so a record from before `waitingSince`/`--for` keeps what was inferred before this report moved its clock.
   if (opts.status === "waiting" || (still && opts.status === undefined)) {
     // Waiting is not progress: the lane stays on the same clock, and the target is named in its nudges and escalation.
-    // --for is shown on one line, with printable spaces retained because they can be part of a reference.
+    // --for is stored on one line with boundary whitespace trimmed; printable spaces inside are part of the name.
     lane.waitingSince = still?.since ?? now;
-    const target = referenceLine(opts.waitingFor ?? "");
-    lane.waitingFor = target.trim() ? target : still?.target || blockerOf(text);
+    lane.waitingFor = oneName(opts.waitingFor ?? "").trim() || still?.target || blockerOf(text);
   } else if (opts.status === "working") {
     delete lane.waitingFor;
     delete lane.waitingSince;

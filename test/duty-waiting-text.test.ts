@@ -96,7 +96,9 @@ describe("a waiting lane's target and start", () => {
   test("the blocker named from report text ends at a CR or line separator and drops control characters", () => {
     expect(blockerOf("WAITING: CI 9\rRetry\nmore")).toBe("CI 9");
     expect(blockerOf("WAITING: deploy\u2028next")).toBe("deploy");
-    expect(blockerOf("WAITING: \u001b[2Jbuild\u0007 7")).toBe("[2Jbuild 7");
+    // A control character becomes a space; the space beside it and the spaces inside a name stay.
+    expect(blockerOf("WAITING: \u001b[2Jbuild\u0007 7")).toBe("[2Jbuild  7");
+    expect(blockerOf("WAITING:  /tmp/build  artifacts/log  ")).toBe("/tmp/build  artifacts/log");
     expect(blockerOf("WAITING:\r\nCI")).toBe("?");
   });
 });

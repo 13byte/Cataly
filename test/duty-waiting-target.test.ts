@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { dutyTick } from "../src/duty.ts";
 import { hhmm } from "../src/fit.ts";
 import { report, startLane } from "../src/lanes.ts";
@@ -44,7 +46,7 @@ describe("a long waiting target or evidence link", () => {
     within120(lines.filter((l) => !l.includes("`")));
   });
 
-  test("a target longer than a line stays whole on one indented line, including its spaces", async () => {
+  test("a target longer than a line, spaces and all, is named whole on one indented line", async () => {
     const target = `${URL} then the deploy of release 2026.11.15-rc3 to the staging cluster eu-west-1`;
     const { pane, at } = await longWait(target);
     await at(10);
@@ -52,7 +54,8 @@ describe("a long waiting target or evidence link", () => {
     const parts = lines.slice(1).filter((l) => l.startsWith("  "));
     expect(parts).toEqual([`  ${target}`]);
     expect(Bun.stringWidth(parts[0]!)).toBeGreaterThan(120);
-    within120([lines[0]!]);
+    // Only that line runs past 120 columns; the terminal folds it, and a copy of it is the whole target.
+    within120(lines.filter((l) => !l.includes("`") && l !== `  ${target}`));
   });
 
   test("the escalation keeps its short waiting line and names the whole target under it", async () => {
@@ -125,5 +128,111 @@ describe("a link wider than a line", () => {
     w.clock = lane.createdAt + 41 * MIN;
     expect(await dutyTick(d)).toContainEqual({ lane: "talker", action: "escalated" });
     expect(lead.received.at(-1)!.split("\n").slice(3)).toEqual([whole]);
+  });
+});
+
+describe("a path with spaces wider than a line", () => {
+  // A space inside a path is not a place to break it: either half names no file a reader can open.
+  const spaced = (root: string) => join(root, "build artifacts", `${"nightly run ".repeat(8)}end`, "result log.txt");
+
+  test("is named whole on one line in the nudge, the escalation and the board", async () => {
+    const target = spaced("/srv/ci");
+    expect(Bun.stringWidth(target)).toBeGreaterThan(120);
+    const { d, w, key, pane, lead, at } = await longWait(target);
+    await at(10);
+    expect(pane.received.at(-1)!.split("\n")).toContain(`  ${target}`);
+    expect(laneBoard(d.store.lanes(), w.clock)).toContain(`  ${target}`);
+    expect(await at(40)).toContainEqual({ lane: key, action: "escalated" });
+    expect(lead.received.at(-1)!.split("\n")[2]).toBe(`  ${target}`);
+  });
+
+  test("is named whole on one line under the escalation's last evidence", async () => {
+    const { w, d, lead, brief } = setup();
+    const file = spaced(d.store.root);
+    mkdirSync(join(file, ".."), { recursive: true });
+    writeFileSync(file, "ok");
+    const lane = await startLane(d, "talker", brief, { group: "w1" });
+    w.panes.get(lane.paneId)!.status = "idle";
+    w.clock = lane.createdAt + MIN;
+    await report(d, "talker", "built", { evidence: [file] });
+    expect(d.store.lane("talker")!.lastEvidence?.ref).toBe(file);
+    w.clock = lane.createdAt + 42 * MIN;
+    expect(await dutyTick(d)).toContainEqual({ lane: "talker", action: "escalated" });
+    expect(lead.received.at(-1)!.split("\n").slice(3)).toEqual([`  ${file}`]);
+  });
+});
+
+describe("a prompts directory whose nudge-waiting.md predates {{wholeTarget}}", () => {
+  // The template an older dori shipped: the target only in its first line and its check line, both cut to fit.
+  const OLD = [
+    "[duty -> {{key}}] Waiting on {{target}} since {{waitingSince}}; no new evidence for {{age}}.",
+    "- Check that {{target}} is still alive and moving (a check, a process, a request).",
+  ].join("\n");
+
+  test("still names the whole target, under the line that cut it", async () => {
+    const { d, key, lane, pane, at } = await longWait();
+    const own = join(d.store.root, "own-prompts");
+    mkdirSync(own);
+    writeFileSync(join(own, "nudge-waiting.md"), OLD);
+    const previous = process.env["DORI_PROMPTS_DIR"];
+    process.env["DORI_PROMPTS_DIR"] = own;
+    try {
+      expect(await at(10)).toContainEqual({ lane: key, action: "nudge-1" });
+    } finally {
+      if (previous === undefined) delete process.env["DORI_PROMPTS_DIR"];
+      else process.env["DORI_PROMPTS_DIR"] = previous;
+    }
+    const lines = pane.received.at(-1)!.split("\n");
+    expect(lines[0]).toMatch(
+      new RegExp(`^\\[duty -> ${key}\\] Waiting on https://\\S*… since ${hhmm(lane.createdAt)};`),
+    );
+    expect(lines[1]).toBe(`  ${URL}`);
+    expect(lines[2]).toStartWith("- Check that https://");
+    expect(lines).toHaveLength(3);
+  });
+});
+
+describe("a name with runs of spaces", () => {
+  // `build  artifacts` is not `build artifacts`: a name shown whole keeps every printable space it has.
+  const doubled = (root: string) =>
+    join(root, "build  artifacts", `${"nightly   run ".repeat(6)}end`, "result  log.txt");
+
+  test("an evidence file keeps them in PROGRESS, the lead's report and the escalation", async () => {
+    const { w, d, lead, brief } = setup();
+    const file = doubled(d.store.root);
+    mkdirSync(join(file, ".."), { recursive: true });
+    writeFileSync(file, "ok");
+    const lane = await startLane(d, "talker", brief, { group: "w1" });
+    w.panes.get(lane.paneId)!.status = "idle";
+    w.clock = lane.createdAt + MIN;
+    const { progress } = await report(d, "talker", "built", { evidence: [file] });
+    expect(progress[0]).toEndWith("end/result  log.txt");
+    expect(lead.received.at(-1)).toEndWith(`\nevidence: ${file}`);
+    w.clock = lane.createdAt + 42 * MIN;
+    expect(await dutyTick(d)).toContainEqual({ lane: "talker", action: "escalated" });
+    expect(lead.received.at(-1)!.split("\n").slice(3)).toEqual([`  ${file}`]);
+  });
+
+  test("a waiting target keeps them in the nudge, the board, the escalation and the hourly audit", async () => {
+    const target = doubled("/srv/ci");
+    const { d, w, key, lane, pane, lead, at } = await longWait(target);
+    await at(10);
+    expect(pane.received.at(-1)!.split("\n")).toContain(`  ${target}`);
+    expect(laneBoard(d.store.lanes(), w.clock)).toContain(`  ${target}`);
+    expect(await at(40)).toContainEqual({ lane: key, action: "escalated" });
+    expect(lead.received.at(-1)!.split("\n")[2]).toBe(`  ${target}`);
+    w.clock = lane.createdAt + 4 * 60 * MIN;
+    const run: LoopRun = { at: w.clock, synced: [], findings: [], started: [], held: [], asked: [] };
+    await audit(d, run);
+    expect(run.findings[0]).toContain(` on ${target} since `);
+  });
+
+  test("a target from the report's WAITING line keeps them; a tab or an escape still becomes one space", async () => {
+    const { d, brief } = setup();
+    await startLane(d, "waiter", brief, { group: "w1" });
+    await report(d, "waiter", `WAITING: ${doubled("/srv")}\nmore`, { status: "waiting" });
+    expect(d.store.lane("waiter")!.waitingFor).toBe(doubled("/srv"));
+    await report(d, "waiter", "still", { status: "waiting", waitingFor: " job\t42  on\u001b[2Jci " });
+    expect(d.store.lane("waiter")!.waitingFor).toBe("job 42  on [2Jci");
   });
 });

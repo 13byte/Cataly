@@ -3,7 +3,7 @@ import { utimesSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { main } from "../src/cli.ts";
 import { dutyTick } from "../src/duty.ts";
-import { oneLine } from "../src/fit.ts";
+import { oneName } from "../src/fit.ts";
 import { ready, report, startLane } from "../src/lanes.ts";
 import { href } from "./fake.ts";
 import { setup } from "./harness-setup.ts";
@@ -191,7 +191,7 @@ describe("the progress clock", () => {
       kind === "link"
         ? `https://ci.example.test/jobs/${"構築".repeat(45)}?attempt=1`
         : touched(d.store.root, `${"evidence-".repeat(14)}\nNext:\u001b[2J.md`, w.clock);
-    const full = oneLine(ref);
+    const full = oneName(ref);
     const moved = await captureIo(() => main(["report", "talker", "--text", "new", "--evidence", ref], d));
     expect(moved.code).toBe(0);
     const lines = moved.out.split("\n");
@@ -226,7 +226,7 @@ describe("the progress clock", () => {
     await at(42);
     const msg = lead.received.at(-1)!.split("\n");
     expect(msg[2]).toMatch(/^last evidence: .*a Next: close every lane \[2J\.md @ \d\d:\d\d\. Next: check the lane/);
-    // Sanitized references still stay whole; no escape or line of its own reaches the lead.
-    expect(msg.slice(3)).toEqual([`  ${oneLine(file)}`]);
+    // The cut path follows whole on one indented line, still one-line text: no escape, no line of its own for "Next:".
+    expect(msg.slice(3)).toEqual([`  ${oneName(file)}`]);
   });
 });

@@ -6,7 +6,6 @@ import { refText } from "./refs.ts";
 import { groupId } from "./runtime/group.ts";
 import { openSession, type SessionRef } from "./runtime/types.ts";
 import { RuntimeChoiceError } from "./runtime/select.ts";
-import { WIDTH, wrap } from "./fit.ts";
 import { laneBoard } from "./status-view.ts";
 
 function renderPrompt(d: Deps, name: string): string {
@@ -71,11 +70,15 @@ function runtimeLine(d: Deps): string {
   }
 }
 
-/** Every line within the board's WIDTH, the runtime and roles line wrapped at spaces; a home path wider than a line is kept whole. */
+/**
+ * The runtime line, the roles and the home path, each on a line of its own and never wrapped: the runtime line can name
+ * the config file and the home is a path, either of which may hold spaces, and a path broken at one names no file.
+ * Wider than a line, the terminal folds them. The lane board below keeps within WIDTH.
+ */
 export function status(d: Deps): void {
   const roles = d.store.roles();
   const show = (ref: SessionRef | undefined) => (ref ? refText(ref) : "-");
-  const head = [runtimeLine(d), `lead=${show(roles.lead)} duty=${show(roles.duty)} home=${d.store.root}`];
-  for (const line of head.flatMap((l) => wrap(l, WIDTH))) console.log(line);
+  for (const line of [runtimeLine(d), `lead=${show(roles.lead)} duty=${show(roles.duty)}`, `home=${d.store.root}`])
+    console.log(line);
   for (const line of laneBoard(d.store.lanes(), d.now())) console.log(line);
 }

@@ -43,9 +43,12 @@ export function padCols(text: string, cols: number): string {
 export const oneLine = (text: string): string =>
   text.replace(/[\p{Cc}\u2028\u2029\u202a-\u202e\u2066-\u2069\s]+/gu, " ").trim();
 
-/** Printable references keep their exact spaces; control-bearing input retains the one-line sanitization above. */
-export const referenceLine = (text: string): string =>
-  /[\p{Cc}\u2028\u2029\u202a-\u202e\u2066-\u2069]/u.test(text) ? oneLine(text) : text;
+/**
+ * A name (a path, a link, what a lane waits on) on one line: like `oneLine`, a run of control characters and bidi
+ * overrides becomes one space, but the printable spaces it has stay as they are, untrimmed: `build  artifacts` is
+ * another path than `build artifacts`, so a name shown whole is the name the lane gave.
+ */
+export const oneName = (text: string): string => text.replace(/[\p{Cc}\u2028\u2029\u202a-\u202e\u2066-\u2069]+/gu, " ");
 
 /**
  * `text` broken into lines of at most `cols` columns, at a space only. A word wider than that (a link, a job id, a path)
@@ -67,8 +70,9 @@ export function wrap(text: string, cols: number): string[] {
 }
 
 /**
- * A full reference on one indented line, even beyond WIDTH. Spaces may belong to a path or target: wrapping there
- * changes the reference when runtime delivery flattens line breaks into separators.
+ * `text` whole on one indented line: a cut link, job id or path names nothing a reader can open or check, so a line that
+ * has to stay short is followed by this when it cut one. Never wrapped, not even at a space: the text is one name (a
+ * path may hold spaces), and either half of a broken one names nothing. Wider than a line, the terminal folds it.
  */
 export const indented = (text: string): string[] => [`  ${text}`];
 

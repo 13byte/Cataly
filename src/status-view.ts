@@ -30,7 +30,7 @@ function tailOf(l: Lane, cols: number): string {
  * prefixes, and a cut one names no lane a command can take): their columns are as wide as the widest open lane's, and
  * the rest is cut to the line. When they leave less than BODY_MIN columns (WAITING_MIN for a waiting lane, so its
  * target and time are never cut off the line's end), the rest goes on an indented line below. A waiting target the line
- * cut follows whole on indented lines: a cut link or job id names nothing to check.
+ * cut follows whole on one indented line: a cut link or job id names nothing to check.
  */
 function laneLine(l: Lane, now: number, cols: { key: number; ref: number }): string[] {
   const since = progressOf(l);
