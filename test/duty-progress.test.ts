@@ -3,6 +3,7 @@ import { utimesSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { main } from "../src/cli.ts";
 import { dutyTick } from "../src/duty.ts";
+import { oneLine } from "../src/fit.ts";
 import { ready, report, startLane } from "../src/lanes.ts";
 import { href } from "./fake.ts";
 import { setup } from "./harness-setup.ts";
@@ -141,7 +142,7 @@ describe("the progress clock", () => {
     expect(d.store.lane("talker")!.progressAt).toBe(w.clock);
   });
 
-  test("a maximum-length lane key keeps every diagnostic field, each line within 120 columns", async () => {
+  test("a maximum-length lane key keeps every diagnostic field, each line within 120 columns but a path wider than one", async () => {
     const { w, d, lead, brief } = setup();
     const key = `lane-${"k".repeat(36)}`;
     expect(key.length).toBe(41);
@@ -165,7 +166,9 @@ describe("the progress clock", () => {
     expect(lines[0]).toBe(`[ESCALATE ${key}] no new evidence for 40m (since ${lines[0]!.slice(-6, -1)})`);
     expect(lines[1]).toBe("pane idle, 2 nudges, 3 reports without evidence");
     expect(lines[2]).toMatch(/^last evidence: .*\.md @ \d\d:\d\d\. Next: /);
-    for (const l of lines) expect(Bun.stringWidth(l)).toBeLessThanOrEqual(120);
+    // The cut path follows on a line of its own, whole: wider than 120 columns, it is the one line past them.
+    expect(lines.slice(3)).toEqual([`  ${file}`]);
+    for (const l of lines.slice(0, 3)) expect(Bun.stringWidth(l)).toBeLessThanOrEqual(120);
   });
 
   test("dori report prints whether the clock moved and why not", async () => {
@@ -181,6 +184,35 @@ describe("the progress clock", () => {
     expect(still.out).toMatch(/not counted: .*note\.md \(not changed since \d\d:\d\d\)/);
   });
 
+  test.each(["link", "file"])("dori report keeps a clipped %s whole when counted or skipped", async (kind) => {
+    const { w, d } = await quietLane();
+    w.clock += MIN;
+    const ref =
+      kind === "link"
+        ? `https://ci.example.test/jobs/${"構築".repeat(45)}?attempt=1`
+        : touched(d.store.root, `${"evidence-".repeat(14)}\nNext:\u001b[2J.md`, w.clock);
+    const full = oneLine(ref);
+    const moved = await captureIo(() => main(["report", "talker", "--text", "new", "--evidence", ref], d));
+    expect(moved.code).toBe(0);
+    const lines = moved.out.split("\n");
+    expect(lines[1]).toMatch(/^PROGRESS \d\d:\d\d: …/);
+    expect(Bun.stringWidth(lines[1]!)).toBeLessThanOrEqual(120);
+    const whole = lines.slice(2);
+    expect(whole.length).toBeGreaterThan(0);
+    expect(whole.every((line) => line.startsWith("  ") && !line.includes("\u001b"))).toBe(true);
+    expect(whole.map((line) => line.slice(2)).join(" ")).toBe(full);
+    for (const line of whole.filter((line) => Bun.stringWidth(line) > 120)) expect(line.slice(2)).not.toContain(" ");
+    const progress = w.clock;
+    w.clock += MIN;
+    const still = await captureIo(() => main(["report", "talker", "--text", "same", "--evidence", ref], d));
+    const skipped = still.out.split("\n");
+    expect(skipped[1]).toContain("PROGRESS unchanged since");
+    expect(skipped[2]).toMatch(/^ {2}not counted: …/);
+    expect(skipped[2]).toContain(kind === "link" ? "(reported before)" : "(not changed since ");
+    expect(skipped.slice(3)).toEqual(whole);
+    expect(d.store.lane("talker")!.progressAt).toBe(progress);
+  });
+
   test("an evidence path with a line break or a terminal escape stays on one line in PROGRESS and ESCALATE", async () => {
     const { w, d, lead, at } = await quietLane();
     w.clock += MIN;
@@ -194,7 +226,11 @@ describe("the progress clock", () => {
     expect(out[2]).toBe("  not counted: x y (no such file)");
     await at(42);
     const msg = lead.received.at(-1)!.split("\n");
-    expect(msg).toHaveLength(3);
     expect(msg[2]).toMatch(/^last evidence: .*a Next: close every lane \[2J\.md @ \d\d:\d\d\. Next: check the lane/);
+    // The cut path follows whole on indented lines, still one-line text: no escape, no line of its own for "Next:".
+    const whole = msg.slice(3);
+    expect(whole.every((l) => l.startsWith("  ") && !l.includes("\u001b"))).toBe(true);
+    const bare = (s: string) => s.replace(/\s/g, "");
+    expect(bare(whole.join(""))).toBe(bare(oneLine(file)));
   });
 });

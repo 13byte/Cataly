@@ -1,5 +1,8 @@
 // Terminal text helpers: wide (Korean) characters take two columns, and a cut never splits a character.
 
+/** Target terminal width; an unbroken path, link or id wider than a line stays whole on its own line. */
+export const WIDTH = 120;
+
 const graphemes = (text: string): string[] =>
   Array.from(new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text), (s) => s.segment);
 
@@ -40,19 +43,30 @@ export function padCols(text: string, cols: number): string {
 export const oneLine = (text: string): string =>
   text.replace(/[\p{Cc}\u2028\u2029\u202a-\u202e\u2066-\u2069\s]+/gu, " ").trim();
 
-/** `text` broken into lines of at most `cols` columns: at a space when one is in reach, else inside a long word. */
+/**
+ * `text` broken into lines of at most `cols` columns, at a space only. A word wider than that (a link, a job id, a path)
+ * is never split: its line runs on to the next space and the terminal folds it for display. A split one is two lines,
+ * neither of which a reader can copy, click or search for.
+ */
 export function wrap(text: string, cols: number): string[] {
   const lines: string[] = [];
   let rest = text;
   while (Bun.stringWidth(rest) > cols) {
-    const head = keep(graphemes(rest), cols).join("") || graphemes(rest)[0]!;
-    const cut = rest[head.length] === " " ? head.length : head.lastIndexOf(" ");
-    const take = cut > 0 ? head.slice(0, cut) : head;
-    lines.push(take.trimEnd());
-    rest = rest.slice(take.length).trimStart();
+    const head = keep(graphemes(rest), cols).join("");
+    const fits = rest[head.length] === " " ? head.length : head.lastIndexOf(" ");
+    const cut = fits > 0 ? fits : rest.indexOf(" ", head.length);
+    if (cut < 0) break;
+    lines.push(rest.slice(0, cut).trimEnd());
+    rest = rest.slice(cut).trimStart();
   }
   return [...lines, rest];
 }
+
+/**
+ * `text` whole on indented lines: a cut link, job id or path names nothing a reader can open or check, so a line that
+ * has to stay short is followed by these when it cut one. Within WIDTH except a word wider than a line, kept whole.
+ */
+export const indented = (text: string): string[] => wrap(text, WIDTH - 2).map((l) => `  ${l}`);
 
 /** Local wall-clock time, "19:47". */
 export function hhmm(at: number): string {

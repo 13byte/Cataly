@@ -32,7 +32,9 @@ describe("a waiting lane", () => {
     expect(await at(9)).toEqual([]);
     expect(await at(10)).toContainEqual({ lane: "blocked", action: "nudge-1" });
     expect(pane.received.at(-1)).toContain(`[duty -> blocked] Waiting on CI run 812 since ${start}`);
-    expect(pane.received.at(-1)).toContain("Check that CI run 812 is still alive");
+    expect(pane.received.at(-1)).toContain(
+      "is still alive and moving (a check, a process, a request):\n  CI run 812\n",
+    );
     expect(await at(20)).toContainEqual({ lane: "blocked", action: "nudge-2" });
     expect((await at(39)).map((e) => e.action)).not.toContain("escalated");
     expect(await at(40)).toContainEqual({ lane: "blocked", action: "escalated" });
@@ -144,6 +146,45 @@ describe("a waiting lane", () => {
     expect(await at(40)).toContainEqual({ lane: "blocked", action: "escalated" });
     expect(pane.received.filter((m) => m.startsWith("[duty"))).toEqual([]);
   });
+
+  test.each(["link", "wide text"])(
+    "a legacy custom template preserves a clipped %s without wholeTarget",
+    async (kind) => {
+      const target =
+        kind === "link" ? `https://ci.example.test/jobs/${"1".repeat(160)}` : "ＷＩＤＥ ＴＡＲＧＥＴ ".repeat(8).trim();
+      const { d, lane, pane, at } = await waitingLane({ waitingFor: target });
+      const dir = join(d.store.root, "custom-prompts");
+      mkdirSync(dir);
+      writeFileSync(
+        join(dir, "nudge-waiting.md"),
+        "[custom {{key}}] Waiting on {{target}} since {{waitingSince}}\nCheck {{target}}.",
+      );
+      const previous = process.env["DORI_PROMPTS_DIR"];
+      process.env["DORI_PROMPTS_DIR"] = dir;
+      try {
+        expect(await at(10)).toContainEqual({ lane: "blocked", action: "nudge-1" });
+        const lines = pane.received.at(-1)!.split("\n");
+        expect(lines[0]).toContain(`… since ${hhmm(lane.createdAt)}`);
+        expect(Bun.stringWidth(lines[0]!)).toBeLessThanOrEqual(120);
+        const whole = lines.slice(2);
+        expect(whole.length).toBeGreaterThan(0);
+        expect(whole.every((line) => line.startsWith("  "))).toBe(true);
+        expect(whole.map((line) => line.slice(2)).join(" ")).toBe(target);
+        expect(lines.filter((line) => Bun.stringWidth(line) > 120)).toEqual(kind === "link" ? [`  ${target}`] : []);
+        expect(await at(11)).toEqual([]);
+        expect(pane.received.filter((text) => text.startsWith("[custom blocked]"))).toHaveLength(1);
+        expect(d.store.lane("blocked")).toMatchObject({
+          nudges: 1,
+          progressAt: lane.createdAt,
+          waitingSince: lane.createdAt,
+          waitingFor: target,
+        });
+      } finally {
+        if (previous === undefined) delete process.env["DORI_PROMPTS_DIR"];
+        else process.env["DORI_PROMPTS_DIR"] = previous;
+      }
+    },
+  );
 
   test.each(["missing", "directory"])(
     "a %s waiting override uses the default or errors without consuming a nudge, then can be repaired",

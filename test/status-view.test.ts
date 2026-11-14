@@ -105,14 +105,41 @@ describe("the lane board", () => {
       expect(key).toHaveLength(41);
       expect(Bun.stringWidth(`hc:${id}`)).toBe(22);
       const lines = laneBoard([waiting], NOW);
-      expect(lines).toHaveLength(2);
       expect(lines[0]).toBe(`${key} waiting  hc    hc:${id}`);
       expect(lines[1]).toContain("  progress 45m ");
       expect(lines[1]).toContain("waiting: ");
       expect(lines[1]).toContain(` since ${hhmm(waiting.waitingSince)}`);
+      // The short target fits its line and adds none; the wide one is cut there and follows whole on indented lines.
+      const below = lines.slice(2);
+      expect(below).toHaveLength(target === "CI 812" ? 0 : 2);
+      for (const line of below) expect(line).toStartWith("  ");
+      if (below.length > 0) expect(below.map((l) => l.trimStart()).join(" ")).toBe(target.trim());
       for (const line of lines) expect(Bun.stringWidth(line)).toBeLessThanOrEqual(120);
     },
   );
+
+  test("an over-width session ref stays whole beside a wrapped Unicode waiting target and both clocks", () => {
+    const key = `lane-${"k".repeat(36)}`;
+    const id = `t${"z".repeat(130)}`;
+    const target = "ＷＩＤＥ ＴＡＲＧＥＴ ".repeat(8).trim();
+    const waiting = {
+      ...lane(key, "waiting", 45),
+      sessionRef: { runtime: "hc" as const, id },
+      waitingFor: target,
+      waitingSince: NOW - 30 * MIN,
+    };
+    const lines = laneBoard([waiting], NOW);
+    expect(lines.slice(0, 2)).toEqual([`${key} waiting  hc`, `hc:${id}`]);
+    expect(lines[2]).toContain(`progress 45m (${hhmm(NOW - 45 * MIN)})`);
+    expect(lines[2]).toContain(` since ${hhmm(waiting.waitingSince)}`);
+    expect(
+      lines
+        .slice(3)
+        .map((line) => line.slice(2))
+        .join(" "),
+    ).toBe(target);
+    expect(lines.filter((line) => Bun.stringWidth(line) > 120)).toEqual([`hc:${id}`]);
+  });
 
   test("terminal escapes, carriage returns and bidi overrides in a lane's text stay on its one line as spaces", () => {
     const [line] = laneBoard([lane("esc", "working", 5, "red \u001b[31mALERT\u001b[0m\rover\u202eturn\nnext")], NOW);
@@ -120,9 +147,11 @@ describe("the lane board", () => {
     expect(oneLine("a\u0007\u2028b\t\tc")).toBe("a b c");
   });
 
-  test("wrap breaks at a space when one is in reach, inside a word otherwise, never past the width", () => {
+  test("wrap breaks only at spaces: a word wider than the width (a path, a link, an id) keeps a line of its own, whole", () => {
     expect(wrap("lead=w1:p1 duty=w1:p2 home=/a/b", 16)).toEqual(["lead=w1:p1", "duty=w1:p2", "home=/a/b"]);
-    expect(wrap(`home=/${"d".repeat(30)}`, 12)).toEqual(["home=/dddddd", "d".repeat(12), "d".repeat(12)]);
-    expect(wrap("ＷＩＤＥ", 3)).toEqual(["Ｗ", "Ｉ", "Ｄ", "Ｅ"]);
+    const path = `home=/${"d".repeat(30)}`;
+    expect(wrap(path, 12)).toEqual([path]);
+    expect(wrap(`lead=w1:p1 ${path} next`, 16)).toEqual(["lead=w1:p1", path, "next"]);
+    expect(wrap("ＷＩＤＥ ＷＯＲＤ", 5)).toEqual(["ＷＩＤＥ", "ＷＯＲＤ"]);
   });
 });

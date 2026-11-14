@@ -3,7 +3,7 @@
 // that keeps saying "still waiting" is escalated to the lead like a silent one.
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
-import { ageText, fitEnd, fitStart, hhmm, oneLine } from "./fit.ts";
+import { ageText, fitEnd, fitStart, hhmm, indented, oneLine } from "./fit.ts";
 import type { Lane } from "./store-types.ts";
 
 /** Minutes without progress before the duty loop tells the lead, once per stall. */
@@ -48,7 +48,9 @@ export function applyEvidence(lane: Lane, evidence: readonly string[], now: numb
   for (const ref of evidence) {
     const c = counted(lane, ref, since);
     if ("why" in c) {
-      skipped.push(`  not counted: ${fitStart(oneLine(ref), 60)} (${c.why})`);
+      const full = oneLine(ref);
+      const shown = fitStart(full, 60);
+      skipped.push(...withWhole(`  not counted: ${shown} (${c.why})`, shown, full));
       continue;
     }
     moved = ref;
@@ -65,7 +67,9 @@ export function applyEvidence(lane: Lane, evidence: readonly string[], now: numb
   lane.nudges = 0;
   delete lane.escalatedAt;
   lane.lastEvidence = { ref: moved, at: now };
-  return [`PROGRESS ${hhmm(now)}: ${fitStart(oneLine(moved), 80)}`, ...skipped];
+  const full = oneLine(moved);
+  const shown = fitStart(full, 80);
+  return [...withWhole(`PROGRESS ${hhmm(now)}: ${shown}`, shown, full), ...skipped];
 }
 
 /**
@@ -95,10 +99,14 @@ export const waitingOn = (lane: Lane, cols = 40): string => fitEnd(waitingTarget
 /** When the lane started waiting; a record from before `waitingSince` counts from its last progress. */
 export const waitingSinceOf = (lane: Lane): number => lane.waitingSince ?? progressOf(lane);
 
+/** `line` alone when the `shown` part of it is `full` whole, else `line` and `full` on indented lines below it. */
+const withWhole = (line: string, shown: string, full: string): string[] =>
+  shown === full ? [line] : [line, ...indented(full)];
+
 /**
  * The [ESCALATE] message: how long, what the pane is doing, how often it was nudged or talked, the last evidence; for a
  * waiting lane also what it waits on. The key line is the only one that can be long (a lane key is up to 41 characters);
- * the counts get a line of their own so no cut can drop them.
+ * the counts get a line of their own so no cut can drop them. A target or evidence its line cut follows it whole.
  */
 export function escalation(lane: Lane, pane: string, now: number): string {
   const since = progressOf(lane);
@@ -106,16 +114,16 @@ export function escalation(lane: Lane, pane: string, now: number): string {
   const waiting = lane.status === "waiting";
   const head = `[ESCALATE ${lane.key}${waiting ? " WAITING" : ""}] no new evidence for ${ageText(now - since)} (since ${hhmm(since)})`;
   const counts = `pane ${pane}, ${lane.nudges} nudges, ${talk} reports without evidence`;
+  const next = waiting ? "check it is alive, or reassign the lane" : "check the lane, re-brief it, or close it";
+  const ref = lane.lastEvidence ? oneLine(lane.lastEvidence.ref) : "";
+  const shown = fitStart(ref, 48);
   const last = lane.lastEvidence
-    ? `${fitStart(oneLine(lane.lastEvidence.ref), 48)} @ ${hhmm(lane.lastEvidence.at)}`
-    : "none recorded";
-  const lines = waiting
-    ? [
-        head,
-        `waiting on ${waitingOn(lane)} since ${hhmm(waitingSinceOf(lane))}`,
-        counts,
-        `last evidence: ${last}. Next: check it is alive, or reassign the lane.`,
-      ]
-    : [head, counts, `last evidence: ${last}. Next: check the lane, re-brief it, or close it.`];
-  return lines.join("\n");
+    ? withWhole(`last evidence: ${shown} @ ${hhmm(lane.lastEvidence.at)}. Next: ${next}.`, shown, ref)
+    : [`last evidence: none recorded. Next: ${next}.`];
+  if (!waiting) return [head, counts, ...last].join("\n");
+  const target = waitingTarget(lane);
+  const on = waitingOn(lane);
+  return [head, ...withWhole(`waiting on ${on} since ${hhmm(waitingSinceOf(lane))}`, on, target), counts, ...last].join(
+    "\n",
+  );
 }

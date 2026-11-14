@@ -6,8 +6,8 @@ import { refText } from "./refs.ts";
 import { groupId } from "./runtime/group.ts";
 import { openSession, type SessionRef } from "./runtime/types.ts";
 import { RuntimeChoiceError } from "./runtime/select.ts";
-import { wrap } from "./fit.ts";
-import { laneBoard, WIDTH } from "./status-view.ts";
+import { WIDTH, wrap } from "./fit.ts";
+import { laneBoard } from "./status-view.ts";
 
 function renderPrompt(d: Deps, name: string): string {
   const dir = join(d.store.root, "prompts");
@@ -71,7 +71,7 @@ function runtimeLine(d: Deps): string {
   }
 }
 
-/** Every line within the board's WIDTH: the runtime line and the home path (a long one wraps, never cut) included. */
+/** Every line within the board's WIDTH, the runtime and roles line wrapped at spaces; a home path wider than a line is kept whole. */
 export function status(d: Deps): void {
   const roles = d.store.roles();
   const show = (ref: SessionRef | undefined) => (ref ? refText(ref) : "-");

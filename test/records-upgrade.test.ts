@@ -79,7 +79,7 @@ describe("records written before runtimes existed (IS-3)", () => {
     expect(lines.find((l) => l.startsWith("old-lane"))).toMatch(/^old-lane\s+working\s+herdr\s+w1:p3\s/);
   });
 
-  test("dori status with a long home path and an unset runtime keeps every line within 120 columns, nothing cut", async () => {
+  test("dori status with a long home path and an unset runtime: nothing cut, a path wider than a line on one line whole", async () => {
     const { d } = oldHome();
     const root = join(d.store.root, `${"deep-home-directory-".repeat(8)}end`);
     const long = {
@@ -93,9 +93,12 @@ describe("records written before runtimes existed (IS-3)", () => {
       status(long);
       return 0;
     });
-    for (const line of out.split("\n")) expect(Bun.stringWidth(line)).toBeLessThanOrEqual(120);
-    expect(out.replaceAll("\n", "")).toContain(`home=${root}`);
-    expect(out.replace(/\n(?!RUNTIME|lead=)/g, "")).toContain(join(root, "config.json"));
+    // A path wider than 120 columns is never split; it starts a line and runs to the next space. Every other line fits.
+    const lines = out.split("\n");
+    expect(lines).toContain(`home=${root}`);
+    expect(lines.find((l) => l.startsWith(`${join(root, "config.json")}`))).toBeDefined();
+    for (const line of lines.filter((l) => !l.startsWith("home=") && !l.startsWith(root)))
+      expect(Bun.stringWidth(line)).toBeLessThanOrEqual(120);
   });
 
   test.each([2, 3])("a legacy record with %s nudges establishes one verifiable queued escalation", async (nudges) => {
