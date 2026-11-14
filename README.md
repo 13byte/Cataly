@@ -147,7 +147,7 @@ Lead/duty sessions use `omp --dori-role dori`; work lanes and the built-in revie
 
 ## Contributing
 
-Open omp-dori [issues](https://github.com/vntrevx/omp-dori/issues) and [pull requests](https://github.com/vntrevx/omp-dori/pulls) in this fork. Follow the [contribution guide](CONTRIBUTING.md); the upstream CLA process is separate.
+This fork is maintained by [vntrevx](https://github.com/vntrevx). Open omp-dori [issues](https://github.com/vntrevx/omp-dori/issues) and [pull requests](https://github.com/vntrevx/omp-dori/pulls) here. The [contribution guide](CONTRIBUTING.md) covers proposals, source setup, verification, project credit and contribution terms. This fork does not require an upstream CLA signature.
 
 ## Limits and privacy
 
@@ -157,4 +157,10 @@ Optional telemetry can be disabled with `DORI_TELEMETRY=0` or `DO_NOT_TRACK=1`. 
 
 ## License
 
-Upstream code remains under the [Sustainable Use License 1.0](LICENSE): own internal business use and non-commercial/personal use, with distribution and notice conditions. The pre-existing OMP integration notice remains in [LICENSE.omp-dori (MIT)](LICENSE.omp-dori); this does not relicense upstream code as MIT. [NOTICE](NOTICE) records the modified copy and attribution. omp-ulw and other third-party components retain their own licenses.
+omp-dori uses licenses according to each component's source:
+
+- **Sustainable Use License 1.0:** dori-superagent-derived code, under the terms and scope in [LICENSE](LICENSE).
+- **MIT:** the pre-existing OMP integration covered by [LICENSE.omp-dori](LICENSE.omp-dori), preserving the YeonGyu Kim and betive37 notices and crediting vntrevx's maintenance of that material.
+- **Third-party licenses:** oh-my-pi, omp-ulw and other components keep their respective terms.
+
+[NOTICE](NOTICE) records this fork's maintainer, imported revisions and modified-copy attribution. The MIT notice covers its specified OMP material; it does not relicense the entire repository.

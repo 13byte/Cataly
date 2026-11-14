@@ -146,7 +146,7 @@ DORI_INSTALL_MODE=side DORI_NO_PULL=1 DORI_SRC="$PWD" bash scripts/install-sourc
 
 ## 参与贡献
 
-请在此 fork 提交 omp-dori 的 [issue](https://github.com/vntrevx/omp-dori/issues) 和 [PR](https://github.com/vntrevx/omp-dori/pulls)，并参阅[贡献指南](CONTRIBUTING.md)。上游 CLA 流程仅适用于上游项目。
+此 fork 由 [vntrevx](https://github.com/vntrevx) 维护。请在本仓库提交 omp-dori 的 [issue](https://github.com/vntrevx/omp-dori/issues) 和 [PR](https://github.com/vntrevx/omp-dori/pulls)。[贡献指南](CONTRIBUTING.md)说明提案、源码开发、验证、项目署名和贡献条件。向此 fork 提交 PR 无需签署上游 CLA。
 
 ## 限制与隐私
 
@@ -156,4 +156,10 @@ Dori 使用你提供的账号和权限运行。对外部系统的操作仍需所
 
 ## 许可证
 
-上游代码仍适用 [Sustainable Use License 1.0](LICENSE)：允许自身内部业务用途及非商业、个人用途，并附有分发和声明保留条件。既有 OMP 集成声明保留在 [LICENSE.omp-dori (MIT)](LICENSE.omp-dori) 中；这并未将上游代码重新许可为 MIT。[NOTICE](NOTICE) 记录了修改副本和来源署名。omp-ulw 及其他第三方组件保留各自的许可证。
+omp-dori 按各组件的来源适用许可证：
+
+- **Sustainable Use License 1.0：**dori-superagent 衍生代码遵循 [LICENSE](LICENSE) 中的适用范围和原文条款。
+- **MIT：**既有 OMP 集成部分遵循 [LICENSE.omp-dori](LICENSE.omp-dori)，保留 YeonGyu Kim、betive37 的声明，并注明 vntrevx 对该部分的维护。
+- **第三方许可证：**oh-my-pi、omp-ulw 及其他组件保留各自的条款。
+
+[NOTICE](NOTICE) 记录本 fork 的维护者、导入版本和修改副本来源。MIT 声明适用于指定的 OMP 部分，并未将整个仓库重新许可为 MIT。

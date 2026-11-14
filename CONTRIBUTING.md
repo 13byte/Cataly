@@ -1,20 +1,39 @@
 # Contributing to omp-dori
 
-Thanks for looking. This repository is a small, strict codebase; a change lands when it is one concern, it has evidence, and every gate is green.
+This is the contribution guide for [vntrevx/omp-dori](https://github.com/vntrevx/omp-dori).
+The fork is maintained by [vntrevx](https://github.com/vntrevx); issues and changes belong here.
 
-For omp-dori bugs and feature requests, open an [issue](https://github.com/vntrevx/omp-dori/issues); submit changes as [pull requests](https://github.com/vntrevx/omp-dori/pulls) to this fork. The development and pull-request guidance below applies to omp-dori; the upstream CLA process is separate.
+## Propose a change
 
-## Upstream CLA process (sisyphuslabs/dori-superagent only)
+1. Check this fork's [issues](https://github.com/vntrevx/omp-dori/issues) and
+   [pull requests](https://github.com/vntrevx/omp-dori/pulls) for related work.
+2. Open an issue describing the observed behavior, reproduction and expected result, or a focused
+   pull request against `main` with the reason for the change.
+3. Develop in an ordinary source checkout using the setup below. Keep credentials, private
+   conversations, account data and installed release state out of patches and fixtures.
+4. Run the applicable gates below and record the actual commands and results. State any check
+   you did not run; include a regression for changed behavior.
+5. Preserve source attribution and the license applicable to the material you change.
+   Update documentation when the user-facing behavior or setup changes.
 
-The CLA process below belongs to upstream [sisyphuslabs/dori-superagent](https://github.com/sisyphuslabs/dori-superagent) and is kept here as attribution. This fork's CLA workflow is intentionally disabled: the CLA Assistant job in `.github/workflows/cla.yml` runs only when the repository is `sisyphuslabs/dori-superagent`, so it never runs for pull requests to this fork, and signing comments are not required for PRs to this fork. [CLA.md](CLA.md) is retained unchanged as the upstream legal text.
+## Project credit
 
-For reference, the upstream process is: every contributor signs the [Contributor License Agreement](CLA.md) once, before a pull request of theirs can be reviewed or merged there. Comment on the pull request with exactly:
+omp-dori brings together [dori-superagent](https://github.com/sisyphuslabs/dori-superagent),
+[oh-my-pi](https://github.com/can1357/oh-my-pi) and [omp-ulw](https://github.com/dbc-hbin/omp-ulw).
+The pre-existing OMP integration retains the YeonGyu Kim and betive37 notices.
+Current fork maintenance is credited to vntrevx. Imported revisions and modified-copy provenance
+are recorded in [NOTICE](NOTICE); each project's original authors retain their credit.
 
-```
-I have read the CLA Document and I hereby sign the CLA
-```
+## Contribution terms
 
-The CLA Assistant workflow then records the signature and the check turns green; it never asks again. Signing is what lets upstream keep one licence for every contribution, including the relicensing rights it needs when it changes its licence — the [licence](LICENSE) is the Sustainable Use License, and the CLA is what makes future licence changes possible without hunting down every author.
+Changes retain the existing license applicable to the affected material: Sustainable Use
+License 1.0 for dori-superagent-derived code, and MIT for the pre-existing OMP integration
+covered by [LICENSE.omp-dori](LICENSE.omp-dori). See the scope in [LICENSE](LICENSE).
+Submit only material you have the right to contribute.
+
+This fork does not require a CLA signature or a CLA comment on its pull requests.
+The workflow is restricted to upstream `sisyphuslabs/dori-superagent`; [CLA.md](CLA.md)
+is retained as that upstream project's agreement, not a new agreement for this fork.
 
 ## Source development and public releases
 

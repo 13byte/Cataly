@@ -147,7 +147,7 @@ Lead·duty는 `omp --dori-role dori`, 작업 레인과 기본 reviewer는 `--dor
 
 ## 기여하기
 
-omp-dori의 [issue](https://github.com/vntrevx/omp-dori/issues)와 [PR](https://github.com/vntrevx/omp-dori/pulls)은 이 fork에 제출하고 [기여 안내](CONTRIBUTING.md)를 따라 주세요. Upstream CLA 절차는 별개입니다.
+이 fork의 maintainer는 [vntrevx](https://github.com/vntrevx)입니다. omp-dori의 [issue](https://github.com/vntrevx/omp-dori/issues)와 [PR](https://github.com/vntrevx/omp-dori/pulls)은 이 저장소에 제출하세요. [기여 안내](CONTRIBUTING.md)에 제안 방법, 소스 개발, 검증, 프로젝트 출처와 기여 조건을 정리했습니다. 이 fork의 PR에는 upstream CLA 서명이 필요하지 않습니다.
 
 ## 한계·개인정보
 
@@ -157,4 +157,10 @@ Dori는 사용자가 제공한 계정과 권한으로 실행합니다. 외부 �
 
 ## 라이선스
 
-Upstream 코드는 [Sustainable Use License 1.0](LICENSE)을 유지합니다. 자체 내부 업무와 비상업·개인 이용을 허용하며 배포·고지 조건이 적용됩니다. 기존 OMP 통합 고지는 [LICENSE.omp-dori (MIT)](LICENSE.omp-dori)에 남으며 upstream 코드를 MIT로 바꾸는 것은 아닙니다. [NOTICE](NOTICE)에 수정본과 출처를 기록합니다. omp-ulw와 다른 제3자 구성 요소는 각각의 라이선스를 유지합니다.
+omp-dori는 구성 요소의 출처에 따라 라이선스를 적용합니다.
+
+- **Sustainable Use License 1.0:** dori-superagent에서 파생된 코드는 [LICENSE](LICENSE)의 적용 범위와 원문 조건을 따릅니다.
+- **MIT:** 기존 OMP 통합 부분은 [LICENSE.omp-dori](LICENSE.omp-dori)를 따릅니다. YeonGyu Kim·betive37의 고지를 유지하고 해당 부분의 vntrevx 유지보수 기여를 명시했습니다.
+- **제3자 라이선스:** oh-my-pi, omp-ulw와 다른 구성 요소는 각각의 라이선스를 유지합니다.
+
+[NOTICE](NOTICE)에 이 fork의 maintainer, 가져온 리비전과 수정본 출처를 기록했습니다. MIT 고지는 명시된 OMP 부분에 적용되며 저장소 전체를 MIT로 재허가하지 않습니다.

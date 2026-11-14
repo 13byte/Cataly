@@ -146,7 +146,7 @@ Le sessioni lead/duty usano `omp --dori-role dori`; le lane di lavoro e il revis
 
 ## Contribuire
 
-Apri [issue](https://github.com/vntrevx/omp-dori/issues) e [pull request](https://github.com/vntrevx/omp-dori/pulls) per omp-dori in questo fork. Segui la [guida ai contributi](CONTRIBUTING.md); la procedura CLA upstream è separata.
+Questo fork è mantenuto da [vntrevx](https://github.com/vntrevx). Apri qui le [issue](https://github.com/vntrevx/omp-dori/issues) e le [pull request](https://github.com/vntrevx/omp-dori/pulls) di omp-dori. La [guida ai contributi](CONTRIBUTING.md) descrive proposte, sviluppo da sorgente, verifiche, attribuzioni e condizioni dei contributi. Le PR di questo fork non richiedono la firma del CLA upstream.
 
 ## Limiti e privacy
 
@@ -156,4 +156,10 @@ La telemetria facoltativa si disattiva con `DORI_TELEMETRY=0` o `DO_NOT_TRACK=1`
 
 ## Licenza
 
-Il codice upstream resta sotto la [Sustainable Use License 1.0](LICENSE): uso interno della propria attività e uso non commerciale/personale, con condizioni per distribuzione e avvisi. L'avviso preesistente sull'integrazione OMP resta in [LICENSE.omp-dori (MIT)](LICENSE.omp-dori); questo non attribuisce la licenza MIT al codice upstream. [NOTICE](NOTICE) documenta la copia modificata e le attribuzioni. omp-ulw e gli altri componenti di terze parti mantengono le proprie licenze.
+omp-dori applica le licenze secondo l'origine dei componenti:
+
+- **Sustainable Use License 1.0:** il codice derivato da dori-superagent segue ambito e condizioni originali in [LICENSE](LICENSE).
+- **MIT:** l'integrazione OMP preesistente segue [LICENSE.omp-dori](LICENSE.omp-dori), conservando gli avvisi di YeonGyu Kim e betive37 e aggiungendo la manutenzione di quella parte da parte di vntrevx.
+- **Licenze di terze parti:** oh-my-pi, omp-ulw e gli altri componenti mantengono le rispettive condizioni.
+
+[NOTICE](NOTICE) registra maintainer, revisioni importate e attribuzione della copia modificata. L'avviso MIT riguarda la parte OMP specificata e non attribuisce una nuova licenza all'intero repository.

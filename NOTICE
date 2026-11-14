@@ -1,4 +1,12 @@
-Modified copy notice
+omp-dori - modified copy and attribution
+
+Project: https://github.com/vntrevx/omp-dori
+Fork maintainer: vntrevx (https://github.com/vntrevx)
+
+This fork combines messenger-facing ownership from dori-superagent, the
+oh-my-pi coding-agent runtime, and the outcome-driven workflow of omp-ulw.
+Maintenance and integration by this fork do not replace the original
+authors' credit or the license attached to each source origin.
 
 This is a modified copy of sisyphuslabs/dori-superagent, based on upstream
 97d807b9037cb050a72129659cf6306d8055010d (2026-11-11 source snapshot).

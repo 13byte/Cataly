@@ -146,7 +146,7 @@ Lead-/Duty-Sessions verwenden `omp --dori-role dori`; Arbeits-Lanes und der eing
 
 ## Mitwirken
 
-Erstelle [Issues](https://github.com/vntrevx/omp-dori/issues) und [Pull Requests](https://github.com/vntrevx/omp-dori/pulls) für omp-dori in diesem Fork. Beachte die [Hinweise zum Mitwirken](CONTRIBUTING.md); das CLA-Verfahren von Upstream ist davon getrennt.
+Dieser Fork wird von [vntrevx](https://github.com/vntrevx) gepflegt. Erstelle omp-dori-[Issues](https://github.com/vntrevx/omp-dori/issues) und [Pull Requests](https://github.com/vntrevx/omp-dori/pulls) hier. Der [Beitragsleitfaden](CONTRIBUTING.md) beschreibt Vorschläge, Quellcodeentwicklung, Prüfungen, Urheberangaben und Beitragsbedingungen. Für PRs in diesem Fork ist keine Unterschrift unter das Upstream-CLA erforderlich.
 
 ## Grenzen und Datenschutz
 
@@ -156,4 +156,10 @@ Die optionale Telemetrie lässt sich mit `DORI_TELEMETRY=0` oder `DO_NOT_TRACK=1
 
 ## Lizenz
 
-Upstream-Code bleibt unter der [Sustainable Use License 1.0](LICENSE): eigener interner Geschäftsgebrauch sowie nicht kommerzielle/private Nutzung, unter Einhaltung der Bedingungen zu Weitergabe und Hinweisen. Der bestehende Hinweis zur OMP-Integration bleibt in [LICENSE.omp-dori (MIT)](LICENSE.omp-dori); dadurch erhält Upstream-Code keine MIT-Lizenz. [NOTICE](NOTICE) dokumentiert die modifizierte Kopie und die Urheberangaben. omp-ulw und andere Drittkomponenten behalten ihre eigenen Lizenzen.
+omp-dori verwendet die Lizenzen der jeweiligen Quellbestandteile:
+
+- **Sustainable Use License 1.0:** Für von dori-superagent abgeleiteten Code gelten Umfang und Originalbedingungen in [LICENSE](LICENSE).
+- **MIT:** Die bestehende OMP-Integration unterliegt [LICENSE.omp-dori](LICENSE.omp-dori). Die Hinweise auf YeonGyu Kim und betive37 bleiben erhalten; die Pflege dieses Teils durch vntrevx wird ergänzt.
+- **Drittlizenzen:** oh-my-pi, omp-ulw und andere Komponenten behalten ihre jeweiligen Bedingungen.
+
+[NOTICE](NOTICE) dokumentiert Maintainer, importierte Revisionen und die Herkunft der modifizierten Kopie. Der MIT-Hinweis gilt für den bezeichneten OMP-Teil und lizenziert nicht das gesamte Repository neu.

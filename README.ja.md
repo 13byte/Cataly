@@ -146,7 +146,7 @@ DORI_INSTALL_MODE=side DORI_NO_PULL=1 DORI_SRC="$PWD" bash scripts/install-sourc
 
 ## 貢献するには
 
-omp-dori の [Issue](https://github.com/vntrevx/omp-dori/issues) と [プルリクエスト](https://github.com/vntrevx/omp-dori/pulls) は、このフォークに送ってください。[貢献ガイド](CONTRIBUTING.md)を参照してください。上流の CLA 手続きは別です。
+このフォークのメンテナーは [vntrevx](https://github.com/vntrevx) です。omp-dori の [Issue](https://github.com/vntrevx/omp-dori/issues) と [プルリクエスト](https://github.com/vntrevx/omp-dori/pulls) は、このリポジトリに送ってください。[貢献ガイド](CONTRIBUTING.md)に、提案、ソース開発、検証、出典と貢献条件をまとめています。このフォークへの PR に上流 CLA の署名は必要ありません。
 
 ## 制約とプライバシー
 
@@ -156,4 +156,10 @@ Dori は、利用者が提供するアカウントと権限で動作します。
 
 ## ライセンス
 
-上流コードには引き続き [Sustainable Use License 1.0](LICENSE) が適用されます。自社内での業務利用と非商用・個人利用が認められ、配布と表示の条件があります。既存の OMP 統合に関する表示は [LICENSE.omp-dori (MIT)](LICENSE.omp-dori) に残り、上流コードを MIT として再ライセンスするものではありません。[NOTICE](NOTICE) に、この修正版と出典の表示を記録しています。omp-ulw などのサードパーティ製コンポーネントには、それぞれのライセンスが適用されます。
+omp-dori は各コンポーネントの出典に応じてライセンスを適用します。
+
+- **Sustainable Use License 1.0:** dori-superagent 由来のコードには [LICENSE](LICENSE) の適用範囲と原文の条件が適用されます。
+- **MIT:** 既存の OMP 統合部分には [LICENSE.omp-dori](LICENSE.omp-dori) が適用されます。YeonGyu Kim と betive37 の表示を保持し、その部分に対する vntrevx の保守を明記しています。
+- **サードパーティーのライセンス:** oh-my-pi、omp-ulw などはそれぞれの条件を保持します。
+
+[NOTICE](NOTICE) にメンテナー、取り込んだリビジョン、修正版の出典を記録しています。MIT の表示は指定された OMP 部分に適用され、リポジトリ全体を MIT に再ライセンスするものではありません。
