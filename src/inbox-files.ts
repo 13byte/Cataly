@@ -7,10 +7,12 @@ import type { QueuedMessage } from "./store-types.ts";
 // Inbox files: one JSONL queue per session. A herdr pane keeps the name it had before runtimes existed (`w1_p3.jsonl`),
 // so queues written by an older binary drain; every other runtime is prefixed (`hc--t7.jsonl`). A `.forward` file beside
 // an inbox (`w1_p3.jsonl.forward`, holding a ref) says that session moved: new messages go to the ref's inbox, and
-// entries an older writer still appends to the old file are merged into it by the next flush.
+// entries an older writer still appends to the old file are merged into it by the next flush. A message queued while
+// the inbox lock is held waits in `<inbox>.spool/` for the holder (inbox-spool.ts).
 
 const HC_PREFIX = "hc--";
 const SUFFIX = ".jsonl";
+const SPOOL = ".spool";
 
 export function inboxFile(root: string, ref: SessionRef): string {
   const name = ref.runtime === "herdr" ? ref.id.replaceAll(":", "_") : `${HC_PREFIX}${ref.id}`;
@@ -24,11 +26,20 @@ function refOfFile(name: string): SessionRef {
     : { runtime: "herdr", id: stem.replaceAll("_", ":") };
 }
 
-/** Every session that has an inbox file, empty or not. */
-export const inboxRefs = (root: string): SessionRef[] =>
-  readdirSync(join(root, "inbox"))
-    .filter((f) => f.endsWith(SUFFIX))
-    .map(refOfFile);
+/** Every session with queued messages, or messages spooled for its queue. */
+export const queuedRefs = (root: string): SessionRef[] =>
+  [
+    ...new Set(
+      readdirSync(join(root, "inbox"))
+        .map((f) => (f.endsWith(`${SUFFIX}${SPOOL}`) ? f.slice(0, -SPOOL.length) : f))
+        .filter((f) => f.endsWith(SUFFIX)),
+    ),
+  ]
+    .map(refOfFile)
+    .filter((ref) => {
+      const path = inboxFile(root, ref);
+      return pendingQueue(path).length > 0 || spooled(path, true).length > 0;
+    });
 
 export function readQueue(path: string): QueuedMessage[] {
   if (!existsSync(path)) return [];
@@ -88,9 +99,12 @@ function forwardedInto(root: string, ref: SessionRef): string[] {
     });
 }
 
-/** True when an old inbox forwarded into `ref` still holds entries to merge. */
-export const forwardPending = (root: string, ref: SessionRef): boolean =>
-  forwardedInto(root, ref).some((old) => readQueue(old).length > 0 || readQueue(`${old}.merging`).length > 0);
+/** True when ref's inbox has entries to move in: spooled beside it, or in old inboxes forwarded into it. */
+export const mergePending = (root: string, ref: SessionRef): boolean =>
+  spooled(inboxFile(root, ref), true).length > 0 ||
+  forwardedInto(root, ref).some(
+    (old) => readQueue(old).length > 0 || readQueue(`${old}.merging`).length > 0 || spooled(old, true).length > 0,
+  );
 
 const keyOf = (m: QueuedMessage): string =>
   m.id === undefined ? `${m.at}\u0000${m.from}\u0000${m.text}` : `id:${m.id}`;
@@ -141,6 +155,7 @@ export function payLead(root: string, into: string): void {
 /**
  * Moves the entries of every old inbox forwarded into `ref` to the end of ref's inbox. Call it under ref's inbox lock.
  * The old file is renamed aside first, so an append that races the merge lands in a fresh old file for the next one.
+ * The old inbox's spool moves here too: once forwarded, only the holder of the new inbox's lock moves it.
  */
 export function mergeForwarded(root: string, ref: SessionRef): void {
   const into = inboxFile(root, ref);
@@ -157,5 +172,36 @@ export function mergeForwarded(root: string, ref: SessionRef): void {
       }
       carryOver(aside, old, into, (m) => m);
     }
+    mergeSpool(old, into);
+  }
+}
+
+export const spoolDir = (path: string): string => `${path}${SPOOL}`;
+const MOVING = ".moving";
+
+/** The files spooled for the queue at `path` (`moving`: those a holder renamed aside to move), oldest first. */
+function spooled(path: string, moving = false): string[] {
+  const dir = spoolDir(path);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((f) => f.endsWith(SUFFIX) || (moving && f.endsWith(`${SUFFIX}${MOVING}`)))
+    .sort()
+    .map((f) => join(dir, f));
+}
+
+/**
+ * Moves the spooled entries of the queue at `from` to the end of `into`, oldest first, under into's lock. A spooled
+ * entry is a message of its own, so it is appended even when an equal one is queued (the same text sent twice in one
+ * millisecond stays two messages); only ids recorded as gone are skipped. Each file is renamed aside before its entry
+ * is appended and removed after: a `.moving` file left by a move cut short between the two may already be in `into`,
+ * and is carried over (skipping what `into` holds) before the rest.
+ */
+export function mergeSpool(from: string, into: string): void {
+  for (const f of spooled(from, true).filter((n) => n.endsWith(MOVING))) carryOver(f, from, into, (m) => m);
+  const gone = new Set([...doneIds(from), ...doneIds(into)]);
+  for (const file of spooled(from)) {
+    renameSync(file, `${file}${MOVING}`);
+    for (const m of readQueue(`${file}${MOVING}`)) if (m.id === undefined || !gone.has(m.id)) appendQueue(into, m);
+    rmSync(`${file}${MOVING}`, { force: true });
   }
 }

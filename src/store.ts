@@ -5,16 +5,16 @@ import {
   appendQueue,
   doneIds,
   forwardOf,
-  forwardPending,
   inboxFile,
-  inboxRefs,
   markDone,
   mergeForwarded,
+  mergePending,
   pendingQueue,
+  queuedRefs,
   readQueue,
   writeQueue,
 } from "./inbox-files.ts";
-import { takeInboxLock } from "./inbox-lock.ts";
+import { lockQueue, mergeOwnSpool, queueMessage } from "./inbox-spool.ts";
 import { refFromText, refText, sameSession } from "./refs.ts";
 import type { SessionRef } from "./runtime/types.ts";
 import {
@@ -103,9 +103,9 @@ export class Store {
     return inboxFile(this.root, ref);
   }
 
-  /** Appends to the inbox of the session `ref` was forwarded to, if it was. */
+  /** Appends to the inbox `ref` was forwarded to, if it was, under its lock; while the lock is held, spools it. */
   enqueue(ref: SessionRef, msg: QueuedMessage): void {
-    appendQueue(this.inboxPath(this.forwardOf(ref) ?? ref), msg);
+    queueMessage(this.root, this.forwardOf(ref) ?? ref, msg);
   }
 
   /**
@@ -124,10 +124,11 @@ export class Store {
     return pendingQueue(this.inboxPath(ref));
   }
 
-  /** Rewrites the queue. The ids of `gone` are recorded first and commit it: `queued` leaves them out from then on. */
+  /** Rewrites the queue (inbox lock held). The ids of `gone` are recorded first and commit it; the spool moves in after. */
   saveInbox(ref: SessionRef, msgs: readonly QueuedMessage[], gone: readonly QueuedMessage[] = []): void {
     markDone(this.inboxPath(ref), gone);
     writeQueue(this.inboxPath(ref), msgs);
+    mergeOwnSpool(this.root, ref);
   }
 
   /** The session this one's inbox was forwarded to by a migration (its `.forward` marker), or undefined. */
@@ -135,9 +136,9 @@ export class Store {
     return forwardOf(this.root, ref);
   }
 
-  /** True when an old inbox forwarded into `ref` still holds entries. */
-  forwardPending(ref: SessionRef): boolean {
-    return forwardPending(this.root, ref);
+  /** True when entries wait to be moved into ref's queue: spooled beside it, or in old inboxes forwarded into it. */
+  mergePending(ref: SessionRef): boolean {
+    return mergePending(this.root, ref);
   }
 
   /** Merges old inboxes forwarded into `ref` into its inbox; call it under ref's inbox lock. */
@@ -149,15 +150,15 @@ export class Store {
    * Takes the session's inbox lock (`<inbox>.lock`, created O_EXCL, holding pid, host and time) and returns its release,
    * or undefined while another flush holds it. A lock whose pid is dead on this host, or one from another host (or
    * unreadable) older than INBOX_LOCK_STALE_MS, is taken over: it is renamed aside first, and when what was renamed is not the lock judged stale (another
-   * process took it over in between), it is put back and the lock counts as held.
+   * process took it over in between), it is put back and the lock counts as held. Its spool moves into the queue then.
    */
   lockInbox(ref: SessionRef, now: number): (() => void) | undefined {
-    return takeInboxLock(`${this.inboxPath(ref)}.lock`, now);
+    return lockQueue(this.root, ref, now);
   }
 
-  /** Sessions with queued messages. */
+  /** Sessions with queued or spooled messages. */
   inboxPanes(): SessionRef[] {
-    return inboxRefs(this.root).filter((r) => this.queued(r).length > 0);
+    return queuedRefs(this.root);
   }
 
   private receiptPath(pr: string, sha: string): string {

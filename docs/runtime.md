@@ -180,6 +180,8 @@ Duty queues notices before recording their nudge count, escalation marker or LOS
 
 Settled notice IDs remain in `<inbox>.ids` and move with forwarded or migrated queues. Deduplication covers retained local duty queues and these journals, including interrupted queue rewrites; distinct IDs remain distinct even when their timestamp and text match. It is not external exactly-once delivery: runtime acceptance and local settlement are separate operations. Losing the journal or selecting an unrelated destination is outside this boundary; ambiguous deliveries retain their existing held-message handling.
 
+Every rewrite of an inbox queue holds the inbox's lock, and so does every append. A message sent while another process holds the lock (a flush, an ack, a migration or a duty notice) is written to a file of its own under `<inbox>.spool/`; the next holder of that lock moves it into the queue in order before it reads the queue and again after it rewrites it, and the duty loop lists a spooled inbox even when its queue is empty. A forwarded inbox's spool moves with its old entries to the new inbox. The send itself returns `QUEUED`.
+
 ## Candidate command deadlines
 
 The candidate updater applies each command's configured `timeoutMs` and sends `SIGKILL` only to its direct child on deadline or abort. After the direct child exits, or a deadline or abort occurs, the controller allows at most one additional second for stdout/stderr drainage. It then cancels its readers, synchronizes and closes its private log files, and retains the PID, known exit/signal, source binding, scope paths and error in the command receipt. Cancellation omits the unflushed redaction tail; incomplete output never establishes readiness or a successful report send.

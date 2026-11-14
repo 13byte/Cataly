@@ -34,7 +34,7 @@ const PREVIEW_CHARS = 60;
 /** Where a session's inbox lives now (its `.forward` target, if it moved), with forwarded entries merged in unless a flush holds the lock. */
 export function currentInbox(d: Deps, from: SessionRef): SessionRef {
   const ref = d.store.forwardOf(from) ?? from;
-  const release = d.store.forwardPending(ref) ? d.store.lockInbox(ref, d.now()) : undefined;
+  const release = d.store.mergePending(ref) ? d.store.lockInbox(ref, d.now()) : undefined;
   if (release)
     try {
       d.store.mergeForwarded(ref);

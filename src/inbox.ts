@@ -66,7 +66,7 @@ export async function tellLead(d: Deps, text: string, from: string): Promise<"DE
 export async function flushInbox(d: Deps, from: SessionRef): Promise<"delivered" | "queued" | "no-agent" | "held"> {
   const ref = d.store.forwardOf(from) ?? from;
   if (migrating(d.store.root, from) || migrating(d.store.root, ref)) return "queued";
-  if (d.store.queued(ref).length === 0 && !d.store.forwardPending(ref)) return "delivered";
+  if (d.store.queued(ref).length === 0 && !d.store.mergePending(ref)) return "delivered";
   const release = d.store.lockInbox(ref, d.now());
   if (!release) return "queued";
   try {
