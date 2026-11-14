@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { accessSync, readFileSync } from "node:fs";
 import { cpus, loadavg } from "node:os";
 import { join, resolve } from "node:path";
 import { shq } from "./delivery.ts";
@@ -95,7 +95,13 @@ export const promptsDir = (): string => process.env["DORI_PROMPTS_DIR"] || PROMP
  */
 export function promptFile(name: string): string {
   const own = join(promptsDir(), name);
-  return existsSync(own) ? own : join(PROMPTS, name);
+  try {
+    accessSync(own);
+    return own;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+    return join(PROMPTS, name);
+  }
 }
 
 export const prompt = (name: string, vars: Record<string, string>): string =>

@@ -151,7 +151,11 @@ function settleInbox(d: Deps, ref: SessionRef, batch: readonly QueuedMessage[], 
   const left = [...batch];
   const gone: QueuedMessage[] = [];
   const rest = d.store.queued(ref).flatMap((m) => {
-    const i = left.findIndex((b) => b.at === m.at && b.from === m.from && b.text === m.text);
+    const i = left.findIndex((b) =>
+      b.id !== undefined || m.id !== undefined
+        ? b.id === m.id
+        : b.at === m.at && b.from === m.from && b.text === m.text,
+    );
     if (i < 0) return [m];
     left.splice(i, 1);
     if (attempt) return [{ ...m, attempt }];
