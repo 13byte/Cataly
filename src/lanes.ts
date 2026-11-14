@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { shq } from "./delivery.ts";
-import { oneLine } from "./fit.ts";
+import { oneName } from "./fit.ts";
 import { agentCommand, prompt, type Deps } from "./harness.ts";
 import { settled, tellLead, type SendResult } from "./inbox.ts";
 import { Refusal } from "./refusal.ts";
@@ -13,8 +13,11 @@ import { groupId } from "./runtime/group.ts";
 import { openSession } from "./runtime/types.ts";
 import { KEY_RE, reservedKey, type Lane } from "./store-types.ts";
 
-/** The lead's `evidence:` line: each reference is the lane's own input, so a line break or escape in it stays out. */
-const evidenceLine = (evidence: readonly string[]): string => `evidence: ${evidence.map(oneLine).join(" ")}`;
+/**
+ * The lead's `evidence:` line: each reference is the lane's own input, so a line break or escape in it stays out; the
+ * spaces inside one stay, so it names the file the lane gave.
+ */
+const evidenceLine = (evidence: readonly string[]): string => `evidence: ${evidence.map(oneName).join(" ")}`;
 
 export async function startLane(
   d: Deps,
@@ -110,7 +113,7 @@ export async function report(
     // Waiting is not progress: the lane stays on the same clock, and the target is named in its nudges and escalation.
     // --for is shown on one line in nudges, the board and escalations, so it is stored that way.
     lane.waitingSince = still?.since ?? now;
-    lane.waitingFor = oneLine(opts.waitingFor ?? "") || still?.target || blockerOf(text);
+    lane.waitingFor = oneName(opts.waitingFor ?? "").trim() || still?.target || blockerOf(text);
   } else if (opts.status === "working") {
     delete lane.waitingFor;
     delete lane.waitingSince;

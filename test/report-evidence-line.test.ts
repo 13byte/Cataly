@@ -35,7 +35,8 @@ describe("evidence references in the lead's copy", () => {
     const { d, lead } = await lane();
     await report(d, "talker", "draft", { evidence: ["acme/app#9\u001b[2J\u202e", "x\ry"] });
     const msg = lead.received.at(-1)!;
-    expect(msg).toBe("[REPORT talker] draft\nevidence: acme/app#9 [2J x y");
+    // Each escape or override becomes one space, and a reference is never trimmed: the first one ends in that space.
+    expect(msg).toBe("[REPORT talker] draft\nevidence: acme/app#9 [2J  x y");
     // The lane's own record keeps the references as given.
     expect(d.store.lane("talker")!.log.at(-1)!.text).toContain("acme/app#9\u001b[2J\u202e");
   });

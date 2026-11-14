@@ -44,6 +44,13 @@ export const oneLine = (text: string): string =>
   text.replace(/[\p{Cc}\u2028\u2029\u202a-\u202e\u2066-\u2069\s]+/gu, " ").trim();
 
 /**
+ * A name (a path, a link, what a lane waits on) on one line: like `oneLine`, a run of control characters and bidi
+ * overrides becomes one space, but the printable spaces it has stay as they are, untrimmed: `build  artifacts` is
+ * another path than `build artifacts`, so a name shown whole is the name the lane gave.
+ */
+export const oneName = (text: string): string => text.replace(/[\p{Cc}\u2028\u2029\u202a-\u202e\u2066-\u2069]+/gu, " ");
+
+/**
  * `text` broken into lines of at most `cols` columns, at a space only. A word wider than that (a link, a job id, a path)
  * is never split: its line runs on to the next space and the terminal folds it for display. A split one is two lines,
  * neither of which a reader can copy, click or search for.

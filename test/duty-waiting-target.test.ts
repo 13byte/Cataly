@@ -189,3 +189,48 @@ describe("a prompts directory whose nudge-waiting.md predates {{wholeTarget}}", 
     expect(lines).toHaveLength(3);
   });
 });
+
+describe("a name with runs of spaces", () => {
+  // `build  artifacts` is not `build artifacts`: a name shown whole keeps every printable space it has.
+  const doubled = (root: string) =>
+    join(root, "build  artifacts", `${"nightly   run ".repeat(6)}end`, "result  log.txt");
+
+  test("an evidence file keeps them in PROGRESS, the lead's report and the escalation", async () => {
+    const { w, d, lead, brief } = setup();
+    const file = doubled(d.store.root);
+    mkdirSync(join(file, ".."), { recursive: true });
+    writeFileSync(file, "ok");
+    const lane = await startLane(d, "talker", brief, { group: "w1" });
+    w.panes.get(lane.paneId)!.status = "idle";
+    w.clock = lane.createdAt + MIN;
+    const { progress } = await report(d, "talker", "built", { evidence: [file] });
+    expect(progress[0]).toEndWith("end/result  log.txt");
+    expect(lead.received.at(-1)).toEndWith(`\nevidence: ${file}`);
+    w.clock = lane.createdAt + 42 * MIN;
+    expect(await dutyTick(d)).toContainEqual({ lane: "talker", action: "escalated" });
+    expect(lead.received.at(-1)!.split("\n").slice(3)).toEqual([`  ${file}`]);
+  });
+
+  test("a waiting target keeps them in the nudge, the board, the escalation and the hourly audit", async () => {
+    const target = doubled("/srv/ci");
+    const { d, w, key, lane, pane, lead, at } = await longWait(target);
+    await at(10);
+    expect(pane.received.at(-1)!.split("\n")).toContain(`  ${target}`);
+    expect(laneBoard(d.store.lanes(), w.clock)).toContain(`  ${target}`);
+    expect(await at(40)).toContainEqual({ lane: key, action: "escalated" });
+    expect(lead.received.at(-1)!.split("\n")[2]).toBe(`  ${target}`);
+    w.clock = lane.createdAt + 4 * 60 * MIN;
+    const run: LoopRun = { at: w.clock, synced: [], findings: [], started: [], held: [], asked: [] };
+    await audit(d, run);
+    expect(run.findings[0]).toContain(` on ${target} since `);
+  });
+
+  test("a target from the report's WAITING line keeps them; a tab or an escape still becomes one space", async () => {
+    const { d, brief } = setup();
+    await startLane(d, "waiter", brief, { group: "w1" });
+    await report(d, "waiter", `WAITING: ${doubled("/srv")}\nmore`, { status: "waiting" });
+    expect(d.store.lane("waiter")!.waitingFor).toBe(doubled("/srv"));
+    await report(d, "waiter", "still", { status: "waiting", waitingFor: " job\t42  on\u001b[2Jci " });
+    expect(d.store.lane("waiter")!.waitingFor).toBe("job 42  on [2Jci");
+  });
+});

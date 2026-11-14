@@ -3,7 +3,7 @@
 // that keeps saying "still waiting" is escalated to the lead like a silent one.
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
-import { ageText, fitEnd, fitStart, hhmm, indented, oneLine } from "./fit.ts";
+import { ageText, fitEnd, fitStart, hhmm, indented, oneName } from "./fit.ts";
 import type { Lane } from "./store-types.ts";
 
 /** Minutes without progress before the duty loop tells the lead, once per stall. */
@@ -48,7 +48,7 @@ export function applyEvidence(lane: Lane, evidence: readonly string[], now: numb
   for (const ref of evidence) {
     const c = counted(lane, ref, since);
     if ("why" in c) {
-      skipped.push(`  not counted: ${fitStart(oneLine(ref), 60)} (${c.why})`);
+      skipped.push(`  not counted: ${fitStart(oneName(ref), 60)} (${c.why})`);
       continue;
     }
     moved = ref;
@@ -65,7 +65,7 @@ export function applyEvidence(lane: Lane, evidence: readonly string[], now: numb
   lane.nudges = 0;
   delete lane.escalatedAt;
   lane.lastEvidence = { ref: moved, at: now };
-  return [`PROGRESS ${hhmm(now)}: ${fitStart(oneLine(moved), 80)}`, ...skipped];
+  return [`PROGRESS ${hhmm(now)}: ${fitStart(oneName(moved), 80)}`, ...skipped];
 }
 
 /**
@@ -78,16 +78,19 @@ export const stalled = (lane: Lane, now: number): boolean => {
   return now - since >= ESCALATE_MINUTES * 60_000 && (lane.escalatedAt === undefined || lane.escalatedAt <= since);
 };
 
-/** A blocker named in report text: its first line (a CR or line separator ends one too) without a leading `WAITING:`. */
+/**
+ * A blocker named in report text: its first line (a CR or line separator ends one too) without a leading `WAITING:`,
+ * trimmed. A name keeps the spaces inside it (`oneName`).
+ */
 export const blockerOf = (text: string): string =>
-  oneLine(text.split(/[\n\r\u2028\u2029]/)[0]!.replace(/^\s*WAITING:\s*/i, "")) || "?";
+  oneName(text.split(/[\n\r\u2028\u2029]/)[0]!.replace(/^\s*WAITING:\s*/i, "")).trim() || "?";
 
 /**
  * What a waiting lane waits on, on one line; a record from before `--for` names its last report's blocker. A target is
  * stored one-line, and one stored before that is made so here.
  */
 export const waitingTarget = (lane: Lane): string =>
-  oneLine(lane.waitingFor ?? blockerOf(lane.log.findLast((e) => e.kind === "report")?.text ?? "?")) || "?";
+  oneName(lane.waitingFor ?? blockerOf(lane.log.findLast((e) => e.kind === "report")?.text ?? "?")).trim() || "?";
 
 /** What a waiting lane waits on, cut to 40 columns, or to `cols` when a line leaves it fewer. */
 export const waitingOn = (lane: Lane, cols = 40): string => fitEnd(waitingTarget(lane), Math.min(40, cols));
@@ -111,7 +114,7 @@ export function escalation(lane: Lane, pane: string, now: number): string {
   const head = `[ESCALATE ${lane.key}${waiting ? " WAITING" : ""}] no new evidence for ${ageText(now - since)} (since ${hhmm(since)})`;
   const counts = `pane ${pane}, ${lane.nudges} nudges, ${talk} reports without evidence`;
   const next = waiting ? "check it is alive, or reassign the lane" : "check the lane, re-brief it, or close it";
-  const ref = lane.lastEvidence ? oneLine(lane.lastEvidence.ref) : "";
+  const ref = lane.lastEvidence ? oneName(lane.lastEvidence.ref) : "";
   const shown = fitStart(ref, 48);
   const last = lane.lastEvidence
     ? withWhole(`last evidence: ${shown} @ ${hhmm(lane.lastEvidence.at)}. Next: ${next}.`, shown, ref)
