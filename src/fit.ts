@@ -63,10 +63,11 @@ export function wrap(text: string, cols: number): string[] {
 }
 
 /**
- * `text` whole on indented lines: a cut link, job id or path names nothing a reader can open or check, so a line that
- * has to stay short is followed by these when it cut one. Within WIDTH except a word wider than a line, kept whole.
+ * `text` whole on one indented line: a cut link, job id or path names nothing a reader can open or check, so a line that
+ * has to stay short is followed by this when it cut one. Never wrapped, not even at a space: the text is one name (a
+ * path may hold spaces), and either half of a broken one names nothing. Wider than a line, the terminal folds it.
  */
-export const indented = (text: string): string[] => wrap(text, WIDTH - 2).map((l) => `  ${l}`);
+export const indented = (text: string): string[] => [`  ${text}`];
 
 /** Local wall-clock time, "19:47". */
 export function hhmm(at: number): string {

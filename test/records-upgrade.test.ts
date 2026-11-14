@@ -75,30 +75,34 @@ describe("records written before runtimes existed (IS-3)", () => {
     });
     const lines = out.split("\n");
     expect(lines[0]).toBe("RUNTIME herdr (from config)");
-    expect(lines[1]).toStartWith("lead=w1:p1 duty=w1:p2 ");
+    expect(lines[1]).toBe("lead=w1:p1 duty=w1:p2");
+    expect(lines[2]).toBe(`home=${d.store.root}`);
     expect(lines.find((l) => l.startsWith("old-lane"))).toMatch(/^old-lane\s+working\s+herdr\s+w1:p3\s/);
   });
 
-  test("dori status with a long home path and an unset runtime: nothing cut, a path wider than a line on one line whole", async () => {
+  test("dori status with a long home path holding spaces and an unset runtime: each path whole on one line", async () => {
     const { d } = oldHome();
-    const root = join(d.store.root, `${"deep-home-directory-".repeat(8)}end`);
+    // Spaces inside a path are no place to break it: either half names no directory.
+    const root = join(d.store.root, "Application Support", `${"deep home directory ".repeat(6)}end`);
+    const config = join(root, "config.json");
     const long = {
       ...d,
       store: new Store(root),
       choice: () => {
-        throw new RuntimeChoiceError(`neither herdr nor hc is on PATH: set "runtime" in ${join(root, "config.json")}`);
+        throw new RuntimeChoiceError(`neither herdr nor hc is on PATH: set "runtime" in ${config}`);
       },
     };
     const { out } = await captureIo(async () => {
       status(long);
       return 0;
     });
-    // A path wider than 120 columns is never split; it starts a line and runs to the next space. Every other line fits.
-    const lines = out.split("\n");
-    expect(lines).toContain(`home=${root}`);
-    expect(lines.find((l) => l.startsWith(`${join(root, "config.json")}`))).toBeDefined();
-    for (const line of lines.filter((l) => !l.startsWith("home=") && !l.startsWith(root)))
-      expect(Bun.stringWidth(line)).toBeLessThanOrEqual(120);
+    expect(Bun.stringWidth(root)).toBeGreaterThan(120);
+    // The two path lines run past 120 columns as they must; the terminal folds them, a copy of each is whole.
+    expect(out.split("\n").slice(0, 3)).toEqual([
+      `RUNTIME unset: neither herdr nor hc is on PATH: set "runtime" in ${config}`,
+      "lead=- duty=-",
+      `home=${root}`,
+    ]);
   });
 
   test.each([2, 3])("a legacy record with %s nudges establishes one verifiable queued escalation", async (nudges) => {

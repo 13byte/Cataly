@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { DeliveryUncertain, failureDetail } from "./delivery.ts";
-import { type Deps, prompt } from "./harness.ts";
+import { type Deps, fill, promptFile } from "./harness.ts";
 import { runHook } from "./hooks.ts";
 import { flushInbox } from "./inbox.ts";
 import { oweLead, payLead } from "./inbox-files.ts";
@@ -168,6 +169,7 @@ export async function dutyTick(d: Deps): Promise<DutyEvent[]> {
       if (due === undefined || quietMin < due) continue;
       const since = progressOf(lane);
       const waiting = lane.status === "waiting";
+      const whole = waiting ? waitingTarget(lane) : "";
       const vars = {
         key: lane.key,
         minutes: String(Math.floor(quietMin)),
@@ -175,19 +177,20 @@ export async function dutyTick(d: Deps): Promise<DutyEvent[]> {
         age: ageText(now - since),
         dori: d.doriCmd,
         ...(waiting
-          ? {
-              target: "",
-              wholeTarget: indented(waitingTarget(lane)).join("\n"),
-              waitingSince: hhmm(waitingSinceOf(lane)),
-            }
+          ? { target: "", wholeTarget: indented(whole).join("\n"), waitingSince: hhmm(waitingSinceOf(lane)) }
           : {}),
       };
       // Built and queued before it is counted: a nudge that could not be built or queued is not used up. A waiting
       // nudge's first line names the target in what it leaves of WIDTH beside the key (at most 40 columns), so the time
-      // shows; its body names the target whole, since a cut link or job id names nothing the lane can check.
+      // shows; its body names the target whole, since a cut link or job id names nothing the lane can check. A
+      // template from before {{wholeTarget}} (DORI_PROMPTS_DIR) gets the whole target under its first line instead.
       const name = waiting ? "nudge-waiting.md" : "nudge.md";
-      const room = waiting ? WIDTH - Bun.stringWidth(prompt(name, vars).split("\n")[0]!) : 0;
-      const text = prompt(name, waiting ? { ...vars, target: waitingOn(lane, Math.max(1, room)) } : vars);
+      const template = readFileSync(promptFile(name), "utf8");
+      const room = waiting ? WIDTH - Bun.stringWidth(fill(template, vars).split("\n")[0]!) : 0;
+      const target = waitingOn(lane, Math.max(1, room));
+      const [first, ...rest] = fill(template, waiting ? { ...vars, target } : vars).split("\n");
+      const named = template.includes("{{wholeTarget}}") || (target === whole && template.includes("{{target}}"));
+      const text = [first, ...(waiting && !named ? indented(whole) : []), ...rest].join("\n");
       const ref = lane.sessionRef;
       const id = `nudge:${lane.key}:${noticeId(d, lane)}:${lane.progressEpoch ?? 0}:${lane.nudges + 1}`;
       if (!underInboxLock(d, ref, (inbox) => d.store.enqueueOnce(inbox, { at: now, from: "duty", text, id }))) {

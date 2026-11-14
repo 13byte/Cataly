@@ -104,8 +104,12 @@ export function promptFile(name: string): string {
   }
 }
 
+/** `template` with each `{{name}}` in `vars` replaced; an unknown one is left as written. */
+export const fill = (template: string, vars: Record<string, string>): string =>
+  template.replace(/\{\{(\w+)\}\}/g, (_, k: string) => vars[k] ?? `{{${k}}}`);
+
 export const prompt = (name: string, vars: Record<string, string>): string =>
-  readFileSync(promptFile(name), "utf8").replace(/\{\{(\w+)\}\}/g, (_, k: string) => vars[k] ?? `{{${k}}}`);
+  fill(readFileSync(promptFile(name), "utf8"), vars);
 
 /** The roles `dori role` registers by hand; `dori up` also registers the two loop sessions. */
 export const ROLES: readonly Role[] = ["lead", "duty"];

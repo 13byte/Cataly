@@ -109,12 +109,10 @@ describe("the lane board", () => {
       expect(lines[1]).toContain("  progress 45m ");
       expect(lines[1]).toContain("waiting: ");
       expect(lines[1]).toContain(` since ${hhmm(waiting.waitingSince)}`);
-      // The short target fits its line and adds none; the wide one is cut there and follows whole on indented lines.
+      // The short target fits its line and adds none; the wide one is cut there and follows whole on one indented line.
       const below = lines.slice(2);
-      expect(below).toHaveLength(target === "CI 812" ? 0 : 2);
-      for (const line of below) expect(line).toStartWith("  ");
-      if (below.length > 0) expect(below.map((l) => l.trimStart()).join(" ")).toBe(target.trim());
-      for (const line of lines) expect(Bun.stringWidth(line)).toBeLessThanOrEqual(120);
+      expect(below).toEqual(target === "CI 812" ? [] : [`  ${target.trim()}`]);
+      for (const line of lines.slice(0, 2)) expect(Bun.stringWidth(line)).toBeLessThanOrEqual(120);
     },
   );
 

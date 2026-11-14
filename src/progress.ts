@@ -95,7 +95,7 @@ export const waitingOn = (lane: Lane, cols = 40): string => fitEnd(waitingTarget
 /** When the lane started waiting; a record from before `waitingSince` counts from its last progress. */
 export const waitingSinceOf = (lane: Lane): number => lane.waitingSince ?? progressOf(lane);
 
-/** `line` alone when the `shown` part of it is `full` whole, else `line` and `full` on indented lines below it. */
+/** `line` alone when the `shown` part of it is `full` whole, else `line` and `full` on one indented line below it. */
 const withWhole = (line: string, shown: string, full: string): string[] =>
   shown === full ? [line] : [line, ...indented(full)];
 
