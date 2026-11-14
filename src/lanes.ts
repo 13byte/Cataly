@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { shq } from "./delivery.ts";
-import { oneLine } from "./fit.ts";
+import { referenceLine } from "./fit.ts";
 import { agentCommand, prompt, type Deps } from "./harness.ts";
 import { settled, tellLead, type SendResult } from "./inbox.ts";
 import { Refusal } from "./refusal.ts";
@@ -14,7 +14,7 @@ import { openSession } from "./runtime/types.ts";
 import { KEY_RE, reservedKey, type Lane } from "./store-types.ts";
 
 /** The lead's `evidence:` line: each reference is the lane's own input, so a line break or escape in it stays out. */
-const evidenceLine = (evidence: readonly string[]): string => `evidence: ${evidence.map(oneLine).join(" ")}`;
+const evidenceLine = (evidence: readonly string[]): string => `evidence: ${evidence.map(referenceLine).join(" ")}`;
 
 export async function startLane(
   d: Deps,
@@ -108,9 +108,10 @@ export async function report(
   // target, so a record from before `waitingSince`/`--for` keeps what was inferred before this report moved its clock.
   if (opts.status === "waiting" || (still && opts.status === undefined)) {
     // Waiting is not progress: the lane stays on the same clock, and the target is named in its nudges and escalation.
-    // --for is shown on one line in nudges, the board and escalations, so it is stored that way.
+    // --for is shown on one line, with printable spaces retained because they can be part of a reference.
     lane.waitingSince = still?.since ?? now;
-    lane.waitingFor = oneLine(opts.waitingFor ?? "") || still?.target || blockerOf(text);
+    const target = referenceLine(opts.waitingFor ?? "");
+    lane.waitingFor = target.trim() ? target : still?.target || blockerOf(text);
   } else if (opts.status === "working") {
     delete lane.waitingFor;
     delete lane.waitingSince;

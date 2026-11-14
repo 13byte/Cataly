@@ -1,6 +1,6 @@
 // Terminal text helpers: wide (Korean) characters take two columns, and a cut never splits a character.
 
-/** Target terminal width; an unbroken path, link or id wider than a line stays whole on its own line. */
+/** Target terminal width; a full reference wider than a line stays whole, including any spaces in it. */
 export const WIDTH = 120;
 
 const graphemes = (text: string): string[] =>
@@ -43,6 +43,10 @@ export function padCols(text: string, cols: number): string {
 export const oneLine = (text: string): string =>
   text.replace(/[\p{Cc}\u2028\u2029\u202a-\u202e\u2066-\u2069\s]+/gu, " ").trim();
 
+/** Printable references keep their exact spaces; control-bearing input retains the one-line sanitization above. */
+export const referenceLine = (text: string): string =>
+  /[\p{Cc}\u2028\u2029\u202a-\u202e\u2066-\u2069]/u.test(text) ? oneLine(text) : text;
+
 /**
  * `text` broken into lines of at most `cols` columns, at a space only. A word wider than that (a link, a job id, a path)
  * is never split: its line runs on to the next space and the terminal folds it for display. A split one is two lines,
@@ -63,10 +67,10 @@ export function wrap(text: string, cols: number): string[] {
 }
 
 /**
- * `text` whole on indented lines: a cut link, job id or path names nothing a reader can open or check, so a line that
- * has to stay short is followed by these when it cut one. Within WIDTH except a word wider than a line, kept whole.
+ * A full reference on one indented line, even beyond WIDTH. Spaces may belong to a path or target: wrapping there
+ * changes the reference when runtime delivery flattens line breaks into separators.
  */
-export const indented = (text: string): string[] => wrap(text, WIDTH - 2).map((l) => `  ${l}`);
+export const indented = (text: string): string[] => [`  ${text}`];
 
 /** Local wall-clock time, "19:47". */
 export function hhmm(at: number): string {

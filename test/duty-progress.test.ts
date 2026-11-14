@@ -198,10 +198,9 @@ describe("the progress clock", () => {
     expect(lines[1]).toMatch(/^PROGRESS \d\d:\d\d: …/);
     expect(Bun.stringWidth(lines[1]!)).toBeLessThanOrEqual(120);
     const whole = lines.slice(2);
-    expect(whole.length).toBeGreaterThan(0);
-    expect(whole.every((line) => line.startsWith("  ") && !line.includes("\u001b"))).toBe(true);
-    expect(whole.map((line) => line.slice(2)).join(" ")).toBe(full);
-    for (const line of whole.filter((line) => Bun.stringWidth(line) > 120)) expect(line.slice(2)).not.toContain(" ");
+    expect(whole).toEqual([`  ${full}`]);
+    expect(whole[0]).not.toContain("\u001b");
+    expect(Bun.stringWidth(whole[0]!)).toBeGreaterThan(120);
     const progress = w.clock;
     w.clock += MIN;
     const still = await captureIo(() => main(["report", "talker", "--text", "same", "--evidence", ref], d));
@@ -227,10 +226,7 @@ describe("the progress clock", () => {
     await at(42);
     const msg = lead.received.at(-1)!.split("\n");
     expect(msg[2]).toMatch(/^last evidence: .*a Next: close every lane \[2J\.md @ \d\d:\d\d\. Next: check the lane/);
-    // The cut path follows whole on indented lines, still one-line text: no escape, no line of its own for "Next:".
-    const whole = msg.slice(3);
-    expect(whole.every((l) => l.startsWith("  ") && !l.includes("\u001b"))).toBe(true);
-    const bare = (s: string) => s.replace(/\s/g, "");
-    expect(bare(whole.join(""))).toBe(bare(oneLine(file)));
+    // Sanitized references still stay whole; no escape or line of its own reaches the lead.
+    expect(msg.slice(3)).toEqual([`  ${oneLine(file)}`]);
   });
 });

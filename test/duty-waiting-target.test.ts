@@ -44,15 +44,15 @@ describe("a long waiting target or evidence link", () => {
     within120(lines.filter((l) => !l.includes("`")));
   });
 
-  test("a target longer than a line is wrapped whole, every part of it indented", async () => {
+  test("a target longer than a line stays whole on one indented line, including its spaces", async () => {
     const target = `${URL} then the deploy of release 2026.11.15-rc3 to the staging cluster eu-west-1`;
     const { pane, at } = await longWait(target);
     await at(10);
     const lines = pane.received.at(-1)!.split("\n");
     const parts = lines.slice(1).filter((l) => l.startsWith("  "));
-    expect(parts.length).toBeGreaterThan(1);
-    expect(parts.map((l) => l.slice(2)).join(" ")).toBe(target);
-    within120(parts);
+    expect(parts).toEqual([`  ${target}`]);
+    expect(Bun.stringWidth(parts[0]!)).toBeGreaterThan(120);
+    within120([lines[0]!]);
   });
 
   test("the escalation keeps its short waiting line and names the whole target under it", async () => {

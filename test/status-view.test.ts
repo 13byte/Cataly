@@ -109,16 +109,14 @@ describe("the lane board", () => {
       expect(lines[1]).toContain("  progress 45m ");
       expect(lines[1]).toContain("waiting: ");
       expect(lines[1]).toContain(` since ${hhmm(waiting.waitingSince)}`);
-      // The short target fits its line and adds none; the wide one is cut there and follows whole on indented lines.
+      // The short target fits its line; a clipped reference follows on one line, even when it contains spaces.
       const below = lines.slice(2);
-      expect(below).toHaveLength(target === "CI 812" ? 0 : 2);
-      for (const line of below) expect(line).toStartWith("  ");
-      if (below.length > 0) expect(below.map((l) => l.trimStart()).join(" ")).toBe(target.trim());
-      for (const line of lines) expect(Bun.stringWidth(line)).toBeLessThanOrEqual(120);
+      expect(below).toEqual(target === "CI 812" ? [] : [`  ${target}`]);
+      for (const line of lines.slice(0, 2)) expect(Bun.stringWidth(line)).toBeLessThanOrEqual(120);
     },
   );
 
-  test("an over-width session ref stays whole beside a wrapped Unicode waiting target and both clocks", () => {
+  test("an over-width session ref and Unicode waiting target stay whole alongside both clocks", () => {
     const key = `lane-${"k".repeat(36)}`;
     const id = `t${"z".repeat(130)}`;
     const target = "ＷＩＤＥ ＴＡＲＧＥＴ ".repeat(8).trim();
@@ -132,13 +130,8 @@ describe("the lane board", () => {
     expect(lines.slice(0, 2)).toEqual([`${key} waiting  hc`, `hc:${id}`]);
     expect(lines[2]).toContain(`progress 45m (${hhmm(NOW - 45 * MIN)})`);
     expect(lines[2]).toContain(` since ${hhmm(waiting.waitingSince)}`);
-    expect(
-      lines
-        .slice(3)
-        .map((line) => line.slice(2))
-        .join(" "),
-    ).toBe(target);
-    expect(lines.filter((line) => Bun.stringWidth(line) > 120)).toEqual([`hc:${id}`]);
+    expect(lines.slice(3)).toEqual([`  ${target}`]);
+    expect(lines.filter((line) => Bun.stringWidth(line) > 120)).toEqual([`hc:${id}`, `  ${target}`]);
   });
 
   test("terminal escapes, carriage returns and bidi overrides in a lane's text stay on its one line as spaces", () => {
