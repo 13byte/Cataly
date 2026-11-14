@@ -97,3 +97,33 @@ describe("a long waiting target or evidence link", () => {
     within120(lines);
   });
 });
+
+// 200 columns, no space: wider than any line, so a split anywhere leaves no line a reader can copy or click whole.
+const WIDE = `https://ci.example.com/org/repo/actions/runs/123456789012/job/987654321098?${"step=build-and-test&".repeat(6)}attempt=1`;
+const whole = `  ${WIDE}`;
+
+describe("a link wider than a line", () => {
+  test("is named whole on one line in the nudge, the escalation, the board and the hourly audit", async () => {
+    expect(Bun.stringWidth(WIDE)).toBeGreaterThanOrEqual(200);
+    const { d, w, key, lane, pane, lead, at } = await longWait(WIDE);
+    await at(10);
+    expect(pane.received.at(-1)!.split("\n")).toContain(whole);
+    expect(laneBoard(d.store.lanes(), w.clock)).toContain(whole);
+    expect(await at(40)).toContainEqual({ lane: key, action: "escalated" });
+    expect(lead.received.at(-1)!.split("\n")[2]).toBe(whole);
+    w.clock = lane.createdAt + 4 * 60 * MIN;
+    const run: LoopRun = { at: w.clock, synced: [], findings: [], started: [], held: [], asked: [] };
+    await audit(d, run);
+    expect(run.findings[0]).toContain(` on ${WIDE} since `);
+  });
+
+  test("is named whole on one line under the escalation's last evidence", async () => {
+    const { w, d, lead, brief } = setup();
+    const lane = await startLane(d, "talker", brief, { group: "w1" });
+    w.panes.get(lane.paneId)!.status = "idle";
+    await report(d, "talker", "CI is running", { evidence: [WIDE] });
+    w.clock = lane.createdAt + 41 * MIN;
+    expect(await dutyTick(d)).toContainEqual({ lane: "talker", action: "escalated" });
+    expect(lead.received.at(-1)!.split("\n").slice(3)).toEqual([whole]);
+  });
+});

@@ -71,7 +71,7 @@ function runtimeLine(d: Deps): string {
   }
 }
 
-/** Every line within the board's WIDTH: the runtime line and the home path (a long one wraps, never cut) included. */
+/** Every line within the board's WIDTH, the runtime and roles line wrapped at spaces; a home path wider than a line is kept whole. */
 export function status(d: Deps): void {
   const roles = d.store.roles();
   const show = (ref: SessionRef | undefined) => (ref ? refText(ref) : "-");

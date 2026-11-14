@@ -124,9 +124,11 @@ describe("the lane board", () => {
     expect(oneLine("a\u0007\u2028b\t\tc")).toBe("a b c");
   });
 
-  test("wrap breaks at a space when one is in reach, inside a word otherwise, never past the width", () => {
+  test("wrap breaks only at spaces: a word wider than the width (a path, a link, an id) keeps a line of its own, whole", () => {
     expect(wrap("lead=w1:p1 duty=w1:p2 home=/a/b", 16)).toEqual(["lead=w1:p1", "duty=w1:p2", "home=/a/b"]);
-    expect(wrap(`home=/${"d".repeat(30)}`, 12)).toEqual(["home=/dddddd", "d".repeat(12), "d".repeat(12)]);
-    expect(wrap("ＷＩＤＥ", 3)).toEqual(["Ｗ", "Ｉ", "Ｄ", "Ｅ"]);
+    const path = `home=/${"d".repeat(30)}`;
+    expect(wrap(path, 12)).toEqual([path]);
+    expect(wrap(`lead=w1:p1 ${path} next`, 16)).toEqual(["lead=w1:p1", path, "next"]);
+    expect(wrap("ＷＩＤＥ ＷＯＲＤ", 5)).toEqual(["ＷＩＤＥ", "ＷＯＲＤ"]);
   });
 });

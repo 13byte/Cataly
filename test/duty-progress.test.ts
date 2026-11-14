@@ -142,7 +142,7 @@ describe("the progress clock", () => {
     expect(d.store.lane("talker")!.progressAt).toBe(w.clock);
   });
 
-  test("a maximum-length lane key keeps every diagnostic field, each line within 120 columns", async () => {
+  test("a maximum-length lane key keeps every diagnostic field, each line within 120 columns but a path wider than one", async () => {
     const { w, d, lead, brief } = setup();
     const key = `lane-${"k".repeat(36)}`;
     expect(key.length).toBe(41);
@@ -166,7 +166,9 @@ describe("the progress clock", () => {
     expect(lines[0]).toBe(`[ESCALATE ${key}] no new evidence for 40m (since ${lines[0]!.slice(-6, -1)})`);
     expect(lines[1]).toBe("pane idle, 2 nudges, 3 reports without evidence");
     expect(lines[2]).toMatch(/^last evidence: .*\.md @ \d\d:\d\d\. Next: /);
-    for (const l of lines) expect(Bun.stringWidth(l)).toBeLessThanOrEqual(120);
+    // The cut path follows on a line of its own, whole: wider than 120 columns, it is the one line past them.
+    expect(lines.slice(3)).toEqual([`  ${file}`]);
+    for (const l of lines.slice(0, 3)) expect(Bun.stringWidth(l)).toBeLessThanOrEqual(120);
   });
 
   test("dori report prints whether the clock moved and why not", async () => {
