@@ -1,18 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  checkName,
-  enqueue,
-  holder,
-  lockDir,
-  queueDir,
-  release,
-  stamp,
-  take,
-  tickets,
-  tryTake,
-} from "../src/lock-queue.ts";
+import { holder, lockDir, release, stamp, tryTake } from "../src/lock-owner.ts";
+import { checkName, enqueue, queueDir, take, tickets } from "../src/lock-queue.ts";
 import { lockWorld } from "./lock-setup.ts";
 
 const NAME = "demo";
@@ -86,6 +76,17 @@ describe("what is left behind is cleared, and nothing else", () => {
     w.live.delete(2);
     expect(tickets(w.env(9), NAME).map((t) => t.lane)).toEqual(["live"]);
     expect(readdirSync(queueDir(w.root, NAME))).toHaveLength(1);
+  });
+
+  test("a guard held by a live waiter turns the next away; one left by a dead waiter is taken over", () => {
+    const w = lockWorld();
+    mkdirSync(queueDir(w.root, NAME), { recursive: true });
+    writeFileSync(join(queueDir(w.root, NAME), ".guard"), "pid=7 x");
+    w.live.add(7);
+    expect(enqueue(w.env(1), NAME, "mine", 5)).toBeUndefined();
+    w.live.delete(7);
+    expect(enqueue(w.env(1), NAME, "mine", 5)?.lane).toBe("mine");
+    expect(readdirSync(queueDir(w.root, NAME)).filter((f) => !f.endsWith(".json"))).toEqual([]);
   });
 
   test("a lock with no owner line is busy until it is older than a minute, then cleared", () => {

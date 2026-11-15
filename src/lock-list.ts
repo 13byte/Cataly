@@ -1,7 +1,8 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { ageText, fitEnd, oneName, WIDTH } from "./fit.ts";
-import { holder, type LockEnv, tickets } from "./lock-queue.ts";
+import { holder } from "./lock-owner.ts";
+import { type LockEnv, tickets } from "./lock-queue.ts";
 
 const LOCK_SUFFIX = ".lock";
 

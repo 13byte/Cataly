@@ -1,16 +1,24 @@
+import { writeSync } from "node:fs";
 import { constants } from "node:os";
 import { alive } from "../skills/dori-mode/scripts/src/checkpoint-lock.ts";
-import { checkName, type LockEnv, RETRY_MS, release, take } from "./lock-queue.ts";
+import { nameCommand, release } from "./lock-owner.ts";
+import { checkName, type LockEnv, RETRY_MS, take } from "./lock-queue.ts";
 import { Refusal } from "./refusal.ts";
 
 type Signal = "SIGTERM" | "SIGINT";
-/** A running command: its exit code (128 + the signal when a signal ended it) and a way to signal it. */
-export type Child = { exited: Promise<number>; kill: (signal: Signal) => void };
+/**
+ * A command spawned held at a gate: `start()` lets it run. Until then its pid exists but nothing of the command has
+ * run, so the lock can name that pid first. `exited` is its exit code (128 + the signal when a signal ended it).
+ */
+export type Child = { pid: number; start: () => void; exited: Promise<number>; kill: (signal: Signal) => void };
 export type RunEnv = LockEnv & {
   spawn: (cmd: readonly string[]) => Child;
   /** Calls `handler` on SIGTERM and SIGINT until the returned function is called. */
   onSignal: (handler: (signal: Signal) => void) => () => void;
 };
+
+/** sh waits for `go` on fd 3, then becomes the command with the same pid; anything else exits 125, running nothing. */
+const GATE = 'IFS= read -r go <&3 && [ "$go" = go ] || exit 125; exec "$@" 3<&-';
 
 export function lockEnv(root: string): RunEnv {
   return {
@@ -20,8 +28,15 @@ export function lockEnv(root: string): RunEnv {
     alive,
     sleep: () => Bun.sleep(RETRY_MS),
     spawn: (cmd) => {
-      const p = Bun.spawn([...cmd], { stdio: ["inherit", "inherit", "inherit"] });
-      return { exited: p.exited, kill: (s) => p.kill(s) };
+      const p = Bun.spawn(["/bin/sh", "-c", GATE, "dori-lock", ...cmd], {
+        stdio: ["inherit", "inherit", "inherit", "pipe"],
+      });
+      return {
+        pid: p.pid,
+        start: () => void writeSync(p.stdio[3] as number, "go\n"),
+        exited: p.exited,
+        kill: (s) => p.kill(s),
+      };
     },
     onSignal: (handler) => {
       const term = () => handler("SIGTERM");
@@ -33,9 +48,10 @@ export function lockEnv(root: string): RunEnv {
 }
 
 /**
- * Waits in line for the lock `name`, runs `cmd` while holding it and returns the command's exit code. A signal while
- * waiting withdraws the ticket and returns 128 + the signal without running anything; a signal while the command runs
- * is passed to it, and the lock is released once it exits.
+ * Waits in line for the lock `name`, runs `cmd` while holding it and returns the command's exit code. The owner line
+ * names the command's pid before the command starts, so the lock stays held while it runs even if this process is
+ * killed. A signal while waiting withdraws the ticket and returns 128 + the signal without running anything; a signal
+ * while the command runs is passed to it, and the lock is released once it exits.
  */
 export async function runLocked(
   env: RunEnv,
@@ -56,11 +72,20 @@ export async function runLocked(
     else stop.abort();
   });
   try {
-    const owner = await take(env, name, lane, priority, stop.signal, log);
+    let owner = await take(env, name, lane, priority, stop.signal, log);
     if (owner === undefined) return 128 + constants.signals[signal ?? "SIGTERM"];
     try {
-      child = env.spawn(cmd);
-      return await child.exited;
+      const held = env.spawn(cmd);
+      child = held;
+      try {
+        owner = nameCommand(env.root, name, owner, held.pid);
+        held.start();
+      } catch (e) {
+        held.kill("SIGTERM");
+        await held.exited;
+        throw e;
+      }
+      return await held.exited;
     } finally {
       release(env.root, name, owner);
     }

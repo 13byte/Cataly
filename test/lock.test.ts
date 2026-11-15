@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Child, type RunEnv, runLocked } from "../src/lock.ts";
-import { holder, lockDir, queueDir } from "../src/lock-queue.ts";
+import { queueDir } from "../src/lock-queue.ts";
+import { holder, lockDir } from "../src/lock-owner.ts";
 import { lockWorld } from "./lock-setup.ts";
 
 const NAME = "demo";
@@ -18,7 +19,7 @@ function runWorld() {
     ...w.env(1),
     spawn: (cmd): Child => {
       spawned.push(cmd);
-      return { exited, kill: (s) => sent.push(s) };
+      return { pid: 4242, start: () => {}, exited, kill: (s) => sent.push(s) };
     },
     onSignal: (handler) => {
       signal = handler;

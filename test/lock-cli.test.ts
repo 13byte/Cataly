@@ -8,7 +8,8 @@ import { status } from "../src/cli-up.ts";
 import { startLane } from "../src/lanes.ts";
 import type { Child, RunEnv } from "../src/lock.ts";
 import { lockLine } from "../src/lock-list.ts";
-import { enqueue, lockDir, stamp, tickets } from "../src/lock-queue.ts";
+import { enqueue, tickets } from "../src/lock-queue.ts";
+import { lockDir, stamp } from "../src/lock-owner.ts";
 import { loopTick } from "../src/loop.ts";
 import { setup } from "./harness-setup.ts";
 import { setup as loopSetup } from "./loop-setup.ts";
@@ -38,7 +39,7 @@ function fakeRun(root: string, now: () => number) {
     now,
     spawn: (cmd): Child => {
       ran.push(cmd);
-      return { exited: Promise.resolve(0), kill: () => {} };
+      return { pid: process.pid, start: () => {}, exited: Promise.resolve(0), kill: () => {} };
     },
     onSignal: () => () => {},
   };
