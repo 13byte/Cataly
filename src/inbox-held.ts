@@ -1,5 +1,5 @@
 import type { Deps } from "./harness.ts";
-import { send, type SendResult } from "./inbox.ts";
+import { resolveAgain, send, type SendResult } from "./inbox.ts";
 import { refText } from "./refs.ts";
 import { Refusal } from "./refusal.ts";
 import type { SessionRef } from "./runtime/types.ts";
@@ -15,7 +15,7 @@ export async function sendToShell(d: Deps, target: string, text: string, from: s
   const rt = d.runtimes.for(ref);
   if ((await rt.probe(ref)).status !== "shell") return send(d, target, text, from);
   if (await rt.typeIntoShell(ref, text)) return "DELIVERED";
-  d.store.enqueue(ref, { at: d.now(), from, text });
+  await d.store.enqueue(ref, { at: d.now(), from, text }, resolveAgain(d, target, ref));
   return "QUEUED";
 }
 
@@ -31,10 +31,10 @@ export type InboxEntry = {
 
 const PREVIEW_CHARS = 60;
 
-/** Where a session's inbox lives now (its `.forward` target, if it moved), with forwarded entries merged in unless a flush holds the lock. */
+/** Where a session's inbox lives now (where its migration redirects end), with forwarded entries merged in unless a flush holds the lock. */
 export function currentInbox(d: Deps, from: SessionRef): SessionRef {
-  const ref = d.store.forwardOf(from) ?? from;
-  const release = d.store.forwardPending(ref) ? d.store.lockInbox(ref, d.now()) : undefined;
+  const ref = d.store.destination(from);
+  const release = d.store.mergePending(ref) ? d.store.lockInbox(ref, d.now()) : undefined;
   if (release)
     try {
       d.store.mergeForwarded(ref);
@@ -66,7 +66,7 @@ export function inboxList(d: Deps, target: string): { paneId: string; entries: I
  */
 export function releaseHeld(d: Deps, target: string, index: number, how: "ack" | "resend"): string {
   const named = resolveTarget(d, target);
-  const ref = d.store.forwardOf(named) ?? named;
+  const ref = d.store.destination(named);
   const paneId = refText(ref);
   const release = d.store.lockInbox(ref, d.now());
   if (!release) throw new Refusal(`the inbox of ${paneId} is being flushed right now; try again`);
