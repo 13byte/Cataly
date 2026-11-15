@@ -385,7 +385,7 @@ EOF
   printf 'export DORI_HOME=%q\n' "$base"
   printf 'export DORI_CONFIG=%q\n' "$config"
   printf 'export DORI_STATE_DIR=%q\n' "$base/state"
-  printf 'export DORI_AGENT_CMD=%q\n' "$base/bin/omp"
+  printf 'export DORI_AGENT_EXECUTABLE=%q\n' "$base/bin/omp"
   printf 'export HC_SESSION=%q\n' "$hc_session"
   # A Herdr app space id shows the side Dori's terminals in that space; without one, hc keeps them hidden.
   [ -z "${OMP_DORI_HC_SPACE:-}" ] || printf 'export DORI_HC_SPACE=%q\n' "$OMP_DORI_HC_SPACE"

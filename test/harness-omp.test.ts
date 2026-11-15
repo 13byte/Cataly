@@ -79,11 +79,12 @@ describe("OMP harness launches", () => {
   });
 
   test("default dependencies select OMP and retain an explicit DORI_AGENT_CMD", () => {
-    const keys = ["DORI_HOME", "DORI_AGENT_CMD", "DORI_TELEMETRY", "DORI_CMD"];
+    const keys = ["DORI_HOME", "DORI_AGENT_CMD", "DORI_AGENT_EXECUTABLE", "DORI_TELEMETRY", "DORI_CMD"];
     const before = keys.map((key) => process.env[key]);
     process.env["DORI_HOME"] = mkdtempSync(join(tmpdir(), "dori-default-"));
     process.env["DORI_TELEMETRY"] = "0";
     delete process.env["DORI_AGENT_CMD"];
+    delete process.env["DORI_AGENT_EXECUTABLE"];
     delete process.env["DORI_CMD"];
     try {
       const d = defaultDeps();

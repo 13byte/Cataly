@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { consumerPaths, owned, realDirectory, regularFile } from "./files.ts";
@@ -73,6 +73,23 @@ export function resolveConsumerOmpCommand(
   if (first !== "omp" && !managed) return configured;
   assertNativeSource(source, home);
   return [join(source, "scripts/consumer/omp"), ...configured.slice(1)];
+}
+
+/** Managed executable paths replace installer defaults; legacy argv overrides still apply only to literal omp. */
+export function resolveProcessOmpCommand(configured: readonly string[], configFile: string): readonly string[] {
+  const executable = process.env["DORI_AGENT_EXECUTABLE"];
+  const installation = dirname(configFile);
+  const installed =
+    executable !== undefined &&
+    (existsSync(join(installation, ".omp-dori")) || existsSync(join(installation, "releases/consumer-owner.json"))) &&
+    configured[0] === join(realpathSync(installation), "bin/omp");
+  const selected =
+    configured[0] === "omp"
+      ? (executable ?? (process.env["DORI_AGENT_CMD"] || undefined))
+      : installed
+        ? executable
+        : undefined;
+  return selected === undefined ? configured : [selected, ...configured.slice(1)];
 }
 
 /** A managed process selects its prepared default, while an explicit external dependency remains a user choice. */

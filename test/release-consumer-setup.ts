@@ -21,7 +21,15 @@ import type { ReleaseManifest } from "../src/release/types.ts";
 import { digest, sourceManifest } from "../src/update/source.ts";
 
 const roots: string[] = [];
-const environmentKeys = ["HOME", "DORI_HOME", "DORI_CONFIG", "DORI_STATE_DIR", "DORI_AGENT_CMD", "DORI_OMP_ULW_PATH"];
+const environmentKeys = [
+  "HOME",
+  "DORI_HOME",
+  "DORI_CONFIG",
+  "DORI_STATE_DIR",
+  "DORI_AGENT_CMD",
+  "DORI_AGENT_EXECUTABLE",
+  "DORI_OMP_ULW_PATH",
+];
 const environment = new Map<string, string | undefined>();
 afterEach(() => {
   for (const [key, value] of environment) {
@@ -116,6 +124,7 @@ export function fixture(): ConsumerFixture {
   process.env["DORI_CONFIG"] = paths.config;
   process.env["DORI_STATE_DIR"] = join(paths.dori, "state");
   delete process.env["DORI_AGENT_CMD"];
+  delete process.env["DORI_AGENT_EXECUTABLE"];
   delete process.env["DORI_OMP_ULW_PATH"];
   initialize(paths);
   const dependency = join(root, "public-dependency-fixture");

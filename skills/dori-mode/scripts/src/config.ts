@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   resolveConsumerOmpCommand,
   resolveConsumerOmpUlwPath,
+  resolveProcessOmpCommand,
   resolveProcessOmpUlwPath,
 } from "../../../../src/release/runtime.ts";
 import type { RuntimeKind } from "../../../../src/runtime/types.ts";
@@ -219,12 +220,7 @@ export const loadConfig = async (path = configPath(), home = homedir()): Promise
   }
   return {
     ...merged,
-    agentCommand: resolveConsumerOmpCommand(
-      process.env["DORI_AGENT_CMD"] && merged.agentCommand[0] === "omp"
-        ? [process.env["DORI_AGENT_CMD"], ...merged.agentCommand.slice(1)]
-        : merged.agentCommand,
-      { home },
-    ),
+    agentCommand: resolveConsumerOmpCommand(resolveProcessOmpCommand(merged.agentCommand, path), { home }),
     stateDir: expandHome(process.env["DORI_STATE_DIR"] ?? merged.stateDir, home),
     defaultCwd: expandHome(merged.defaultCwd, home),
     sessionsDir: expandHome(merged.sessionsDir, home),

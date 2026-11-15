@@ -57,6 +57,8 @@ export const defaultDeps = (): Deps => {
     exec: spawnExec,
     now: Date.now,
     get agentCmd() {
+      const executable = process.env["DORI_AGENT_EXECUTABLE"];
+      if (executable !== undefined) return shq(executable);
       if (process.env["DORI_AGENT_CMD"] !== undefined) return process.env["DORI_AGENT_CMD"];
       const selected = resolveConsumerOmpCommand(["omp"])[0]!;
       return selected !== "omp"

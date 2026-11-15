@@ -73,7 +73,7 @@ export function actorEnv(config: DeploymentConfig, toolchain?: ToolchainReceipt)
     DORI_HOME: config.doriHome,
     DORI_CONFIG: config.doriConfig,
     DORI_STATE_DIR: config.stateDir,
-    ...(toolchain?.nativeSource || toolchain?.nativeOverride ? { DORI_AGENT_CMD: toolchain.omp } : {}),
+    ...(toolchain?.nativeSource || toolchain?.nativeOverride ? { DORI_AGENT_EXECUTABLE: toolchain.omp } : {}),
     ...(toolchain?.ompUlw ? { DORI_OMP_ULW_PATH: join(toolchain.ompUlw.directory, "index.ts") } : {}),
     ...(process.env["OMP_ULW_SCOPE_FILE"] === undefined
       ? {}
