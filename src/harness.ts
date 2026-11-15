@@ -1,8 +1,9 @@
-import { accessSync, readFileSync } from "node:fs";
+import { accessSync, existsSync, readFileSync } from "node:fs";
 import { cpus, loadavg } from "node:os";
 import { join, resolve } from "node:path";
 import { shq } from "./delivery.ts";
 import { memFreePct } from "./host.ts";
+import { resolveConsumerOmpCommand } from "./release/runtime.ts";
 import { type Exec, spawnExec } from "./runtime/exec.ts";
 import { HcRuntime } from "./runtime/hc/index.ts";
 import { HerdrRuntime } from "./runtime/herdr/index.ts";
@@ -55,7 +56,15 @@ export const defaultDeps = (): Deps => {
     choice,
     exec: spawnExec,
     now: Date.now,
-    agentCmd: process.env["DORI_AGENT_CMD"] ?? "omp",
+    get agentCmd() {
+      if (process.env["DORI_AGENT_CMD"] !== undefined) return process.env["DORI_AGENT_CMD"];
+      const selected = resolveConsumerOmpCommand(["omp"])[0]!;
+      return selected !== "omp"
+        ? shq(selected)
+        : existsSync(join(store.root, ".omp-dori"))
+          ? shq(join(store.root, "bin/omp"))
+          : "omp";
+    },
     doriCmd: process.env["DORI_CMD"] ?? `DORI_HOME=${shq(store.root)} bun ${shq(CLI)}`,
     host: () => ({ load1: loadavg()[0] ?? 0, cores: cpus().length, memFreePct: memFreePct() }),
     usage: new Telemetry(store.root),

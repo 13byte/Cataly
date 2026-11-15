@@ -1,4 +1,5 @@
 import { realpathSync } from "node:fs";
+import { join } from "node:path";
 import { readPaneState } from "../../skills/dori-mode/scripts/src/lane-state.ts";
 import type { DeploymentCli } from "./deployment-cli.ts";
 import { completedLegacyRollbackForeground, legacyRollbackForeground } from "./deployment-legacy-monitors.ts";
@@ -43,6 +44,9 @@ export async function launchRuntime(
     toolchain.omp,
     "--config",
     toolchain.nativeConfig,
+    ...(toolchain.ompUlw
+      ? ["--no-extensions", "-e", join(prior ? record.oldSource! : record.releasePath, "extension")]
+      : []),
     `--resume=${previous.sessionFile}`,
     "--dori-role",
     "dori",
@@ -85,7 +89,8 @@ export async function launchedProcess(
       !argv.includes(toolchain.nativeConfig) ||
       (identity.executable !== toolchain.ompEntry &&
         !argv.includes(toolchain.omp) &&
-        !argv.includes(toolchain.ompEntry))
+        !argv.includes(toolchain.ompEntry) &&
+        !(toolchain.nativeSource && argv.includes(toolchain.nativeSource.entry)))
     )
       return [];
     return [identity];

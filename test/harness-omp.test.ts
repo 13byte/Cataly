@@ -91,6 +91,9 @@ describe("OMP harness launches", () => {
       expect(agentCommand(d, "dori")).toBe("omp --dori-role dori");
       expect(d.doriCmd).toContain("bun '");
       expect(d.doriCmd).toContain("src/cli.ts");
+      writeFileSync(join(d.store.root, ".omp-dori"), "primary\n");
+      expect(defaultDeps().agentCmd).toContain(join(d.store.root, "bin/omp"));
+      expect(defaultDeps().agentCmd).not.toBe("omp");
       process.env["DORI_AGENT_CMD"] = "custom-agent --model x";
       expect(defaultDeps().agentCmd).toBe("custom-agent --model x");
     } finally {

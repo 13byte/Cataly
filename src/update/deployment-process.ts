@@ -61,7 +61,7 @@ export function actorEnv(config: DeploymentConfig, toolchain?: ToolchainReceipt)
     HOME: config.home,
     PATH: [
       dirname(toolchain?.bun ?? config.bun),
-      dirname(toolchain?.omp ?? config.omp),
+      dirname(toolchain?.omp ?? config.omp ?? join(config.doriHome, "bin/omp")),
       dirname(runtimeBinary(config)),
       join(config.doriHome, "bin"),
       join(config.home, ".bun", "bin"),
@@ -73,6 +73,11 @@ export function actorEnv(config: DeploymentConfig, toolchain?: ToolchainReceipt)
     DORI_HOME: config.doriHome,
     DORI_CONFIG: config.doriConfig,
     DORI_STATE_DIR: config.stateDir,
+    ...(toolchain?.nativeSource || toolchain?.nativeOverride ? { DORI_AGENT_CMD: toolchain.omp } : {}),
+    ...(toolchain?.ompUlw ? { DORI_OMP_ULW_PATH: join(toolchain.ompUlw.directory, "index.ts") } : {}),
+    ...(process.env["OMP_ULW_SCOPE_FILE"] === undefined
+      ? {}
+      : { OMP_ULW_SCOPE_FILE: process.env["OMP_ULW_SCOPE_FILE"] }),
     ...(config.runtime === "hc"
       ? { HC_TERMINAL_ID: config.pane, ...(config.hcSession ? { HC_SESSION: config.hcSession } : {}) }
       : {

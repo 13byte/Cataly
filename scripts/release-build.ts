@@ -15,6 +15,7 @@ import { dirname, join, resolve } from "node:path";
 import { validateReleaseManifest } from "../src/release/manifest.ts";
 import type { ReleaseManifest } from "../src/release/types.ts";
 import { isReleaseVersion, releaseVersion } from "../src/release/version.ts";
+import { readSourceBundle } from "../src/release/source-bundle.ts";
 import { digest, sameManifest, sourceManifest } from "../src/update/source.ts";
 import { command, git } from "./release-process.ts";
 import { committedSource } from "./release-source.ts";
@@ -50,10 +51,26 @@ export async function buildRelease(root: string, output: string, prerelease: boo
     ) {
       throw new Error("Committed package version differs from the canonical producer version");
     }
-    for (const name of ["LICENSE", "LICENSE.omp-dori", "NOTICE", "install.sh", "omp-ulw.lock"]) {
+    for (const name of [
+      "LICENSE",
+      "LICENSE.omp-dori",
+      "NOTICE",
+      "install.sh",
+      "omp-ulw.lock",
+      "native-omp.lock",
+      "native-omp.patch",
+      "omp-ulw.overlay.lock",
+      "omp-ulw.patch",
+      "native-addon/package.json",
+      "native-addon/bun.lock",
+      "scripts/source-dependencies.ts",
+      "scripts/consumer/omp",
+    ]) {
       if (!observed.files.some((file) => file.path === name)) throw new Error(`Committed release is missing ${name}`);
     }
     const pin = readFileSync(join(source, "omp-ulw.lock"), "utf8").trim();
+    const native = readSourceBundle(source, true);
+    if (readSourceBundle(source).lock.commit !== pin) throw new Error("Committed ULW base and overlay differ");
     const paths = new Set([archiveRoot]);
     for (const file of observed.files) {
       let parent = dirname(`${archiveRoot}/${file.path}`);
@@ -107,7 +124,7 @@ export async function buildRelease(root: string, output: string, prerelease: boo
         platform: "linux",
         arch: "x64",
         bun: "1.4.4",
-        omp: "18.18.8",
+        omp: native.lock.nativeVersion,
         runtime: "herdr",
         messenger: "discord",
       },

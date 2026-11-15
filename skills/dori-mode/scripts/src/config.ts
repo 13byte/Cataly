@@ -1,7 +1,11 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { resolveConsumerOmpUlwPath } from "../../../../src/release/runtime.ts";
+import {
+  resolveConsumerOmpCommand,
+  resolveConsumerOmpUlwPath,
+  resolveProcessOmpUlwPath,
+} from "../../../../src/release/runtime.ts";
 import type { RuntimeKind } from "../../../../src/runtime/types.ts";
 import type { SupervisionOptions } from "./supervision-observe.ts";
 import type { CommitIdentity } from "./verify-pr-check.ts";
@@ -215,10 +219,19 @@ export const loadConfig = async (path = configPath(), home = homedir()): Promise
   }
   return {
     ...merged,
+    agentCommand: resolveConsumerOmpCommand(
+      process.env["DORI_AGENT_CMD"] && merged.agentCommand[0] === "omp"
+        ? [process.env["DORI_AGENT_CMD"], ...merged.agentCommand.slice(1)]
+        : merged.agentCommand,
+      { home },
+    ),
     stateDir: expandHome(process.env["DORI_STATE_DIR"] ?? merged.stateDir, home),
     defaultCwd: expandHome(merged.defaultCwd, home),
     sessionsDir: expandHome(merged.sessionsDir, home),
-    ompUlwPath: resolveConsumerOmpUlwPath(expandHome(merged.ompUlwPath, home), { home }),
+    ompUlwPath: resolveConsumerOmpUlwPath(resolveProcessOmpUlwPath(expandHome(merged.ompUlwPath, home), home), {
+      home,
+      useDefault: raw.ompUlwPath === undefined,
+    }),
     leadPane: process.env["DORI_LEAD_PANE"] ?? merged.leadPane,
   };
 };

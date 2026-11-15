@@ -8,7 +8,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { freezeSource } from "../update/source.ts";
 import { extractArchive } from "./archive.ts";
 import type { VerifiedBundle } from "./bundle.ts";
@@ -24,11 +24,15 @@ import {
 } from "./files.ts";
 import { assertNoLiveDori } from "./live.ts";
 import { validateReleaseManifest } from "./manifest.ts";
+import { provisionNativeSource } from "./native.ts";
 import { assertLock, provisionDependency } from "./provision.ts";
 import { activateRelease, type InstalledState, manifestPath, releaseId, releasePath, verifyRelease } from "./state.ts";
 
 export function preflightInstallation(paths: ConsumerPaths): void {
   pointer(paths.live);
+  const native = pointer(join(paths.dori, "bin/omp"));
+  if (native && !/^[a-f0-9]{40}-[a-f0-9]{16}\/scripts\/consumer\/omp$/.test(relative(paths.releases, native)))
+    throw new Error("Unmanaged native OMP command; preserve it and move it aside before installing");
   for (const [path, target] of paths.links) {
     realDirectory(dirname(path));
     const current = pointer(path);
@@ -47,12 +51,23 @@ function freezeDirectories(root: string): void {
   chmodSync(root, 0o555);
 }
 
-function installReferences(paths: ConsumerPaths, source: string, dependency: string): void {
+async function installReferences(
+  paths: ConsumerPaths,
+  source: string,
+  dependency: string,
+  manifest: InstalledState["current"],
+): Promise<void> {
   // Preflight the entire set before the first link/config creation. Existing custom files stay untouched.
   preflightInstallation(paths);
+  const native = manifest.requirements.omp === "18.20.0" ? await provisionNativeSource(source, paths.home) : undefined;
   if (!regularFile(paths.config)) {
     const example = JSON.parse(readFileSync(join(source, "skills/dori-mode/references/config.example.json"), "utf8"));
     example.ompUlwPath = dependency;
+    if (native)
+      example.agentCommand = [
+        join(paths.dori, "bin/omp"),
+        ...(example.agentCommand?.slice(1) ?? ["--dori-role", "lane", "--model", "{model}", "{prompt}"]),
+      ];
     writeFileSync(paths.config, `${JSON.stringify(example, null, 2)}\n`, { flag: "wx", mode: 0o600 });
   }
   for (const [path, target] of paths.links) {
@@ -60,6 +75,9 @@ function installReferences(paths: ConsumerPaths, source: string, dependency: str
     owned(dirname(path));
     if (pointer(path) === undefined) replacePointer(path, undefined, target);
   }
+  // Older manifests predate the bound-source protocol; removing only our slot restores their original PATH contract.
+  const omp = join(paths.dori, "bin/omp");
+  replacePointer(omp, pointer(omp), native ? join(source, "scripts/consumer/omp") : undefined);
 }
 
 export async function installBundle(
@@ -84,8 +102,8 @@ export async function installBundle(
     if (JSON.stringify(before.current) !== JSON.stringify(manifest))
       throw new Error("Installed release identity collision");
     const source = verifyRelease(paths, manifest);
-    const dependency = await provisionDependency(paths, manifest);
-    installReferences(paths, source, dependency);
+    const dependency = await provisionDependency(paths, manifest, source);
+    await installReferences(paths, source, dependency, manifest);
     return before;
   }
   const stage = mkdtempSync(join(paths.staging, "release-"));
@@ -93,7 +111,7 @@ export async function installBundle(
     const extracted = join(stage, "extracted");
     extractArchive(bundle.files, manifest, extracted);
     assertLock(extracted, manifest);
-    const dependency = await provisionDependency(paths, manifest);
+    const dependency = await provisionDependency(paths, manifest, extracted);
     if (lstatSync(destination, { throwIfNoEntry: false })) verifyRelease(paths, manifest);
     else {
       const frozen = join(stage, "source");
@@ -107,7 +125,7 @@ export async function installBundle(
       freezeDirectories(destination);
     }
     const source = verifyRelease(paths, manifest);
-    installReferences(paths, source, dependency);
+    await installReferences(paths, source, dependency, manifest);
     const after: InstalledState = { version: 1, current: manifest, ...(before ? { previous: before.current } : {}) };
     activateRelease(paths, before, after);
     return after;
@@ -126,8 +144,8 @@ export async function rollbackRelease(
     throw new Error("--version differs from the retained previous release");
   preflightInstallation(paths);
   const source = verifyRelease(paths, before.previous);
-  const dependency = await provisionDependency(paths, before.previous);
-  installReferences(paths, source, dependency);
+  const dependency = await provisionDependency(paths, before.previous, source);
+  await installReferences(paths, source, dependency, before.previous);
   const after: InstalledState = { version: 1, current: before.previous, previous: before.current };
   activateRelease(paths, before, after);
   return after;
