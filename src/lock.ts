@@ -2,6 +2,7 @@ import { writeSync } from "node:fs";
 import { constants } from "node:os";
 import { alive } from "../skills/dori-mode/scripts/src/checkpoint-lock.ts";
 import { nameCommand, release } from "./lock-owner.ts";
+import { procStat } from "./update/proc.ts";
 import { checkName, type LockEnv, RETRY_MS, take } from "./lock-queue.ts";
 import { Refusal } from "./refusal.ts";
 
@@ -13,8 +14,11 @@ type Signal = "SIGTERM" | "SIGINT";
 export type Child = { pid: number; start: () => void; exited: Promise<number>; kill: (signal: Signal) => void };
 export type RunEnv = LockEnv & {
   spawn: (cmd: readonly string[]) => Child;
-  /** Calls `handler` on SIGTERM and SIGINT until the returned function is called. */
-  onSignal: (handler: (signal: Signal) => void) => () => void;
+  /**
+   * Calls `handler` on SIGTERM and SIGINT until the returned function is called. `foreground` is a SIGINT while this
+   * process's group is the terminal's foreground group: a Ctrl-C there, which the terminal sends to the command too.
+   */
+  onSignal: (handler: (signal: Signal, foreground: boolean) => void) => () => void;
 };
 
 /** sh waits for `go` on fd 3, then becomes the command with the same pid; anything else exits 125, running nothing. */
@@ -39,8 +43,11 @@ export function lockEnv(root: string): RunEnv {
       };
     },
     onSignal: (handler) => {
-      const term = () => handler("SIGTERM");
-      const int = () => handler("SIGINT");
+      const term = () => handler("SIGTERM", false);
+      const int = () => {
+        const { pgid, tpgid } = procStat(process.pid);
+        handler("SIGINT", tpgid > 0 && tpgid === pgid);
+      };
       process.on("SIGTERM", term).on("SIGINT", int);
       return () => process.off("SIGTERM", term).off("SIGINT", int);
     },
@@ -51,8 +58,9 @@ export function lockEnv(root: string): RunEnv {
  * Waits in line for the lock `name`, runs `cmd` while holding it and returns the command's exit code. The owner line
  * names the command's pid before the command starts, so the lock stays held while it runs even if this process is
  * killed. A signal while waiting, or one that comes as the lock is taken, withdraws the ticket or releases the lock
- * and returns 128 + the signal without running anything; a signal while the command runs is passed to it, and the
- * lock is released once it exits.
+ * and returns 128 + the signal without running anything; a signal while the command runs is passed to it (a Ctrl-C at
+ * the terminal already reached it, as it shares this process's group, and is not sent again), and the lock is released
+ * once it exits.
  */
 export async function runLocked(
   env: RunEnv,
@@ -67,10 +75,10 @@ export async function runLocked(
   const stop = new AbortController();
   let child: Child | undefined;
   let signal: Signal | undefined;
-  const off = env.onSignal((s) => {
+  const off = env.onSignal((s, foreground) => {
     signal ??= s;
-    if (child) child.kill(s);
-    else stop.abort();
+    if (!child) stop.abort();
+    else if (!foreground) child.kill(s);
   });
   try {
     let owner = await take(env, name, lane, priority, stop.signal, log);

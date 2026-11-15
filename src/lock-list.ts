@@ -26,7 +26,8 @@ function lockNames(env: LockEnv): string[] {
   const held = dirs(state)
     .filter((f) => f.endsWith(LOCK_SUFFIX))
     .map((f) => f.slice(0, -LOCK_SUFFIX.length));
-  const queued = dirs(join(state, "locks")).filter((n) => tickets(env, n).length > 0);
+  // Only a lock name's queue is read: reading one removes its dead waiters' tickets.
+  const queued = dirs(join(state, "locks")).filter((n) => lockName(n) && tickets(env, n).length > 0);
   return [...new Set([...held, ...queued])].filter(lockName).sort();
 }
 

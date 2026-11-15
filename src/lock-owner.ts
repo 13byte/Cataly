@@ -6,7 +6,8 @@ import { Refusal } from "./refusal.ts";
 /**
  * The lock directory `<root>/state/<name>.lock`, shared with shell waiters that only `mkdir` it and write
  * `<lane> <YYYY-MM-DD HH:MM:SS> pid=<pid>` (local time) into its `owner` file. `dori harness lock` adds ` cmd=<pid>`,
- * the command it runs, before that command starts.
+ * the command it runs, before that command starts. A shell waiter clears a lock by its own script's rules, not under
+ * the claim below, so what this file guarantees about clearing holds between `dori harness lock` waiters.
  */
 export type OwnerEnv = ClaimEnv & { root: string };
 export type Holder = { owner: string; lane: string; pid?: number; since: number };
@@ -141,7 +142,10 @@ export function tryTake(
   return { busy: "contended" };
 }
 
-/** Names the holder's command on its owner line, so the lock stays held while it runs; the new owner line. */
+/**
+ * Names the holder's command on its owner line, so for other `dori harness lock` waiters the lock stays held while it
+ * runs; the new owner line. A shell waiter keeps it held only if its script reads `cmd=` too.
+ */
 export function nameCommand(root: string, name: string, owner: string, pid: number): string {
   const named = `${owner} cmd=${pid}`;
   writeOwner(lockDir(root, name), named);

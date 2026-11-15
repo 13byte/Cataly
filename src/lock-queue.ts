@@ -44,7 +44,17 @@ export const queueDir = (root: string, name: string): string => join(root, "stat
 
 const order = (a: Ticket, b: Ticket): number => a.priority - b.priority || a.seq - b.seq;
 
-/** The queue in turn order. Tickets of dead waiters are removed; one that can't be read is skipped. */
+/** A ticket as writeTicket writes it; other JSON in the queue dir is not one and is never removed. */
+const isTicket = (t: unknown): t is Omit<Ticket, "id"> => {
+  const v = (t ?? {}) as Partial<Record<keyof Ticket, unknown>>;
+  return (
+    typeof v.lane === "string" &&
+    (["pid", "at", "priority", "seq"] as const).every((k) => Number.isInteger(v[k])) &&
+    (v.pid as number) > 0
+  );
+};
+
+/** The queue in turn order. Tickets of dead waiters are removed; a file that is not a whole ticket is skipped. */
 export function tickets(env: LockEnv, name: string): Ticket[] {
   const dir = queueDir(env.root, name);
   let files: string[];
@@ -56,12 +66,13 @@ export function tickets(env: LockEnv, name: string): Ticket[] {
   }
   const live: Ticket[] = [];
   for (const f of files) {
-    let t: Ticket;
+    let t: unknown;
     try {
-      t = JSON.parse(readFileSync(join(dir, f), "utf8")) as Ticket;
+      t = JSON.parse(readFileSync(join(dir, f), "utf8"));
     } catch {
       continue;
     }
+    if (!isTicket(t)) continue;
     if (env.alive(t.pid)) live.push({ ...t, id: f.slice(0, -5) });
     else rmSync(join(dir, f), { force: true });
   }

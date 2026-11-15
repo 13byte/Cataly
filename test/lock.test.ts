@@ -14,7 +14,7 @@ function runWorld() {
   const w = lockWorld();
   const sent: string[] = [];
   const spawned: (readonly string[])[] = [];
-  let signal: ((s: "SIGTERM" | "SIGINT") => void) | undefined;
+  let signal: ((s: "SIGTERM" | "SIGINT", foreground: boolean) => void) | undefined;
   const { promise: exited, resolve: finish } = Promise.withResolvers<number>();
   const env: RunEnv = {
     ...w.env(1),
@@ -29,7 +29,15 @@ function runWorld() {
       };
     },
   };
-  return { w, env, sent, spawned, finish, signal: (s: "SIGTERM" | "SIGINT") => signal?.(s), hooked: () => !!signal };
+  return {
+    w,
+    env,
+    sent,
+    spawned,
+    finish,
+    signal: (s: "SIGTERM" | "SIGINT", foreground = false) => signal?.(s, foreground),
+    hooked: () => !!signal,
+  };
 }
 
 const leftNothing = (root: string) => {
@@ -59,6 +67,19 @@ describe("runLocked", () => {
     expect(holder(r.w.root, NAME)?.lane).toBe("mine");
     r.finish(143);
     expect(await run).toBe(143);
+    leftNothing(r.w.root);
+  });
+
+  test("a Ctrl-C at the terminal reaches the command once: the terminal sends it to the command too", async () => {
+    const r = runWorld();
+    const run = runLocked(r.env, NAME, "mine", 5, ["sleep", "9"], () => {});
+    await r.w.turn();
+    r.signal("SIGINT", true);
+    expect(r.sent).toEqual([]);
+    r.signal("SIGINT", false);
+    expect(r.sent).toEqual(["SIGINT"]);
+    r.finish(130);
+    expect(await run).toBe(130);
     leftNothing(r.w.root);
   });
 

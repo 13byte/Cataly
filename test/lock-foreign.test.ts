@@ -75,3 +75,20 @@ test("--lane is a lane key: spaces, line breaks, owner fields and paths are refu
     await expect(runLock(d, parse(["lock", "demo", "--lane", lane, "--", "true"]), env)).rejects.toThrow("lane key");
   expect(ran).toEqual([]);
 });
+
+test("status removes only a dead waiter's ticket: other JSON under state/locks is left alone", () => {
+  const { d } = setup();
+  const dead = Bun.spawnSync(["true"]).pid;
+  const dirs = [join(d.store.root, "state", "locks", ".cache"), join(d.store.root, "state", "locks", "demo")];
+  for (const dir of dirs) {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "note.json"), '{"note":"not a ticket"}');
+    writeFileSync(join(dir, "pid-text.json"), `{"lane":"x","pid":"${dead}","at":1,"priority":5,"seq":1}`);
+  }
+  writeFileSync(join(dirs[1]!, "1-gone.json"), JSON.stringify({ lane: "gone", pid: dead, at: 1, priority: 5, seq: 1 }));
+
+  expect(lines(() => status(d)).filter((l) => l.startsWith("lock "))).toEqual([]);
+
+  expect(readdirSync(dirs[0]!).sort()).toEqual(["note.json", "pid-text.json"]);
+  expect(readdirSync(dirs[1]!).sort()).toEqual(["note.json", "pid-text.json"]);
+});
