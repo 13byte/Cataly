@@ -38,6 +38,7 @@ interface SessionEntry {
 }
 export interface DoriContext {
   cwd: string;
+  abort(): void;
   agent: { kind: "main" | "sub"; id: string; parentId?: string };
   model?: PromptModel;
   sessionManager: { getSessionId(): string; getSessionFile(): string | undefined; getBranch(): SessionEntry[] };
@@ -472,14 +473,20 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
 
   // OMP chains prompt replacements in extension/handler order; append to the prompt this handler receives.
   pi.on("before_agent_start", (event, ctx) => {
-    if (role && requiredLoadError) throw requiredLoadError;
+    if (role && requiredLoadError) {
+      ctx.abort();
+      throw requiredLoadError;
+    }
     if (role !== "lane" || ctx.agent.kind !== "main" || typeof event !== "object" || event === null) return;
     const systemPrompt = "systemPrompt" in event ? withLaneBookkeeping(event.systemPrompt, ctx.model) : undefined;
     return systemPrompt && { systemPrompt };
   });
 
-  pi.on("before_provider_request", () => {
-    if (role && requiredLoadError) throw requiredLoadError;
+  pi.on("before_provider_request", (_event, ctx) => {
+    if (role && requiredLoadError) {
+      ctx.abort();
+      throw requiredLoadError;
+    }
   });
 
   const z = pi.zod;

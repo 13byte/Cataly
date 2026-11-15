@@ -54,6 +54,7 @@ export const fakePi = (options: FakeOptions): FakePi => {
     session: options.session,
     ctx: () => ({
       cwd: tmpdir(),
+      abort: () => void calls.push("abort"),
       mode: "print",
       agent,
       model: options.model,

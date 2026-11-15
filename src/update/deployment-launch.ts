@@ -1,5 +1,5 @@
 import { realpathSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { readPaneState } from "../../skills/dori-mode/scripts/src/lane-state.ts";
 import type { DeploymentCli } from "./deployment-cli.ts";
 import { completedLegacyRollbackForeground, legacyRollbackForeground } from "./deployment-legacy-monitors.ts";
@@ -90,7 +90,17 @@ export async function launchedProcess(
       (identity.executable !== toolchain.ompEntry &&
         !argv.includes(toolchain.omp) &&
         !argv.includes(toolchain.ompEntry) &&
-        !(toolchain.nativeSource && argv.includes(toolchain.nativeSource.entry)))
+        !(
+          toolchain.nativeSource &&
+          argv.some((arg) => {
+            if (!isAbsolute(arg)) return false;
+            try {
+              return realpathSync(arg) === toolchain.nativeSource?.entry;
+            } catch {
+              return false;
+            }
+          })
+        ))
     )
       return [];
     return [identity];
