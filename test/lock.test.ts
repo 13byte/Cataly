@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, spyOn, test } from "bun:test";
+import * as fs from "node:fs";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Child, type RunEnv, runLocked } from "../src/lock.ts";
@@ -75,6 +76,26 @@ describe("runLocked", () => {
     expect(r.spawned).toEqual([]);
     expect(readdirSync(queueDir(r.w.root, NAME))).toEqual([]);
     expect(holder(r.w.root, NAME)?.lane).toBe("other");
+  });
+
+  test("a signal that comes as the lock is taken, before the command starts, runs nothing: 128 + the signal", async () => {
+    const r = runWorld();
+    // The signal arrives just as the owner line is put in place (the last step of the take).
+    let sent = false;
+    const rename = fs.renameSync;
+    spyOn(fs, "renameSync").mockImplementation(((from: fs.PathLike, to: fs.PathLike) => {
+      rename(from, to);
+      if (!sent && String(to) === join(lockDir(r.w.root, NAME), "owner")) {
+        sent = true;
+        r.signal("SIGTERM");
+      }
+    }) as never);
+    const run = runLocked(r.env, NAME, "mine", 5, ["make"], () => {});
+    expect(await run).toBe(143);
+    mock.restore();
+    expect(sent).toBe(true);
+    expect(r.spawned).toEqual([]);
+    leftNothing(r.w.root);
   });
 
   test("no command after -- or a bad name is refused before anything is queued", async () => {

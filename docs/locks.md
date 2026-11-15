@@ -15,21 +15,23 @@ Each waiter writes a ticket `state/locks/<name>/<id>.json` under `DORI_HOME` wit
 
 Getting in line and taking the lock happen under the queue's guard file `state/locks/<name>/.guard`, one waiter at a time. A waiter's place is one past the highest place in line when it gets the guard. The head checks that it is still the head and takes the lock without letting the guard go, so a p1 that gets in line just as a p5 takes the lock is either in line before the p5 checks (and goes first) or comes after the p5 has the lock. A waiter that finds the guard held tries again on its next check.
 
-The priority of a turn is `--priority`, else the lane's recorded priority (`start --priority`, `priority <key> N`, or the backlog item's priority when the hourly loop opened the lane), else 5. A value outside 1-9 is refused.
+The priority of a turn is `--priority`, else the lane's recorded priority (`start --priority`, `priority <key> N`, or the backlog item's priority when the hourly loop opened the lane), else 5. A value outside 1-9 is refused, and so is a `--lane` that is not a lane key (the same rule as `start <key>`), since the lane is written into the owner line.
 
 ## The lock itself
 
 The lock is the directory `state/<name>.lock`, created with `mkdir`, with an `owner` line `<lane> <YYYY-MM-DD HH:MM:SS> pid=<pid> cmd=<pid>` in local time: `pid` is the waiting `dori harness lock` process and `cmd` is its command. This is the same directory and owner line a shell `mkdir` lock uses (a shell lock has only `pid=`), so a shell waiter of the same name and `dori harness lock` exclude each other. A shell waiter does not take a ticket: it may win a free lock between two queued turns, and it is never turned away.
 
+`state/` is shared with other tools (it is also OMP's default runtime state directory), and some of them keep plain lock files there that also end in `.lock`. Only a directory is a lock of this kind: a lock name whose `state/<name>.lock` is a file (or a symlink) is refused with `is not a lock directory`, and the file is left untouched.
+
 The command is started held, its pid is added to the owner line, and only then does it run. The lock stays held while any pid on the owner line is alive, so a `dori harness lock` killed with SIGKILL does not free the lock while its command still runs.
 
 A lock whose every owner pid is dead, or a lock directory older than 60 seconds with no owner line, is cleared and the clearing is logged. The directory is removed in place, never moved: a waiter that judged it left behind first takes the claim file `state/<name>.lock.claim-<digest of the owner line>`, then removes the directory only if it still holds that same owner line. Waiters that judged the same dead owner need the same claim, so only one of them clears it, and a waiter that paused after reading the dead owner never removes a lock someone took meanwhile. The guard and claim files hold the pid of the process that made them; one whose pid is dead (or that has no pid and is older than 60 seconds) is taken over under its own claim, so a waiter killed while holding one does not block the line.
 
-The holder's command runs with the terminal's stdin, stdout and stderr; `lock` exits with its exit code and prints its own `LOCK` lines to stderr. SIGTERM or SIGINT while waiting withdraws the ticket and exits 128 + the signal without running the command; while the command runs, the signal goes to the command and the lock is released when it exits.
+The holder's command runs with the terminal's stdin, stdout and stderr; `lock` exits with its exit code and prints its own `LOCK` lines to stderr. SIGTERM or SIGINT while waiting withdraws the ticket and exits 128 + the signal without running the command, and so does one that comes as the lock is taken, before the command is started: the lock is released and nothing runs. While the command runs, the signal goes to the command and the lock is released when it exits.
 
 ## Seeing the line
 
-`dori harness lock <name> --list` and the end of `dori harness status` print one line per lock that is held or has waiters, within 120 columns:
+`dori harness lock <name> --list` and the end of `dori harness status` print one line per lock that is held or has waiters, within 120 columns. `status` lists the lock directories and queues under `state/` whose names are lock names, shell `mkdir` locks included; other tools' plain `*.lock` files are not listed:
 
 ```
 lock build: held by lane-a 12m (pid 4242) | queue: 1) lane-c p1 3m 2) lane-b p5 9m +2 more

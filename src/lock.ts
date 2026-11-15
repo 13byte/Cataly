@@ -50,8 +50,9 @@ export function lockEnv(root: string): RunEnv {
 /**
  * Waits in line for the lock `name`, runs `cmd` while holding it and returns the command's exit code. The owner line
  * names the command's pid before the command starts, so the lock stays held while it runs even if this process is
- * killed. A signal while waiting withdraws the ticket and returns 128 + the signal without running anything; a signal
- * while the command runs is passed to it, and the lock is released once it exits.
+ * killed. A signal while waiting, or one that comes as the lock is taken, withdraws the ticket or releases the lock
+ * and returns 128 + the signal without running anything; a signal while the command runs is passed to it, and the
+ * lock is released once it exits.
  */
 export async function runLocked(
   env: RunEnv,
@@ -75,6 +76,8 @@ export async function runLocked(
     let owner = await take(env, name, lane, priority, stop.signal, log);
     if (owner === undefined) return 128 + constants.signals[signal ?? "SIGTERM"];
     try {
+      // A signal that came after the take and before the command exists has nothing to kill: run nothing.
+      if (signal !== undefined) return 128 + constants.signals[signal];
       const held = env.spawn(cmd);
       child = held;
       try {

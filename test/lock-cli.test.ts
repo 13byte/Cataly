@@ -109,7 +109,7 @@ describe("a lock's turn and line", () => {
   test("a lock with no command after -- is refused", async () => {
     const { d } = setup();
     const { env, ran } = fakeRun(d.store.root, d.now);
-    await expect(runLock(d, parse(["lock", "demo", "--lane", "k"]), env)).rejects.toThrow("lock needs a command");
+    await expect(runLock(d, parse(["lock", "demo", "--lane", "k-lane"]), env)).rejects.toThrow("lock needs a command");
     expect(ran).toEqual([]);
   });
 

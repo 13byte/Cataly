@@ -1,6 +1,7 @@
-import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ClaimEnv, underClaim } from "./lock-claim.ts";
+import { Refusal } from "./refusal.ts";
 
 /**
  * The lock directory `<root>/state/<name>.lock`, shared with shell waiters that only `mkdir` it and write
@@ -31,9 +32,26 @@ const readOr = (path: string): string | undefined => {
   }
 };
 
-/** The current holder from the owner line; a lock without one (yet) reports its directory time. */
+/**
+ * Whether `path` exists and is not a directory. `DORI_HOME/state` is shared with other tools (it is OMP's default
+ * runtime state dir) whose lock files also end in `.lock`; those are not locks of this kind, and are never touched.
+ */
+function notDirectory(path: string): boolean {
+  try {
+    return !lstatSync(path).isDirectory();
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw e;
+  }
+}
+
+/**
+ * The current holder from the owner line; a lock without one (yet) reports its directory time. A `<name>.lock` that
+ * is not a directory (notDirectory) has none.
+ */
 export function holder(root: string, name: string): Holder | undefined {
   const dir = lockDir(root, name);
+  if (notDirectory(dir)) return undefined;
   let mtime: number;
   try {
     mtime = statSync(dir).mtimeMs;
@@ -88,7 +106,7 @@ const writeOwner = (dir: string, owner: string): void => {
   renameSync(join(dir, "owner.tmp"), join(dir, "owner"));
 };
 
-/** One attempt at the lock directory: the owner line written, or why it is busy. */
+/** One attempt at the lock directory: the owner line written, or why it is busy. Another tool's file there is refused. */
 export function tryTake(
   env: OwnerEnv,
   name: string,
@@ -101,6 +119,8 @@ export function tryTake(
       mkdirSync(dir);
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      if (notDirectory(dir))
+        throw new Refusal(`state/${name}.lock is not a lock directory (another tool's lock?); use another lock name`);
       const seen = readOr(join(dir, "owner"));
       let why: string | undefined;
       try {

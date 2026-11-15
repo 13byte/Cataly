@@ -24,8 +24,11 @@ export const RETRY_MS = 2_000;
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 const GUARD = ".guard";
 
+/** A lock name: a letter or digit, then letters, digits, `_`, `.` or `-`, at most 64 in all. */
+export const lockName = (name: string): boolean => NAME_RE.test(name);
+
 export function checkName(name: string): string {
-  if (!NAME_RE.test(name)) throw new Refusal(`lock name must match ${NAME_RE}`);
+  if (!lockName(name)) throw new Refusal(`lock name must match ${NAME_RE}`);
   return name;
 }
 

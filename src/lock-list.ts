@@ -1,27 +1,33 @@
-import { readdirSync } from "node:fs";
+import { type Dirent, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { ageText, fitEnd, oneName, WIDTH } from "./fit.ts";
 import { holder } from "./lock-owner.ts";
-import { type LockEnv, tickets } from "./lock-queue.ts";
+import { type LockEnv, lockName, tickets } from "./lock-queue.ts";
 
 const LOCK_SUFFIX = ".lock";
 
-/** The names of the locks held or waited for under `root`: a lock directory or a queue with tickets. */
+/**
+ * The names of the locks held or waited for under `root`: a lock directory or a queue with tickets. A shell `mkdir`
+ * lock of a valid name is one of them too, as it is the same lock. `state/` is shared with other tools (it is OMP's
+ * default runtime state dir): their `*.lock` files and entries whose names are not lock names are not shown.
+ */
 function lockNames(env: LockEnv): string[] {
   const state = join(env.root, "state");
-  const list = (dir: string): string[] => {
+  const dirs = (dir: string): string[] => {
+    let entries: Dirent[];
     try {
-      return readdirSync(dir);
+      entries = readdirSync(dir, { withFileTypes: true });
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw e;
     }
+    return entries.filter((e) => e.isDirectory()).map((e) => e.name);
   };
-  const held = list(state)
+  const held = dirs(state)
     .filter((f) => f.endsWith(LOCK_SUFFIX))
     .map((f) => f.slice(0, -LOCK_SUFFIX.length));
-  const queued = list(join(state, "locks")).filter((n) => tickets(env, n).length > 0);
-  return [...new Set([...held, ...queued])].sort();
+  const queued = dirs(join(state, "locks")).filter((n) => tickets(env, n).length > 0);
+  return [...new Set([...held, ...queued])].filter(lockName).sort();
 }
 
 /**
