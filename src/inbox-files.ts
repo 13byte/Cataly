@@ -141,20 +141,27 @@ export function carryOver(aside: string, from: string, into: string, map: (m: Qu
 }
 
 // Notices for the lead found while no lead is registered (a lost lane's LOST) wait in `duty/lead.jsonl`, a queue of
-// their own outside any lane record, so a lane started again under the same key cannot drop one.
-const owedFile = (root: string): string => join(root, "duty", "lead.jsonl");
+// their own outside any lane record, so a lane started again under the same key cannot drop one. A message for the
+// lead whose route stays held (inbox-spool.ts) waits in that queue's spool, one file per message, so it has no second
+// writer of the queue.
+export const owedFile = (root: string): string => join(root, "duty", "lead.jsonl");
 
 export function oweLead(root: string, msg: QueuedMessage & { id: string }): void {
   if (!readQueue(owedFile(root)).some((m) => m.id === msg.id)) appendQueue(owedFile(root), msg);
 }
 
-/** Moves the owed notices into the lead's inbox `into`; renamed aside first, so a run cut short is finished next time. */
+/**
+ * Moves the owed notices into the lead's inbox `into`, then the messages spooled for the lead, oldest first; call it
+ * under into's inbox lock. The queue is renamed aside first, so a run cut short is finished next time.
+ */
 export function payLead(root: string, into: string): void {
   const owed = owedFile(root);
   const aside = `${owed}.merging`;
-  if (!existsSync(aside) && !existsSync(owed)) return;
-  if (!existsSync(aside)) renameSync(owed, aside);
-  carryOver(aside, owed, into, (m) => m);
+  if (existsSync(aside) || existsSync(owed)) {
+    if (!existsSync(aside)) renameSync(owed, aside);
+    carryOver(aside, owed, into, (m) => m);
+  }
+  mergeSpool(owed, into);
 }
 
 /**

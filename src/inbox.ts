@@ -21,7 +21,10 @@ export async function send(d: Deps, target: string, text: string, from: string):
   return settled(sendOrThrow(d, target, text, from));
 }
 
-/** send for the duty and hourly loops: throws DeliveryUncertain, having recorded it, so they report the failure. */
+/**
+ * send for the duty and hourly loops: throws DeliveryUncertain, having recorded it, so they report the failure. A
+ * message kept for the lead while its route stays held (queueMessage) is QUEUED: the next duty pass moves it.
+ */
 export async function sendOrThrow(
   d: Deps,
   target: string,
@@ -29,7 +32,7 @@ export async function sendOrThrow(
   from: string,
 ): Promise<"DELIVERED" | "QUEUED"> {
   const ref = resolveTarget(d, target);
-  d.store.enqueue(ref, { at: d.now(), from, text });
+  if (d.store.enqueue(ref, { at: d.now(), from, text }) === "kept") return "QUEUED";
   return (await flushInbox(d, ref)) === "delivered" ? "DELIVERED" : "QUEUED";
 }
 

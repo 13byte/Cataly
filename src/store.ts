@@ -103,9 +103,10 @@ export class Store {
     return inboxFile(this.root, ref);
   }
 
-  /** Appends to the inbox `ref` was forwarded to, if it was, under its lock; see queueMessage. */
-  enqueue(ref: SessionRef, msg: QueuedMessage): void {
-    queueMessage(this.root, ref, msg);
+  /** Appends to the inbox `ref` was forwarded to, if it was, under its lock, or keeps it for the lead; queueMessage. */
+  enqueue(ref: SessionRef, msg: QueuedMessage): "queued" | "kept" {
+    const lead = this.roles().lead;
+    return queueMessage(this.root, ref, msg, lead !== undefined && sameSession(lead, ref));
   }
 
   /**

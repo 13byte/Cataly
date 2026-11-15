@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { appendQueue, forwardOf, inboxFile, mergeSpool, spoolDir } from "./inbox-files.ts";
+import { appendQueue, forwardOf, inboxFile, mergeSpool, owedFile, spoolDir } from "./inbox-files.ts";
 import { takeInboxLock } from "./inbox-lock.ts";
 import { refText } from "./refs.ts";
 import { Refusal } from "./refusal.ts";
@@ -74,20 +74,25 @@ function appendOrSpool(root: string, ref: SessionRef, msg: QueuedMessage): void 
 
 /**
  * Queues `msg` in the inbox ref was forwarded to, if it was, else in ref's own, under ref's route lock. A migration
- * holds the route only while it moves files, so a held route is waited for briefly, then the send is refused.
+ * holds the route only while it moves files, so a held route is waited for briefly. Then a message for the lead
+ * (`lead`: the session the lead role names) is kept for it like an owed notice ("kept": payLead moves it once the
+ * route is free), so a report, READY or held-delivery notice is never dropped; a send to any other session is refused.
  */
-export function queueMessage(root: string, ref: SessionRef, msg: QueuedMessage): void {
+export function queueMessage(root: string, ref: SessionRef, msg: QueuedMessage, lead: boolean): "queued" | "kept" {
   for (let tries = 0; ; tries++) {
     const route = lockRoute(root, ref, msg.at);
     if (route) {
       try {
         appendOrSpool(root, forwardOf(root, ref) ?? ref, msg);
-        return;
+        return "queued";
       } finally {
         route();
       }
     }
-    if (tries >= ROUTE_TRIES) throw new Refusal(`the inbox of ${refText(ref)} is being moved; send again`);
-    Bun.sleepSync(ROUTE_RETRY_MS);
+    if (tries < ROUTE_TRIES) Bun.sleepSync(ROUTE_RETRY_MS);
+    else if (lead) {
+      spoolMessage(owedFile(root), msg);
+      return "kept";
+    } else throw new Refusal(`the inbox of ${refText(ref)} is being moved; send again`);
   }
 }
