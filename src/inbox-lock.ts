@@ -1,4 +1,5 @@
-import { linkSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { INBOX_LOCK_STALE_MS } from "./store-types.ts";
 
@@ -43,6 +44,13 @@ function lockStale(path: string, content: string, now: number): boolean {
   return now - at > INBOX_LOCK_STALE_MS;
 }
 
+/**
+ * Takes the lock at `path` (created O_EXCL, holding pid, host and time) and returns its release, or undefined while
+ * another process holds it. A stale lock (lockStale) is taken over under a claim: `<path>.claim-<digest of what was
+ * read>`, itself taken with this function, so a claimer that died is taken over the same way one level down. Only the
+ * claim holder removes the lock, and only when it still reads as the stale lock the claim names: a taker that paused
+ * after reading it can never remove a lock another process took over meanwhile.
+ */
 export function takeInboxLock(path: string, now: number): (() => void) | undefined {
   const mine = JSON.stringify({ pid: process.pid, host: hostname(), at: now });
   for (let tries = 0; tries < 2; tries++) {
@@ -57,22 +65,13 @@ export function takeInboxLock(path: string, now: number): (() => void) | undefin
     const seen = readOrUndefined(path);
     if (seen === undefined) continue;
     if (!lockStale(path, seen, now)) return undefined;
-    const aside = `${path}.${process.pid}.stale`;
+    const claim = takeInboxLock(`${path}.claim-${createHash("sha256").update(seen).digest("hex")}`, now);
+    if (!claim) return undefined;
     try {
-      renameSync(path, aside);
-    } catch {
-      continue;
+      if (readOrUndefined(path) === seen) rmSync(path, { force: true });
+    } finally {
+      claim();
     }
-    if (readOrUndefined(aside) !== seen) {
-      try {
-        linkSync(aside, path);
-      } catch {
-        // a third process holds the lock now; either way it is not ours
-      }
-      rmSync(aside, { force: true });
-      return undefined;
-    }
-    rmSync(aside, { force: true });
   }
   return undefined;
 }
