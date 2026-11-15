@@ -103,9 +103,9 @@ export class Store {
     return inboxFile(this.root, ref);
   }
 
-  /** Appends to the inbox `ref` was forwarded to, if it was, under its lock; while the lock is held, spools it. */
+  /** Appends to the inbox `ref` was forwarded to, if it was, under its lock; see queueMessage. */
   enqueue(ref: SessionRef, msg: QueuedMessage): void {
-    queueMessage(this.root, this.forwardOf(ref) ?? ref, msg);
+    queueMessage(this.root, ref, msg);
   }
 
   /**

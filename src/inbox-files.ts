@@ -106,15 +106,20 @@ export const mergePending = (root: string, ref: SessionRef): boolean =>
     (old) => readQueue(old).length > 0 || readQueue(`${old}.merging`).length > 0 || spooled(old, true).length > 0,
   );
 
+/** An entry's identity: its id; else the spool file it came through (one sent message); else at+from+text. */
 const keyOf = (m: QueuedMessage): string =>
-  m.id === undefined ? `${m.at}\u0000${m.from}\u0000${m.text}` : `id:${m.id}`;
+  m.id !== undefined
+    ? `id:${m.id}`
+    : m.spool !== undefined
+      ? `spool:${m.spool}`
+      : `${m.at}\u0000${m.from}\u0000${m.text}`;
 
 /**
  * Appends the entries of `aside` (a queue renamed aside, its ids still at `<from>.ids`) to the end of `into`, then
  * removes it. The ids `from` recorded as gone are recorded for `into` first and their entries are left behind, so a
- * notice delivered before the move is neither delivered nor queued again after it. An entry whose id `into` already
- * holds or recorded as gone, or an id-less entry it already holds (keyed by at+from+text), is not added again.
- * Different ids remain distinct even when their timestamps and text match after a clock or runtime reset.
+ * notice delivered before the move is neither delivered nor queued again after it. An entry `into` already holds under
+ * the same key (keyOf), or whose id it recorded as gone, is not added again. Different ids and different spool files
+ * remain distinct even when their timestamps and text match.
  */
 export function carryOver(aside: string, from: string, into: string, map: (m: QueuedMessage) => QueuedMessage): void {
   const done = doneIds(from);
@@ -194,7 +199,7 @@ function spooled(path: string, moving = false): string[] {
  * entry is a message of its own, so it is appended even when an equal one is queued (the same text sent twice in one
  * millisecond stays two messages); only ids recorded as gone are skipped. Each file is renamed aside before its entry
  * is appended and removed after: a `.moving` file left by a move cut short between the two may already be in `into`,
- * and is carried over (skipping what `into` holds) before the rest.
+ * and is carried over (skipping it if `into` holds an entry from the same spool file) before the rest.
  */
 export function mergeSpool(from: string, into: string): void {
   for (const f of spooled(from, true).filter((n) => n.endsWith(MOVING))) carryOver(f, from, into, (m) => m);

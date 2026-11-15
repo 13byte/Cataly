@@ -1,5 +1,6 @@
 import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { carryOver } from "./inbox-files.ts";
+import { lockRoute } from "./inbox-spool.ts";
 import type { Deps } from "./harness.ts";
 import type { MigrateOpts } from "./migrate-capture.ts";
 import { refText } from "./refs.ts";
@@ -14,17 +15,30 @@ const GONE_INPUT = "typed into the session it was migrated from; that input is g
 const carried = (m: QueuedMessage): QueuedMessage =>
   m.attempt?.state === "typed" ? { ...m, attempt: { at: m.attempt.at, state: "ambiguous", detail: GONE_INPUT } } : m;
 
-/** Runs `body` under the inbox locks of every ref (in the order given), retrying while another flush holds one. */
-async function underLocks(d: Deps, refs: readonly SessionRef[], opts: MigrateOpts, body: () => void): Promise<void> {
+/**
+ * Runs `body` under the route lock of `route` (the old inbox: no send reads its marker meanwhile, see lockRoute), then
+ * the inbox locks of every ref (in the order given), retrying while a send or another flush holds one.
+ */
+async function underLocks(
+  d: Deps,
+  route: SessionRef,
+  refs: readonly SessionRef[],
+  opts: MigrateOpts,
+  body: () => void,
+): Promise<void> {
+  const takes = [
+    () => lockRoute(d.store.root, route, d.now()),
+    ...refs.map((ref) => () => d.store.lockInbox(ref, d.now())),
+  ];
   for (let tries = 0; ; tries++) {
     const held: (() => void)[] = [];
-    for (const ref of refs) {
-      const release = d.store.lockInbox(ref, d.now());
+    for (const take of takes) {
+      const release = take();
       if (!release) break;
       held.push(release);
     }
     try {
-      if (held.length === refs.length) {
+      if (held.length === takes.length) {
         body();
         return;
       }
@@ -53,7 +67,7 @@ function mergeFile(src: string, dst: string, map: (m: QueuedMessage) => QueuedMe
  */
 export async function moveInbox(d: Deps, from: SessionRef, to: SessionRef, opts: MigrateOpts): Promise<void> {
   const old = d.store.inboxPath(from);
-  await underLocks(d, [from, to], opts, () => {
+  await underLocks(d, from, [from, to], opts, () => {
     const marker = `${old}.forward`;
     writeFileSync(`${marker}.tmp`, `${refText(to)}\n`);
     renameSync(`${marker}.tmp`, marker);
@@ -61,10 +75,13 @@ export async function moveInbox(d: Deps, from: SessionRef, to: SessionRef, opts:
   });
 }
 
-/** Step (8): drains what late senders appended to the old path into the new inbox, then removes the marker. */
+/**
+ * Step (8): drains what late senders appended to the old path into the new inbox, then removes the marker, holding the
+ * old route throughout: a send that read the marker has written before the drain, and none reads it until it is gone.
+ */
 export async function drainForward(d: Deps, from: SessionRef, to: SessionRef, opts: MigrateOpts): Promise<void> {
   const old = d.store.inboxPath(from);
-  await underLocks(d, [to], opts, () => {
+  await underLocks(d, from, [to], opts, () => {
     d.store.mergeForwarded(to);
     rmSync(`${old}.forward`, { force: true });
   });
@@ -74,7 +91,7 @@ export async function drainForward(d: Deps, from: SessionRef, to: SessionRef, op
 export async function moveBack(d: Deps, from: SessionRef, to: SessionRef, opts: MigrateOpts): Promise<void> {
   const old = d.store.inboxPath(from);
   if (!existsSync(`${old}.forward`)) return;
-  await underLocks(d, [from, to], opts, () => {
+  await underLocks(d, from, [from, to], opts, () => {
     rmSync(`${old}.forward`, { force: true });
     mergeFile(d.store.inboxPath(to), old, (m) => m);
   });

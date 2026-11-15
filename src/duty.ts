@@ -5,6 +5,7 @@ import { type Deps, fill, promptFile } from "./harness.ts";
 import { runHook } from "./hooks.ts";
 import { flushInbox } from "./inbox.ts";
 import { oweLead, payLead } from "./inbox-files.ts";
+import { lockRoute } from "./inbox-spool.ts";
 import { Refusal } from "./refusal.ts";
 import { refText } from "./refs.ts";
 import { escalation, progressOf, stalled, waitingOn, waitingSinceOf, waitingTarget } from "./progress.ts";
@@ -32,19 +33,26 @@ function noticeId(d: Deps, lane: Lane): string {
 }
 
 /**
- * Runs `write` on the inbox of `ref` (the one it was forwarded to, if it was) under that inbox's lock, the lock every
- * rewrite of the queue holds: a flush that read the queue before an unlocked append writes it back without the
- * appended entry. False while another process holds the lock: nothing is written, and the next pass tries again.
+ * Runs `write` on the inbox of `ref` (the one it was forwarded to, if it was) under ref's route lock and that inbox's
+ * lock, the lock every rewrite of the queue holds: a flush that read the queue before an unlocked append writes it
+ * back without the appended entry, and a migration that moved ref's inbox meanwhile would leave it behind (lockRoute).
+ * False while another process holds either lock: nothing is written, and the next pass tries again.
  */
 function underInboxLock(d: Deps, ref: SessionRef, write: (inbox: SessionRef) => void): boolean {
-  const inbox = d.store.forwardOf(ref) ?? ref;
-  const release = d.store.lockInbox(inbox, d.now());
-  if (!release) return false;
+  const route = lockRoute(d.store.root, ref, d.now());
+  if (!route) return false;
   try {
-    write(inbox);
-    return true;
+    const inbox = d.store.forwardOf(ref) ?? ref;
+    const release = d.store.lockInbox(inbox, d.now());
+    if (!release) return false;
+    try {
+      write(inbox);
+      return true;
+    } finally {
+      release();
+    }
   } finally {
-    release();
+    route();
   }
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { appendFileSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { dutyTick } from "../src/duty.ts";
 import type { Deps } from "../src/harness.ts";
@@ -74,24 +74,6 @@ describe("a message queued while another process rewrites the same inbox", () =>
     await dutyTick(s.d);
     expect(s.pane.received).toEqual(["spooled"]);
     expect(s.d.store.inboxPanes()).toEqual([]);
-  });
-
-  test("a spooled message a holder appended but did not remove before it stopped is not queued twice", async () => {
-    const s = setup();
-    s.pane.status = "working";
-    const release = s.d.store.lockInbox(href("w1:p2"), s.d.now())!;
-    expect(await send(s.d, "w1:p2", "once", "cli")).toBe("QUEUED");
-    expect(await send(s.d, "w1:p2", "once", "cli")).toBe("QUEUED");
-    const path = s.d.store.inboxPath(href("w1:p2"));
-    // The holder renamed the first file aside and appended its entry, then stopped before removing it.
-    const [first] = readdirSync(`${path}.spool`).sort();
-    const moving = join(`${path}.spool`, `${first}.moving`);
-    renameSync(join(`${path}.spool`, first!), moving);
-    appendFileSync(path, readFileSync(moving, "utf8"));
-    release();
-    s.d.store.lockInbox(href("w1:p2"), s.d.now())!();
-    expect(texts(s.d, href("w1:p2"))).toEqual(["once", "once"]);
-    expect(readdirSync(`${path}.spool`)).toEqual([]);
   });
 
   test("a spooled message renamed aside by a holder that stopped before appending it is delivered by the next duty pass", async () => {

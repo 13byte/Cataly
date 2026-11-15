@@ -154,7 +154,7 @@ function settleInbox(d: Deps, ref: SessionRef, batch: readonly QueuedMessage[], 
     const i = left.findIndex((b) =>
       b.id !== undefined || m.id !== undefined
         ? b.id === m.id
-        : b.at === m.at && b.from === m.from && b.text === m.text,
+        : b.spool === m.spool && b.at === m.at && b.from === m.from && b.text === m.text,
     );
     if (i < 0) return [m];
     left.splice(i, 1);
