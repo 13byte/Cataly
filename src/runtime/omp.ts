@@ -38,9 +38,12 @@ export function ompStateDir(env: Env): string {
 
 const OMP_COMMAND =
   /^(?:(?:\S*\/)?(?:bun|node)(?:\s+-\S+)*\s+)?(?:\S*\/)?omp(?:\s|$)|^(?:\S*\/)?(?:bun|node)(?:\s+-\S+)*\s+\S*@oh-my-pi\/pi-coding-agent\/dist\/cli\.js(?:\s|$)/;
+const SOURCE_OMP_COMMAND =
+  /^(?:\S*\/)?bun\s+--preload\s+(\S*\/packages\/coding-agent\/)scripts\/omp\.ts\s+\1(?:scripts\/\.\.\/)?src\/cli\.ts(?:\s|$)/;
 const ompProcess = (p: ForegroundProcess): boolean =>
   p.name.split("/").at(-1) === "omp" ||
-  p.argv.slice(0, 2).some((arg) => /(?:^|\/)omp$|@oh-my-pi\/pi-coding-agent\/dist\/cli\.js$/.test(arg));
+  p.argv.slice(0, 2).some((arg) => /(?:^|\/)omp$|@oh-my-pi\/pi-coding-agent\/dist\/cli\.js$/.test(arg)) ||
+  SOURCE_OMP_COMMAND.test(p.argv.join(" "));
 
 function readState(stateDir: string, id: string): PaneState | undefined {
   try {
@@ -101,7 +104,7 @@ export async function withOmpState(exec: Exec, stateDir: string, id: string, pro
     const writer = table.find((p) => p.pid === state.pid);
     if (
       writer === undefined ||
-      !OMP_COMMAND.test(writer.command) ||
+      (!OMP_COMMAND.test(writer.command) && !SOURCE_OMP_COMMAND.test(writer.command)) ||
       !under(table, writer.pid, probe.rootPid) ||
       (!probe.shellInFront && !probe.foreground?.some((p) => p.pid !== undefined && under(table, p.pid, writer.pid)))
     ) {
