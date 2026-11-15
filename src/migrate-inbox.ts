@@ -16,18 +16,18 @@ const carried = (m: QueuedMessage): QueuedMessage =>
   m.attempt?.state === "typed" ? { ...m, attempt: { at: m.attempt.at, state: "ambiguous", detail: GONE_INPUT } } : m;
 
 /**
- * Runs `body` under the route lock of `route` (the old inbox: no send reads its marker meanwhile, see lockRoute), then
- * the inbox locks of every ref (in the order given), retrying while a send or another flush holds one.
+ * Runs `body` under the route locks of `routes` (no send reads their markers or writes to them meanwhile, see
+ * lockRoute), then the inbox locks of every ref (in the order given), retrying while a send or another flush holds one.
  */
 async function underLocks(
   d: Deps,
-  route: SessionRef,
+  routes: readonly SessionRef[],
   refs: readonly SessionRef[],
   opts: MigrateOpts,
   body: () => void,
 ): Promise<void> {
   const takes = [
-    () => lockRoute(d.store.root, route, d.now()),
+    ...routes.map((ref) => () => lockRoute(d.store.root, ref, d.now())),
     ...refs.map((ref) => () => d.store.lockInbox(ref, d.now())),
   ];
   for (let tries = 0; ; tries++) {
@@ -67,7 +67,7 @@ function mergeFile(src: string, dst: string, map: (m: QueuedMessage) => QueuedMe
  */
 export async function moveInbox(d: Deps, from: SessionRef, to: SessionRef, opts: MigrateOpts): Promise<void> {
   const old = d.store.inboxPath(from);
-  await underLocks(d, from, [from, to], opts, () => {
+  await underLocks(d, [from], [from, to], opts, () => {
     const marker = `${old}.forward`;
     writeFileSync(`${marker}.tmp`, `${refText(to)}\n`);
     renameSync(`${marker}.tmp`, marker);
@@ -81,17 +81,21 @@ export async function moveInbox(d: Deps, from: SessionRef, to: SessionRef, opts:
  */
 export async function drainForward(d: Deps, from: SessionRef, to: SessionRef, opts: MigrateOpts): Promise<void> {
   const old = d.store.inboxPath(from);
-  await underLocks(d, from, [to], opts, () => {
+  await underLocks(d, [from], [to], opts, () => {
     d.store.mergeForwarded(to);
     rmSync(`${old}.forward`, { force: true });
   });
 }
 
-/** Rollback after step (6) ran: the entries go back to the old inbox (unchanged, held entries still held). */
+/**
+ * Rollback after step (6) ran: the entries go back to the old inbox (unchanged, held entries still held). The
+ * replacement's route is held too: a send addressed to it directly has written before its lock is taken (which moves
+ * its spool into its queue), and none writes until the marker is gone and its queue is back on the old inbox.
+ */
 export async function moveBack(d: Deps, from: SessionRef, to: SessionRef, opts: MigrateOpts): Promise<void> {
   const old = d.store.inboxPath(from);
   if (!existsSync(`${old}.forward`)) return;
-  await underLocks(d, from, [from, to], opts, () => {
+  await underLocks(d, [from, to], [from, to], opts, () => {
     rmSync(`${old}.forward`, { force: true });
     mergeFile(d.store.inboxPath(to), old, (m) => m);
   });
