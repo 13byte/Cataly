@@ -1,5 +1,14 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -9,7 +18,7 @@ afterEach(() => {
 });
 
 function fixture(version = "18.20.0") {
-  const root = mkdtempSync(join(tmpdir(), "dori-legacy-prerequisite-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "dori-legacy-prerequisite-")));
   roots.push(root);
   const home = join(root, "home");
   const tools = join(root, "tools");
@@ -29,14 +38,20 @@ function fixture(version = "18.20.0") {
     });
   symlinkSync(target, join(managed, "omp"));
   symlinkSync(join(managed, "omp"), join(alias, "omp"));
-  const run = (directories: readonly string[], command?: string) => {
+  // Exercise command selection on every CI host; platform admission is checked separately below.
+  const run = (directories: readonly string[], command?: string, platform = "linux", arch = "x64") => {
     if (command)
       writeFileSync(join(home, ".dori/config.json"), JSON.stringify({ agentCommand: [command] }), { mode: 0o600 });
     return Bun.spawnSync(
       [
         process.execPath,
         "--eval",
-        `import { prerequisites } from ${JSON.stringify(resolve(import.meta.dir, "../src/release/provision.ts"))}; prerequisites(true);`,
+        `import { prerequisites } from ${JSON.stringify(resolve(import.meta.dir, "../src/release/provision.ts"))};
+Object.defineProperties(process, {
+  platform: { value: ${JSON.stringify(platform)} },
+  arch: { value: ${JSON.stringify(arch)} },
+});
+prerequisites(true);`,
       ],
       { env: { HOME: home, PATH: [...directories, tools].join(":") }, stdout: "pipe", stderr: "pipe" },
     );
@@ -87,3 +102,15 @@ test("legacy activation holds when no native command is available", () => {
   expect(result.stderr.toString()).toContain("independently installed OMP");
   expect(existsSync(join(f.home, "executed"))).toBe(false);
 });
+
+for (const [platform, arch] of [
+  ["darwin", "arm64"],
+  ["linux", "arm64"],
+] as const)
+  test(`legacy activation retains platform admission: ${platform}/${arch}`, () => {
+    const f = fixture();
+    const result = f.run([f.independent], undefined, platform, arch);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr.toString()).toContain("This release supports Linux x64");
+    expect(existsSync(join(f.home, "executed"))).toBe(false);
+  });

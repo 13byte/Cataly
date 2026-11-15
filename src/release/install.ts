@@ -26,7 +26,15 @@ import { assertNoLiveDori } from "./live.ts";
 import { validateReleaseManifest } from "./manifest.ts";
 import { provisionNativeSource } from "./native.ts";
 import { assertLock, provisionDependency } from "./provision.ts";
-import { activateRelease, type InstalledState, manifestPath, releaseId, releasePath, verifyRelease } from "./state.ts";
+import {
+  activateRelease,
+  assertInstalledPointer,
+  type InstalledState,
+  manifestPath,
+  releaseId,
+  releasePath,
+  verifyRelease,
+} from "./state.ts";
 
 export function preflightInstallation(paths: ConsumerPaths): void {
   pointer(paths.live);
@@ -75,9 +83,6 @@ async function installReferences(
     owned(dirname(path));
     if (pointer(path) === undefined) replacePointer(path, undefined, target);
   }
-  // Older manifests predate the bound-source protocol; removing only our slot restores their original PATH contract.
-  const omp = join(paths.dori, "bin/omp");
-  replacePointer(omp, pointer(omp), native ? join(source, "scripts/consumer/omp") : undefined);
 }
 
 export async function installBundle(
@@ -86,6 +91,7 @@ export async function installBundle(
   before: InstalledState | undefined,
 ): Promise<InstalledState> {
   preflightInstallation(paths);
+  assertInstalledPointer(paths, before);
   const manifest = validateReleaseManifest(bundle.manifest);
   const receipts = readdirSync(paths.manifests)
     .filter((name) => name.endsWith(".json"))
@@ -104,6 +110,7 @@ export async function installBundle(
     const source = verifyRelease(paths, manifest);
     const dependency = await provisionDependency(paths, manifest, source);
     await installReferences(paths, source, dependency, manifest);
+    assertInstalledPointer(paths, before);
     return before;
   }
   const stage = mkdtempSync(join(paths.staging, "release-"));
@@ -143,6 +150,7 @@ export async function rollbackRelease(
   if (version && version !== before.previous.tag)
     throw new Error("--version differs from the retained previous release");
   preflightInstallation(paths);
+  assertInstalledPointer(paths, before);
   const source = verifyRelease(paths, before.previous);
   const dependency = await provisionDependency(paths, before.previous, source);
   await installReferences(paths, source, dependency, before.previous);
