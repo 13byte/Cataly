@@ -102,10 +102,11 @@ export class Store {
   }
 
   /**
-   * Appends under its lock to the inbox `ref` resolves to (its redirect or tombstone, inbox-spool.ts), or keeps it for
-   * the lead. `recheck` is the sender's name resolved again under the route (a lane or role that switched meanwhile).
+   * Appends under its lock to the inbox `ref` resolves to (the live redirect of a running migration, inbox-spool.ts),
+   * or keeps it for the lead. `recheck` is the sender's name resolved again under the route (a lane or role that
+   * switched meanwhile).
    */
-  enqueue(ref: SessionRef, msg: QueuedMessage, recheck?: () => SessionRef): Queued {
+  enqueue(ref: SessionRef, msg: QueuedMessage, recheck?: () => SessionRef): Promise<Queued> {
     const lead = this.roles().lead;
     return queueMessage(this.root, ref, msg, lead !== undefined && sameSession(lead, ref), recheck);
   }
@@ -134,7 +135,7 @@ export class Store {
     mergeOwnSpool(this.root, ref);
   }
 
-  /** Where the inbox of `ref` lives now: the session its migration redirect chain (`.forward`, `.migrated`) ends at. */
+  /** Where the inbox of `ref` lives now: the session the `.forward` chain of a running migration ends at. */
   destination(ref: SessionRef): SessionRef {
     return destinationOf(this.root, ref);
   }

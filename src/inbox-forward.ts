@@ -19,15 +19,13 @@ import { refFromText, refText, sameSession } from "./refs.ts";
 import type { SessionRef } from "./runtime/types.ts";
 import type { QueuedMessage } from "./store-types.ts";
 
-// Where an inbox went. A migration writes `<inbox>.jsonl.forward` naming the replacement and later removes it, so the
-// marker is a live redirect (a send holds the route from reading it to writing its message, inbox-spool.ts). A finished
-// migration also leaves `<inbox>.jsonl.migrated`: the closed inbox's durable tombstone, so a send that only ever held the
-// old name follows it (destinationOf) instead of queueing a message nothing will ever flush. The session a redirect or
-// tombstone names is open by that very write: a tombstone an earlier migration left on it goes (a migration back to a
-// session that was migrated away from, or a herdr pane id reused for a new pane), so two inboxes never name each other.
+// Where an inbox went while a migration runs: `<inbox>.jsonl.forward` names the replacement from step 6 until the
+// final drain removes it, so it is a live redirect (a send holds the route from reading it to writing its message,
+// inbox-spool.ts). Nothing names the replacement after that: herdr pane ids and hc terminal ids are used again for new
+// sessions, so a redirect kept on an id would send an unrelated session's messages to the replacement. A sender that
+// resolved a lane key or role before the migration finished resolves it again under the route instead (queueMessage).
 
 const MARKER = ".forward";
-const TOMB = ".migrated";
 
 /** The session this inbox is forwarded to right now, or undefined. */
 export function forwardOf(root: string, ref: SessionRef): SessionRef | undefined {
@@ -41,18 +39,11 @@ const markerRef = (marker: string): SessionRef | undefined => {
   return text === "" ? undefined : refFromText(text);
 };
 
-/** `path` (a marker or tombstone naming `to`) written in one rename; `to` is open again, so its own tombstone goes. */
-function writeRedirect(root: string, path: string, to: SessionRef): void {
-  writeFileSync(`${path}.tmp`, `${refText(to)}\n`);
-  renameSync(`${path}.tmp`, path);
-  rmSync(`${inboxFile(root, to)}${TOMB}`, { force: true });
-}
-
-/** Writes the redirect and clears a tombstone it supersedes; call it under the inbox's route. */
+/** Writes the redirect in one rename; call it under the inbox's route. */
 export function writeForward(root: string, ref: SessionRef, to: SessionRef): void {
-  const base = inboxFile(root, ref);
-  writeRedirect(root, `${base}${MARKER}`, to);
-  rmSync(`${base}${TOMB}`, { force: true });
+  const marker = `${inboxFile(root, ref)}${MARKER}`;
+  writeFileSync(`${marker}.tmp`, `${refText(to)}\n`);
+  renameSync(`${marker}.tmp`, marker);
 }
 
 /** Removes the live redirect; call it under the inbox's route. */
@@ -60,26 +51,14 @@ export function removeForward(root: string, ref: SessionRef): void {
   rmSync(`${inboxFile(root, ref)}${MARKER}`, { force: true });
 }
 
-/** Records that this inbox is closed and its entries now belong to `to`; call it under the inbox's route. */
-export function markMigrated(root: string, ref: SessionRef, to: SessionRef): void {
-  writeRedirect(root, `${inboxFile(root, ref)}${TOMB}`, to);
-}
-
-/** The replacement a closed inbox names, or undefined while it is open. */
-export const migratedTo = (root: string, ref: SessionRef): SessionRef | undefined => {
-  const tomb = `${inboxFile(root, ref)}${TOMB}`;
-  return existsSync(tomb) ? markerRef(tomb) : undefined;
-};
-
-/** The open old inboxes that name `ref`: a live marker, or the tombstone a finished migration left behind. */
+/** The old inboxes whose live redirect names `ref`. */
 function movedInto(root: string, ref: SessionRef): string[] {
   const dir = join(root, "inbox");
   return readdirSync(dir)
-    .filter((f) => f.endsWith(MARKER) || f.endsWith(TOMB))
-    .map((f) => join(dir, f.replace(new RegExp(`(${MARKER}|${TOMB})$`), "")))
-    .filter((old, i, all) => all.indexOf(old) === i)
+    .filter((f) => f.endsWith(MARKER))
+    .map((f) => join(dir, f.slice(0, -MARKER.length)))
     .filter((old) => {
-      const to = markerRef(`${old}${MARKER}`) ?? markerRef(`${old}${TOMB}`);
+      const to = markerRef(`${old}${MARKER}`);
       return to !== undefined && sameSession(to, ref);
     });
 }
@@ -141,10 +120,10 @@ export function payLead(root: string, into: string): void {
 }
 
 /**
- * Moves the entries of every old inbox that names `ref` (a live redirect, or the tombstone a finished migration left) to
- * the end of ref's inbox. Call it under ref's inbox lock. Each old queue is renamed aside first, so an append that races
- * the merge lands in a fresh old file for the next one. The old inbox's spool moves here too: once it names a
- * replacement, only the holder of that inbox's lock moves its spool.
+ * Moves the entries of every old inbox whose live redirect names `ref` to the end of ref's inbox. Call it under ref's
+ * inbox lock. Each old queue is renamed aside first, so an append that races the merge lands in a fresh old file for
+ * the next one. The old inbox's spool moves here too: while it names a replacement, only the holder of that inbox's
+ * lock moves its spool.
  */
 export function mergeForwarded(root: string, ref: SessionRef): void {
   const into = inboxFile(root, ref);

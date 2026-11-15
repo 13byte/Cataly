@@ -4,7 +4,6 @@ import { dutyTick } from "../src/duty.ts";
 import type { Deps } from "../src/harness.ts";
 import type { MigrateOpts } from "../src/migrate-capture.ts";
 import { moveBack, moveInbox } from "../src/migrate-inbox.ts";
-import { Refusal } from "../src/refusal.ts";
 import type { SessionRef } from "../src/runtime/types.ts";
 import { href } from "./fake.ts";
 import { setup } from "./inbox-setup.ts";
@@ -42,29 +41,30 @@ const spooled = (d: Deps, ref: SessionRef): string[] => {
 };
 
 describe("a rollback that puts the inbox back on the old session", () => {
-  test("a send to the replacement after the rollback took its lock waits; nothing is left in its spool", async () => {
+  test("a send to the replacement after the rollback took its lock waits, then queues on that id; no spool is left", async () => {
     const s = setup();
-    s.w.addPane("w1:p4", "idle");
-    s.d.store.enqueue(OLD, { at: s.d.now(), from: "cli", text: "first" });
+    const next = s.w.addPane("w1:p4", "idle");
+    await s.d.store.enqueue(OLD, { at: s.d.now(), from: "cli", text: "first" });
     await moveInbox(s.d, OLD, NEW, opts);
-    // The sender cannot wait for real while the rollback runs in this thread: it waits out its tries and is refused.
-    const waits = spyOn(Bun, "sleepSync").mockImplementation(() => {});
-    let sent: unknown;
+    // A wait for the route resolves at once, but only once the rollback in this thread has let go of it.
+    const waits = spyOn(Bun, "sleep").mockImplementation(async () => {});
+    let sent: Promise<unknown> = Promise.resolve();
+    let during: unknown;
     const paused = atMarkerRemoval(s.d, () => {
-      try {
-        sent = s.d.store.enqueue(NEW, { at: s.d.now(), from: "cli", text: "late" });
-      } catch (e) {
-        sent = e;
-      }
+      sent = s.d.store.enqueue(NEW, { at: s.d.now(), from: "cli", text: "late" });
+      during = { spool: spooled(s.d, NEW), queue: s.d.store.queued(NEW).map((m) => m.text) };
     });
     await moveBack(s.d, OLD, NEW, opts);
     expect(paused()).toBe(true);
+    expect(during).toEqual({ spool: [], queue: ["first"] });
+    expect(await sent).toEqual({ kind: "queued", at: NEW });
     expect(waits).toHaveBeenCalled();
-    expect(sent).toBeInstanceOf(Refusal);
-    expect({ spool: spooled(s.d, NEW), queue: s.d.store.queued(NEW) }).toEqual({ spool: [], queue: [] });
+    expect(spooled(s.d, NEW)).toEqual([]);
+    expect(s.d.store.queued(OLD).map((m) => m.text)).toEqual(["first"]);
     waits.mockRestore();
     await dutyTick(s.d);
-    expect(s.pane.received).toEqual(["first"]);
+    // The rollback leaves nothing on the replacement's id: the session there now gets what is sent to it.
+    expect({ old: s.pane.received, replacement: next.received }).toEqual({ old: ["first"], replacement: ["late"] });
   });
 
   test("a send to the replacement already writing when the rollback starts is waited for and goes back", async () => {
@@ -81,7 +81,10 @@ describe("a rollback that puts the inbox back on the old session", () => {
       }
       return REAL_EXISTS(p);
     }) as never);
-    expect(s.d.store.enqueue(NEW, { at: s.d.now(), from: "cli", text: "late" })).toEqual({ kind: "queued", at: NEW });
+    expect(await s.d.store.enqueue(NEW, { at: s.d.now(), from: "cli", text: "late" })).toEqual({
+      kind: "queued",
+      at: NEW,
+    });
     expect(armed).toBe(false);
     await rolledBack;
     expect({ spool: spooled(s.d, NEW), queue: s.d.store.queued(NEW) }).toEqual({ spool: [], queue: [] });

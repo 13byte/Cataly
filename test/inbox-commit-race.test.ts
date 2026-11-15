@@ -2,7 +2,6 @@ import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
 import { dutyTick } from "../src/duty.ts";
 import { flushInbox, send } from "../src/inbox.ts";
-import { drainForward, moveBack, moveInbox } from "../src/migrate-inbox.ts";
 import { href } from "./fake.ts";
 import { quietLane } from "./harness-setup.ts";
 import { setup } from "./inbox-setup.ts";
@@ -43,7 +42,7 @@ test("an id-less spool entry settled before an interrupted rewrite is never deli
   const s = setup();
   const release = s.d.store.lockInbox(OLD, s.d.now());
   if (release === undefined) throw new Error("fixture inbox locked");
-  s.d.store.enqueue(OLD, { at: s.d.now(), from: "cli", text: "once" });
+  await s.d.store.enqueue(OLD, { at: s.d.now(), from: "cli", text: "once" });
   release();
   const path = s.d.store.inboxPath(OLD);
   let stopped = false;
@@ -66,8 +65,8 @@ test("an id-less spool entry settled before an interrupted rewrite is never deli
 
 test("enumeration during a locked partial rewrite does not abort delivery to another inbox", async () => {
   const s = setup();
-  s.d.store.enqueue(OLD, { at: s.d.now(), from: "cli", text: "rewriting" });
-  s.d.store.enqueue(href("w1:p1"), { at: s.d.now(), from: "cli", text: "unrelated" });
+  await s.d.store.enqueue(OLD, { at: s.d.now(), from: "cli", text: "rewriting" });
+  await s.d.store.enqueue(href("w1:p1"), { at: s.d.now(), from: "cli", text: "unrelated" });
   const release = s.d.store.lockInbox(OLD, s.d.now());
   if (release === undefined) throw new Error("fixture inbox locked");
   const path = s.d.store.inboxPath(OLD);
@@ -85,7 +84,7 @@ test("enumeration during a locked partial rewrite does not abort delivery to ano
 
 test("a flush that finds the queue part way through a locked rewrite waits for the holder, without throwing", async () => {
   const s = setup();
-  s.d.store.enqueue(OLD, { at: s.d.now(), from: "cli", text: "rewriting" });
+  await s.d.store.enqueue(OLD, { at: s.d.now(), from: "cli", text: "rewriting" });
   const release = s.d.store.lockInbox(OLD, s.d.now());
   if (release === undefined) throw new Error("fixture inbox locked");
   const path = s.d.store.inboxPath(OLD);
@@ -99,50 +98,4 @@ test("a flush that finds the queue part way through a locked rewrite waits for t
   }
   expect(await flushInbox(s.d, OLD)).toBe("delivered");
   expect(s.pane.received).toEqual(["rewriting"]);
-});
-
-test("a raw session reference remains redirected after migration final drain", async () => {
-  const s = setup();
-  const next = s.w.addPane(NEW.id, "idle");
-  const opts = {
-    sleep: async () => {},
-    log: () => {},
-    to: "herdr" as const,
-    waitMinutes: 1,
-    dryRun: false,
-    resume: false,
-  };
-  await moveInbox(s.d, OLD, NEW, opts);
-  await drainForward(s.d, OLD, NEW, opts);
-
-  const result = await send(s.d, OLD.id, "stale reference", "cli");
-
-  expect({ result, old: s.pane.received, next: next.received }).toEqual({
-    result: "DELIVERED",
-    old: [],
-    next: ["stale reference"],
-  });
-});
-
-test("a raw replacement reference remains redirected after rollback", async () => {
-  const s = setup();
-  const next = s.w.addPane(NEW.id, "idle");
-  const opts = {
-    sleep: async () => {},
-    log: () => {},
-    to: "herdr" as const,
-    waitMinutes: 1,
-    dryRun: false,
-    resume: false,
-  };
-  await moveInbox(s.d, OLD, NEW, opts);
-  await moveBack(s.d, OLD, NEW, opts);
-
-  const result = await send(s.d, NEW.id, "replacement reference", "cli");
-
-  expect({ result, old: s.pane.received, next: next.received }).toEqual({
-    result: "DELIVERED",
-    old: ["replacement reference"],
-    next: [],
-  });
 });

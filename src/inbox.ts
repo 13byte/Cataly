@@ -33,16 +33,23 @@ export async function sendOrThrow(
   from: string,
 ): Promise<"DELIVERED" | "QUEUED"> {
   const ref = resolveTarget(d, target);
-  const again = (): SessionRef => {
+  const queued = await d.store.enqueue(ref, { at: d.now(), from, text }, resolveAgain(d, target, ref));
+  if (queued.kind === "kept") return "QUEUED";
+  return (await flushInbox(d, queued.at)) === "delivered" ? "DELIVERED" : "QUEUED";
+}
+
+/**
+ * `target` resolved again (for queueMessage's recheck under the route): a lane or role that switched sessions since
+ * `ref` was resolved names its new session; a name that no longer resolves stays at `ref`.
+ */
+export function resolveAgain(d: Deps, target: string, ref: SessionRef): () => SessionRef {
+  return () => {
     try {
       return resolveTarget(d, target);
     } catch {
       return ref;
     }
   };
-  const queued = d.store.enqueue(ref, { at: d.now(), from, text }, again);
-  if (queued.kind === "kept") return "QUEUED";
-  return (await flushInbox(d, queued.at)) === "delivered" ? "DELIVERED" : "QUEUED";
 }
 
 /**

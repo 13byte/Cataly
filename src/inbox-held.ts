@@ -1,5 +1,5 @@
 import type { Deps } from "./harness.ts";
-import { send, type SendResult } from "./inbox.ts";
+import { resolveAgain, send, type SendResult } from "./inbox.ts";
 import { refText } from "./refs.ts";
 import { Refusal } from "./refusal.ts";
 import type { SessionRef } from "./runtime/types.ts";
@@ -15,7 +15,7 @@ export async function sendToShell(d: Deps, target: string, text: string, from: s
   const rt = d.runtimes.for(ref);
   if ((await rt.probe(ref)).status !== "shell") return send(d, target, text, from);
   if (await rt.typeIntoShell(ref, text)) return "DELIVERED";
-  d.store.enqueue(ref, { at: d.now(), from, text });
+  await d.store.enqueue(ref, { at: d.now(), from, text }, resolveAgain(d, target, ref));
   return "QUEUED";
 }
 

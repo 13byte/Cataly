@@ -77,7 +77,7 @@ describe("a send to a session whose inbox a migration moves meanwhile reaches th
         migrated = migrateInbox(s.d, OLD, NEW);
       },
     );
-    s.d.store.enqueue(OLD, { at: s.d.now(), from: "cli", text: "late" });
+    await s.d.store.enqueue(OLD, { at: s.d.now(), from: "cli", text: "late" });
     expect(paused()).toBe(true);
     await migrated;
     await dutyTick(s.d);
@@ -98,7 +98,7 @@ describe("a send to a session whose inbox a migration moves meanwhile reaches th
         migrated = migrateInbox(s.d, OLD, NEW);
       },
     );
-    s.d.store.enqueue(OLD, { at: s.d.now(), from: "cli", text: "late" });
+    await s.d.store.enqueue(OLD, { at: s.d.now(), from: "cli", text: "late" });
     expect(paused()).toBe(true);
     await migrated;
     await dutyTick(s.d);
@@ -134,14 +134,14 @@ describe("a send to a session whose inbox a migration moves meanwhile reaches th
     expect(lead2.received.join("\n").split("[LOST talker]")).toHaveLength(2);
   });
 
-  test("a send waits while a migration holds the old inbox's route, then goes where the marker it wrote points", () => {
+  test("a send waits while a migration holds the old inbox's route, then goes where the marker it wrote points", async () => {
     const s = setup();
     const route = holdRoute(s.d, OLD);
-    const waits = spyOn(Bun, "sleepSync").mockImplementation(() => {
+    const waits = spyOn(Bun, "sleep").mockImplementation(async () => {
       route();
-      void moveInbox(s.d, OLD, NEW, opts);
+      await moveInbox(s.d, OLD, NEW, opts);
     });
-    s.d.store.enqueue(OLD, { at: s.d.now(), from: "cli", text: "waited" });
+    await s.d.store.enqueue(OLD, { at: s.d.now(), from: "cli", text: "waited" });
     expect(waits).toHaveBeenCalledTimes(1);
     expect({ old: texts(s.d, OLD), new: texts(s.d, NEW) }).toEqual({ old: [], new: ["waited"] });
   });
@@ -149,7 +149,7 @@ describe("a send to a session whose inbox a migration moves meanwhile reaches th
   test("a send whose route stays held is refused and queues nothing", async () => {
     const s = setup();
     holdRoute(s.d, OLD);
-    spyOn(Bun, "sleepSync").mockImplementation(() => {});
+    spyOn(Bun, "sleep").mockImplementation(async () => {});
     await expect(send(s.d, "w1:p2", "refused", "cli")).rejects.toBeInstanceOf(Refusal);
     expect(s.d.store.inboxPanes()).toEqual([]);
     expect(s.pane.received).toEqual([]);
@@ -161,19 +161,19 @@ describe("a spooled message moved by a holder that stopped part way is queued ex
    * "same" queued, then "same" again at the same millisecond while another process held the lock: two messages. The
    * holder never let go (it died holding the lock, now judged stale), so the second still waits in the spool.
    */
-  function twoEqual() {
+  async function twoEqual() {
     const s = setup();
     const msg = { at: s.d.now(), from: "cli", text: "same" };
-    s.d.store.enqueue(OLD, msg);
+    await s.d.store.enqueue(OLD, msg);
     const lock = `${s.d.store.inboxPath(OLD)}.lock`;
     fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, host: hostname(), at: s.d.now() }));
-    s.d.store.enqueue(OLD, msg);
+    await s.d.store.enqueue(OLD, msg);
     fs.rmSync(lock);
     return s;
   }
 
-  test("renamed aside, stopped before its append, beside an equal queued message: it is still added", () => {
-    const s = twoEqual();
+  test("renamed aside, stopped before its append, beside an equal queued message: it is still added", async () => {
+    const s = await twoEqual();
     onceAt(
       "appendFileSync",
       (p) => p === s.d.store.inboxPath(OLD),
@@ -188,8 +188,8 @@ describe("a spooled message moved by a holder that stopped part way is queued ex
     expect(fs.readdirSync(`${s.d.store.inboxPath(OLD)}.spool`)).toEqual([]);
   });
 
-  test("appended, stopped before removing its file, beside an equal queued message: it is not added again", () => {
-    const s = twoEqual();
+  test("appended, stopped before removing its file, beside an equal queued message: it is not added again", async () => {
+    const s = await twoEqual();
     onceAt(
       "rmSync",
       (p) => p.endsWith(".moving"),
@@ -205,7 +205,7 @@ describe("a spooled message moved by a holder that stopped part way is queued ex
   });
 
   test("a migration carries both equal messages, the spooled one included, to the new inbox", async () => {
-    const s = twoEqual();
+    const s = await twoEqual();
     await migrateInbox(s.d, OLD, NEW);
     expect(texts(s.d, NEW)).toEqual(["same", "same"]);
   });

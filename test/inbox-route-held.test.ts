@@ -24,7 +24,7 @@ function holdRoute(d: Deps, ref: SessionRef): () => void {
 }
 
 /** Every wait for a held route returns at once; counts the waits. */
-const noWait = () => spyOn(Bun, "sleepSync").mockImplementation(() => {});
+const noWait = () => spyOn(Bun, "sleep").mockImplementation(async () => {});
 
 const LEAD = href("w1:p1");
 
@@ -78,7 +78,7 @@ describe("a message for the lead whose route stays held is kept for the lead", (
   });
 });
 
-test("a send whose write fails lets go of the route: a later send is not kept waiting behind it", () => {
+test("a send whose write fails lets go of the route: a later send is not kept waiting behind it", async () => {
   const s = setup();
   const lock = `${s.d.store.inboxPath(href("w1:p2"))}.lock`;
   const real = fs.writeFileSync;
@@ -86,9 +86,27 @@ test("a send whose write fails lets go of the route: a later send is not kept wa
     if (String(file) === lock) throw new Error("disk full");
     return (real as (...a: unknown[]) => unknown)(file, ...rest);
   }) as never);
-  expect(() => s.d.store.enqueue(href("w1:p2"), { at: s.d.now(), from: "cli", text: "lost write" })).toThrow(
+  await expect(s.d.store.enqueue(href("w1:p2"), { at: s.d.now(), from: "cli", text: "lost write" })).rejects.toThrow(
     "disk full",
   );
   mock.restore();
   expect(fs.existsSync(`${s.d.store.inboxPath(href("w1:p2"))}.route`)).toBe(false);
+});
+
+test("a send waiting for a held route does not stop the process: other work runs, and the send goes once it is free", async () => {
+  const s = setup();
+  const free = holdRoute(s.d, href("w1:p2"));
+  const waiting = Promise.withResolvers<void>();
+  const wake = Promise.withResolvers<void>();
+  spyOn(Bun, "sleep").mockImplementation(async () => {
+    waiting.resolve();
+    await wake.promise;
+  });
+  const sent = s.d.store.enqueue(href("w1:p2"), { at: s.d.now(), from: "cli", text: "waited" });
+  // The route's holder is this process's own other work: it can only let go while the waiting send has yielded.
+  await waiting.promise;
+  free();
+  wake.resolve();
+  expect(await sent).toEqual({ kind: "queued", at: href("w1:p2") });
+  expect(s.d.store.queued(href("w1:p2")).map((m) => m.text)).toEqual(["waited"]);
 });

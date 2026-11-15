@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { appendQueue, inboxFile, owedFile, spoolDir, spooled } from "./inbox-files.ts";
-import { forwardOf, mergeSpool, migratedTo } from "./inbox-forward.ts";
+import { forwardOf, mergeSpool } from "./inbox-forward.ts";
 import { takeInboxLock } from "./inbox-lock.ts";
 import { Refusal } from "./refusal.ts";
 import { refText, sameSession } from "./refs.ts";
@@ -28,12 +28,12 @@ export function spoolMessage(path: string, msg: QueuedMessage): void {
 }
 
 /**
- * Moves ref's spool into its queue; call it under ref's inbox lock. Not while a `.forward` marker or a tombstone names
- * another inbox: the holder of that inbox's lock moves it then (mergeForwarded), so no spooled file has two movers.
- * Returns whether this inbox moves its own spool.
+ * Moves ref's spool into its queue; call it under ref's inbox lock. Not while a `.forward` marker names another inbox:
+ * the holder of that inbox's lock moves it then (mergeForwarded), so no spooled file has two movers. Returns whether
+ * this inbox moves its own spool.
  */
 export function mergeOwnSpool(root: string, ref: SessionRef): boolean {
-  if (forwardOf(root, ref) !== undefined || migratedTo(root, ref) !== undefined) return false;
+  if (forwardOf(root, ref) !== undefined) return false;
   const path = inboxFile(root, ref);
   mergeSpool(path, path);
   return true;
@@ -83,9 +83,9 @@ export function lockRoute(root: string, ref: SessionRef, now: number): (() => vo
 }
 
 /**
- * Where a message sent to `ref` belongs once its route is held: the inbox the durable redirect chain leads to. A closed
- * inbox whose tombstone names a session is still resolvable, so a sender that only ever held the old name follows it
- * instead of writing where nothing is flushed. A name with no redirect and no tombstone is its own destination.
+ * Where a message sent to `ref` belongs once its route is held: the inbox the live `.forward` chain of a running
+ * migration leads to. A finished migration leaves nothing behind (inbox-forward.ts), so a name with no marker is its
+ * own destination, also when its id is used again by a new session.
  */
 export function destinationOf(root: string, ref: SessionRef): SessionRef {
   const seen = new Set<string>();
@@ -93,7 +93,7 @@ export function destinationOf(root: string, ref: SessionRef): SessionRef {
     const key = `${at.runtime}:${at.id}`;
     if (seen.has(key)) return at;
     seen.add(key);
-    const next = forwardOf(root, at) ?? migratedTo(root, at);
+    const next = forwardOf(root, at);
     if (next === undefined || sameSession(next, at)) return at;
     at = next;
   }
@@ -123,46 +123,45 @@ export type Queued = { kind: "queued"; at: SessionRef } | { kind: "kept" };
 /**
  * Queues `msg` for the inbox its name resolves to under the route. `recheck` resolves the name this send used again
  * under the route: a migration or a lane switch that finished while the caller was between resolving and taking the
- * route moves the message to the session it now names. The route is held until the message is written (queued or
- * spooled), so a migration cannot drain between the write and the redirect's removal. A held route is waited for
- * briefly; then a message for the lead (`lead`: the session the lead role names) is kept for it like an owed notice
- * ("kept": payLead moves it once the route is free), so a report, READY or held-delivery notice is never dropped, and a
- * send to any other session is refused.
+ * route moves the message to the session it now names, at once. The route is held until the message is written (queued
+ * or spooled), so a migration cannot drain between the write and the redirect's removal. A held route is waited for
+ * briefly, without blocking the process; then a message for the lead (`lead`: the session the lead role names) is kept
+ * for it like an owed notice ("kept": payLead moves it once the route is free), so a report, READY or held-delivery
+ * notice is never dropped, and a send to any other session is refused.
  */
-export function queueMessage(
+export async function queueMessage(
   root: string,
   ref: SessionRef,
   msg: QueuedMessage,
   lead: boolean,
   recheck?: () => SessionRef,
-): Queued {
+): Promise<Queued> {
   let target = ref;
-  for (let tries = 0; ; tries++) {
+  for (let tries = 0; ; ) {
     const current = target;
     const route = lockRoute(root, current, msg.at);
     if (route) {
       let moved: SessionRef | undefined;
-      let at: SessionRef | undefined;
       try {
         moved = recheck?.();
         if (moved === undefined || sameSession(moved, current)) {
-          at = destinationOf(root, current);
+          const at = destinationOf(root, current);
           appendOrSpool(root, at, msg);
+          return { kind: "queued", at };
         }
       } finally {
         route();
       }
-      if (at !== undefined) return { kind: "queued", at };
-      if (moved === undefined) throw new Refusal(`the inbox of ${refText(current)} is being moved; send again`);
       target = moved;
+      continue;
     }
-    if (tries >= ROUTE_TRIES) {
+    if (tries++ >= ROUTE_TRIES) {
       if (lead) {
         spoolMessage(owedFile(root), msg);
         return { kind: "kept" };
       }
       throw new Refusal(`the inbox of ${refText(current)} is being moved; send again`);
     }
-    Bun.sleepSync(ROUTE_RETRY_MS);
+    await Bun.sleep(ROUTE_RETRY_MS);
   }
 }
