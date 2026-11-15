@@ -1,5 +1,5 @@
 import { appendFileSync, existsSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { refFromText, sameSession } from "./refs.ts";
 import type { SessionRef } from "./runtime/types.ts";
 import type { QueuedMessage } from "./store-types.ts";
@@ -67,11 +67,14 @@ const recordIds = (path: string, ids: readonly string[]): void => {
   if (ids.length > 0) appendFileSync(idsFile(path), ids.map((id) => `${id}\n`).join(""));
 };
 
-export const markDone = (path: string, msgs: readonly QueuedMessage[]): void =>
-  recordIds(
-    path,
-    msgs.flatMap((m) => (m.id === undefined ? [] : [m.id])),
-  );
+/** A spooled entry's identity in `<inbox>.ids`: its file name, so a leftover `.moving` file is not queued again. */
+export const spoolKey = (name: string): string => `spool:${name}`;
+
+/** The ids `markDone` records for `msgs`: their `id`, and the spool file a spooled entry came through. */
+export const doneKeys = (msgs: readonly QueuedMessage[]): string[] =>
+  msgs.flatMap((m) => [...(m.id === undefined ? [] : [m.id]), ...(m.spool === undefined ? [] : [spoolKey(m.spool)])]);
+
+export const markDone = (path: string, msgs: readonly QueuedMessage[]): void => recordIds(path, doneKeys(msgs));
 
 /** The session's queue as the flush sees it: entries whose id was recorded as gone are left out. */
 export function pendingQueue(path: string): QueuedMessage[] {
@@ -130,11 +133,11 @@ export function carryOver(aside: string, from: string, into: string, map: (m: Qu
   );
   const held = readQueue(into);
   const seen = new Set(held.map(keyOf));
-  const ids = new Set([...done, ...known, ...held.flatMap((m) => (m.id === undefined ? [] : [m.id]))]);
+  const ids = new Set([...done, ...known, ...held.flatMap((m) => doneKeys([m]))]);
   for (const m of readQueue(aside)) {
     if ((m.id !== undefined && ids.has(m.id)) || seen.has(keyOf(m))) continue;
     seen.add(keyOf(m));
-    if (m.id !== undefined) ids.add(m.id);
+    for (const key of doneKeys([m])) ids.add(key);
     appendQueue(into, map(m));
   }
   rmSync(aside, { force: true });
@@ -206,11 +209,21 @@ function spooled(path: string, moving = false): string[] {
  * entry is a message of its own, so it is appended even when an equal one is queued (the same text sent twice in one
  * millisecond stays two messages); only ids recorded as gone are skipped. Each file is renamed aside before its entry
  * is appended and removed after: a `.moving` file left by a move cut short between the two may already be in `into`,
- * and is carried over (skipping it if `into` holds an entry from the same spool file) before the rest.
+ * and is carried over (skipping it if `into` holds an entry from the same spool file) before the rest. A `.moving`
+ * file whose entry already left `into` (`<into>.ids` holds its spool name) is removed without being appended again.
  */
 export function mergeSpool(from: string, into: string): void {
-  for (const f of spooled(from, true).filter((n) => n.endsWith(MOVING))) carryOver(f, from, into, (m) => m);
   const gone = new Set([...doneIds(from), ...doneIds(into)]);
+  for (const f of spooled(from, true).filter((n) => n.endsWith(MOVING))) {
+    const name = basename(f)
+      .slice(0, -MOVING.length)
+      .replace(/\.jsonl$/, "");
+    if (gone.has(spoolKey(name))) {
+      rmSync(f, { force: true });
+      continue;
+    }
+    carryOver(f, from, into, (m) => m);
+  }
   for (const file of spooled(from)) {
     renameSync(file, `${file}${MOVING}`);
     for (const m of readQueue(`${file}${MOVING}`)) if (m.id === undefined || !gone.has(m.id)) appendQueue(into, m);

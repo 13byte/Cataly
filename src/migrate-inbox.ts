@@ -18,6 +18,8 @@ const carried = (m: QueuedMessage): QueuedMessage =>
 /**
  * Runs `body` under the route locks of `routes` (no send reads their markers or writes to them meanwhile, see
  * lockRoute), then the inbox locks of every ref (in the order given), retrying while a send or another flush holds one.
+ * Every take runs inside the protected region, so a take that throws (an I/O error while writing the lock file, a
+ * spool that cannot be read) releases the locks already taken instead of leaving them held until this process exits.
  */
 async function underLocks(
   d: Deps,
@@ -32,12 +34,12 @@ async function underLocks(
   ];
   for (let tries = 0; ; tries++) {
     const held: (() => void)[] = [];
-    for (const take of takes) {
-      const release = take();
-      if (!release) break;
-      held.push(release);
-    }
     try {
+      for (const take of takes) {
+        const release = take();
+        if (!release) break;
+        held.push(release);
+      }
       if (held.length === takes.length) {
         body();
         return;

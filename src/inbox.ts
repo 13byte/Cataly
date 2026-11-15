@@ -32,7 +32,14 @@ export async function sendOrThrow(
   from: string,
 ): Promise<"DELIVERED" | "QUEUED"> {
   const ref = resolveTarget(d, target);
-  if (d.store.enqueue(ref, { at: d.now(), from, text }) === "kept") return "QUEUED";
+  const again = (): SessionRef => {
+    try {
+      return resolveTarget(d, target);
+    } catch {
+      return ref;
+    }
+  };
+  if (d.store.enqueue(ref, { at: d.now(), from, text }, again) === "kept") return "QUEUED";
   return (await flushInbox(d, ref)) === "delivered" ? "DELIVERED" : "QUEUED";
 }
 

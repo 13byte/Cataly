@@ -103,10 +103,11 @@ export class Store {
     return inboxFile(this.root, ref);
   }
 
-  /** Appends to the inbox `ref` was forwarded to, if it was, under its lock, or keeps it for the lead; queueMessage. */
-  enqueue(ref: SessionRef, msg: QueuedMessage): "queued" | "kept" {
+  /** Appends under its lock to the inbox `ref` was forwarded to, or keeps it for the lead; queueMessage. `recheck` is
+   * the sender's name resolved again under the route (a lane or role that switched sessions meanwhile). */
+  enqueue(ref: SessionRef, msg: QueuedMessage, recheck?: () => SessionRef): "queued" | "kept" {
     const lead = this.roles().lead;
-    return queueMessage(this.root, ref, msg, lead !== undefined && sameSession(lead, ref));
+    return queueMessage(this.root, ref, msg, lead !== undefined && sameSession(lead, ref), recheck);
   }
 
   /**
