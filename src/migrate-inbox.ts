@@ -1,5 +1,5 @@
-import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { carryOver } from "./inbox-files.ts";
+import { existsSync, renameSync } from "node:fs";
+import { carryOver, forwardOf, markMigrated, mergeSpool, removeForward, writeForward } from "./inbox-forward.ts";
 import { lockRoute } from "./inbox-spool.ts";
 import type { Deps } from "./harness.ts";
 import type { MigrateOpts } from "./migrate-capture.ts";
@@ -55,7 +55,7 @@ async function underLocks(
 /**
  * Appends every entry of `src` (and a `.merging` copy a cut-short run left) to `dst`, never rename-overwriting `dst`.
  * The source is renamed aside first, so an append racing the move lands in a fresh source file for a later merge;
- * `carryOver` skips what `dst` already holds and what `src` recorded as delivered, so a re-run adds no duplicates.
+ * `carryOver` skips what `dst` already holds and what `src` recorded as settled, so a re-run adds no duplicates.
  */
 function mergeFile(src: string, dst: string, map: (m: QueuedMessage) => QueuedMessage): void {
   const aside = `${src}.merging`;
@@ -64,41 +64,49 @@ function mergeFile(src: string, dst: string, map: (m: QueuedMessage) => QueuedMe
 }
 
 /**
- * Step (6): writes the `.forward` marker on the old inbox naming the new ref, then merges the old entries into the new
- * inbox under both inbox locks. Plain entries stay queued, held stay held, typed become held.
+ * Step (6): writes the live redirect on the old inbox naming the new ref, then merges the old entries into the new
+ * inbox under both inbox locks; the old inbox's spool moves too. Plain entries stay queued, held stay held, typed become
+ * held.
  */
 export async function moveInbox(d: Deps, from: SessionRef, to: SessionRef, opts: MigrateOpts): Promise<void> {
-  const old = d.store.inboxPath(from);
   await underLocks(d, [from], [from, to], opts, () => {
-    const marker = `${old}.forward`;
-    writeFileSync(`${marker}.tmp`, `${refText(to)}\n`);
-    renameSync(`${marker}.tmp`, marker);
-    mergeFile(old, d.store.inboxPath(to), carried);
+    writeForward(d.store.root, from, to);
+    const old = d.store.inboxPath(from);
+    const next = d.store.inboxPath(to);
+    mergeFile(old, next, carried);
+    mergeSpool(old, next);
   });
 }
 
 /**
- * Step (8): drains what late senders appended to the old path into the new inbox, then removes the marker, holding the
- * old route throughout: a send that read the marker has written before the drain, and none reads it until it is gone.
+ * Step (8): drains what late senders appended to the old path into the new inbox, then replaces the live redirect with
+ * the old inbox's tombstone. The old route is held throughout: a send that read the redirect has written before the
+ * drain, and none writes until the tombstone is in place. Holding the old inbox lock keeps its spool for this drain, so
+ * a message spooled by a send that raced the marker cannot be left behind with nothing to move it.
  */
 export async function drainForward(d: Deps, from: SessionRef, to: SessionRef, opts: MigrateOpts): Promise<void> {
-  const old = d.store.inboxPath(from);
-  await underLocks(d, [from], [to], opts, () => {
+  await underLocks(d, [from], [from, to], opts, () => {
     d.store.mergeForwarded(to);
-    rmSync(`${old}.forward`, { force: true });
+    removeForward(d.store.root, from);
+    markMigrated(d.store.root, from, to);
   });
 }
 
 /**
- * Rollback after step (6) ran: the entries go back to the old inbox (unchanged, held entries still held). The
- * replacement's route is held too: a send addressed to it directly has written before its lock is taken (which moves
- * its spool into its queue), and none writes until the marker is gone and its queue is back on the old inbox.
+ * Rollback after step (6) ran: the entries go back to the old inbox (unchanged, held entries still held) and the old
+ * inbox is open again. The replacement's route is held too: a send addressed to it directly has written before its lock
+ * is taken (which moves its spool into its queue), and none writes until its entries are back on the old inbox. A
+ * sender that used the replacement's own name meanwhile still has to land on the old session, so the replacement keeps
+ * a tombstone naming it: the name resolves back instead of queueing for a session that is closed.
  */
 export async function moveBack(d: Deps, from: SessionRef, to: SessionRef, opts: MigrateOpts): Promise<void> {
-  const old = d.store.inboxPath(from);
-  if (!existsSync(`${old}.forward`)) return;
+  if (forwardOf(d.store.root, from) === undefined) return;
   await underLocks(d, [from, to], [from, to], opts, () => {
-    rmSync(`${old}.forward`, { force: true });
-    mergeFile(d.store.inboxPath(to), old, (m) => m);
+    const old = d.store.inboxPath(from);
+    const next = d.store.inboxPath(to);
+    removeForward(d.store.root, from);
+    mergeFile(next, old, (m) => m);
+    mergeSpool(next, old);
+    markMigrated(d.store.root, to, from);
   });
 }

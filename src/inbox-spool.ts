@@ -1,14 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { appendQueue, forwardOf, inboxFile, mergeSpool, owedFile, spoolDir } from "./inbox-files.ts";
+import { appendQueue, inboxFile, owedFile, spoolDir, spooled } from "./inbox-files.ts";
+import { forwardOf, mergeSpool, migratedTo } from "./inbox-forward.ts";
 import { takeInboxLock } from "./inbox-lock.ts";
-import { refText, sameSession } from "./refs.ts";
 import { Refusal } from "./refusal.ts";
+import { refText, sameSession } from "./refs.ts";
 import type { SessionRef } from "./runtime/types.ts";
 import type { QueuedMessage } from "./store-types.ts";
 
-// A message queued while another process holds the inbox lock is written to a file of its own in `<inbox>.spool/`, and
+// A message sent while another process holds the inbox lock is written to a file of its own in `<inbox>.spool/`, and
 // the holder of the lock moves it into the queue. A holder rewrites the queue from what it read, so an append beside it
 // would be lost; one file per message means nothing it moves can still be written to. The entry keeps the file's name
 // (`spool`), so a move cut short adds it once and an equal message stays a message of its own.
@@ -18,7 +19,7 @@ const ROUTE_RETRY_MS = 50;
 let spoolSeq = 0;
 
 /** Spools `msg` for the queue at `path` in a file of its own, written aside and renamed in whole. */
-function spoolMessage(path: string, msg: QueuedMessage): void {
+export function spoolMessage(path: string, msg: QueuedMessage): void {
   mkdirSync(spoolDir(path), { recursive: true });
   const name = `${String(msg.at).padStart(15, "0")}-${String(spoolSeq++).padStart(9, "0")}-${randomUUID()}`;
   const file = join(spoolDir(path), `${name}.jsonl`);
@@ -27,26 +28,49 @@ function spoolMessage(path: string, msg: QueuedMessage): void {
 }
 
 /**
- * Moves ref's spool into its queue; call it under ref's inbox lock, before the queue is read and after it is rewritten.
- * Not while a `.forward` marker names another inbox: the holder of that inbox's lock moves it then (mergeForwarded), so
- * no spooled file has two movers at once.
+ * Moves ref's spool into its queue; call it under ref's inbox lock. Not while a `.forward` marker or a tombstone names
+ * another inbox: the holder of that inbox's lock moves it then (mergeForwarded), so no spooled file has two movers.
+ * Returns whether this inbox moves its own spool.
  */
-export function mergeOwnSpool(root: string, ref: SessionRef): void {
+export function mergeOwnSpool(root: string, ref: SessionRef): boolean {
+  if (forwardOf(root, ref) !== undefined || migratedTo(root, ref) !== undefined) return false;
   const path = inboxFile(root, ref);
-  if (forwardOf(root, ref) === undefined) mergeSpool(path, path);
+  mergeSpool(path, path);
+  return true;
 }
 
-/** Takes ref's inbox lock (see Store.lockInbox) and moves its spool into the queue before anything reads it. */
+/**
+ * Takes ref's inbox lock (see Store.lockInbox) and moves its spool into the queue before anything reads it. The release
+ * moves the spool in again before it lets go, and once it has let go takes the lock back for a file spooled meanwhile:
+ * a sender spools only while the lock is held and tries the lock once after (appendOrSpool), so whichever of the two
+ * looks last finds the file, and a message for an inbox that is never flushed (a lead with no agent) still reaches it.
+ */
 export function lockQueue(root: string, ref: SessionRef, now: number): (() => void) | undefined {
-  const release = takeInboxLock(`${inboxFile(root, ref)}.lock`, now);
-  if (!release) return undefined;
-  try {
-    mergeOwnSpool(root, ref);
-  } catch (e) {
-    release();
-    throw e;
-  }
-  return release;
+  const path = inboxFile(root, ref);
+  const take = (): (() => void) | undefined => {
+    const unlock = takeInboxLock(`${path}.lock`, now);
+    if (!unlock) return undefined;
+    try {
+      mergeOwnSpool(root, ref);
+    } catch (e) {
+      unlock();
+      throw e;
+    }
+    return unlock;
+  };
+  const held = take();
+  if (!held) return undefined;
+  return () => {
+    for (let unlock: (() => void) | undefined = held; unlock; ) {
+      let owns = false;
+      try {
+        owns = mergeOwnSpool(root, ref);
+      } finally {
+        unlock();
+      }
+      unlock = owns && spooled(path).length > 0 ? take() : undefined;
+    }
+  };
 }
 
 /**
@@ -58,11 +82,32 @@ export function lockRoute(root: string, ref: SessionRef, now: number): (() => vo
   return takeInboxLock(`${inboxFile(root, ref)}.route`, now);
 }
 
-/** Appends `msg` to ref's queue under its lock; while another process holds the lock, spools it for that holder. */
+/**
+ * Where a message sent to `ref` belongs once its route is held: the inbox the durable redirect chain leads to. A closed
+ * inbox whose tombstone names a session is still resolvable, so a sender that only ever held the old name follows it
+ * instead of writing where nothing is flushed. A name with no redirect and no tombstone is its own destination.
+ */
+export function destinationOf(root: string, ref: SessionRef): SessionRef {
+  const seen = new Set<string>();
+  for (let at = ref; ; ) {
+    const key = `${at.runtime}:${at.id}`;
+    if (seen.has(key)) return at;
+    seen.add(key);
+    const next = forwardOf(root, at) ?? migratedTo(root, at);
+    if (next === undefined || sameSession(next, at)) return at;
+    at = next;
+  }
+}
+
+/**
+ * Appends `msg` to ref's queue under its lock. While another process holds the lock it is spooled for that holder, and
+ * the lock is tried once more: a holder that let go before the file was written did not see it (lockQueue).
+ */
 function appendOrSpool(root: string, ref: SessionRef, msg: QueuedMessage): void {
   const release = lockQueue(root, ref, msg.at);
   if (!release) {
     spoolMessage(inboxFile(root, ref), msg);
+    lockQueue(root, ref, msg.at)?.();
     return;
   }
   try {
@@ -72,15 +117,17 @@ function appendOrSpool(root: string, ref: SessionRef, msg: QueuedMessage): void 
   }
 }
 
+/** Where a sent message went: queued for the inbox `at` (the one its sender flushes), or kept for the lead. */
+export type Queued = { kind: "queued"; at: SessionRef } | { kind: "kept" };
+
 /**
- * Queues `msg` in the inbox ref was forwarded to, if it was, else in ref's own, under ref's route lock. A migration
- * holds the route only while it moves files, so a held route is waited for briefly. Then a message for the lead
- * (`lead`: the session the lead role names) is kept for it like an owed notice ("kept": payLead moves it once the
- * route is free), so a report, READY or held-delivery notice is never dropped; a send to any other session is refused.
- *
- * `recheck` resolves the name this send used again, under the route: a migration or a lane switch that finished while
- * the caller was between resolving and taking the route moves the message to the session it now names, instead of the
- * closed one. A name that no longer resolves (the lane is done) leaves the send on `ref`.
+ * Queues `msg` for the inbox its name resolves to under the route. `recheck` resolves the name this send used again
+ * under the route: a migration or a lane switch that finished while the caller was between resolving and taking the
+ * route moves the message to the session it now names. The route is held until the message is written (queued or
+ * spooled), so a migration cannot drain between the write and the redirect's removal. A held route is waited for
+ * briefly; then a message for the lead (`lead`: the session the lead role names) is kept for it like an owed notice
+ * ("kept": payLead moves it once the route is free), so a report, READY or held-delivery notice is never dropped, and a
+ * send to any other session is refused.
  */
 export function queueMessage(
   root: string,
@@ -88,28 +135,34 @@ export function queueMessage(
   msg: QueuedMessage,
   lead: boolean,
   recheck?: () => SessionRef,
-): "queued" | "kept" {
+): Queued {
   let target = ref;
   for (let tries = 0; ; tries++) {
     const current = target;
     const route = lockRoute(root, current, msg.at);
     if (route) {
       let moved: SessionRef | undefined;
+      let at: SessionRef | undefined;
       try {
         moved = recheck?.();
         if (moved === undefined || sameSession(moved, current)) {
-          appendOrSpool(root, forwardOf(root, current) ?? current, msg);
-          return "queued";
+          at = destinationOf(root, current);
+          appendOrSpool(root, at, msg);
         }
       } finally {
         route();
       }
-      if (tries < ROUTE_TRIES) target = moved;
+      if (at !== undefined) return { kind: "queued", at };
+      if (moved === undefined) throw new Refusal(`the inbox of ${refText(current)} is being moved; send again`);
+      target = moved;
     }
-    if (tries < ROUTE_TRIES) Bun.sleepSync(ROUTE_RETRY_MS);
-    else if (lead) {
-      spoolMessage(owedFile(root), msg);
-      return "kept";
-    } else throw new Refusal(`the inbox of ${refText(current)} is being moved; send again`);
+    if (tries >= ROUTE_TRIES) {
+      if (lead) {
+        spoolMessage(owedFile(root), msg);
+        return { kind: "kept" };
+      }
+      throw new Refusal(`the inbox of ${refText(current)} is being moved; send again`);
+    }
+    Bun.sleepSync(ROUTE_RETRY_MS);
   }
 }

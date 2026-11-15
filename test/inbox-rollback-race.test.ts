@@ -81,7 +81,7 @@ describe("a rollback that puts the inbox back on the old session", () => {
       }
       return REAL_EXISTS(p);
     }) as never);
-    expect(s.d.store.enqueue(NEW, { at: s.d.now(), from: "cli", text: "late" })).toBe("queued");
+    expect(s.d.store.enqueue(NEW, { at: s.d.now(), from: "cli", text: "late" })).toEqual({ kind: "queued", at: NEW });
     expect(armed).toBe(false);
     await rolledBack;
     expect({ spool: spooled(s.d, NEW), queue: s.d.store.queued(NEW) }).toEqual({ spool: [], queue: [] });

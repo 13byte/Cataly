@@ -1,6 +1,7 @@
 import { DeliveryUncertain, failureDetail } from "./delivery.ts";
 import type { Deps } from "./harness.ts";
 import { Refusal } from "./refusal.ts";
+import { nonEmpty } from "./inbox-files.ts";
 import { resolveTarget } from "./target.ts";
 import { refText } from "./refs.ts";
 import type { AgentStatus, SessionRef } from "./runtime/types.ts";
@@ -39,8 +40,9 @@ export async function sendOrThrow(
       return ref;
     }
   };
-  if (d.store.enqueue(ref, { at: d.now(), from, text }, again) === "kept") return "QUEUED";
-  return (await flushInbox(d, ref)) === "delivered" ? "DELIVERED" : "QUEUED";
+  const queued = d.store.enqueue(ref, { at: d.now(), from, text }, again);
+  if (queued.kind === "kept") return "QUEUED";
+  return (await flushInbox(d, queued.at)) === "delivered" ? "DELIVERED" : "QUEUED";
 }
 
 /**
@@ -74,9 +76,10 @@ export async function tellLead(d: Deps, text: string, from: string): Promise<"DE
  * session whose inbox was forwarded (a migration) is flushed at its new ref, old entries merged in first.
  */
 export async function flushInbox(d: Deps, from: SessionRef): Promise<"delivered" | "queued" | "no-agent" | "held"> {
-  const ref = d.store.forwardOf(from) ?? from;
+  const ref = d.store.destination(from);
   if (migrating(d.store.root, from) || migrating(d.store.root, ref)) return "queued";
-  if (d.store.queued(ref).length === 0 && !d.store.mergePending(ref)) return "delivered";
+  // Unlocked, so the queue is not parsed here: a holder may be part way through appending to it.
+  if (!nonEmpty(d.store.inboxPath(ref)) && !d.store.mergePending(ref)) return "delivered";
   const release = d.store.lockInbox(ref, d.now());
   if (!release) return "queued";
   try {

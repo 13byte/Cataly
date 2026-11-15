@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import * as fs from "node:fs";
 import { rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dutyTick } from "../src/duty.ts";
@@ -75,4 +76,19 @@ describe("a message for the lead whose route stays held is kept for the lead", (
     await dutyTick(s.d);
     expect(s.lead.received).toEqual(["kept"]);
   });
+});
+
+test("a send whose write fails lets go of the route: a later send is not kept waiting behind it", () => {
+  const s = setup();
+  const lock = `${s.d.store.inboxPath(href("w1:p2"))}.lock`;
+  const real = fs.writeFileSync;
+  spyOn(fs, "writeFileSync").mockImplementation(((file: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
+    if (String(file) === lock) throw new Error("disk full");
+    return (real as (...a: unknown[]) => unknown)(file, ...rest);
+  }) as never);
+  expect(() => s.d.store.enqueue(href("w1:p2"), { at: s.d.now(), from: "cli", text: "lost write" })).toThrow(
+    "disk full",
+  );
+  mock.restore();
+  expect(fs.existsSync(`${s.d.store.inboxPath(href("w1:p2"))}.route`)).toBe(false);
 });

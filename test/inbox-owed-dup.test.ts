@@ -2,7 +2,8 @@ import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
 import { join } from "node:path";
 import { flushInbox } from "../src/inbox.ts";
-import { owedFile, payLead } from "../src/inbox-files.ts";
+import { owedFile } from "../src/inbox-files.ts";
+import { payLead } from "../src/inbox-forward.ts";
 import { href } from "./fake.ts";
 import { setup } from "./inbox-setup.ts";
 

@@ -157,14 +157,18 @@ describe("a send to a session whose inbox a migration moves meanwhile reaches th
 });
 
 describe("a spooled message moved by a holder that stopped part way is queued exactly once", () => {
-  /** "same" queued, then "same" again at the same millisecond while a holder had the lock: two messages. */
+  /**
+   * "same" queued, then "same" again at the same millisecond while another process held the lock: two messages. The
+   * holder never let go (it died holding the lock, now judged stale), so the second still waits in the spool.
+   */
   function twoEqual() {
     const s = setup();
     const msg = { at: s.d.now(), from: "cli", text: "same" };
     s.d.store.enqueue(OLD, msg);
-    const release = s.d.store.lockInbox(OLD, s.d.now())!;
+    const lock = `${s.d.store.inboxPath(OLD)}.lock`;
+    fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, host: hostname(), at: s.d.now() }));
     s.d.store.enqueue(OLD, msg);
-    release();
+    fs.rmSync(lock);
     return s;
   }
 

@@ -4,7 +4,8 @@ import { DeliveryUncertain, failureDetail } from "./delivery.ts";
 import { type Deps, fill, promptFile } from "./harness.ts";
 import { runHook } from "./hooks.ts";
 import { flushInbox } from "./inbox.ts";
-import { oweLead, payLead } from "./inbox-files.ts";
+import { oweLead } from "./inbox-files.ts";
+import { payLead } from "./inbox-forward.ts";
 import { lockRoute } from "./inbox-spool.ts";
 import { Refusal } from "./refusal.ts";
 import { refText } from "./refs.ts";
@@ -42,7 +43,7 @@ function underInboxLock(d: Deps, ref: SessionRef, write: (inbox: SessionRef) => 
   const route = lockRoute(d.store.root, ref, d.now());
   if (!route) return false;
   try {
-    const inbox = d.store.forwardOf(ref) ?? ref;
+    const inbox = d.store.destination(ref);
     const release = d.store.lockInbox(inbox, d.now());
     if (!release) return false;
     try {
@@ -92,8 +93,8 @@ export async function dutyTick(d: Deps): Promise<DutyEvent[]> {
     const paneId = refText(ref);
     try {
       const result = await flushInbox(d, ref);
-      // flushInbox follows a `.forward` marker; the counts are read where the entries live now.
-      const at = d.store.forwardOf(ref) ?? ref;
+      // flushInbox follows the migration redirects; the counts are read where the entries live now.
+      const at = d.store.destination(ref);
       if (result === "delivered") events.push({ pane: paneId, action: "flushed" });
       if (result === "no-agent") {
         events.push({

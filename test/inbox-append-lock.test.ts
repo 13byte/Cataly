@@ -1,7 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, spyOn, test } from "bun:test";
+import * as fs from "node:fs";
 import { mkdirSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { dutyTick } from "../src/duty.ts";
+import { readQueue } from "../src/inbox-files.ts";
 import type { Deps } from "../src/harness.ts";
 import { send } from "../src/inbox.ts";
 import { sendToShell } from "../src/inbox-held.ts";
@@ -9,6 +11,8 @@ import { moveBack, moveInbox } from "../src/migrate-inbox.ts";
 import type { SessionRef } from "../src/runtime/types.ts";
 import { href } from "./fake.ts";
 import { setup } from "./inbox-setup.ts";
+
+const REAL_RENAME = fs.renameSync;
 
 /**
  * Another process's flush of `ref`, stopped between reading the queue and writing it back: it holds the inbox lock and
@@ -121,6 +125,29 @@ describe("a message queued while another process rewrites the same inbox", () =>
     into();
     expect(texts(s.d, href("w1:p4"))).toEqual(["moving"]);
     expect(s.d.store.mergePending(href("w1:p4"))).toBe(false);
+  });
+
+  test("a message spooled while a flush holds the lock is in the queue once the flush lets go", async () => {
+    const s = setup();
+    const release = s.d.store.lockInbox(href("w1:p2"), s.d.now())!;
+    s.d.store.enqueue(href("w1:p2"), { at: s.d.now(), from: "cli", text: "waits" });
+    release();
+    expect(readQueue(s.d.store.inboxPath(href("w1:p2"))).map((m) => m.text)).toEqual(["waits"]);
+    expect(readdirSync(`${s.d.store.inboxPath(href("w1:p2"))}.spool`)).toEqual([]);
+  });
+
+  test("a message spooled just after the holder let go is moved into the queue by its sender", async () => {
+    const s = setup();
+    const release = s.d.store.lockInbox(href("w1:p2"), s.d.now())!;
+    const dir = `${s.d.store.inboxPath(href("w1:p2"))}.spool`;
+    spyOn(fs, "renameSync").mockImplementation((from, to) => {
+      if (String(to).startsWith(dir) && String(to).endsWith(".jsonl")) release();
+      return REAL_RENAME(from, to);
+    });
+    s.d.store.enqueue(href("w1:p2"), { at: s.d.now(), from: "cli", text: "late" });
+    mock.restore();
+    expect(readQueue(s.d.store.inboxPath(href("w1:p2"))).map((m) => m.text)).toEqual(["late"]);
+    expect(readdirSync(dir)).toEqual([]);
   });
 });
 

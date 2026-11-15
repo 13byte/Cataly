@@ -4,17 +4,15 @@ import { join } from "node:path";
 import {
   appendQueue,
   doneIds,
-  forwardOf,
   inboxFile,
   markDone,
-  mergeForwarded,
-  mergePending,
   pendingQueue,
   queuedRefs,
   readQueue,
   writeQueue,
 } from "./inbox-files.ts";
-import { lockQueue, mergeOwnSpool, queueMessage } from "./inbox-spool.ts";
+import { mergeForwarded, mergePending } from "./inbox-forward.ts";
+import { destinationOf, lockQueue, mergeOwnSpool, type Queued, queueMessage } from "./inbox-spool.ts";
 import { refFromText, refText, sameSession } from "./refs.ts";
 import type { SessionRef } from "./runtime/types.ts";
 import {
@@ -103,19 +101,22 @@ export class Store {
     return inboxFile(this.root, ref);
   }
 
-  /** Appends under its lock to the inbox `ref` was forwarded to, or keeps it for the lead; queueMessage. `recheck` is
-   * the sender's name resolved again under the route (a lane or role that switched sessions meanwhile). */
-  enqueue(ref: SessionRef, msg: QueuedMessage, recheck?: () => SessionRef): "queued" | "kept" {
+  /**
+   * Appends under its lock to the inbox `ref` resolves to (its redirect or tombstone, inbox-spool.ts), or keeps it for
+   * the lead. `recheck` is the sender's name resolved again under the route (a lane or role that switched meanwhile).
+   */
+  enqueue(ref: SessionRef, msg: QueuedMessage, recheck?: () => SessionRef): Queued {
     const lead = this.roles().lead;
     return queueMessage(this.root, ref, msg, lead !== undefined && sameSession(lead, ref), recheck);
   }
 
   /**
-   * Queues a duty notice unless the same id is queued for this session or left its queue before (`<inbox>.ids`): a
-   * duty pass cut short after queueing it queues it again on the next pass. Returns false when it was not queued.
+   * Queues a duty notice on `inbox` (a destination, its lock held) unless the same id is queued there or left that queue
+   * before (`<inbox>.ids`): a duty pass cut short after queueing it queues it again on the next pass. Returns false when
+   * it was not queued.
    */
-  enqueueOnce(ref: SessionRef, msg: QueuedMessage & { id: string }): boolean {
-    const path = this.inboxPath(this.forwardOf(ref) ?? ref);
+  enqueueOnce(inbox: SessionRef, msg: QueuedMessage & { id: string }): boolean {
+    const path = this.inboxPath(inbox);
     if (doneIds(path).has(msg.id) || readQueue(path).some((m) => m.id === msg.id)) return false;
     appendQueue(path, msg);
     return true;
@@ -133,9 +134,9 @@ export class Store {
     mergeOwnSpool(this.root, ref);
   }
 
-  /** The session this one's inbox was forwarded to by a migration (its `.forward` marker), or undefined. */
-  forwardOf(ref: SessionRef): SessionRef | undefined {
-    return forwardOf(this.root, ref);
+  /** Where the inbox of `ref` lives now: the session its migration redirect chain (`.forward`, `.migrated`) ends at. */
+  destination(ref: SessionRef): SessionRef {
+    return destinationOf(this.root, ref);
   }
 
   /** True when entries wait to be moved into ref's queue: spooled beside it, or in old inboxes forwarded into it. */
@@ -149,10 +150,8 @@ export class Store {
   }
 
   /**
-   * Takes the session's inbox lock (`<inbox>.lock`, created O_EXCL, holding pid, host and time) and returns its release,
-   * or undefined while another flush holds it. A lock whose pid is dead on this host, or one from another host (or
-   * unreadable) older than INBOX_LOCK_STALE_MS, is taken over: it is renamed aside first, and when what was renamed is not the lock judged stale (another
-   * process took it over in between), it is put back and the lock counts as held. Its spool moves into the queue then.
+   * The session's inbox lock (`<inbox>.lock`, inbox-lock.ts), or undefined while another process holds it. Taking it
+   * moves the spool into the queue, and so does letting go: a message spooled meanwhile is never left behind.
    */
   lockInbox(ref: SessionRef, now: number): (() => void) | undefined {
     return lockQueue(this.root, ref, now);

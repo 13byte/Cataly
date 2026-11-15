@@ -31,9 +31,9 @@ export type InboxEntry = {
 
 const PREVIEW_CHARS = 60;
 
-/** Where a session's inbox lives now (its `.forward` target, if it moved), with forwarded entries merged in unless a flush holds the lock. */
+/** Where a session's inbox lives now (where its migration redirects end), with forwarded entries merged in unless a flush holds the lock. */
 export function currentInbox(d: Deps, from: SessionRef): SessionRef {
-  const ref = d.store.forwardOf(from) ?? from;
+  const ref = d.store.destination(from);
   const release = d.store.mergePending(ref) ? d.store.lockInbox(ref, d.now()) : undefined;
   if (release)
     try {
@@ -66,7 +66,7 @@ export function inboxList(d: Deps, target: string): { paneId: string; entries: I
  */
 export function releaseHeld(d: Deps, target: string, index: number, how: "ack" | "resend"): string {
   const named = resolveTarget(d, target);
-  const ref = d.store.forwardOf(named) ?? named;
+  const ref = d.store.destination(named);
   const paneId = refText(ref);
   const release = d.store.lockInbox(ref, d.now());
   if (!release) throw new Refusal(`the inbox of ${paneId} is being flushed right now; try again`);
