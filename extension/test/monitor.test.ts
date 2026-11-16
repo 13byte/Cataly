@@ -111,18 +111,33 @@ describe("Monitors", () => {
     monitors.stop("notes");
     await until(() => !alive(pid));
     batches.length = 0;
-    // INBOUND_READY, a stall and HOST_GUARD COMPUTE_READY wake even beside a notice; so does a monitor's own exit.
+    // INBOUND_READY, a stall, HOST_GUARD COMPUTE_READY and a nudge that did not land wake even beside a notice, while
+    // the monitor is still running.
     for (const line of [
       "INBOUND_READY discord owner=1",
       "STALLED a-lane idle",
       "HOST_GUARD COMPUTE_READY load 1 < 2",
+      "NUDGED a-lane 16 min silent, delivery failed",
+      "NUDGED a-lane 16 min silent, delivery unconfirmed",
     ]) {
-      monitors.start("mixed", ["sh", "-c", `echo 'POSTED a-lane x'; echo '${line}'`], ".", "/", "s1");
-      await until(() => batches.some((b) => b.content.includes("exited")));
-      expect(batches.every((b) => b.wake)).toBe(true);
-      expect(batches.map((b) => b.content).join("\n")).toContain(line);
+      const running = monitors.start(
+        "mixed",
+        ["sh", "-c", `echo 'POSTED a-lane x'; echo '${line}'; exec sleep 30`],
+        ".",
+        "/",
+        "s1",
+      );
+      await until(() => batches.flatMap((b) => b.content.split("\n")).length === 2);
+      expect(batches.map((b) => b.wake)).toEqual([true]);
+      expect(batches[0]?.content).toContain(line);
+      monitors.stop("mixed");
+      await until(() => !alive(running.pid));
       batches.length = 0;
     }
+    // A monitor's own exit wakes even after only notices.
+    monitors.start("ends", ["sh", "-c", "echo 'POSTED a-lane x'"], ".", "/", "s1");
+    await until(() => batches.some((b) => b.content.includes("exited")));
+    expect(batches.find((b) => b.content.includes("exited"))?.wake).toBe(true);
   });
 
   test("rejects an invalid filter before spawning", () => {
@@ -160,12 +175,15 @@ describe("monitor tool", () => {
     await run(dori, {
       op: "start",
       name: "fresh",
-      argv: ["sh", "-c", "echo 'NUDGED a-lane 16 min'; exec sleep 30"],
+      argv: ["sh", "-c", "echo 'NUDGED a-lane 16 min silent, delivery delivered'; exec sleep 30"],
       filter: ".",
     });
     await until(() => dori.messages.length > 0);
     expect(dori.messages).toEqual([
-      { content: "[fresh] NUDGED a-lane 16 min", options: { triggerTurn: false, deliverAs: "nextTurn" } },
+      {
+        content: "[fresh] NUDGED a-lane 16 min silent, delivery delivered",
+        options: { triggerTurn: false, deliverAs: "nextTurn" },
+      },
     ]);
     await dori.emit("session_shutdown");
   });

@@ -12,11 +12,12 @@ export const BATCH_MS = 300;
 const BATCH_MAX_LINES = 100;
 /**
  * Notices that need no turn of their own: a loop that started (INBOUND_READY still wakes, for onboarding), a presence
- * heartbeat, and freshness outcomes that are already done (NUDGED, POSTED) or held for a later tick. Every other line,
- * including STALLED, JOURNAL-ERROR, WORKING-WHILE-PAUSED, BLOCKED, warnings, errors and an exited monitor, wakes.
+ * heartbeat, and freshness outcomes that are already done (a NUDGED whose delivery was confirmed, POSTED) or held for a
+ * later tick. Every other line wakes, including a nudge whose delivery failed or is unconfirmed (it is not retried),
+ * STALLED, JOURNAL-ERROR, WORKING-WHILE-PAUSED, BLOCKED, warnings, errors and an exited monitor.
  */
 const NOTICE =
-  /^(?:LANE_WATCH_READY|HOST_GUARD_READY|PRESENCE_READY|PRESENCE_ACK|NUDGED|POSTED|NO-REPORT|PENDING-REPORT|STALE-REPORT)(?:\s|$)/;
+  /^(?:(?:LANE_WATCH_READY|HOST_GUARD_READY|PRESENCE_READY|PRESENCE_ACK|POSTED|NO-REPORT|PENDING-REPORT|STALE-REPORT)(?:\s|$)|NUDGED\s.*, delivery delivered\s*$)/;
 
 type Running = {
   readonly name: string;
