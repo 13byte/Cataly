@@ -67,12 +67,26 @@ const tokens = (value: unknown): string[] =>
     : [];
 // A command's own words say what it runs, never which lane: the program, and for dori its command and, for a messenger
 // command, the platform. `dori inbound slack` is not lane "dori", "inbound" or "slack".
-const DORI_PROGRAMS = new Set(["dori", "omp-dori"]);
-const PLATFORM_COMMANDS = new Set(["send", "presence", "inbound", "thread", "react"]);
-const argumentWords = (argv: readonly string[]): readonly string[] =>
-  !DORI_PROGRAMS.has(basename(argv[0] ?? ""))
-    ? argv.slice(1)
-    : argv.slice(PLATFORM_COMMANDS.has(argv[1] ?? "") ? 3 : 2);
+// The dori program may run behind a wrapper (`bash -c "... exec dori inbound discord"`) or from source
+// (`bun .../scripts/src/cli.ts inbound slack`), so its words are found wherever it appears.
+const DORI_PROGRAMS: Record<string, true> = { dori: true, "omp-dori": true };
+const PLATFORM_COMMANDS: Record<string, true> = {
+  send: true,
+  presence: true,
+  inbound: true,
+  thread: true,
+  react: true,
+};
+const argumentWords = (argv: readonly string[]): readonly string[] => {
+  const own = new Set([0]);
+  argv.forEach((word, at) => {
+    const name = basename(word);
+    if (DORI_PROGRAMS[name] !== true && !(name === "cli.ts" && basename(argv[at - 1] ?? "") === "bun")) return;
+    own.add(at).add(at + 1);
+    if (PLATFORM_COMMANDS[argv[at + 1] ?? ""] === true) own.add(at + 2);
+  });
+  return argv.filter((_, at) => !own.has(at));
+};
 const tiedBy = (monitor: Monitor, lane: Lane): string | null => {
   const ref = sessionOf(lane);
   const panes = [lane.pane, ref?.id, ref ? formatRef(ref) : undefined].filter((id): id is string => !!id);

@@ -236,6 +236,8 @@ test("a closed lane named after a dori program, command or platform word does no
       { argv: ["dori", "inbound", "slack", "--loop", "1"], monitorId: "mon_INBOUND" },
       { argv: ["/home/user/.dori/bin/dori", "freshness", "--loop", "1"], monitorId: "mon_FRESHNESS" },
       { command: "dori inbound slack --loop 1", monitorId: "mon_COMMAND" },
+      { command: 'bash -c "cd /srv && exec dori inbound slack --loop 1"', monitorId: "mon_WRAPPED" },
+      { argv: ["bun", "/opt/dori/skills/dori-mode/scripts/src/cli.ts", "freshness"], monitorId: "mon_SOURCE" },
       { command: "tail -F /logs/out.log", monitorId: "mon_TAIL" },
       { argv: ["dori", "report-watch", "slack"], monitorId: "mon_LANE" },
     ]),
