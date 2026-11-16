@@ -14,7 +14,7 @@ The immutable `v0.1.0` and `v0.1.1` tags are superseded unpublished release atte
 | Session runtime | herdr, with its OMP integration | herdr 0.9.5 |
 | Messenger | Discord, using your own bot | Discord |
 
-Newer Bun or OMP versions meeting the minimum are not automatically tested combinations. macOS and hc have CI coverage and retained adapters, rather than a first-release live consumer support promise. Slack and Telegram remain source features. The maintainer source-container recipe is separate from the public release installer; it is not a published consumer image.
+Newer Bun or OMP versions meeting the minimum are not automatically tested combinations. The consumer release implementation also supports an isolated macOS arm64/hc profile when a release manifest explicitly declares it; this does not claim that such a release has been published or that a macOS rollout has been exercised. A manifest without capabilities is legacy Linux x64/herdr only. Unsupported host/runtime combinations and releases without the selected capability hold rather than activate. Slack and Telegram remain source features. The maintainer source-container recipe is separate from the public release installer; it is not a published consumer image.
 
 Linux x64 identifies the platform and architecture, not a tested matrix of Linux distributions. Qualify the specific distribution and toolchain against the release's actual clean-consumer evidence; other Linux distributions remain compatibility targets with unverified consumer behavior.
 
@@ -22,7 +22,7 @@ Preview support does not imply an independent external-user beta, exhaustive pro
 
 ## Prerequisites and trust
 
-Install git, Bun, native OMP and herdr yourself and put their binaries on `PATH`. The release installer checks prerequisites; it does not install or upgrade your toolchain. The download example also uses Bash, curl, tar and `sha256sum`. [Bun](https://bun.sh), [OMP](https://github.com/can1357/oh-my-pi) and [herdr](https://github.com/herdrdev/herdr) document their own installation and authentication.
+For the Linux preview, install git, Bun, native OMP and herdr yourself and put their binaries on `PATH`. The release installer checks prerequisites; it does not install or upgrade your toolchain. The download example also uses Bash, curl, tar and `sha256sum`. [Bun](https://bun.sh), [OMP](https://github.com/can1357/oh-my-pi) and [herdr](https://github.com/herdrdev/herdr) document their own installation and authentication.
 
 Consumers need neither the GitHub CLI nor GitHub write permission to install, check, update or roll back Dori. These operations do not call porting/review models or change global provider settings. Later AI sessions use your own configured provider and quota; Discord uses your own application/bot account and token. No maintainer credentials, private session history or model authentication ship in the assets.
 
@@ -60,9 +60,28 @@ Only run the installer after every checksum passes. Preserve the PATH export in 
 
 `--from DIRECTORY` is a supported local release-asset input for the bootstrap and for consumer `check`/`install`. Copy the four matching assets together. It is **not** a completely air-gapped first-install promise: git may still need anonymous network access to obtain the exact public omp-ulw commit. A previously provisioned, owned dependency is reused only after validation. There is no separate opaque dependency bundle format.
 
+## Isolated macOS arm64/hc consumer
+
+Use this procedure only with a verified release asset set whose source-bound `release-capabilities.json` declares `darwin`/`arm64`/`hc`. The manifest includes that file's SHA256 in its source inventory; capabilities are validated after archive verification, before installation. The `v0.1.2` Linux example above is not evidence that such assets exist. Install git, Bun, native OMP and hc on `PATH`, verify all four matching assets and their checksums using the release's instructions, then run its checked bootstrap:
+
+```sh
+bash ./install.sh --from "$download_dir" --home "$HOME/.omp-dori" --runtime hc
+"$HOME/.omp-dori/bin/dori" update status --home "$HOME/.omp-dori" --runtime hc
+```
+
+The bootstrap defaults to side mode and `~/.omp-dori`/`hc` on Darwin, and primary `~/.dori`/`herdr` on Linux. `--home` selects an absolute installation path; `--runtime hc|herdr` selects the runtime, and `DORI_RUNTIME` supplies its default when set. `DORI_INSTALL_MODE=side` selects a separate side home, with `OMP_DORI_HOME` overriding its default; bootstrap ignores inherited `DORI_HOME`. A side home must be outside `~/.dori`. Installed update commands select explicit `--home`, otherwise the loaded release's own home; an ordinary source CLI falls back to `DORI_HOME`, then `~/.dori`. Their runtime is explicit `--runtime`, otherwise the home config's runtime or the platform default.
+
+The isolated home contains `bin/dori`, `bin/dori-harness`, `bin/omp`, `bin/omp-dori` and `omp.yml`. Its renamed `omp-dori-mode` skill and discovery overlay are retained per release under `releases/consumer-discovery/<release-id>/`. The wrapper resolves the active source pointer before selecting both the extension and that release's skill, so a held or interrupted activation cannot mix their versions. Use local paths such as `"$HOME/.omp-dori/bin/omp-dori" omp --dori-role dori` or `"$HOME/.omp-dori/bin/omp-dori" hc ...`; the wrapper loads the local Dori extension with `--no-extensions`, with the pinned ULW imported for roles. It binds the selected config, clears inherited state/runtime overrides, and defaults state inside that home while preserving an explicitly configured state directory. Each side home has distinct hc and herdr namespaces; foreign terminal identities are cleared when switching namespaces, while terminals already in that home's namespace retain theirs. There are no global command, skill or extension links and no global discovery of this installation. Configure the local home and authenticate deliberately before launching; installation itself launches nothing.
+
+The manifest and installed-state schema remain compatible with older consumer CLIs, including after a primary Linux rollback. A release without the source-bound capability file is legacy Linux/herdr primary-only: its CLI predates home selection, so bootstrap, update and rollback refuse it in isolated homes.
+
+Explicit install, reinstall and rollback refresh unchanged owned launchers to the running Bun and the native OMP found on `PATH`. Owner-modified launchers remain held. If the old Bun path has disappeared and the installed command cannot start, run the verified release bootstrap using the new toolchain against the same consumer home; do not hand-edit wrappers or use the source installer to take it over.
+
+To migrate from source, first install into a separate fresh release home and preserve the source installation untouched. Stop the source Dori and its monitors before any deliberate, user-authorized copying of selected configuration, state or authentication, reconfiguration and launch in the new home. Review paths and runtime settings for the new home. Never overwrite a live source home or automatically copy secrets. Source-owned homes are held rather than taken over.
+
 ## Installation layout and preserved data
 
-The consumer installation uses:
+The primary Linux consumer installation uses:
 
 - `~/.dori/bin/dori`: the stable launcher.
 - `~/.dori/src`: the single active source pointer.
@@ -81,23 +100,32 @@ An existing real directory at `~/.dori/src`, an unmanaged pointer, or a conflict
 
 ## Your authentication and explicit startup
 
-Configure `~/.dori/config.json` for your own environment: `runtime: "herdr"`, `leadPane`, `laneWorkspace`, `defaultCwd`, a provider-qualified `defaultModel` available to your account, and messenger hooks. Authenticate OMP with your own provider account. Create/invite your own bot through the [Discord Developer Portal](https://discord.com/developers/applications), granting the chosen channel's View Channel/Read Message History permissions and the send/thread permissions you intend to use. Enable **Message Content Intent** on the Bot page for ordinary owner text. See the [setup reference](../skills/dori-mode/references/setup.md) and [Discord's content-intent requirements](https://docs.discord.com/developers/events/gateway#message-content-intent). Native Dori handles this supported bot text flow; Node, agent-messenger, a user-account token and an external watch script are not prerequisites.
+An existing consumer `config.json` must explicitly select `"runtime": "herdr"` on Linux x64 or `"runtime": "hc"` on macOS arm64. Bootstrap (including older released CLIs), check, install and rollback hold when that key is absent, even with `--runtime`; the installer preserves owner configuration rather than silently replacing runtime auto-detection. Add the matching key deliberately before retrying. A fresh installation creates it automatically. Ordinary source installations retain their existing runtime auto-detection.
 
-Keep your bot token alone in an owned regular `~/.dori/discord-token` file with mode `0600`. Load it as `DORI_DISCORD_TOKEN` only within the opted-in native monitor child environment. Do not put its value in chat, command arguments, source, monitor specifications, release assets or support reports, and do not export it into the parent OMP session.
+Configure the selected installation's `config.json` for your own environment: `runtime: "herdr"` for Linux primary or `"hc"` for macOS side, `leadPane` in its runtime namespace, `laneWorkspace`, `defaultCwd`, a provider-qualified `defaultModel` available to your account, and messenger hooks. An explicit update `--runtime` does not override a conflicting preserved config; correct that configuration deliberately before retrying. Authenticate OMP with your own provider account. Create/invite your own bot through the [Discord Developer Portal](https://discord.com/developers/applications), granting the chosen channel's View Channel/Read Message History permissions and the send/thread permissions you intend to use. Enable **Message Content Intent** on the Bot page for ordinary owner text. See the [setup reference](../skills/dori-mode/references/setup.md) and [Discord's content-intent requirements](https://docs.discord.com/developers/events/gateway#message-content-intent). Native Dori handles this supported bot text flow; Node, agent-messenger, a user-account token and an external watch script are not prerequisites.
 
-Install herdr's OMP integration explicitly:
+Choose the installation before preparing authentication or monitors. For Linux primary use `export DORI_HOME="$HOME/.dori"`; for the default macOS side home use `export DORI_HOME="$HOME/.omp-dori"` (substitute its actual path for a custom home). The side wrapper binds this variable to its own home. The recipes below require it and never fall back to another installation.
+
+Keep that installation's bot token alone in an owned regular `$DORI_HOME/discord-token` file with mode `0600`. Load it as `DORI_DISCORD_TOKEN` only within the opted-in native monitor child environment. Do not put its value in chat, command arguments, source, monitor specifications, release assets or support reports, and do not export it into the parent OMP session.
+
+For Linux primary, install herdr's OMP integration explicitly:
 
 ```sh
 herdr integration install omp
 ```
 
-Before starting OMP inside herdr, enable Discord's Developer Mode to copy your own user ID and the exact channel ID (or the thread's own ID). Keep these as positive decimal strings. They are non-secret and can be inherited by the native monitor children:
+Before starting OMP, enable Discord's Developer Mode to copy your own user ID and the exact channel ID (or the thread's own ID). Keep these as positive decimal strings. They are non-secret and can be inherited by the native monitor children:
 
 ```sh
 read -r -p "Your Discord user ID: " DORI_DISCORD_OWNER_ID
 read -r -p "Discord channel or thread ID: " DORI_DISCORD_CHANNEL_ID
 export DORI_DISCORD_OWNER_ID DORI_DISCORD_CHANNEL_ID
-omp --dori-role dori
+```
+
+For Linux primary, start `omp --dori-role dori` inside herdr with the selected `DORI_HOME` exported. For macOS side, start the lead in that home's separate hc namespace:
+
+```sh
+"$DORI_HOME/bin/omp-dori" hc run --name omp-dori-lead -- "$DORI_HOME/bin/omp-dori" omp --dori-role dori
 ```
 
 Then say "Dori mode" and complete the name, messenger destination and permitted-tool onboarding. This is an explicit AI session start and can use provider quota. The harness is an additional opt-in surface: `dori harness up` starts real lead/duty sessions and loops. Do not start a duplicate against the same runtime and state.
@@ -113,7 +141,7 @@ More channels are opt-in and leave a single `DORI_DISCORD_CHANNEL_ID` setup unch
 With the protected token file prepared above and the non-secret IDs inherited from the owning OMP session, explicitly start one native `monitor` using these `argv` values and filter `^INBOUND`:
 
 ```json
-["bash", "-c", "set -eu; DORI_DISCORD_TOKEN=\"$(cat \"$HOME/.dori/discord-token\")\"; export DORI_DISCORD_TOKEN; exec \"$HOME/.dori/bin/dori\" inbound discord"]
+["bash", "-c", "set -eu; base=\"${DORI_HOME:?Select this installation home}\"; DORI_DISCORD_TOKEN=\"$(cat \"$base/discord-token\")\"; export DORI_DISCORD_TOKEN; exec \"$base/bin/dori\" inbound discord"]
 ```
 
 The token value never appears in this argv or its monitor receipt: only the child shell reads and exports it. No private helper, external watch script, Node or agent-messenger is needed. A different token-file path is an explicit local choice; keep it owned, regular and mode `0600`.
@@ -147,7 +175,7 @@ Discord REST inbound polling and message sending alone do not keep a bot online.
 For an explicitly enabled presence monitor, use these native monitor `argv` values and filter `^PRESENCE_`. The protected token file is read inside the child shell; the monitor specification contains only its path, never the token:
 
 ```json
-["bash", "-c", "set -eu; DORI_DISCORD_TOKEN=\"$(cat \"$HOME/.dori/discord-token\")\"; export DORI_DISCORD_TOKEN; exec \"$HOME/.dori/bin/dori\" presence discord"]
+["bash", "-c", "set -eu; base=\"${DORI_HOME:?Select this installation home}\"; DORI_DISCORD_TOKEN=\"$(cat \"$base/discord-token\")\"; export DORI_DISCORD_TOKEN; exec \"$base/bin/dori\" presence discord"]
 ```
 
 Presence logs distinguish actual Gateway state:
@@ -161,11 +189,22 @@ An authentication, configuration or intent failure exits nonzero with a sanitize
 
 ## Updates and rollback
 
-The consumer API runs before normal Dori config loading:
+The consumer API runs before normal Dori config loading. Use the local `bin/dori` for an isolated home:
 
 ```text
-dori update <check|install|status|rollback> [--version TAG] [--from DIST]
+dori update <check|install|status|rollback> [--version TAG] [--from DIST] [--home PATH] [--runtime hc|herdr]
 ```
+
+For example, after obtaining a compatible asset set in `download_dir`:
+
+```sh
+"$HOME/.omp-dori/bin/dori" update check --from "$download_dir" --home "$HOME/.omp-dori" --runtime hc
+"$HOME/.omp-dori/bin/dori" update install --from "$download_dir" --home "$HOME/.omp-dori" --runtime hc
+"$HOME/.omp-dori/bin/dori" update status --home "$HOME/.omp-dori" --runtime hc
+"$HOME/.omp-dori/bin/dori" update rollback --home "$HOME/.omp-dori" --runtime hc
+```
+
+The operator explicitly checks and installs updates; inclusion of release management does not enable a background updater or publication policy. Neither installation nor update enables watchers, services, messenger intake or presence. A stopped activation remains stopped. Each retained release uses its own exact manifest-bound omp-ulw pin and cache across update and rollback.
 
 | Command | Behavior and options |
 |---|---|

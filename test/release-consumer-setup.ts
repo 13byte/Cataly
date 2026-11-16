@@ -89,10 +89,11 @@ function git(cwd: string, ...args: string[]): string {
   return result.stdout.toString().trim();
 }
 
-export function fixture() {
+export function fixture(side = false) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "dori-consumer-")));
   roots.push(root);
-  const paths = consumerPaths(join(root, "home"));
+  const home = join(root, "home");
+  const paths = consumerPaths(home, join(home, side ? ".omp-dori" : ".dori"));
   initialize(paths);
   const dependency = join(root, "public-dependency-fixture");
   mkdirSync(dependency, { mode: 0o700 });
@@ -117,9 +118,18 @@ export function fixture() {
     const contents: Record<string, string> = {
       "omp-ulw.lock": `${pin}\n`,
       "payload.txt": payload,
+      "skills/dori-mode/SKILL.md": `---\nname: dori-mode\ndescription: Dori commands\n---\nRelease skill\n${payload}`,
       "bin-entry.sh": "#!/bin/sh\nprintf 'release fixture\\n'\n",
       "skills/dori-mode/references/config.example.json": '{"runtime":"herdr","stateDir":"~/.dori/state"}\n',
     };
+    if (side)
+      contents["release-capabilities.json"] = JSON.stringify({
+        version: 1,
+        profiles: [
+          { platform: "linux", arch: "x64", runtime: "herdr" },
+          { platform: "darwin", arch: "arm64", runtime: "hc" },
+        ],
+      });
     for (const [path, bytes] of Object.entries(contents)) {
       mkdirSync(dirname(join(source, path)), { recursive: true, mode: 0o700 });
       writeFileSync(join(source, path), bytes, { mode: 0o600 });

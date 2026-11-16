@@ -25,6 +25,7 @@ import {
 import { assertNoLiveDori } from "./live.ts";
 import { validateReleaseManifest } from "./manifest.ts";
 import { assertLock, provisionDependency } from "./provision.ts";
+import { installIsolatedReferences, preflightReferences } from "./references.ts";
 import { activateRelease, type InstalledState, manifestPath, releaseId, releasePath, verifyRelease } from "./state.ts";
 
 export function preflightInstallation(paths: ConsumerPaths): void {
@@ -36,6 +37,7 @@ export function preflightInstallation(paths: ConsumerPaths): void {
       throw new Error(`Unmanaged installation link: ${path}; preserve it and move it aside before installing`);
   }
   regularFile(paths.config);
+  preflightReferences(paths);
   assertNoLiveDori(paths);
 }
 
@@ -53,8 +55,14 @@ function installReferences(paths: ConsumerPaths, source: string, dependency: str
   if (!regularFile(paths.config)) {
     const example = JSON.parse(readFileSync(join(source, "skills/dori-mode/references/config.example.json"), "utf8"));
     example.ompUlwPath = dependency;
+    example.runtime = process.platform === "darwin" ? "hc" : "herdr";
+    if (paths.dori !== join(paths.home, ".dori")) {
+      example.stateDir = join(paths.dori, "state");
+      example.agentCommand = [join(paths.dori, "bin/omp"), "--dori-role", "lane", "--model", "{model}", "{prompt}"];
+    }
     writeFileSync(paths.config, `${JSON.stringify(example, null, 2)}\n`, { flag: "wx", mode: 0o600 });
   }
+  installIsolatedReferences(paths, source);
   for (const [path, target] of paths.links) {
     realDirectory(dirname(path), true);
     owned(dirname(path));

@@ -1,5 +1,5 @@
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync } from "node:fs";
+import { delimiter, dirname, join } from "node:path";
 import type { ConsumerPaths } from "./files.ts";
 import { owned, readJson, realDirectory, regularFile, saveJson } from "./files.ts";
 import type { ReleaseManifest } from "./types.ts";
@@ -13,14 +13,37 @@ function atLeast(observed: string, minimum: readonly number[]): boolean {
   return true;
 }
 
-export function prerequisites(): void {
-  if (process.platform !== "linux" || process.arch !== "x64")
-    throw new Error("This release supports Linux x64 with herdr and Discord");
+export function nativeOmp(): string | undefined {
+  for (const path of (process.env["PATH"] ?? "").split(delimiter)) {
+    const candidate = Bun.which("omp", { PATH: path });
+    if (!candidate) continue;
+    const base = dirname(dirname(realpathSync(candidate)));
+    if (
+      lstatSync(join(base, ".omp-dori"), { throwIfNoEntry: false })?.isFile() ||
+      lstatSync(join(base, "releases/consumer-owner.json"), { throwIfNoEntry: false })
+    )
+      continue;
+    return candidate;
+  }
+  return undefined;
+}
+
+export function prerequisites(runtime: string, tools = true): void {
+  if (
+    !(
+      (process.platform === "linux" && process.arch === "x64" && runtime === "herdr") ||
+      (process.platform === "darwin" && process.arch === "arm64" && runtime === "hc")
+    )
+  )
+    throw new Error(`Unsupported release host/runtime: ${process.platform}/${process.arch}/${runtime}`);
+  if (!tools) return;
   if (!atLeast(Bun.version, [1, 4, 4])) throw new Error("Bun 1.4.4+ is required; install it before OMP-Dori");
-  for (const name of ["git", "omp", "herdr"]) {
+  for (const name of ["git", runtime]) {
     if (!Bun.which(name)) throw new Error(`${name} is required; install it before OMP-Dori`);
   }
-  const omp = Bun.spawnSync(["omp", "--version"], { stdout: "pipe", stderr: "pipe", timeout: 10_000 });
+  const executable = nativeOmp();
+  if (!executable) throw new Error("Native omp is required outside Dori wrappers");
+  const omp = Bun.spawnSync([executable, "--version"], { stdout: "pipe", stderr: "pipe", timeout: 10_000 });
   const version = omp.stdout.toString().match(/\d+\.\d+\.\d+(?:[-+][^\s]+)?/)?.[0] ?? "";
   if (omp.exitCode !== 0 || !atLeast(version, [18, 18, 8])) throw new Error("OMP 18.18.8+ is required");
 }
