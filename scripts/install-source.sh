@@ -32,9 +32,6 @@ omp_bin="${DORI_OMP:-}"
 if [ -n "$omp_bin" ]; then
   omp_bin="$(command -v "$omp_bin")" || fail "DORI_OMP does not name an executable"
   omp_bin="$(absolute "$omp_bin")"
-  omp_version="$("$omp_bin" --version)"
-  [[ "$omp_version" =~ ([0-9]+(\.[0-9]+){2}) ]] || fail "could not read DORI_OMP version"
-  at_least "$min_omp" "${BASH_REMATCH[1]}" || fail "DORI_OMP must be $min_omp or newer"
 fi
 
 # Every install of this repository leaves a marker in its home. Installs that predate it are known by the
@@ -120,6 +117,24 @@ ulw="$(absolute "${OMP_ULW_SRC:-$base/omp-ulw}")"
 skills="$(absolute "${SKILLS_DIR:-$HOME/.agents/skills}")"
 extensions="$(absolute "${OMP_EXTENSIONS_DIR:-$HOME/.omp/agent/extensions}")"
 bin_dir="$(absolute "${OMP_DORI_BIN_DIR:-${BUN_INSTALL:-$HOME/.bun}/bin}")"
+
+# Resolve the install mode before checking every wrapper it writes. File identity follows symlinks,
+# including aliased parents, and catches hard links without trusting an existing wrapper's source.
+check_omp_wrapper_collision() {
+  local name
+  for name in omp dori omp-dori; do
+    if [ "$mode" = primary ] && [ "$name" != omp ]; then continue; fi
+    if [ "$omp_bin" -ef "$base/bin/$name" ]; then
+      fail "Selected OMP executable $omp_bin aliases generated wrapper $base/bin/$name; choose an independent executable with DORI_OMP."
+    fi
+  done
+}
+if [ -n "$omp_bin" ]; then
+  check_omp_wrapper_collision
+  omp_version="$("$omp_bin" --version)"
+  [[ "$omp_version" =~ ([0-9]+(\.[0-9]+){2}) ]] || fail "could not read DORI_OMP version"
+  at_least "$min_omp" "${BASH_REMATCH[1]}" || fail "DORI_OMP must be $min_omp or newer"
+fi
 
 # Checkouts of every supported revision have these files; older revisions have no package.json.
 is_ulw() { [ -f "$1/index.ts" ] && [ -f "$1/presets.ts" ]; }
@@ -220,6 +235,7 @@ fi
 if [ -z "$omp_bin" ]; then
   native="$(bun "$src/scripts/source-dependencies.ts" native "$src" "$HOME")"
   omp_bin="$native/bin/omp"
+  check_omp_wrapper_collision
 fi
 
 if [ "$mode" = primary ] && { [ -n "$other" ] ||

@@ -10,6 +10,10 @@ Lead and duty start OMP with role `dori`; lanes and the built-in reviewer use ro
 
 New terminal sessions receive the selected `HOME`, `DORI_CONFIG`, `DORI_HOME`, `DORI_STATE_DIR`, `DORI_AGENT_ARGV`, `DORI_OMP_ULW_PATH` and `OMP_ULW_SCOPE_FILE` explicitly across the terminal server boundary, along with configured `DORI_HERDR_SESSION` and `HC_SESSION`. Relative paths become absolute without collapsing symlinks or `..`; empty scope values remain unchanged. Fresh sessions clear `DORI_MANAGED_STARTUP` and obtain their own pane identity from the server. Initial launches, reviewer children, migration and native resume keep this context without forwarding arbitrary parent variables.
 
+Required managed ULW imports may select a dependency directory or its `index.ts` entry. Import and factory failures in either form cancel role requests at both the session and provider boundaries. Ordinary sessions and explicitly configured external overlays retain their existing behavior.
+
+Source installation holds when its selected native executable aliases a wrapper that the chosen install mode will overwrite. File identity checks cover direct paths, symlinks, aliased parents and hard links without reading wrapper contents. Explicit overrides are checked before their version probe or installation changes; a bundled native selection is checked as soon as it is available.
+
 ## The interface
 
 `SessionRuntime` in `src/runtime/types.ts` is the whole contract. Each runtime has one adapter, `src/runtime/herdr/` and `src/runtime/hc/`, and both run their CLI through one injectable process runner (`src/runtime/exec.ts`), so tests replace the binary with a recorder.
