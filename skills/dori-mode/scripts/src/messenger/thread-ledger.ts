@@ -1,54 +1,135 @@
-import { mkdirSync, renameSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { dirname } from "node:path";
+
+import { alive, inspect, LOCK_STALE_MS, type LockOwner, ownerOf } from "../checkpoint-lock.ts";
+import { MessengerError } from "./http.ts";
 
 export const tsAfter = (a: string, b: string): boolean => Number(a) > Number(b);
 
 export type LedgerThread = { readonly channel: string; readonly rootTs: string; readonly seenTs: string };
+type Threads = Map<string, LedgerThread>;
 
+const LOCK_RETRY_MS = 20;
+const LOCK_WAIT_MS = 10_000;
+const keyOf = (channel: string, rootTs: string): string => `${channel}:${rootTs}`;
+
+/**
+ * The Slack threads the Dori posted in, shared by every `dori send slack` and the long-lived receiver. Nothing is
+ * cached: a read takes the file as it is now, and a change re-reads it under a writer lock, merges, and replaces it
+ * atomically, so no process writes an old snapshot over another's threads and a seen position only moves forward.
+ */
 export class ThreadLedger {
-  private threads = new Map<string, LedgerThread>();
-  private loaded = false;
+  constructor(
+    private readonly file: string,
+    private readonly wait: (ms: number) => Promise<void> = (ms) => Bun.sleep(ms),
+  ) {}
 
-  constructor(private readonly file: string) {}
-
-  private key(channel: string, rootTs: string): string {
-    return `${channel}:${rootTs}`;
+  private read(): Threads {
+    const threads: Threads = new Map();
+    let raw: string;
+    try {
+      raw = readFileSync(this.file, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return threads;
+      throw error;
+    }
+    for (const t of JSON.parse(raw) as LedgerThread[]) threads.set(keyOf(t.channel, t.rootTs), t);
+    return threads;
   }
 
-  async load(): Promise<void> {
-    if (this.loaded) return;
-    const f = Bun.file(this.file);
-    if (await f.exists())
-      for (const t of (await f.json()) as LedgerThread[]) this.threads.set(this.key(t.channel, t.rootTs), t);
-    this.loaded = true;
-  }
-
-  private async save(): Promise<void> {
+  /**
+   * Take the writer lock and return its release. A live writer holds it for milliseconds and is waited for; a lock
+   * whose pid is dead on this host, or LOCK_STALE_MS old, is moved aside and removed only if it is still the one judged
+   * stale. A lock with no owner record yet is aged by its mtime.
+   */
+  private async lock(): Promise<() => void> {
     mkdirSync(dirname(this.file), { recursive: true });
-    const tmp = `${this.file}.${process.pid}.tmp`;
-    await Bun.write(tmp, JSON.stringify([...this.threads.values()], null, 1));
-    renameSync(tmp, this.file);
+    const lock = `${this.file}.lock`;
+    const record = JSON.stringify({
+      pid: process.pid,
+      host: hostname(),
+      at: new Date().toISOString(),
+      nonce: randomUUID(),
+    } satisfies LockOwner);
+    for (let waited = 0; ; ) {
+      try {
+        writeFileSync(lock, record, { flag: "wx", mode: 0o600 });
+        // Only this live writer could have made the lock stale, so it is still ours here.
+        return () => {
+          if (inspect(lock)?.raw === record) rmSync(lock, { force: true });
+        };
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+      const seen = inspect(lock);
+      if (!seen) continue;
+      const owner = ownerOf(seen.raw);
+      const at = owner ? Date.parse(owner.at) : NaN;
+      const since = Number.isFinite(at) ? at : seen.mtimeMs;
+      if ((owner?.host === hostname() && !alive(owner.pid)) || Date.now() - since >= LOCK_STALE_MS) {
+        const moved = `${lock}.${process.pid}.${randomUUID()}.stale`;
+        try {
+          renameSync(lock, moved);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+          throw error;
+        }
+        const taken = inspect(moved);
+        // A newer writer's lock: put it back without replacing another one, and never delete it.
+        if (taken?.ino !== seen.ino || taken.raw !== seen.raw)
+          try {
+            linkSync(moved, lock);
+          } catch {
+            throw new MessengerError(
+              `slack thread ledger lock of another writer could not be put back from ${moved}`,
+              0,
+            );
+          }
+        rmSync(moved, { force: true });
+        continue;
+      }
+      if (waited >= LOCK_WAIT_MS)
+        throw new MessengerError(`slack thread ledger ${lock} stayed locked by pid ${owner?.pid ?? "unknown"}`, 0);
+      await this.wait(LOCK_RETRY_MS);
+      waited += LOCK_RETRY_MS;
+    }
+  }
+
+  /** Apply `change` to the latest threads on disk; a change that returns false writes nothing. */
+  private async update(change: (threads: Threads) => boolean): Promise<void> {
+    const release = await this.lock();
+    try {
+      const threads = this.read();
+      if (!change(threads)) return;
+      const tmp = `${this.file}.${process.pid}.tmp`;
+      writeFileSync(tmp, JSON.stringify([...threads.values()], null, 1));
+      renameSync(tmp, this.file);
+    } finally {
+      release();
+    }
   }
 
   async record(channel: string, rootTs: string, postedTs: string): Promise<void> {
-    await this.load();
-    const k = this.key(channel, rootTs);
-    const prev = this.threads.get(k);
-    const seenTs = prev && tsAfter(prev.seenTs, postedTs) ? prev.seenTs : postedTs;
-    this.threads.set(k, { channel, rootTs, seenTs });
-    await this.save();
+    await this.update((threads) => {
+      const prev = threads.get(keyOf(channel, rootTs));
+      const seenTs = prev && tsAfter(prev.seenTs, postedTs) ? prev.seenTs : postedTs;
+      threads.set(keyOf(channel, rootTs), { channel, rootTs, seenTs });
+      return true;
+    });
   }
 
   async markSeen(channel: string, rootTs: string, ts: string): Promise<void> {
-    await this.load();
-    const prev = this.threads.get(this.key(channel, rootTs));
-    if (!prev || !tsAfter(ts, prev.seenTs)) return;
-    this.threads.set(this.key(channel, rootTs), { ...prev, seenTs: ts });
-    await this.save();
+    await this.update((threads) => {
+      const prev = threads.get(keyOf(channel, rootTs));
+      if (!prev || !tsAfter(ts, prev.seenTs)) return false;
+      threads.set(keyOf(channel, rootTs), { ...prev, seenTs: ts });
+      return true;
+    });
   }
 
   async list(): Promise<LedgerThread[]> {
-    await this.load();
-    return [...this.threads.values()];
+    return [...this.read().values()];
   }
 }
