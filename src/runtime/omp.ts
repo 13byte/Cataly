@@ -71,59 +71,74 @@ const ENV_LONG: Record<string, "flag" | "operand"> = {
   "list-signal-handling": "flag",
   unset: "operand",
   chdir: "operand",
+  argv0: "operand",
 };
 
-/** The command `env [OPTION]... [-] [NAME=VALUE]... COMMAND` runs (GNU and BSD options), or undefined if unparsed. */
-function envCommand(argv: readonly string[]): readonly string[] | undefined {
-  let at = 0;
+/** GNU getopt_long accepts any unambiguous prefix of a long option name. */
+const envLong = (name: string): "flag" | "operand" | undefined => {
+  if (Object.hasOwn(ENV_LONG, name)) return ENV_LONG[name];
+  const matches = Object.keys(ENV_LONG).filter((option) => name !== "" && option.startsWith(name));
+  return matches.length === 1 ? ENV_LONG[matches[0]!] : undefined;
+};
+
+/**
+ * The index where `env [OPTION]... [-] [NAME=VALUE]... COMMAND` starts COMMAND, or undefined when an option is not one
+ * of the GNU/BSD options that only change the environment or directory. `-S`/`--split-string` re-parses a string with
+ * its own quoting, escapes and comments, so it is not decoded here.
+ */
+function envCommandAt(argv: readonly string[], at: number): number | undefined {
   for (;;) {
     const word = argv[at];
     if (word === undefined || word === "-" || !word.startsWith("-")) break;
     at++;
     if (word === "--") break;
     if (word.startsWith("--")) {
-      const [name = "", ...value] = word.slice(2).split("=");
-      if (name === "split-string") return splitString(value.length > 0 ? value.join("=") : argv[at++], argv.slice(at));
-      const kind = Object.hasOwn(ENV_LONG, name) ? ENV_LONG[name] : undefined;
+      const equals = word.indexOf("=");
+      const kind = envLong(word.slice(2, equals < 0 ? undefined : equals));
       if (kind === undefined) return undefined;
-      if (kind === "operand" && value.length === 0) at++;
+      if (kind === "operand" && equals < 0) at++;
       continue;
     }
     for (let i = 1; i < word.length; i++) {
       const flag = word[i];
       if (flag === "i" || flag === "0" || flag === "v") continue;
-      const operand = i + 1 < word.length ? word.slice(i + 1) : undefined;
-      if (flag === "S") return splitString(operand ?? argv[at++], argv.slice(at));
-      if (flag !== "u" && flag !== "C" && flag !== "P") return undefined;
-      if (operand === undefined) at++;
+      if (flag !== "u" && flag !== "C" && flag !== "P" && flag !== "a") return undefined;
+      if (i + 1 === word.length) at++;
       break;
     }
   }
   if (argv[at] === "-") at++;
-  while (ASSIGNMENT.test(argv[at] ?? "")) at++;
-  return at > argv.length ? undefined : argv.slice(at);
+  // env takes every word with a `=` as an assignment, not only shell-style names.
+  while (argv[at]?.includes("=")) at++;
+  return at < argv.length ? at : undefined;
 }
 
-// `env -S` splits its operand on whitespace into further env arguments; quotes and escapes in it are not decoded.
-const splitString = (operand: string | undefined, rest: readonly string[]): readonly string[] | undefined =>
-  operand === undefined || /["'\\]/.test(operand)
-    ? undefined
-    : envCommand([...operand.split(/\s+/).filter(Boolean), ...rest]);
+/**
+ * What an exact argv runs, after leading `NAME=value` assignments and the `env` utility with its options: the command
+ * itself (that prefix removed), as `omp` when it starts OMP and `other` otherwise, or `unparsed` for an `env` prefix
+ * whose options are not understood (such as `-S`), which must not be taken for either.
+ */
+export type OmpArgv =
+  | { readonly kind: "omp" | "other"; readonly command: readonly string[] }
+  | { readonly kind: "unparsed" };
 
-/** An exact argv that starts OMP, after leading `NAME=value` assignments and the `env` utility with its options. */
-export function isOmpArgv(argv: readonly string[]): boolean {
+export function classifyOmpArgv(argv: readonly string[]): OmpArgv {
   let at = 0;
   while (ASSIGNMENT.test(argv[at] ?? "")) at++;
-  const command = argv[at]?.split("/").at(-1) === "env" ? envCommand(argv.slice(at + 1)) : argv.slice(at);
-  if (command === undefined) return false;
-  if (sourceOmpArgv(command)) return true;
+  const start = argv[at]?.split("/").at(-1) === "env" ? envCommandAt(argv, at + 1) : at;
+  if (start === undefined) return { kind: "unparsed" };
+  const command = argv.slice(start);
+  if (sourceOmpArgv(command)) return { kind: "omp", command };
   const name = command[0]?.split("/").at(-1);
-  if (name === "omp") return true;
-  if (name !== "bun" && name !== "node") return false;
+  if (name === "omp") return { kind: "omp", command };
+  if (name !== "bun" && name !== "node") return { kind: "other", command };
   let script = 1;
   while (command[script]?.startsWith("-")) script++;
-  return OMP_EXECUTABLE.test(command[script] ?? "");
+  return { kind: OMP_EXECUTABLE.test(command[script] ?? "") ? "omp" : "other", command };
 }
+
+/** An exact argv that starts OMP (see classifyOmpArgv); an unparsed `env` prefix is not one. */
+export const isOmpArgv = (argv: readonly string[]): boolean => classifyOmpArgv(argv).kind === "omp";
 
 const ompProcess = (p: ForegroundProcess): boolean =>
   p.name.split("/").at(-1) === "omp" ||
