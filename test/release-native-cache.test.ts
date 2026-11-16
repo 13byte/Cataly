@@ -1,5 +1,14 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pruneNativeCache } from "../src/release/native-cache.ts";
@@ -68,6 +77,47 @@ test("only an identity no source, reference or process names is pruned, and only
     expect(existsSync(superseded.receipt.directory)).toBe(false);
     expect(existsSync(leftover)).toBe(false);
     expect(existsSync(`${superseded.receipt.directory}.pruning`)).toBe(false);
+  } finally {
+    holder.stdin.end();
+    await holder.exited;
+  }
+});
+
+test("a link into the cache, a used detached copy and a partial receipt keep their identities", async () => {
+  const c = cache();
+  const linked = c.native("linked");
+  const chained = c.native("chained");
+  const partial = c.native("partial");
+  const superseded = c.native("superseded");
+  for (const f of [linked, chained, partial, superseded]) rmSync(f.source, { recursive: true });
+  const bin = join(c.root, "dori/bin");
+  mkdirSync(bin, { recursive: true });
+  symlinkSync(linked.receipt.omp, join(bin, "omp"));
+  // A chain whose first link names nothing in the cache still resolves into it.
+  symlinkSync(chained.receipt.omp, join(c.root, "hop"));
+  symlinkSync(join(c.root, "hop"), join(bin, "omp-side"));
+  const { identity, source } = partial.receipt;
+  writeFileSync(join(partial.receipt.directory, "receipt.json"), JSON.stringify({ identity, source }));
+  // A process still runs from the copy an interrupted prune detached; the live entry beside it is unused.
+  const detached = `${superseded.receipt.directory}.pruning`;
+  mkdirSync(detached, { mode: 0o700 });
+  const holder = Bun.spawn(["/bin/sh", "-c", "echo ready; read line"], {
+    cwd: detached,
+    stdin: "pipe",
+    stdout: "pipe",
+  });
+  try {
+    expect(new TextDecoder().decode((await holder.stdout.getReader().read()).value)).toBe("ready\n");
+    const applied = pruneNativeCache(c.home, [], [join(c.root, "dori")], true);
+    const reasons = Object.fromEntries(applied.entries.map((entry) => [entry.directory, entry.protectedBy]));
+    expect(reasons[linked.receipt.directory]).toEqual([`link ${join(bin, "omp")}`]);
+    expect(reasons[chained.receipt.directory]).toEqual([`link ${join(bin, "omp-side")}`]);
+    expect(reasons[partial.receipt.directory]).toEqual(["unrecognized receipt"]);
+    expect(reasons[detached]).toEqual([`process ${holder.pid}`]);
+    expect(reasons[superseded.receipt.directory]).toEqual([]);
+    expect(applied.removed).toEqual([]);
+    for (const kept of [linked, chained, partial, superseded]) expect(existsSync(kept.receipt.directory)).toBe(true);
+    expect(existsSync(detached)).toBe(true);
   } finally {
     holder.stdin.end();
     await holder.exited;

@@ -1,6 +1,7 @@
-import { lstatSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { owned, readJson, realDirectory } from "./files.ts";
+import type { NativeReceipt } from "./native.ts";
 import { readSourceBundle } from "./source-bundle.ts";
 
 export type NativeCacheEntry = {
@@ -15,17 +16,18 @@ export type NativeCacheEntry = {
 const ENTRY = new RegExp(`^native-${process.platform}-${process.arch}-([a-f0-9]{64})(\\.pruning)?$`);
 const MAX_REFERENCE = 1024 * 1024;
 
-/** Walk without following links; `visit` sees every directory and every small regular file. */
-function walk(root: string, visit: (path: string, file: boolean) => void): void {
+/** Walk without following links; `visit` sees every directory, every symbolic link and every small regular file. */
+function walk(root: string, visit: (path: string, kind: "directory" | "file" | "link") => void): void {
   const stack = [root];
   while (stack.length) {
     const path = stack.pop()!;
     const stat = lstatSync(path, { throwIfNoEntry: false });
-    if (!stat || stat.isSymbolicLink()) continue;
-    if (stat.isFile()) {
-      if (stat.size <= MAX_REFERENCE) visit(path, true);
+    if (!stat) continue;
+    if (stat.isSymbolicLink()) visit(path, "link");
+    else if (stat.isFile()) {
+      if (stat.size <= MAX_REFERENCE) visit(path, "file");
     } else if (stat.isDirectory()) {
-      visit(path, false);
+      visit(path, "directory");
       for (const name of readdirSync(path))
         if (name !== ".git" && name !== "node_modules") stack.push(join(path, name));
     }
@@ -69,9 +71,17 @@ export function reportNativeCache(
     .map((name) => ({ name, match: ENTRY.exec(name) }))
     .filter((entry) => entry.match)
     .map(({ name, match }) => ({ directory: join(cache, name), identity: match![1]!, detached: !!match![2] }));
-  const identities = found.map((entry) => entry.identity);
+  // A live entry is keyed by its identity; a detached one by its own `<identity>.pruning` name, which only a process
+  // or reference still using that very directory names.
+  const keyOf = (entry: { readonly identity: string; readonly detached: boolean }) =>
+    entry.detached ? `${entry.identity}.pruning` : entry.identity;
+  const keys = found.map(keyOf);
   const reasons = new Map<string, string[]>();
-  const add = (identity: string, reason: string) => reasons.set(identity, [...(reasons.get(identity) ?? []), reason]);
+  const add = (key: string, reason: string) => reasons.set(key, [...(reasons.get(key) ?? []), reason]);
+  const names = (text: string, reason: string) => {
+    for (const key of keys)
+      if ((key.endsWith(".pruning") ? text : text.replaceAll(`${key}.pruning`, "")).includes(key)) add(key, reason);
+  };
   const bind = (source: string, reason: string) => {
     try {
       add(readSourceBundle(source, true).identity, reason);
@@ -81,13 +91,27 @@ export function reportNativeCache(
   };
   for (const source of sources) bind(source, `source ${source}`);
   for (const root of roots)
-    walk(root, (path, file) => {
-      if (!file) {
+    walk(root, (path, kind) => {
+      if (kind === "directory") {
         if (lstatSync(join(path, "native-omp.lock"), { throwIfNoEntry: false })) bind(path, `source ${path}`);
         return;
       }
-      const text = readFileSync(path, "latin1");
-      for (const identity of identities) if (text.includes(identity)) add(identity, `reference ${path}`);
+      if (kind === "file") return names(readFileSync(path, "latin1"), `reference ${path}`);
+      // A link into the cache (an `omp` on PATH, a release's toolchain link) keeps its target, through link chains too.
+      let target: string;
+      try {
+        target = readlinkSync(path);
+      } catch {
+        for (const key of keys) add(key, `unreadable link ${path}`);
+        return;
+      }
+      let resolved = "";
+      try {
+        resolved = realpathSync(path);
+      } catch {
+        // A dangling link names only its own target text.
+      }
+      names(`${target}\0${resolved}`, `link ${path}`);
     });
   const ps = Bun.spawnSync(["ps", "-A", "-ww", "-o", "pid=,args="], { stdout: "pipe", stderr: "pipe" });
   if (ps.exitCode !== 0) throw new Error("Process table is unavailable; native cache use cannot be ruled out");
@@ -99,19 +123,20 @@ export function reportNativeCache(
     } catch {
       // Another user's or an exited process exposes no working directory; its argv was still checked.
     }
-    for (const identity of identities)
-      if (line.includes(identity) || cwd.includes(identity)) add(identity, `process ${pid}`);
+    names(`${line}\0${cwd}`, `process ${pid}`);
   }
-  return found.map(({ directory, identity, detached }) => {
-    // A directory detached by an interrupted prune has a name no launcher or receipt resolves.
-    if (detached) return { directory, identity, bytes: exclusiveBytes(directory), protectedBy: [] };
-    const protectedBy = [...(reasons.get(identity) ?? [])];
+  return found.map((entry) => {
+    const { directory, identity, detached } = entry;
+    const protectedBy = [...(reasons.get(keyOf(entry)) ?? [])];
+    // A directory detached by an interrupted prune has a name no launcher or receipt resolves: only a process or
+    // reference that still names that very directory keeps it.
+    if (detached) return { directory, identity, bytes: exclusiveBytes(directory), protectedBy };
     try {
       realDirectory(directory);
       owned(directory);
-      const receipt = readJson(join(directory, "receipt.json")) as { identity?: unknown; source?: unknown };
-      if (receipt.identity !== identity) protectedBy.push("unrecognized receipt");
-      else if (typeof receipt.source === "string") {
+      const receipt = readJson(join(directory, "receipt.json"));
+      if (!recognized(receipt, identity, directory)) protectedBy.push("unrecognized receipt");
+      else {
         try {
           if (readSourceBundle(receipt.source, true).identity === identity) protectedBy.push("receipt source");
         } catch {
@@ -125,6 +150,30 @@ export function reportNativeCache(
   });
 }
 
+// The receipt contract `prepareNative` writes (src/release/native.ts NativeReceipt): any other shape is kept unread.
+const RECEIPT_TEXT = [
+  "source",
+  "directory",
+  "omp",
+  "ompHash",
+  "entry",
+  "bun",
+  "bunHash",
+  "addonLockHash",
+  "addon",
+  "addonHash",
+];
+function recognized(receipt: unknown, identity: string, directory: string): receipt is NativeReceipt {
+  if (typeof receipt !== "object" || receipt === null) return false;
+  const fields = receipt as Record<string, unknown>;
+  return (
+    fields["version"] === 1 &&
+    fields["identity"] === identity &&
+    fields["directory"] === directory &&
+    RECEIPT_TEXT.every((name) => typeof fields[name] === "string" && fields[name] !== "")
+  );
+}
+
 /** Detach then remove only the unprotected entries of a fresh report. Without `apply` nothing changes. */
 export function pruneNativeCache(
   home: string,
@@ -135,12 +184,19 @@ export function pruneNativeCache(
   const entries = reportNativeCache(home, sources, roots);
   const removed: string[] = [];
   if (!apply) return { entries, removed };
+  const reported = new Map(entries.map((entry) => [entry.directory, entry]));
   for (const entry of entries) {
-    if (entry.protectedBy.length) continue;
-    // Detach first so a launcher never sees a half-removed identity; an older detached copy is already unreachable.
+    if (entry.protectedBy.length || removed.includes(entry.directory)) continue;
+    // Detach first so a launcher never sees a half-removed identity. An older detached copy is replaced only when it
+    // is itself unprotected; a copy something still uses keeps this identity in place until a later prune.
     const detached = entry.directory.endsWith(".pruning") ? entry.directory : `${entry.directory}.pruning`;
     if (detached !== entry.directory) {
-      rmSync(detached, { recursive: true, force: true });
+      const older = reported.get(detached);
+      if (older?.protectedBy.length) continue;
+      if (older) {
+        rmSync(detached, { recursive: true, force: true });
+        removed.push(detached);
+      }
       renameSync(entry.directory, detached);
     }
     rmSync(detached, { recursive: true, force: true });
