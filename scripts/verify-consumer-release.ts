@@ -118,7 +118,7 @@ try {
       const bytes = `${JSON.stringify({ ...b, tag: "invalid-negative-test-tag" }, null, 2)}\n`;
       writeFileSync(manifestFile(bad), bytes);
       const sums = readFileSync(join(bad, "SHA256SUMS"), "utf8").replace(
-        /^[a-f0-9]{64}  release-manifest\.json$/m,
+        /^[a-f0-9]{64} {2}release-manifest\.json$/m,
         `${digest(bytes)}  release-manifest.json`,
       );
       writeFileSync(join(bad, "SHA256SUMS"), sums);
@@ -191,6 +191,14 @@ try {
   });
   await run("update-b", [cli, "update", "install", "--from", distB, "--version", b.tag]);
   await inspect(distB, distA);
+  await run("adopted-b-harness", [
+    bun,
+    join(import.meta.dir, "consumer-smoke-harness.ts"),
+    "--side",
+    side,
+    "--expected-source",
+    join(side, "releases/releases", `${b.commit}-${b.source.hash.slice(0, 16)}`),
+  ]);
   await run("rollback-a", [cli, "update", "rollback", "--version", a.tag]);
   await inspect(distA, distB);
   assert.equal(snapshot(join(side, "bin")), wrappersA, "Rollback did not restore exact A wrapper bytes/modes");
