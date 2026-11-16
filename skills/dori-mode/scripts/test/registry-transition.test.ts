@@ -49,6 +49,7 @@ test("a close whose registration disappears during signal I/O touches no thread 
   const result = await closeLane(deps, lane, "late close");
   expect(result.closed).toBe(false);
   expect(result.lines.at(-1)).toStartWith("LANE_CHANGED discarded-lane");
+  expect(result.lines.at(-1)).toContain("(now not registered, was working)");
   expect(await base.registry.read(lane.key)).toBeNull();
   expect(world.calls.some((argv) => argv[0] === "notify" || argv[2] === "close")).toBe(false);
 });

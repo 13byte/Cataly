@@ -139,3 +139,25 @@ test.each([0o600, 0o640])("staging preserves an existing brief's %s permissions 
     process.umask(before);
   }
 });
+
+test.each([false, true])("a read-only brief or linked template refuses replacement (%s)", async (linked) => {
+  const target = join(briefs, linked ? "template.md" : "lane.md");
+  const brief = join(briefs, "lane.md");
+  writeFileSync(target, "protected instructions");
+  chmodSync(target, 0o444);
+  if (linked) symlinkSync(target, brief);
+  try {
+    const deps = withTab(depsFor(world, fakeClock(T0), state.dir));
+    await expect(launchLane(deps, { key: "readonly-lane", title: "t", brief, done: DONE })).rejects.toThrow(
+      "brief not writable",
+    );
+    expect(await deps.registry.read("readonly-lane")).toBeNull();
+    expect(world.calls.some((argv) => argv[0] === "herdr" && argv[1] === "tab")).toBe(false);
+    expect(readFileSync(target, "utf8")).toBe("protected instructions");
+    expect(statSync(target).mode & 0o777).toBe(0o444);
+    expect(lstatSync(brief).isSymbolicLink()).toBe(linked);
+    expect(readdirSync(briefs).sort()).toEqual(linked ? ["lane.md", "template.md"] : ["lane.md"]);
+  } finally {
+    chmodSync(target, 0o600);
+  }
+});

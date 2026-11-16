@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, chmodSync, constants, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 
 import { type CreateSpec, formatRef, type SessionRef } from "../../../../src/runtime/types.ts";
 import { type Lane, type Registry, sessionFields } from "./registry.ts";
@@ -48,6 +48,7 @@ export const openLaneSession = async (
   const target = briefTarget(brief);
   const staged = `${target}.${process.pid}.${randomUUID()}.launch`;
   try {
+    accessSync(target, constants.W_OK);
     writeFileSync(staged, preamble, { flag: "wx", mode: 0o600 });
     chmodSync(staged, statSync(target).mode & 0o777);
   } catch (error) {
