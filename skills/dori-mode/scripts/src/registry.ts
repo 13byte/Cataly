@@ -1,8 +1,13 @@
-import { mkdirSync, readdirSync, renameSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { SessionRef } from "../../../../src/runtime/types.ts";
+import { takeLock } from "./checkpoint-lock.ts";
 import type { BudgetLimits } from "./supervision-observe.ts";
+
+// A writer holds a lane's lock for one synchronous read and write, so a short wait covers any live contention.
+const LOCK_WAIT_MS = 5_000;
+const LOCK_RETRY_MS = 10;
 
 export const LANE_KEY = /^[a-z0-9][a-z0-9._-]{1,60}$/;
 /**
@@ -111,12 +116,71 @@ export class Registry {
     return (await f.exists()) ? upgradeLane((await f.json()) as Lane) : null;
   }
 
-  // temp file + rename so a concurrent reader never sees a half-written lane
-  async write(lane: Lane): Promise<void> {
+  /**
+   * Runs `fn` under the lane's writer lock. `fn` is synchronous, so the lock is held for one read and one write and
+   * never across pane, git or network I/O. Another writer's lock is waited out; a dead or stale one is taken over.
+   */
+  private async locked<T>(key: string, fn: () => T): Promise<T> {
     mkdirSync(this.dir, { recursive: true });
+    const lock = `${this.path(key)}.lock`;
+    const fail = (m: string) => new Error(`lane registry lock of ${key} ${m}`);
+    const deadline = Date.now() + LOCK_WAIT_MS;
+    for (;;) {
+      const held = takeLock(lock, Date.now(), fail);
+      if (typeof held !== "string") {
+        try {
+          return fn();
+        } finally {
+          held();
+        }
+      }
+      if (Date.now() >= deadline) throw new Error(`lane registry locked: ${key} (${held})`);
+      await Bun.sleep(LOCK_RETRY_MS);
+    }
+  }
+
+  private readNow(key: string): Lane | null {
+    try {
+      return upgradeLane(JSON.parse(readFileSync(this.path(key), "utf8")) as Lane);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  }
+
+  // temp file + rename so a concurrent reader never sees a half-written lane
+  private writeNow(lane: Lane): void {
     const tmp = `${this.path(lane.key)}.${process.pid}.tmp`;
-    await Bun.write(tmp, JSON.stringify(lane, null, 1));
+    writeFileSync(tmp, JSON.stringify(lane, null, 1));
     renameSync(tmp, this.path(lane.key));
+  }
+
+  async write(lane: Lane): Promise<void> {
+    await this.locked(lane.key, () => this.writeNow(lane));
+  }
+
+  /**
+   * Read-modify-write of one lane under its lock: `fn` gets the lane as stored now (null when there is no record) and
+   * returns the lane to store, or null to leave it. Returns what was stored, or null. A lane read earlier and held
+   * across I/O must be changed here, never written back whole, so a status or claim written meanwhile is kept.
+   */
+  update(key: string, fn: (current: Lane | null) => Lane | null): Promise<Lane | null> {
+    return this.locked(key, () => {
+      const next = fn(this.readNow(key));
+      if (next) this.writeNow(next);
+      return next;
+    });
+  }
+
+  /**
+   * A change decided from `seen`: applied to the stored lane only while it still has `seen`'s status and claim
+   * generation (null when it moved on meanwhile, so a later claim, objection, pause or close is never overwritten).
+   */
+  transition(seen: Lane, next: (current: Lane) => Lane): Promise<Lane | null> {
+    return this.update(seen.key, (current) => {
+      if (!current) return next(seen);
+      return statusOf(current) === statusOf(seen) && current.claim?.at === seen.claim?.at ? next(current) : null;
+    });
   }
 
   // Reading never creates the lanes directory (dori boot is read-only); write() creates it.
