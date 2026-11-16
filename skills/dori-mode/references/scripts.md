@@ -59,7 +59,7 @@ The CLI is a thin layer over typed modules you can import in your own scripts:
 | `src/messenger/typing.ts` | `typingWhile`: show typing while a piece of work runs, stop when it ends |
 | `src/messenger/voice.ts` | `transcribe`: voice note to text through your hook |
 | `src/messenger/thread-ledger.ts` | `ThreadLedger`: every thread the Dori posts in, persisted; given to `Slack`, it records each `chat.postMessage` (also raw `call`s) |
-| `src/messenger/slack-inbound.ts` | `pollSlackInbound`: threads view, the ledger's threads and unread counts, deduplicated, own messages filtered |
+| `src/messenger/slack-inbound.ts` | `pollSlackInbound`: threads view, the ledger's threads and unread counts, deduplicated, own messages filtered; each goes to the `emit` callback before any thread position is saved |
 | `src/messenger/telegram-inbound.ts` | `pollTelegramInbound`: owner-gated `getUpdates` long-poll, persisted offset, DMs and the group gate |
 | `src/messenger/slack-presence.ts` | `slackPresence`: hold a user account active |
 | `src/routing.ts` | `canLaunch`, `idleLaneFor`: the routing checks |

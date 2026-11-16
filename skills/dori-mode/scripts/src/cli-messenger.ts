@@ -154,10 +154,11 @@ const inbound: Command = async ({ key, loopMinutes, config, values }) => {
   const me = String((await slack.call("auth.test", {}))["user_id"] ?? die("auth.test returned no user_id"));
   console.log("INBOUND_READY slack");
   await every(minutes, async () => {
-    for (const i of await pollSlackInbound(slack, ledger, { selfUserId: me }))
+    await pollSlackInbound(slack, ledger, { selfUserId: me }, (i) =>
       console.log(
         `INBOUND ${i.source} ${i.channel} ${i.threadTs ?? "-"} ${i.ts || "-"} ${i.user ?? "-"} ${JSON.stringify((i.text ?? "").slice(0, 200))}`,
-      );
+      ),
+    );
   });
 };
 
