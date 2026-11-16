@@ -48,3 +48,14 @@ test("the Linux source launcher argv is admitted as native OMP, not as an extern
   expect(() => load([...source, "--resume", "session", "{prompt}"])).toThrow();
   expect(() => load(["sh", "-c", 'exec "$0" "$@"', "omp", "--resume", "session", "{prompt}"])).not.toThrow();
 });
+
+test.each([
+  ["env -u NAME", ["env", "-u", "FOO", "omp"]],
+  ["env -uNAME", ["/usr/bin/env", "-uFOO", "omp"]],
+  ["env --unset NAME", ["env", "--unset", "FOO", "A=1", "omp"]],
+  ["env --unset=NAME -i -", ["env", "--unset=FOO", "-i", "-", "A=1", "omp"]],
+  ["env -iv -C DIR --", ["A=1", "env", "-iv", "-C", "/tmp", "--", "B=2", "omp"]],
+  ["env -S STRING", ["env", "-S", "-u FOO A=1 omp"]],
+])("an OMP argv behind %s keeps the native resume guard", (_, command) => {
+  expect(() => load([...command, "--resume", "session", "{prompt}"])).toThrow("without session resume");
+});
