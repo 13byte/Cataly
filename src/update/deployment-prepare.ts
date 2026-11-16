@@ -147,6 +147,8 @@ export async function prepareRelease(
         "--frozen-lockfile",
         "--ignore-scripts",
         "--silent",
+        // Root and skill runtimes import no devDependency (gate tools only); the extension keeps its full host install.
+        ...(relative === "extension" ? [] : ["--production"]),
       ],
       join(record.releasePath, relative),
       env,
