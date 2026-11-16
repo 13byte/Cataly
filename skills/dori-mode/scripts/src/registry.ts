@@ -117,8 +117,7 @@ export class Registry {
   }
 
   async read(key: string): Promise<Lane | null> {
-    const f = Bun.file(this.path(key));
-    return (await f.exists()) ? upgradeLane((await f.json()) as Lane) : null;
+    return this.readNow(key);
   }
 
   /**
