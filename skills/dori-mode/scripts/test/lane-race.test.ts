@@ -78,7 +78,9 @@ test("the watcher does not close a lane objected to while its git state was read
 
   const lines = await watchTick(deps);
 
-  expect(lines).toEqual(["LANE_CHANGED race-lane is now not-done, not done-claimed; verification not recorded"]);
+  expect(lines).toEqual([
+    "LANE_CHANGED race-lane moved on while this ran (now not-done, was done-claimed); verification not recorded",
+  ]);
   expect(statusOf(await stored(deps))).toBe("not-done");
   expect((await stored(deps)).objection?.reasons).toEqual(["owner objection before closure"]);
   expect(paneCloses()).toEqual([]);
@@ -96,10 +98,35 @@ test("a close is refused, before the pane is closed, when an objection lands dur
   const result = await closeLane(deps, { ...lane, thread: "chat:team/1" }, "closed by the lead");
 
   expect(result.closed).toBe(false);
-  expect(result.lines.at(-1)).toBe("LANE_CHANGED race-lane is now not-done, not working; close not recorded");
+  expect(result.lines.at(-1)).toBe(
+    "LANE_CHANGED race-lane moved on while this ran (now not-done, was working); close not recorded",
+  );
   expect(statusOf(await stored(deps))).toBe("not-done");
   expect(paneCloses()).toEqual([]);
   expect(world.calls.filter((c) => c[0] === "notify")).toEqual([]);
+});
+
+test("a close of a not-done lane is refused when a new objection lands during the Done signal read", async () => {
+  const base = depsFor(world, fakeClock(T0), state.dir);
+  const at = new Date(T0).toISOString();
+  const objected = withStatus(lane, "not-done", "tests fail", at, { objection: { at, reasons: ["tests fail"] } });
+  await base.registry.write(objected);
+  const deps = interleaved(
+    base,
+    (argv) => argv[0] === "gh",
+    async () => objectDone(base, await stored(base), ["still not merged"]),
+  );
+
+  const result = await closeLane(deps, objected, "closed by the lead");
+
+  expect(result.closed).toBe(false);
+  expect(result.lines.at(-1)).toBe(
+    "LANE_CHANGED race-lane moved on while this ran (now not-done, was not-done); close not recorded",
+  );
+  const after = await stored(deps);
+  expect(statusOf(after)).toBe("not-done");
+  expect(after.objection?.reasons).toEqual(["still not merged"]);
+  expect(paneCloses()).toEqual([]);
 });
 
 test("a paused lane resumed during the freshness status read is not turned back to paused", async () => {
@@ -136,6 +163,9 @@ test("a done claim written while /goal pause is confirmed is not overwritten wit
   const r = await pauseLane(deps, lane, "owner said wait");
 
   expect(r.code).toBe(3);
+  expect(r.lines).toEqual([
+    "LANE_CHANGED race-lane moved on while this ran (now done-claimed, was working); pause (its goal is paused) not recorded",
+  ]);
   expect(statusOf(await stored(deps))).toBe("done-claimed");
   expect((await stored(deps)).claim?.evidence).toBe("done");
 });

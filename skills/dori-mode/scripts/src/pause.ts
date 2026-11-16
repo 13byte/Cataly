@@ -1,6 +1,6 @@
 import type { SessionRef } from "../../../../src/runtime/types.ts";
 import { isOmpCommand } from "./config.ts";
-import type { FlowDeps } from "./done-flow.ts";
+import { type FlowDeps, movedOn } from "./done-flow.ts";
 import type { GoalStatus } from "./lane-state.ts";
 import { trustedPaneState } from "./session-id.ts";
 import { runtimesOf } from "./run.ts";
@@ -74,12 +74,7 @@ export const pauseLane = async (deps: FlowDeps, lane: Lane, note: string): Promi
       lastFreshnessNote: undefined,
     }),
   );
-  if (!paused)
-    return {
-      lane,
-      lines: [`PAUSE_UNVERIFIED ${lane.key} moved on during /goal pause; goal paused, lane record unchanged`],
-      code: 3,
-    };
+  if (!paused) return { lane, lines: [await movedOn(deps, lane, "pause (its goal is paused)")], code: 3 };
   const rts = runtimesOf(deps);
   const running = (await statusLookup(rts, ref)).status === "working";
   if (running) await rts.for(ref).keys(ref, ["escape"]);
@@ -109,12 +104,7 @@ export const resumeLane = async (deps: FlowDeps, lane: Lane, note: string): Prom
       lastFreshnessNote: undefined,
     }),
   );
-  if (!resumed)
-    return {
-      lane,
-      lines: [`RESUME_UNVERIFIED ${lane.key} moved on during /goal resume; goal resumed, lane record unchanged`],
-      code: 3,
-    };
+  if (!resumed) return { lane, lines: [await movedOn(deps, lane, "resume (its goal is resumed)")], code: 3 };
   return { lane: resumed, lines: [`RESUMED ${lane.key} as ${statusOf(resumed)}, goal resumed`], code: 0 };
 };
 

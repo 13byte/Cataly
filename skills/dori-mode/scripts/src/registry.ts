@@ -88,6 +88,13 @@ const sameSession = (a: SessionRef | undefined, b: SessionRef): boolean =>
 
 export const statusOf = (lane: Lane): LaneStatus => (lane.closedAt ? "closed" : (lane.status ?? "working"));
 
+/**
+ * The lane's status generation: every status change (a claim, objection, verification, pause, resume or close) goes
+ * through `withStatus` and appends one history entry, even when the status stays the same, as a second objection does.
+ * Bookkeeping fields (freshness notes, `claim.emitted`, a receipt) leave it as it is.
+ */
+const generation = (lane: Lane): string => `${lane.openedAt} ${lane.history?.length ?? 0} ${statusOf(lane)}`;
+
 export const withStatus = (
   lane: Lane,
   status: LaneStatus,
@@ -173,13 +180,14 @@ export class Registry {
   }
 
   /**
-   * A change decided from `seen`: applied to the stored lane only while it still has `seen`'s status and claim
-   * generation (null when it moved on meanwhile, so a later claim, objection, pause or close is never overwritten).
+   * A change decided from `seen`: applied to the stored lane only while it still has `seen`'s status generation (null
+   * when it moved on meanwhile, so a later claim, objection, pause or close is never overwritten, including a new
+   * objection to a lane that was already not-done).
    */
   transition(seen: Lane, next: (current: Lane) => Lane): Promise<Lane | null> {
     return this.update(seen.key, (current) => {
       if (!current) return next(seen);
-      return statusOf(current) === statusOf(seen) && current.claim?.at === seen.claim?.at ? next(current) : null;
+      return generation(current) === generation(seen) ? next(current) : null;
     });
   }
 
