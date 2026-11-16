@@ -6,6 +6,7 @@ import { claimDone, closeLane, type FlowDeps, objectDone, watchTick } from "../s
 import { freshnessTick } from "../src/freshness.ts";
 import { pauseLane } from "../src/pause.ts";
 import { type Lane, statusOf, withStatus } from "../src/registry.ts";
+import { Reports } from "../src/reports.ts";
 import type { Runner } from "../src/run.ts";
 import { depsFor, fakeClock, newWorld, type TestState, withState, type World } from "./fakes.ts";
 
@@ -137,6 +138,41 @@ test("a done claim written while /goal pause is confirmed is not overwritten wit
   expect(r.code).toBe(3);
   expect(statusOf(await stored(deps))).toBe("done-claimed");
   expect((await stored(deps)).claim?.evidence).toBe("done");
+});
+
+test("a failed thread hook leaves the report unposted and the next tick sends it again", async () => {
+  const clock = fakeClock(T0 + 30 * MIN);
+  const base = depsFor(world, clock, state.dir, {
+    nudgeAfterMin: 999,
+    postAfterMin: 1,
+    hooks: { threadReply: ["notify", "{thread}", "{text}"] },
+  });
+  const reporting: Lane = { ...lane, thread: "telegram:1/2", reportProtocol: "jsonl-v1" };
+  await base.registry.write(reporting);
+  new Reports(state.dir).report(reporting.key, "blocker", "needs owner decision", T0);
+  const outcomes = [{ code: 1, out: "", err: "connection refused" }];
+  const hookCalls: string[][] = [];
+  const deps: FlowDeps = {
+    ...base,
+    run: async (argv, opts) => {
+      if (argv[0] !== "notify") return base.run(argv, opts);
+      hookCalls.push([...argv]);
+      return outcomes.shift() ?? { code: 0, out: "", err: "" };
+    },
+  };
+
+  expect(await freshnessTick(deps, "/home/test")).toEqual([
+    { kind: "post-failed", lane: reporting.key, detail: "thread hook failed: connection refused" },
+  ]);
+  const unposted = await stored(deps);
+  expect([unposted.lastPostedReport, unposted.lastAutoReplyAt]).toEqual([undefined, undefined]);
+
+  clock.at += 2 * MIN;
+  expect((await freshnessTick(deps, "/home/test")).map((a) => a.kind)).toEqual(["posted"]);
+  expect((await stored(deps)).lastPostedReport).toBe("[REPORT] race-lane | blocker | needs owner decision");
+  clock.at += 2 * MIN;
+  expect(await freshnessTick(deps, "/home/test")).toEqual([]);
+  expect(hookCalls).toHaveLength(2);
 });
 
 test("a lane lock left by a dead writer is taken over and released after the update", async () => {

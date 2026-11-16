@@ -80,6 +80,7 @@ export type SweepAct = {
     | "nudged"
     | "posted"
     | "no-report"
+    | "post-failed"
     | "pending-report"
     | "stale-report"
     | "working-while-paused"
@@ -226,7 +227,13 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
         continue;
       }
       const text = `Progress (from the lane's last report): ${scrubForThread(report ?? "", home)}`;
-      await deps.run(fill(hook, { thread: lane.thread, text, key: lane.key }));
+      const sent = await deps.run(fill(hook, { thread: lane.thread, text, key: lane.key }));
+      // Only a delivered report counts as posted: a failed hook leaves it unposted, so the next tick sends it again.
+      if (sent.code !== 0) {
+        await remember(deps, lane.key, { lastSeenReport: current.lastSeenReport });
+        acts.push({ kind: "post-failed", lane: lane.key, detail: `thread hook failed: ${sent.err.slice(0, 160)}` });
+        continue;
+      }
       await remember(deps, lane.key, {
         lastSeenReport: current.lastSeenReport,
         lastAutoReplyAt: now,
