@@ -372,7 +372,7 @@ printf '%s\n' "$mode" > "$base/.omp-dori"
 
 command -v herdr >/dev/null || command -v hc >/dev/null || echo "Install herdr or hc before launching sessions." >&2
 
-bun_bin="$(command -v bun)"
+bun_bin="$(absolute "$(command -v bun)")"
 ulw_guard() {
   [ -n "$ulw_bound" ] || return 0
   printf '%s\n' 'guard=$(mktemp -d)' 'trap '\''rmdir "$guard"'\'' EXIT'
