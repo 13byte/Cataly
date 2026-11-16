@@ -56,6 +56,26 @@ describe("update supervisor", () => {
     expect(result.invocations).toBe(2);
     expect(result.code).toBe(2);
   }, 15_000);
+
+  test("a config that omits intervalSeconds uses the shared loader default", async () => {
+    const base = fixture();
+    const { intervalSeconds: _omitted, ...config } = base.config;
+    const { run } = supervise(config, [2]);
+    const result = await run();
+    expect(result.stderr).not.toContain("DORI_SUPERVISOR_CONFIG_ERROR");
+    expect(result.stdout).toContain("DORI_SUPERVISOR_READY");
+    expect(result.invocations).toBe(1);
+    expect(result.stderr).toContain("DORI_SUPERVISOR_HELD exit=2");
+  });
+
+  test("an interval the shared loader rejects is still a configuration error", async () => {
+    const base = fixture();
+    const { run } = supervise({ ...base.config, intervalSeconds: 0 }, [0]);
+    const result = await run();
+    expect(result.stderr).toContain("DORI_SUPERVISOR_CONFIG_ERROR");
+    expect(result.invocations).toBe(0);
+    expect(result.code).toBe(2);
+  });
 });
 
 describe("controller lock conflicts", () => {
