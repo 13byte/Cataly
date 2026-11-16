@@ -1,0 +1,99 @@
+import { afterEach, expect, test } from "bun:test";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { pruneNativeCache } from "../src/release/native-cache.ts";
+import { nativeCacheFixture, overlayFixture } from "./source-bundle-setup.ts";
+
+const roots: string[] = [];
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function cache() {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "dori-native-cache-")));
+  roots.push(root);
+  const home = join(root, "home");
+  const native = (name: string, source = join(root, `source-${name}`)) => {
+    const f = overlayFixture(source, join(root, `upstream-${name}`), true, name);
+    return { source: f.source, receipt: nativeCacheFixture(f.source, home, f.checkout) };
+  };
+  return { root, home, native };
+}
+
+test("only an identity no source, reference or process names is pruned, and only when applied", async () => {
+  const c = cache();
+  const live = c.native("live");
+  const releases = join(c.root, "dori/releases");
+  const discovered = c.native("discovered", join(releases, "retained-release"));
+  const wrapped = c.native("wrapped");
+  const running = c.native("running");
+  const superseded = c.native("superseded");
+  for (const source of [wrapped.source, running.source, superseded.source]) rmSync(source, { recursive: true });
+  mkdirSync(join(c.root, "dori/bin"), { recursive: true });
+  writeFileSync(join(c.root, "dori/bin/omp"), `#!/bin/sh\nexec ${wrapped.receipt.omp} "$@"\n`);
+  const unknown = join(c.home, ".cache/omp-dori", `native-${process.platform}-${process.arch}-${"e".repeat(64)}`);
+  mkdirSync(unknown, { mode: 0o700 });
+  const holder = Bun.spawn(["/bin/sh", "-c", "echo ready; read line", "dori-native-holder", running.receipt.omp], {
+    stdin: "pipe",
+    stdout: "pipe",
+  });
+  try {
+    // The holder has exec'd once it speaks, so its argv is the one the process table shows.
+    const reader = holder.stdout.getReader();
+    expect(new TextDecoder().decode((await reader.read()).value)).toBe("ready\n");
+    const sources = [live.source];
+    const scanned = [join(c.root, "dori")];
+    const dry = pruneNativeCache(c.home, sources, scanned, false);
+    const reasons = Object.fromEntries(dry.entries.map((entry) => [entry.directory, entry.protectedBy]));
+    expect(reasons[live.receipt.directory]).toEqual(
+      expect.arrayContaining([`source ${live.source}`, "receipt source"]),
+    );
+    expect(reasons[discovered.receipt.directory]).toContain(`source ${discovered.source}`);
+    expect(reasons[wrapped.receipt.directory]).toEqual([`reference ${join(c.root, "dori/bin/omp")}`]);
+    expect(reasons[running.receipt.directory]).toEqual([`process ${holder.pid}`]);
+    expect(reasons[superseded.receipt.directory]).toEqual([]);
+    expect(reasons[unknown]).toEqual(["unrecognized receipt"]);
+    expect(dry.entries.find((entry) => entry.directory === superseded.receipt.directory)!.bytes).toBeGreaterThan(0);
+    expect(dry.removed).toEqual([]);
+    expect(existsSync(superseded.receipt.directory)).toBe(true);
+
+    // An interrupted earlier prune left a detached copy that nothing can resolve.
+    const leftover = `${live.receipt.directory}.pruning`;
+    mkdirSync(leftover, { mode: 0o700 });
+    const applied = pruneNativeCache(c.home, sources, scanned, true);
+    expect(applied.removed.sort()).toEqual([superseded.receipt.directory, leftover].sort());
+    for (const kept of [live, discovered, wrapped, running]) expect(existsSync(kept.receipt.omp)).toBe(true);
+    expect(existsSync(unknown)).toBe(true);
+    expect(existsSync(superseded.receipt.directory)).toBe(false);
+    expect(existsSync(leftover)).toBe(false);
+    expect(existsSync(`${superseded.receipt.directory}.pruning`)).toBe(false);
+  } finally {
+    holder.stdin.end();
+    await holder.exited;
+  }
+});
+
+test("dori update cache reports by default and removes unreferenced identities only with --prune", () => {
+  const c = cache();
+  const superseded = c.native("superseded");
+  renameSync(superseded.source, join(c.root, "moved-away"));
+  const cli = resolve(import.meta.dir, "../src/release/cli.ts");
+  const run = (...argv: string[]) =>
+    Bun.spawnSync([process.execPath, cli, "cache", ...argv], {
+      env: { HOME: c.home, PATH: process.env["PATH"], OMP_DORI_HOME: join(c.root, "side") },
+    });
+  const listed = run();
+  expect(listed.exitCode).toBe(0);
+  const report = JSON.parse(listed.stdout.toString());
+  expect(report.pruned).toBe(false);
+  expect(report.entries).toEqual([
+    expect.objectContaining({ directory: superseded.receipt.directory, protectedBy: [] }),
+  ]);
+  expect(existsSync(superseded.receipt.directory)).toBe(true);
+  expect(run("--from", c.root).exitCode).toBe(2);
+  const pruned = run("--prune");
+  expect(pruned.exitCode).toBe(0);
+  expect(JSON.parse(pruned.stdout.toString()).removed).toEqual([superseded.receipt.directory]);
+  expect(existsSync(superseded.receipt.directory)).toBe(false);
+});

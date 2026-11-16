@@ -1,17 +1,22 @@
 import { lstatSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { acquireBundle } from "./bundle.ts";
 import { acquireConsumerLock, consumerPaths, initialize, pointer, realDirectory } from "./files.ts";
 import { installBundle, preflightInstallation, rollbackRelease } from "./install.ts";
+import { pruneNativeCache } from "./native-cache.ts";
 import { prerequisites } from "./provision.ts";
 import { hasConsumerState, loadInstalled, recoverInstalled, verifyRelease } from "./state.ts";
 import type { ReleaseManifest } from "./types.ts";
 
-const USAGE = `dori update <check|install|status|rollback> [--version vX.Y.Z] [--from DIST]
+const USAGE = `dori update <check|install|status|rollback|cache> [--version vX.Y.Z] [--from DIST]
   check       verify an available public release without activating it
   install     verify and install a fixed release; no messenger, watcher, model or service is started
   status      print verified installed and retained previous release identities
   rollback    verify and restore the retained previous release (--version may assert its tag)
+  cache       list native cache identities, the references keeping each and reclaimable bytes;
+              --prune removes only unreferenced ones; --reference DIR adds a root to scan (repeatable)
 Default check/install selects the latest stable GitHub release. Explicit tags also allow previews.
 --from reads local release assets; first installation may still fetch the exact public omp-ulw pin.
 Activation holds while Dori is live. Stop Dori yourself before installing or rolling back.`;
@@ -30,14 +35,20 @@ export async function runConsumerUpdate(argv: string[]): Promise<number> {
       args: argv,
       allowPositionals: true,
       strict: true,
-      options: { version: { type: "string" }, from: { type: "string" }, help: { type: "boolean", short: "h" } },
+      options: {
+        version: { type: "string" },
+        from: { type: "string" },
+        prune: { type: "boolean" },
+        reference: { type: "string", multiple: true },
+        help: { type: "boolean", short: "h" },
+      },
     });
     if (args.values.help || args.positionals.length === 0) {
       console.log(USAGE);
       return 0;
     }
     const command = args.positionals[0];
-    if (args.positionals.length !== 1 || !["check", "install", "status", "rollback"].includes(command ?? ""))
+    if (args.positionals.length !== 1 || !["check", "install", "status", "rollback", "cache"].includes(command ?? ""))
       throw new Error(USAGE);
     if (args.values.version !== undefined && !/^v\d+\.\d+\.\d+$/.test(args.values.version))
       throw new Error("--version must be an exact vX.Y.Z tag");
@@ -47,9 +58,26 @@ export async function runConsumerUpdate(argv: string[]): Promise<number> {
       (command === "rollback" && args.values.from)
     )
       throw new Error("--from applies to check/install; status takes no selection");
+    if (
+      (command === "cache" && (args.values.from !== undefined || args.values.version !== undefined)) ||
+      (command !== "cache" && (args.values.prune || args.values.reference))
+    )
+      throw new Error("cache takes only --prune and --reference");
     const paths = consumerPaths();
     realDirectory(paths.dori);
     realDirectory(paths.root);
+    if (command === "cache") {
+      if (args.values.prune && hasConsumerState(paths)) releaseLock = acquireConsumerLock(paths);
+      const roots = [paths.dori, process.env["OMP_DORI_HOME"] || join(homedir(), ".omp-dori")];
+      const result = pruneNativeCache(
+        paths.home,
+        [resolve(import.meta.dir, "../..")],
+        [...roots, ...(args.values.reference ?? []).map((path) => resolve(path))],
+        args.values.prune === true,
+      );
+      console.log(JSON.stringify({ ...result, pruned: args.values.prune === true }, null, 2));
+      return 0;
+    }
     if (command === "check") {
       const bundle = await acquireBundle({
         ...(args.values.version ? { version: args.values.version } : {}),

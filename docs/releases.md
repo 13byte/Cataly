@@ -182,7 +182,7 @@ An authentication, configuration or intent failure exits nonzero with a sanitize
 The consumer API runs before normal Dori config loading:
 
 ```text
-dori update <check|install|status|rollback> [--version TAG] [--from DIST]
+dori update <check|install|status|rollback|cache> [--version TAG] [--from DIST]
 ```
 
 | Command | Behavior and options |
@@ -192,8 +192,10 @@ dori update <check|install|status|rollback> [--version TAG] [--from DIST]
 | `dori update status` | Inspect installed state and reconcile an interrupted activation journal |
 | `dori update rollback` | Verify and restore the retained previous release |
 | `dori update rollback --version v0.1.2` | Assert that the retained rollback target is exactly this tag |
+| `dori update cache` | List native cache identities, what keeps each and the bytes removal would free; changes nothing |
+| `dori update cache --prune [--reference DIR]...` | Remove only identities that no source, reference file or running process names |
 
-`status` and `rollback` do not accept `--from`. Rollback is a retained-source operation; use `install --from DIST` to select a local candidate. Network `check`/`install` without `--version` selects stable latest only. No consumer command ports upstream, runs review models, fetches arbitrary `main`, publishes GitHub changes or grants repository write access.
+`cache` keeps an identity when the running release, a source under `~/.dori`, the side home or a `--reference` root binds it, when its receipt's own source still binds it, when a file there (wrappers, release state, deployment records) names it, when a running process names it or when its receipt is unrecognized. Pass each deployment `releaseRoot` as `--reference`; it cannot be discovered. `status` and `rollback` do not accept `--from`. Rollback is a retained-source operation; use `install --from DIST` to select a local candidate. Network `check`/`install` without `--version` selects stable latest only. No consumer command ports upstream, runs review models, fetches arbitrary `main`, publishes GitHub changes or grants repository write access.
 
 **Activation holds while a live Dori is detected, even when it is idle.** Plan a maintenance window. Explicitly stop the monitors you own, end the owning Dori session using normal runtime controls, inspect `dori update status`, then retry the install or rollback. The installer and release commands never kill or restart Dori, consume an approval, alter a paused monitor or pretend a busy hold succeeded.
 
