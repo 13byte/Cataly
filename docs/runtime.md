@@ -16,6 +16,10 @@ Source installation holds when its selected native executable aliases a wrapper 
 
 The native selection must also avoid traversing a command symlink that installation will replace: the primary `dori` link or side `omp-dori` link. This check follows relative links, parent aliases and directory prefixes without rewriting the selected pathname. Independent paths to the same executable remain valid because relinking leaves their target inode intact.
 
+Managed release preparation runs Git materialization and frozen dependency installation with a child-local `umask 077` before bundle admission. The caller's mask stays unchanged, and independently group/world-writable bundle files remain rejected.
+
+Source-native preparation builds the export viewer with the pinned upstream builder's `--check` mode after frozen dependency installation. The generated filename, size and SHA-256 must match the tracked viewer manifest without rewriting it. Native cache admission and launch require that exact owned asset; missing, modified, writable or additional assets hold admission.
+
 ## The interface
 
 `SessionRuntime` in `src/runtime/types.ts` is the whole contract. Each runtime has one adapter, `src/runtime/herdr/` and `src/runtime/hc/`, and both run their CLI through one injectable process runner (`src/runtime/exec.ts`), so tests replace the binary with a recorder.

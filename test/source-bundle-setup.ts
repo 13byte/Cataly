@@ -4,6 +4,9 @@ import { nativeDirectory, nativeLauncher, type NativeReceipt } from "../src/rele
 import { readSourceBundle, type SourceBundle } from "../src/release/source-bundle.ts";
 import { digest } from "../src/update/source.ts";
 
+// Native fixtures bind a tracked viewer manifest to synthetic admission bytes, never an application viewer.
+const NATIVE_VIEWER_FIXTURE = "isolated viewer admission bytes, not an application viewer\n";
+
 export function fixtureGit(cwd: string, ...argv: string[]): string {
   const result = Bun.spawnSync(
     ["/bin/sh", "-c", 'umask 077; exec "$@"', "dori-source-fixture", "git", "-c", "core.hooksPath=/dev/null", ...argv],
@@ -34,7 +37,10 @@ export function overlayFixture(source: string, checkout: string, native = false,
     writeFileSync(full, text, { mode: executable ? 0o755 : 0o600 });
     if (executable) chmodSync(full, 0o755);
   };
-  put(".gitignore", "*.node\nnode_modules/\n");
+  put(
+    ".gitignore",
+    ["*.node", "node_modules/", ...(native ? ["packages/coding-agent/export-assets/"] : []), ""].join("\n"),
+  );
   // A real upstream shape: Git's own attribute transform rewrites these bytes on checkout.
   put(".gitattributes", "*.cmd text eol=crlf\n");
   put("crates/pi-shell/tests/fixtures/minimizer/cargo/test-pass.cmd", "@echo off\nrem fixture\n");
@@ -44,6 +50,15 @@ export function overlayFixture(source: string, checkout: string, native = false,
     put("packages/coding-agent/scripts/omp", '#!/bin/sh\nprintf "18.20.0\\n"\n', true);
     put("packages/coding-agent/src/cli.ts", 'export const version = "18.20.0";\n');
     put("packages/natives/native/loader-state.js", "export {};\n");
+    const hash = digest(NATIVE_VIEWER_FIXTURE);
+    put(
+      "packages/coding-agent/src/export/html/viewer.generated.json",
+      JSON.stringify({
+        file: `export-viewer-${hash}.js`,
+        integrity: `sha256-${Buffer.from(hash, "hex").toString("base64")}`,
+        size: Buffer.byteLength(NATIVE_VIEWER_FIXTURE),
+      }),
+    );
   }
   fixtureGit(checkout, "init", "--quiet");
   fixtureGit(checkout, "add", ".");
@@ -68,7 +83,7 @@ export function overlayFixture(source: string, checkout: string, native = false,
   return { source, checkout, lock, patch, commit, put };
 }
 
-/** Synthetic addon bytes exercise receipt admission only; real addon loading is a separate isolated installation gate. */
+/** Synthetic addon/viewer bytes exercise admission only; real loading and export are separate installation gates. */
 export function nativeCacheFixture(source: string, home: string, upstream: string): NativeReceipt {
   const directory = nativeDirectory(source, home);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -87,6 +102,12 @@ export function nativeCacheFixture(source: string, home: string, upstream: strin
   symlinkSync(bun, join(directory, "bin/bun"));
   const addon = join(directory, "source/packages/natives/native/pi_natives.fixture.node");
   writeFileSync(addon, "isolated receipt bytes, not a loadable native addon\n", { mode: 0o600 });
+  const assets = join(checkout, "packages/coding-agent/export-assets");
+  const manifest = JSON.parse(
+    readFileSync(join(checkout, "packages/coding-agent/src/export/html/viewer.generated.json"), "utf8"),
+  );
+  mkdirSync(assets, { mode: 0o700 });
+  writeFileSync(join(assets, manifest.file), NATIVE_VIEWER_FIXTURE, { mode: 0o600 });
   const receipt: NativeReceipt = {
     version: 1,
     source,

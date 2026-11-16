@@ -5,6 +5,7 @@ import { command } from "../update/deployment-process.ts";
 import { digest } from "../update/source.ts";
 import type { SourceEntry } from "../update/types.ts";
 import { owned, readJson, realDirectory, regularFile } from "./files.ts";
+import { assertNativeExport } from "./native-export.ts";
 
 export class SourceBundleError extends Error {}
 
@@ -127,11 +128,13 @@ export function assertSourceBundle(checkout: string, bundle: BoundBundle, home: 
     git(["diff-files", "--ignore-submodules=none", "--name-only"]) !== ""
   )
     throw new Error("Bound source checkout differs from its upstream, patch or resulting tree");
+  const nativeExport = bundle.lock.nativeVersion && assertNativeExport(checkout, false);
   for (const path of git(["ls-files", "--others", "--directory", "-z"]).split("\0").filter(Boolean)) {
     if (
       bundle.lock.nativeVersion &&
       (path.split("/").includes("node_modules") ||
-        /^packages\/natives\/native\/pi_natives\.[a-z0-9-]+\.node$/.test(path))
+        /^packages\/natives\/native\/pi_natives\.[a-z0-9-]+\.node$/.test(path) ||
+        (nativeExport && path === "packages/coding-agent/export-assets/"))
     )
       continue;
     throw new Error(`Bound source has an unexpected untracked path: ${path}`);

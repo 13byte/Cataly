@@ -69,7 +69,13 @@ export async function prepareRelease(
     DO_NOT_TRACK: "1",
   };
   const git = (argv: readonly string[], cwd = record.releasePath): Promise<string> =>
-    command([...SAFE_GIT, ...argv], cwd, env, 300_000, signal);
+    command(
+      ["/bin/sh", "-c", 'umask 077; exec "$@"', "dori-managed-git", ...SAFE_GIT, ...argv],
+      cwd,
+      env,
+      300_000,
+      signal,
+    );
   const release = lstatSync(record.releasePath, { throwIfNoEntry: false });
   if (!release)
     await git(["clone", "--no-local", "--no-hardlinks", "--no-checkout", "--", input.remote, record.releasePath], home);
@@ -131,7 +137,17 @@ export async function prepareRelease(
         throw new DeploymentHeld("published release lacks a frozen dependency manifest");
     }
     await command(
-      [config.bun, "install", "--frozen-lockfile", "--ignore-scripts", "--silent"],
+      [
+        "/bin/sh",
+        "-c",
+        'umask 077; exec "$@"',
+        "dori-managed-install",
+        config.bun,
+        "install",
+        "--frozen-lockfile",
+        "--ignore-scripts",
+        "--silent",
+      ],
       join(record.releasePath, relative),
       env,
       300_000,

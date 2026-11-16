@@ -17,6 +17,7 @@ import { shq } from "../delivery.ts";
 import { command } from "../update/deployment-process.ts";
 import { digest } from "../update/source.ts";
 import { owned, readJson, realDirectory, regularFile, saveJson } from "./files.ts";
+import { assertNativeExport } from "./native-export.ts";
 import { assertSourceBundle, bundleEnv, readSourceBundle } from "./source-bundle.ts";
 import { checkoutSourceBundle } from "./source-checkout.ts";
 
@@ -85,6 +86,7 @@ export function assertNativeSource(source: string, home: string, bun = process.e
   )
     throw new Error("Bound native source, Bun, addon or launcher receipt differs");
   assertSourceBundle(checkout, bundle, home);
+  assertNativeExport(checkout);
   return receipt;
 }
 
@@ -143,6 +145,21 @@ export async function provisionNativeSource(
     for (const name of ["package.json", "bun.lock"])
       if (digest(readFileSync(join(addon, name))) !== digest(readFileSync(join(source, "native-addon", name))))
         throw new Error("Frozen official addon dependency metadata changed during installation");
+    assertSourceBundle(checkout, bundle, home);
+    await command(
+      [
+        "/bin/sh",
+        "-c",
+        'umask 077; exec "$@"',
+        "dori-native-export",
+        bun,
+        "packages/collab-web/scripts/build-export-viewer.ts",
+        "--check",
+      ],
+      checkout,
+      bundleEnv(home, bun),
+      300_000,
+    );
     const official = await probe(
       join(addon, "node_modules/@oh-my-pi/pi-natives/native/loader-state.js"),
       stage,
