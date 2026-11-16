@@ -93,6 +93,7 @@ jobs:
           runtime="$RUNNER_TEMP/consumer-hc"
           mkdir -m 700 "$runtime" "$runtime/home" "$runtime/s" "$runtime/r" "$runtime/c"
           curl --proto '=https' --tlsv1.2 -fL https://releases.herdr.dev/core/install.sh -o "$runtime/install-hc.sh"
+          printf '%s  %s\n' '9d29a920d796d11b00fde9ab0958b616179d88acc25edf0fde8b574bde0227d2' "$runtime/install-hc.sh" | shasum -a 256 -c -
           env -i HOME="$runtime/home" PATH=/usr/bin:/bin HC_VERSION=0.1.20 sh "$runtime/install-hc.sh"
           hc="$runtime/home/.local/bin/hc"
           env -i HOME="$runtime/home" PATH="$runtime/home/.local/bin:/usr/bin:/bin" \
