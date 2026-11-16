@@ -214,6 +214,8 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
   let requiredLoadError: SourceBundleError | undefined;
   let warned = false;
   let lifecycleRegistered = false;
+  /** The session whose monitor bootstrap was rejected: it stays role-less until a session_start bootstraps it again. */
+  let rejectedBootstrap: string | undefined;
   let session: { id: string; startedAt: string } | undefined;
   let goal: PaneState["goal"] = { status: "none" };
   let agentStatus: "idle" | "working" = "idle";
@@ -388,8 +390,11 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
     if (bootstrap && role === "dori") {
       try {
         if (bootstrapMonitors(pi, branch, sessionId, recordedMonitors(branch))) branch = ctx.sessionManager.getBranch();
+        rejectedBootstrap = undefined;
       } catch (error) {
-        // A rejected bootstrap leaves no role session behind: no handler may publish ready or approval-free state.
+        // A rejected bootstrap leaves no role session behind: no handler may publish ready or approval-free state, and
+        // a later branch or tree move in this session does not restore the role from its record.
+        rejectedBootstrap = sessionId;
         role = undefined;
         agentRoles.delete(ctx.agent.id);
         monitors.stopAll();
@@ -458,6 +463,7 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
   for (const eventName of ["session_start", "session_switch", "session_branch", "session_tree"] as const) {
     pi.on(eventName, async (_event, ctx) => {
       const branch = ctx.sessionManager.getBranch();
+      let flaggedRole = false;
       if (ctx.agent.kind === "sub") {
         role = ctx.agent.parentId === undefined ? undefined : agentRoles.get(ctx.agent.parentId);
       } else {
@@ -465,13 +471,16 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
         const flagged = pi.getFlag(ROLE_FLAG);
         if (eventName === "session_start" && role === undefined && flagged !== undefined) {
           role = parseRole(flagged);
-          if (role) pi.appendEntry(ROLE_ENTRY, role);
+          if (role) flaggedRole = true;
           else ctx.ui.notify(`omp-dori: --${ROLE_FLAG} must be "dori" or "lane", got "${String(flagged)}"`, "error");
         }
+        if (eventName !== "session_start" && rejectedBootstrap === ctx.sessionManager.getSessionId()) role = undefined;
       }
       if (role) agentRoles.set(ctx.agent.id, role);
       else agentRoles.delete(ctx.agent.id);
       if (ctx.agent.kind === "main") await syncMain(ctx, branch, eventName === "session_start");
+      // The flag's role is recorded only once its session started: a rejected bootstrap has thrown before this.
+      if (flaggedRole && role) pi.appendEntry(ROLE_ENTRY, role);
     });
   }
 
