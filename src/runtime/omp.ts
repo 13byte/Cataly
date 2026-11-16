@@ -37,10 +37,15 @@ export function ompStateDir(env: Env): string {
   return expandHome(config.stateDir ?? join(doriHome, "state"));
 }
 
+// The one classification of OMP's launch forms: the `omp` command, its published package CLI under Bun or Node, and the
+// pinned source launcher (`bun --preload <pkg>/scripts/omp.ts [--preload <timer>] <pkg>/[scripts/../]src/cli.ts`).
+// Each representation has its own parser below; none of them attests a live process (withOmpState does that).
 const OMP_COMMAND =
   /^(?:(?:\S*\/)?(?:bun|node)(?:\s+-\S+)*\s+)?(?:\S*\/)?omp(?:\s|$)|^(?:\S*\/)?(?:bun|node)(?:\s+-\S+)*\s+\S*@oh-my-pi\/pi-coding-agent\/dist\/cli\.js(?:\s|$)/;
 const SOURCE_OMP_COMMAND =
   /^(?:\S*\/)?bun\s+--preload\s+(.+\/packages\/coding-agent\/)scripts\/omp\.ts\s+(?:--preload\s+\1scripts\/\.\.\/\.\.\/utils\/src\/module-timer\.ts\s+)?\1(?:scripts\/\.\.\/)?src\/cli\.ts(?:\s|$)/;
+const OMP_EXECUTABLE = /(?:^|\/)omp$|@oh-my-pi\/pi-coding-agent\/dist\/cli\.js$/;
+
 const sourceOmpArgv = (argv: readonly string[]): boolean => {
   if (!/(?:^|\/)bun$/.test(argv[0] ?? "") || argv[1] !== "--preload") return false;
   const root = /^(.+\/packages\/coding-agent\/)scripts\/omp\.ts$/.exec(argv[2] ?? "")?.[1];
@@ -50,9 +55,95 @@ const sourceOmpArgv = (argv: readonly string[]): boolean => {
   const entry = argv[timing ? 5 : 3];
   return entry === `${root}src/cli.ts` || entry === `${root}scripts/../src/cli.ts`;
 };
+
+/** A `ps` command line of an OMP process. Its argument boundaries are lost, so source roots may contain spaces. */
+export const isOmpProcessCommand = (command: string): boolean =>
+  OMP_COMMAND.test(command) || SOURCE_OMP_COMMAND.test(command);
+
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+// GNU env's long options: those that take a separate operand when written without `=`, and those that take none.
+const ENV_LONG: Record<string, "flag" | "operand"> = {
+  "ignore-environment": "flag",
+  null: "flag",
+  debug: "flag",
+  "block-signal": "flag",
+  "default-signal": "flag",
+  "ignore-signal": "flag",
+  "list-signal-handling": "flag",
+  unset: "operand",
+  chdir: "operand",
+  argv0: "operand",
+};
+
+/** GNU getopt_long accepts any unambiguous prefix of a long option name. */
+const envLong = (name: string): "flag" | "operand" | undefined => {
+  if (Object.hasOwn(ENV_LONG, name)) return ENV_LONG[name];
+  const matches = Object.keys(ENV_LONG).filter((option) => name !== "" && option.startsWith(name));
+  return matches.length === 1 ? ENV_LONG[matches[0]!] : undefined;
+};
+
+/**
+ * The index where `env [OPTION]... [-] [NAME=VALUE]... COMMAND` starts COMMAND, or undefined when an option is not one
+ * of the GNU/BSD options that only change the environment or directory. `-S`/`--split-string` re-parses a string with
+ * its own quoting, escapes and comments, so it is not decoded here.
+ */
+function envCommandAt(argv: readonly string[], at: number): number | undefined {
+  for (;;) {
+    const word = argv[at];
+    if (word === undefined || word === "-" || !word.startsWith("-")) break;
+    at++;
+    if (word === "--") break;
+    if (word.startsWith("--")) {
+      const equals = word.indexOf("=");
+      const kind = envLong(word.slice(2, equals < 0 ? undefined : equals));
+      if (kind === undefined) return undefined;
+      if (kind === "operand" && equals < 0) at++;
+      continue;
+    }
+    for (let i = 1; i < word.length; i++) {
+      const flag = word[i];
+      if (flag === "i" || flag === "0" || flag === "v") continue;
+      if (flag !== "u" && flag !== "C" && flag !== "P" && flag !== "a") return undefined;
+      if (i + 1 === word.length) at++;
+      break;
+    }
+  }
+  if (argv[at] === "-") at++;
+  // env takes every word with a `=` as an assignment, not only shell-style names.
+  while (argv[at]?.includes("=")) at++;
+  return at < argv.length ? at : undefined;
+}
+
+/**
+ * What an exact argv runs, after leading `NAME=value` assignments and the `env` utility with its options: the command
+ * itself (that prefix removed), as `omp` when it starts OMP and `other` otherwise, or `unparsed` for an `env` prefix
+ * whose options are not understood (such as `-S`), which must not be taken for either.
+ */
+export type OmpArgv =
+  | { readonly kind: "omp" | "other"; readonly command: readonly string[] }
+  | { readonly kind: "unparsed" };
+
+export function classifyOmpArgv(argv: readonly string[]): OmpArgv {
+  let at = 0;
+  while (ASSIGNMENT.test(argv[at] ?? "")) at++;
+  const start = argv[at]?.split("/").at(-1) === "env" ? envCommandAt(argv, at + 1) : at;
+  if (start === undefined) return { kind: "unparsed" };
+  const command = argv.slice(start);
+  if (sourceOmpArgv(command)) return { kind: "omp", command };
+  const name = command[0]?.split("/").at(-1);
+  if (name === "omp") return { kind: "omp", command };
+  if (name !== "bun" && name !== "node") return { kind: "other", command };
+  let script = 1;
+  while (command[script]?.startsWith("-")) script++;
+  return { kind: OMP_EXECUTABLE.test(command[script] ?? "") ? "omp" : "other", command };
+}
+
+/** An exact argv that starts OMP (see classifyOmpArgv); an unparsed `env` prefix is not one. */
+export const isOmpArgv = (argv: readonly string[]): boolean => classifyOmpArgv(argv).kind === "omp";
+
 const ompProcess = (p: ForegroundProcess): boolean =>
   p.name.split("/").at(-1) === "omp" ||
-  p.argv.slice(0, 2).some((arg) => /(?:^|\/)omp$|@oh-my-pi\/pi-coding-agent\/dist\/cli\.js$/.test(arg)) ||
+  p.argv.slice(0, 2).some((arg) => OMP_EXECUTABLE.test(arg)) ||
   sourceOmpArgv(p.argv);
 
 function readState(stateDir: string, id: string): PaneState | undefined {
@@ -114,7 +205,7 @@ export async function withOmpState(exec: Exec, stateDir: string, id: string, pro
     const writer = table.find((p) => p.pid === state.pid);
     if (
       writer === undefined ||
-      (!OMP_COMMAND.test(writer.command) && !SOURCE_OMP_COMMAND.test(writer.command)) ||
+      !isOmpProcessCommand(writer.command) ||
       !under(table, writer.pid, probe.rootPid) ||
       (!probe.shellInFront && !probe.foreground?.some((p) => p.pid !== undefined && under(table, p.pid, writer.pid)))
     ) {
