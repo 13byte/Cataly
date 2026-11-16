@@ -187,7 +187,8 @@ const startLane = async (
   // A working agent with its goal may be reading a file or log that quotes a failure phrase, as the re-checks allow. An
   // empty goal marker opts out of the goal check, so only a recorded goal vouches for one here.
   const bad = startupFailure(screen, ompAgent);
-  const goalProven = async (): Promise<boolean> => (marker !== "" && (await hasGoal(screen))) || (await recordedGoal());
+  const goalProven = async (): Promise<boolean> =>
+    (marker !== "" && !omp && goalShown(screen, marker)) || (await recordedGoal());
   if (bad && !(status === "working" && !error && (await goalProven())))
     return { lane, startup: `STARTUP_ERROR ${input.key} ${pane}: ${bad}` };
   if (status === "gone" && (await launchFinished(deps, input.key)))
