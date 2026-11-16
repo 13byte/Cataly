@@ -59,7 +59,11 @@ export const defaultDeps = (): Deps => {
     get agentCmd() {
       const selected = processOmpCommand();
       if (selected) return selected.map(shq).join(" ");
-      if (process.env["DORI_AGENT_CMD"] !== undefined) return process.env["DORI_AGENT_CMD"];
+      if (process.env["DORI_AGENT_CMD"] !== undefined) {
+        const legacy = [process.env["DORI_AGENT_CMD"]] as const;
+        const command = resolveConsumerOmpCommand(legacy);
+        return command === legacy ? legacy[0] : command.map(shq).join(" ");
+      }
       const command = resolveConsumerOmpCommand(["omp"]);
       return command[0] !== "omp"
         ? command.map(shq).join(" ")

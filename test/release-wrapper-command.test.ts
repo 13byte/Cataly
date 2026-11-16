@@ -26,7 +26,7 @@ test("isolated wrappers quote the loaded release and clear foreign selection in 
 const deps = defaultDeps();
 const roles = Object.fromEntries(["dori", "lane"].map(role => {
   const command = agentCommand(deps, role);
-  const parsed = Bun.spawnSync(["/bin/sh", "-c", "set -- " + command + "; printf '%s\\\\0' \\\"$@\\\""]);
+  const parsed = Bun.spawnSync(["/bin/sh", "-c", "set -- " + command + "; printf '%s\\\\0' \\"$@\\""]);
   return [role, { code: parsed.exitCode, argv: parsed.stdout.toString().split("\\0").slice(0, -1) }];
 }));
 console.log(JSON.stringify({
@@ -82,7 +82,7 @@ console.log(JSON.stringify({
   expect(observed).toMatchObject({
     home: paths.dori,
     config: paths.config,
-    agent: null,
+    agent: join(paths.dori, "bin/omp"),
     argv: null,
     state: null,
     runtime: null,

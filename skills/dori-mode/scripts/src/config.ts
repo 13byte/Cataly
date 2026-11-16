@@ -227,7 +227,10 @@ export const loadConfig = async (path = configPath(), home = homedir()): Promise
   const command = resolveProcessOmpCommand(merged.agentCommand, path);
   return {
     ...merged,
-    agentCommand: command === merged.agentCommand ? resolveConsumerOmpCommand(command, { home }) : command,
+    agentCommand:
+      command === merged.agentCommand || process.env["DORI_AGENT_ARGV"] === undefined
+        ? resolveConsumerOmpCommand(command, { home })
+        : command,
     stateDir: expandHome(process.env["DORI_STATE_DIR"] ?? merged.stateDir, home),
     defaultCwd: expandHome(merged.defaultCwd, home),
     sessionsDir: expandHome(merged.sessionsDir, home),
