@@ -167,6 +167,14 @@ export class Registry {
   }
 
   /**
+   * Registers a new lane only while its key has no record, checked and written under the lane's lock: of two launches
+   * or adopts of one key, the second is refused (false) and cannot erase what the first, or a later claim, recorded.
+   */
+  async create(lane: Lane): Promise<boolean> {
+    return (await this.update(lane.key, (current) => (current ? null : lane))) !== null;
+  }
+
+  /**
    * Read-modify-write of one lane under its lock: `fn` gets the lane as stored now (null when there is no record) and
    * returns the lane to store, or null to leave it. Returns what was stored, or null. A lane read earlier and held
    * across I/O must be changed here, never written back whole, so a status or claim written meanwhile is kept.

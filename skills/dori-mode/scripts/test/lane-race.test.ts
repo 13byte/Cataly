@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
+import { join } from "node:path";
 
 import { claimDone, closeLane, type FlowDeps, objectDone, watchTick } from "../src/done-flow.ts";
 import { freshnessTick } from "../src/freshness.ts";
+import { adoptLane, launchLane } from "../src/launch.ts";
 import { pauseLane } from "../src/pause.ts";
 import { type Lane, statusOf, withStatus } from "../src/registry.ts";
 import { Reports } from "../src/reports.ts";
@@ -127,6 +129,31 @@ test("a close of a not-done lane is refused when a new objection lands during th
   expect(statusOf(after)).toBe("not-done");
   expect(after.objection?.reasons).toEqual(["still not merged"]);
   expect(paneCloses()).toEqual([]);
+});
+
+test("a launch whose key is adopted and objected to while its session is created is refused and keeps that record", async () => {
+  const base = depsFor(world, fakeClock(T0), state.dir);
+  const brief = join(state.dir, "brief.md");
+  writeFileSync(brief, "brief");
+  const run: Runner = async (argv, opts) => {
+    if (argv[0] === "herdr" && argv[1] === "tab" && argv[2] === "create") {
+      await adoptLane(base, { key: lane.key, title: "adopted", brief: "/b.md", done: lane.done, pane: "w:p1" });
+      await objectDone(base, await stored(base), ["adopted lane objected"]);
+      return { code: 0, out: JSON.stringify({ result: { root_pane: { pane_id: "w:p9" }, tab_id: "w:t9" } }), err: "" };
+    }
+    return base.run(argv, opts);
+  };
+
+  await expect(launchLane({ ...base, run }, { key: lane.key, title: "race", brief, done: lane.done })).rejects.toThrow(
+    "lane race-lane is already registered",
+  );
+
+  const after = await stored(base);
+  expect(after.title).toBe("adopted");
+  expect(statusOf(after)).toBe("not-done");
+  expect(after.objection?.reasons).toEqual(["adopted lane objected"]);
+  expect(paneCloses()).toEqual([["herdr", "tab", "close", "w:t9"]]);
+  expect(readFileSync(brief, "utf8")).toBe("brief");
 });
 
 test("a paused lane resumed during the freshness status read is not turned back to paused", async () => {
