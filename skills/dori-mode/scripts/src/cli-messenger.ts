@@ -32,6 +32,9 @@ const send: Command = async (cli) => {
   const edit = opt("edit");
   const token = (name: string) => process.env[name] ?? die(`${name} is not set`);
   if (platform === "slack") {
+    // An --edit given empty ("$UNSET") or not a message ts is refused before any request: it must never post anew.
+    if (values["edit"] !== undefined && !/^\d+\.\d+$/.test(edit ?? ""))
+      die("--edit must be a Slack message ts, such as 1700000000.000100");
     const slack = new Slack(
       fetchHttp,
       realClock,

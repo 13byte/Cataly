@@ -63,3 +63,19 @@ test("Slack inbound prints the owner's whole message on its one INBOUND line", a
     `INBOUND threads-view C1 10.1 11.1 U_OWNER ${JSON.stringify(text)}`,
   ]);
 });
+
+test("send slack refuses an --edit that is empty or not a message ts before it posts anything", async () => {
+  const send = (...flags: string[]) => slackCli(["send", "slack", "--to", "C1", "--text", "report", ...flags]);
+  for (const flags of [["--edit", ""], ["--edit", " "], ["--edit"], ["--edit", "last"]]) {
+    const r = await send(...flags);
+    expect({ flags, code: r.code, err: r.err, out: r.out, methods: r.methods }).toEqual({
+      flags,
+      code: 1,
+      err: "--edit must be a Slack message ts, such as 1700000000.000100",
+      out: "",
+      methods: [],
+    });
+  }
+  const edited = await send("--edit", "1700000000.000100");
+  expect([edited.code, edited.out, edited.methods]).toEqual([0, "", ["chat.update"]]);
+});
