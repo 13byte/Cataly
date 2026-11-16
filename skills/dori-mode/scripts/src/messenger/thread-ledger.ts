@@ -77,7 +77,9 @@ export class ThreadLedger {
           throw error;
         }
         const taken = inspect(moved);
-        // A newer writer's lock: put it back without replacing another one, and never delete it.
+        // A newer writer's lock: put it back without replacing another one, and never delete it. Until it is back, a
+        // third writer can take the empty path, so two writers may briefly overlap; this needs two takeovers of one
+        // stale lock to interleave within microseconds, and then one overlapping write can lose the other's change.
         if (taken?.ino !== seen.ino || taken.raw !== seen.raw)
           try {
             linkSync(moved, lock);
@@ -111,11 +113,15 @@ export class ThreadLedger {
     }
   }
 
+  /**
+   * Registers a thread the Dori posted in. A new thread is read from the Dori's post on; a known one keeps its seen
+   * position, which only the receiver moves (`markSeen`, after delivery): a reply that arrived before this post but has
+   * not been delivered yet must still be read, and the Dori's own messages are skipped as they are read.
+   */
   async record(channel: string, rootTs: string, postedTs: string): Promise<void> {
     await this.update((threads) => {
-      const prev = threads.get(keyOf(channel, rootTs));
-      const seenTs = prev && tsAfter(prev.seenTs, postedTs) ? prev.seenTs : postedTs;
-      threads.set(keyOf(channel, rootTs), { channel, rootTs, seenTs });
+      if (threads.has(keyOf(channel, rootTs))) return false;
+      threads.set(keyOf(channel, rootTs), { channel, rootTs, seenTs: postedTs });
       return true;
     });
   }

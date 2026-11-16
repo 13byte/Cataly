@@ -156,6 +156,26 @@ test("a poll that fails after reading an own-thread reply moves no cursor, so th
   expect(await poll()).toEqual([]);
 });
 
+test("a reply a separate `dori send slack` posts after an undelivered owner reply does not hide that reply", async () => {
+  const { w, slack, poll } = setup("separate-sender");
+  const root = (await slack.post("C7", "migration plan")).ts;
+  w.replies[`C7:${root}`]?.push({ ts: "2000.000100", user: "U_OWNER", text: "wait for the backup" });
+  // Another process, with its own ledger instance on the same file, replies before the receiver's next poll.
+  w.nextTs = 3000;
+  const sender = new Slack(
+    slackFake(w).http,
+    fakeClock(0),
+    { token: "t" },
+    "https://slack.test/api",
+    new ThreadLedger(join(state.dir, "separate-sender.json")),
+  );
+  await sender.post("C7", "starting now", root);
+  expect((await poll()).map((i) => [i.source, i.ts, i.text])).toEqual([
+    ["own-thread", "2000.000100", "wait for the backup"],
+  ]);
+  expect(await poll()).toEqual([]);
+});
+
 test("a newer unread in the threads view does not skip an older unseen reply in an own thread", async () => {
   const { w, slack, poll } = setup("partial-view");
   const root = (await slack.post("C6", "release checklist")).ts;
