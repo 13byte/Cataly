@@ -15,7 +15,7 @@ export function processCwds(pids: readonly string[], platform = process.platform
         // Another user's or an exited process exposes no working directory.
       }
     }
-    return cwds;
+    return cwds.size > 0 ? cwds : null;
   }
   let output: string;
   try {
@@ -25,6 +25,8 @@ export function processCwds(pids: readonly string[], platform = process.platform
       stderr: "pipe",
       timeout: 60_000,
     });
+    // A run cut short (timeout or signal) printed only part of the table.
+    if (lsof.exitedDueToTimeout || lsof.signalCode) return null;
     output = lsof.stdout.toString();
   } catch {
     return null;

@@ -63,6 +63,7 @@ export function reportNativeCache(
   home: string,
   sources: readonly string[],
   roots: readonly string[],
+  readCwds: typeof processCwds = processCwds,
 ): NativeCacheEntry[] {
   const cache = join(home, ".cache/omp-dori");
   if (!lstatSync(cache, { throwIfNoEntry: false })) return [];
@@ -141,7 +142,7 @@ export function reportNativeCache(
   const lines = ps.stdout.toString().split("\n");
   const pids = lines.map((line) => line.trim().split(/\s+/, 1)[0] ?? "");
   // A process also uses an entry through its working directory; when no directory can be read, nothing is pruned.
-  const cwds = processCwds(pids.filter(Boolean));
+  const cwds = readCwds(pids.filter(Boolean));
   if (!cwds) for (const key of keys) add(key, "process working directories unavailable");
   lines.forEach((line, at) => {
     const pid = pids[at] ?? "";
@@ -202,8 +203,9 @@ export function pruneNativeCache(
   sources: readonly string[],
   roots: readonly string[],
   apply: boolean,
+  readCwds: typeof processCwds = processCwds,
 ): { readonly entries: NativeCacheEntry[]; readonly removed: string[] } {
-  const entries = reportNativeCache(home, sources, roots);
+  const entries = reportNativeCache(home, sources, roots, readCwds);
   const removed: string[] = [];
   if (!apply) return { entries, removed };
   const reported = new Map(entries.map((entry) => [entry.directory, entry]));
