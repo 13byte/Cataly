@@ -36,10 +36,15 @@ export function ompStateDir(env: Env): string {
   return expandHome(config.stateDir ?? join(homedir(), ".dori", "state"));
 }
 
+// The one classification of OMP's launch forms: the `omp` command, its published package CLI under Bun or Node, and the
+// pinned source launcher (`bun --preload <pkg>/scripts/omp.ts [--preload <timer>] <pkg>/[scripts/../]src/cli.ts`).
+// Each representation has its own parser below; none of them attests a live process (withOmpState does that).
 const OMP_COMMAND =
   /^(?:(?:\S*\/)?(?:bun|node)(?:\s+-\S+)*\s+)?(?:\S*\/)?omp(?:\s|$)|^(?:\S*\/)?(?:bun|node)(?:\s+-\S+)*\s+\S*@oh-my-pi\/pi-coding-agent\/dist\/cli\.js(?:\s|$)/;
 const SOURCE_OMP_COMMAND =
   /^(?:\S*\/)?bun\s+--preload\s+(.+\/packages\/coding-agent\/)scripts\/omp\.ts\s+(?:--preload\s+\1scripts\/\.\.\/\.\.\/utils\/src\/module-timer\.ts\s+)?\1(?:scripts\/\.\.\/)?src\/cli\.ts(?:\s|$)/;
+const OMP_EXECUTABLE = /(?:^|\/)omp$|@oh-my-pi\/pi-coding-agent\/dist\/cli\.js$/;
+
 const sourceOmpArgv = (argv: readonly string[]): boolean => {
   if (!/(?:^|\/)bun$/.test(argv[0] ?? "") || argv[1] !== "--preload") return false;
   const root = /^(.+\/packages\/coding-agent\/)scripts\/omp\.ts$/.exec(argv[2] ?? "")?.[1];
@@ -49,9 +54,30 @@ const sourceOmpArgv = (argv: readonly string[]): boolean => {
   const entry = argv[timing ? 5 : 3];
   return entry === `${root}src/cli.ts` || entry === `${root}scripts/../src/cli.ts`;
 };
+
+/** A `ps` command line of an OMP process. Its argument boundaries are lost, so source roots may contain spaces. */
+export const isOmpProcessCommand = (command: string): boolean =>
+  OMP_COMMAND.test(command) || SOURCE_OMP_COMMAND.test(command);
+
+/** An exact argv that starts OMP, after leading `NAME=value` assignments and the `env` utility. */
+export function isOmpArgv(argv: readonly string[]): boolean {
+  let at = 0;
+  while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(argv[at] ?? "")) at++;
+  if (argv[at]?.split("/").at(-1) === "env") at++;
+  while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(argv[at] ?? "")) at++;
+  const command = argv.slice(at);
+  if (sourceOmpArgv(command)) return true;
+  const name = command[0]?.split("/").at(-1);
+  if (name === "omp") return true;
+  if (name !== "bun" && name !== "node") return false;
+  let script = 1;
+  while (command[script]?.startsWith("-")) script++;
+  return OMP_EXECUTABLE.test(command[script] ?? "");
+}
+
 const ompProcess = (p: ForegroundProcess): boolean =>
   p.name.split("/").at(-1) === "omp" ||
-  p.argv.slice(0, 2).some((arg) => /(?:^|\/)omp$|@oh-my-pi\/pi-coding-agent\/dist\/cli\.js$/.test(arg)) ||
+  p.argv.slice(0, 2).some((arg) => OMP_EXECUTABLE.test(arg)) ||
   sourceOmpArgv(p.argv);
 
 function readState(stateDir: string, id: string): PaneState | undefined {
@@ -113,7 +139,7 @@ export async function withOmpState(exec: Exec, stateDir: string, id: string, pro
     const writer = table.find((p) => p.pid === state.pid);
     if (
       writer === undefined ||
-      (!OMP_COMMAND.test(writer.command) && !SOURCE_OMP_COMMAND.test(writer.command)) ||
+      !isOmpProcessCommand(writer.command) ||
       !under(table, writer.pid, probe.rootPid) ||
       (!probe.shellInFront && !probe.foreground?.some((p) => p.pid !== undefined && under(table, p.pid, writer.pid)))
     ) {

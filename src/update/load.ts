@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
-import { expandHome, isOmpCommand } from "../../skills/dori-mode/scripts/src/config.ts";
+import { expandHome } from "../../skills/dori-mode/scripts/src/config.ts";
+import { isOmpArgv } from "../runtime/omp.ts";
 import { canonical, contains, object, UpdateError } from "./config.ts";
 import { checkNativeArgv } from "./native-argv.ts";
 import { parsePromotionConfig } from "./publish-config.ts";
@@ -58,7 +59,7 @@ const allow = (raw: Record<string, unknown>, names: readonly string[], label: st
 
 /** Direct OMP invocations get the native final-message parser, isolation flags and capability guards. */
 export const nativeAgent = (command: UpdateCommand): boolean =>
-  command.engine === "omp" || (command.engine === undefined && isOmpCommand(command.argv));
+  command.engine === "omp" || (command.engine === undefined && isOmpArgv(command.argv));
 
 const command = (value: unknown, label: string, agent = false): UpdateCommand => {
   if (!object(value)) throw new UpdateError(`${label} must configure a real argv command`);

@@ -235,7 +235,3 @@ export const loadConfig = async (path = configPath(), home = homedir()): Promise
 
 export const fill = (template: ArgvTemplate, values: Readonly<Record<string, string>>): string[] =>
   template.map((part) => part.replace(/\{(\w+)\}/g, (whole, name: string) => values[name] ?? whole));
-
-/** Whether the configured argv starts OMP, including its installed package entry point. */
-export const isOmpCommand = (argv: ArgvTemplate): boolean =>
-  argv.some((part) => /(?:^|[/\\])omp(?:\s|$)|pi-coding-agent[/\\]dist[/\\]cli\.js/.test(part));
