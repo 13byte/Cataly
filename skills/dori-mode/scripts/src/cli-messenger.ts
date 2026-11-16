@@ -154,9 +154,10 @@ const inbound: Command = async ({ key, loopMinutes, config, values }) => {
   const me = String((await slack.call("auth.test", {}))["user_id"] ?? die("auth.test returned no user_id"));
   console.log("INBOUND_READY slack");
   await every(minutes, async () => {
+    // Full text, JSON-escaped on one line, as Telegram's: a monitor reads nothing but this line.
     await pollSlackInbound(slack, ledger, { selfUserId: me }, (i) =>
       console.log(
-        `INBOUND ${i.source} ${i.channel} ${i.threadTs ?? "-"} ${i.ts || "-"} ${i.user ?? "-"} ${JSON.stringify((i.text ?? "").slice(0, 200))}`,
+        `INBOUND ${i.source} ${i.channel} ${i.threadTs ?? "-"} ${i.ts || "-"} ${i.user ?? "-"} ${JSON.stringify(i.text ?? "")}`,
       ),
     );
   });
