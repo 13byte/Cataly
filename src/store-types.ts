@@ -65,8 +65,18 @@ export type DeliveryAttempt = {
 /** A flush lock from another host (or an unreadable one) older than this is taken over; on this host only a dead pid frees it (#108). */
 export const INBOX_LOCK_STALE_MS = 60_000;
 
-/** `id`: a duty notice's fixed incarnation/epoch name; one id is queued for a session only once. */
-export type QueuedMessage = { at: number; from: string; text: string; id?: string; attempt?: DeliveryAttempt };
+/**
+ * `id`: a duty notice's fixed incarnation/epoch name; one id is queued for a session only once. `spool`: the name of
+ * the spool file the message came through (inbox-spool.ts), so it stays one message however its move was cut short.
+ */
+export type QueuedMessage = {
+  at: number;
+  from: string;
+  text: string;
+  id?: string;
+  spool?: string;
+  attempt?: DeliveryAttempt;
+};
 
 export type ReviewReceipt = {
   pr: string;
