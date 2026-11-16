@@ -218,9 +218,10 @@ export const loadConfig = async (path = configPath(), home = homedir()): Promise
         throw new ConfigError(`invalid supervision lanes.${key}.${name}: expected a nonnegative number or null`);
     }
   }
+  const command = resolveProcessOmpCommand(merged.agentCommand, path);
   return {
     ...merged,
-    agentCommand: resolveConsumerOmpCommand(resolveProcessOmpCommand(merged.agentCommand, path), { home }),
+    agentCommand: command === merged.agentCommand ? resolveConsumerOmpCommand(command, { home }) : command,
     stateDir: expandHome(process.env["DORI_STATE_DIR"] ?? merged.stateDir, home),
     defaultCwd: expandHome(merged.defaultCwd, home),
     sessionsDir: expandHome(merged.sessionsDir, home),

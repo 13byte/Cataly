@@ -49,11 +49,17 @@ export function managedCommand() {
     bunHash: digest(readFileSync(process.execPath)),
     nativeConfig,
     nativeConfigHash: digest(readFileSync(nativeConfig)),
+    ompUlw: {
+      source: join(root, "prepared source 'extension'; literal"),
+      identity: "a".repeat(64),
+      directory: join(root, "selected ulw 'quote'"),
+    },
     nativeOverride: true,
   };
   const env = actorEnv(config, toolchain);
-  environment({ ...env, DORI_AGENT_CMD: undefined, DORI_OMP_ULW_PATH: undefined });
-  return { root, omp, config, toolchain, env };
+  environment({ ...env, DORI_AGENT_CMD: undefined });
+  const argv = [omp, "--config", nativeConfig, "--no-extensions", "-e", join(toolchain.ompUlw!.source, "extension")];
+  return { root, omp, config, toolchain, env, argv };
 }
 
 export const argvOutput = (stdout: Buffer): string[] => stdout.toString().split("\0").slice(0, -1);

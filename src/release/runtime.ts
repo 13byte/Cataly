@@ -72,24 +72,41 @@ export function resolveConsumerOmpCommand(
     /^[a-f0-9]{40}-[a-f0-9]{16}\/scripts\/consumer\/omp$/.test(relative(paths.releases, first));
   if (first !== "omp" && !managed) return configured;
   assertNativeSource(source, home);
-  return [join(source, "scripts/consumer/omp"), ...configured.slice(1)];
+  return [
+    join(source, "scripts/consumer/omp"),
+    "--no-extensions",
+    "-e",
+    join(source, "extension"),
+    ...configured.slice(1),
+  ];
 }
 
-/** Managed executable paths replace installer defaults; legacy argv overrides still apply only to literal omp. */
+/** Selected process argv is one command, never shell syntax or a partial executable override. */
+export function processOmpCommand(): readonly string[] | undefined {
+  const raw = process.env["DORI_AGENT_ARGV"];
+  if (raw === undefined) return undefined;
+  const selected: unknown = JSON.parse(raw);
+  if (
+    !Array.isArray(selected) ||
+    selected.length === 0 ||
+    selected.some((part) => typeof part !== "string") ||
+    selected[0] === ""
+  )
+    throw new Error("DORI_AGENT_ARGV must be a nonempty string array with an executable");
+  return selected;
+}
+
+/** Selected argv replaces only literal OMP and the marked installation's lexical/canonical defaults. */
 export function resolveProcessOmpCommand(configured: readonly string[], configFile: string): readonly string[] {
-  const executable = process.env["DORI_AGENT_EXECUTABLE"];
-  const installation = dirname(configFile);
+  const selected = processOmpCommand();
+  const installation = resolve(dirname(configFile));
   const installed =
-    executable !== undefined &&
+    selected !== undefined &&
     (existsSync(join(installation, ".omp-dori")) || existsSync(join(installation, "releases/consumer-owner.json"))) &&
-    configured[0] === join(realpathSync(installation), "bin/omp");
-  const selected =
-    configured[0] === "omp"
-      ? (executable ?? (process.env["DORI_AGENT_CMD"] || undefined))
-      : installed
-        ? executable
-        : undefined;
-  return selected === undefined ? configured : [selected, ...configured.slice(1)];
+    (configured[0] === join(installation, "bin/omp") || configured[0] === join(realpathSync(installation), "bin/omp"));
+  if (selected && (configured[0] === "omp" || installed)) return [...selected, ...configured.slice(1)];
+  const legacy = configured[0] === "omp" ? process.env["DORI_AGENT_CMD"] : undefined;
+  return legacy ? [legacy, ...configured.slice(1)] : configured;
 }
 
 /** A managed process selects its prepared default, while an explicit external dependency remains a user choice. */

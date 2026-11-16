@@ -31,6 +31,7 @@ at_least "$min_bun" "$bun_version" || fail "bun $bun_version is older than $min_
 omp_bin="${DORI_OMP:-}"
 if [ -n "$omp_bin" ]; then
   omp_bin="$(command -v "$omp_bin")" || fail "DORI_OMP does not name an executable"
+  omp_bin="$(absolute "$omp_bin")"
   omp_version="$("$omp_bin" --version)"
   [[ "$omp_version" =~ ([0-9]+(\.[0-9]+){2}) ]] || fail "could not read DORI_OMP version"
   at_least "$min_omp" "${BASH_REMATCH[1]}" || fail "DORI_OMP must be $min_omp or newer"
@@ -385,7 +386,8 @@ EOF
   printf 'export DORI_HOME=%q\n' "$base"
   printf 'export DORI_CONFIG=%q\n' "$config"
   printf 'export DORI_STATE_DIR=%q\n' "$base/state"
-  printf 'export DORI_AGENT_EXECUTABLE=%q\n' "$base/bin/omp"
+  printf '%s\n' 'unset DORI_AGENT_CMD DORI_AGENT_EXECUTABLE DORI_OMP_ULW_PATH'
+  printf 'export DORI_AGENT_ARGV=%q\n' "$(bun -e 'console.log(JSON.stringify([process.argv[1]]))' "$base/bin/omp")"
   printf 'export HC_SESSION=%q\n' "$hc_session"
   # A Herdr app space id shows the side Dori's terminals in that space; without one, hc keeps them hidden.
   [ -z "${OMP_DORI_HC_SPACE:-}" ] || printf 'export DORI_HC_SPACE=%q\n' "$OMP_DORI_HC_SPACE"

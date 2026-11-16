@@ -70,7 +70,14 @@ test("managed default preparation binds native and ULW source identities and pro
   expect(f.config.omp).toBeUndefined();
   expect(f.record.toolchain?.nativeSource?.identity).toBe(f.receipt.identity);
   expect(f.record.toolchain?.nativeOverride).toBeUndefined();
-  expect(actorEnv(f.config, f.record.toolchain)["DORI_AGENT_EXECUTABLE"]).toBe(f.receipt.omp);
+  expect(JSON.parse(actorEnv(f.config, f.record.toolchain)["DORI_AGENT_ARGV"]!)).toEqual([
+    f.receipt.omp,
+    "--config",
+    f.record.toolchain!.nativeConfig,
+    "--no-extensions",
+    "-e",
+    join(f.source, "extension"),
+  ]);
   expect(actorEnv(f.config, f.record.toolchain)["DORI_AGENT_CMD"]).toBeUndefined();
   expect(actorEnv(f.config, f.record.toolchain)["DORI_OMP_ULW_PATH"]).toBe(
     join(f.record.toolchain!.ompUlw!.directory, "index.ts"),

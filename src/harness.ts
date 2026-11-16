@@ -3,7 +3,7 @@ import { cpus, loadavg } from "node:os";
 import { join, resolve } from "node:path";
 import { shq } from "./delivery.ts";
 import { memFreePct } from "./host.ts";
-import { resolveConsumerOmpCommand } from "./release/runtime.ts";
+import { processOmpCommand, resolveConsumerOmpCommand } from "./release/runtime.ts";
 import { type Exec, spawnExec } from "./runtime/exec.ts";
 import { HcRuntime } from "./runtime/hc/index.ts";
 import { HerdrRuntime } from "./runtime/herdr/index.ts";
@@ -57,12 +57,12 @@ export const defaultDeps = (): Deps => {
     exec: spawnExec,
     now: Date.now,
     get agentCmd() {
-      const executable = process.env["DORI_AGENT_EXECUTABLE"];
-      if (executable !== undefined) return shq(executable);
+      const selected = processOmpCommand();
+      if (selected) return selected.map(shq).join(" ");
       if (process.env["DORI_AGENT_CMD"] !== undefined) return process.env["DORI_AGENT_CMD"];
-      const selected = resolveConsumerOmpCommand(["omp"])[0]!;
-      return selected !== "omp"
-        ? shq(selected)
+      const command = resolveConsumerOmpCommand(["omp"]);
+      return command[0] !== "omp"
+        ? command.map(shq).join(" ")
         : existsSync(join(store.root, ".omp-dori"))
           ? shq(join(store.root, "bin/omp"))
           : "omp";

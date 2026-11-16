@@ -27,7 +27,7 @@ const environmentKeys = [
   "DORI_CONFIG",
   "DORI_STATE_DIR",
   "DORI_AGENT_CMD",
-  "DORI_AGENT_EXECUTABLE",
+  "DORI_AGENT_ARGV",
   "DORI_OMP_ULW_PATH",
 ];
 const environment = new Map<string, string | undefined>();
@@ -124,7 +124,7 @@ export function fixture(): ConsumerFixture {
   process.env["DORI_CONFIG"] = paths.config;
   process.env["DORI_STATE_DIR"] = join(paths.dori, "state");
   delete process.env["DORI_AGENT_CMD"];
-  delete process.env["DORI_AGENT_EXECUTABLE"];
+  delete process.env["DORI_AGENT_ARGV"];
   delete process.env["DORI_OMP_ULW_PATH"];
   initialize(paths);
   const dependency = join(root, "public-dependency-fixture");

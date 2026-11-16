@@ -55,6 +55,18 @@ export function underProcess(pid: number, root: number): boolean {
   return false;
 }
 
+/** The prepared parent and its descendants use the same fence and pinned Dori extension. */
+export function managedOmpCommand(toolchain: ToolchainReceipt, source: string | undefined): readonly string[] {
+  if (toolchain.ompUlw && source !== toolchain.ompUlw.source)
+    throw new DeploymentHeld("managed extension source differs from its prepared toolchain");
+  return [
+    toolchain.omp,
+    "--config",
+    toolchain.nativeConfig,
+    ...(toolchain.ompUlw ? ["--no-extensions", "-e", join(source!, "extension")] : []),
+  ];
+}
+
 /** No caller environment, tokens, sudo context or global Bun policy enters a prepared release/native actor. */
 export function actorEnv(config: DeploymentConfig, toolchain?: ToolchainReceipt): Record<string, string> {
   return {
@@ -73,7 +85,9 @@ export function actorEnv(config: DeploymentConfig, toolchain?: ToolchainReceipt)
     DORI_HOME: config.doriHome,
     DORI_CONFIG: config.doriConfig,
     DORI_STATE_DIR: config.stateDir,
-    ...(toolchain?.nativeSource || toolchain?.nativeOverride ? { DORI_AGENT_EXECUTABLE: toolchain.omp } : {}),
+    ...(toolchain?.nativeSource || toolchain?.nativeOverride
+      ? { DORI_AGENT_ARGV: JSON.stringify(managedOmpCommand(toolchain, toolchain.ompUlw?.source)) }
+      : {}),
     ...(toolchain?.ompUlw ? { DORI_OMP_ULW_PATH: join(toolchain.ompUlw.directory, "index.ts") } : {}),
     ...(process.env["OMP_ULW_SCOPE_FILE"] === undefined
       ? {}

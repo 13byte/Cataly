@@ -1,11 +1,18 @@
 import { realpathSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute } from "node:path";
 import { readPaneState } from "../../skills/dori-mode/scripts/src/lane-state.ts";
 import type { DeploymentCli } from "./deployment-cli.ts";
 import { completedLegacyRollbackForeground, legacyRollbackForeground } from "./deployment-legacy-monitors.ts";
 import { captureRuntime, requireShell } from "./deployment-native.ts";
 import { runtimeUsesToolchain } from "./deployment-prior.ts";
-import { actorEnv, DeploymentHeld, processIdentity, sameProcess, underProcess } from "./deployment-process.ts";
+import {
+  actorEnv,
+  DeploymentHeld,
+  managedOmpCommand,
+  processIdentity,
+  sameProcess,
+  underProcess,
+} from "./deployment-process.ts";
 import { bareRootShell } from "./deployment-shell.ts";
 import { terminateBoundProcess } from "./deployment-signal.ts";
 import { assertRuntimeToolchain } from "./deployment-toolchain.ts";
@@ -34,6 +41,7 @@ export async function launchRuntime(
   const toolchain = prior ? record.oldToolchain : record.toolchain;
   if (!previous || !toolchain) throw new DeploymentHeld("native launch lacks its identity/toolchain journal");
   assertRuntimeToolchain(config, toolchain);
+  const command = managedOmpCommand(toolchain, prior ? record.oldSource : record.releasePath);
   await requireShell(config, cli);
   const quote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
   const env = { ...actorEnv(config, toolchain), DORI_MANAGED_STARTUP: "1" };
@@ -41,12 +49,7 @@ export async function launchRuntime(
     "/usr/bin/env",
     "-i",
     ...Object.entries(env).map(([key, value]) => `${key}=${value}`),
-    toolchain.omp,
-    "--config",
-    toolchain.nativeConfig,
-    ...(toolchain.ompUlw
-      ? ["--no-extensions", "-e", join(prior ? record.oldSource! : record.releasePath, "extension")]
-      : []),
+    ...command,
     `--resume=${previous.sessionFile}`,
     "--dori-role",
     "dori",

@@ -84,6 +84,13 @@ test("consumer install, update and reuse select each loaded release's bound over
   const sourceOne = releasePath(f.paths, one.current);
   const omp = resolveConsumerOmpCommand(["omp", "{prompt}"], { home: f.paths.home, sourceRoot: sourceOne });
   expect(omp[0]).toBe(readlinkSync(join(f.paths.dori, "bin/omp")));
+  expect(omp).toEqual([
+    join(sourceOne, "scripts/consumer/omp"),
+    "--no-extensions",
+    "-e",
+    join(sourceOne, "extension"),
+    "{prompt}",
+  ]);
   expect(configured.agentCommand[0]).toBe(join(f.paths.dori, "bin/omp"));
   const second = bundledRelease(f, "second", first.source);
   const two = await installBundle(f.paths, second.bundle, one);

@@ -21,7 +21,7 @@ test
   .each(["canonical", "launcher", "relative", "other", "missing"])(
   "source-native launch binds only its canonical absolute entry (%s)",
   async (spelling) => {
-    const root = mkdtempSync(join(tmpdir(), "dori-source-launch-"));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "dori-source-launch-")));
     directories.push(root);
     const config = { ...deploymentConfig(root), omp: join(root, "omp"), bun: process.execPath };
     const source = join(root, "source/packages/coding-agent");
