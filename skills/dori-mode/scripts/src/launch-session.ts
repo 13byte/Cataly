@@ -11,6 +11,15 @@ export type OpenedLane =
 
 const why = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
+// Each cleanup step is tried on its own: one that fails is reported and never stops the others.
+const removeStaged = (staged: string): void => {
+  try {
+    rmSync(staged, { force: true });
+  } catch (error) {
+    process.stderr.write(`dori: could not remove the staged brief ${staged} (${why(error)})\n`);
+  }
+};
+
 // A brief that is a link (a shared template) is written through it, as a plain write would.
 const briefTarget = (brief: string): string => {
   try {
@@ -40,14 +49,14 @@ export const openLaneSession = async (
   try {
     await Bun.write(staged, preamble);
   } catch (error) {
-    rmSync(staged, { force: true });
+    removeStaged(staged);
     return { kind: "failed", what: "brief not writable", error };
   }
   let ref: SessionRef;
   try {
     ref = await rts.default.create(spec);
   } catch (error) {
-    rmSync(staged, { force: true });
+    removeStaged(staged);
     return { kind: "failed", what: "session create failed", error };
   }
   const lane: Lane = { ...draft, ...sessionFields(ref) };
@@ -62,7 +71,7 @@ export const openLaneSession = async (
   } catch (error) {
     failure = { kind: "failed", what: registered ? "brief not written" : "lane not registered", error };
   }
-  rmSync(staged, { force: true });
+  removeStaged(staged);
   if (registered)
     await registry.discard(lane).catch((error: unknown) => {
       process.stderr.write(`dori: could not remove lane ${lane.key} after its launch failed (${why(error)})\n`);

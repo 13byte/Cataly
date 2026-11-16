@@ -71,6 +71,35 @@ test("a brief that cannot be put in place after registration undoes the record, 
   expect(readdirSync(briefs)).toEqual(["lane.md"]);
 });
 
+test("a staged brief that cannot be removed does not stop the record and tab rollback", async () => {
+  const brief = join(briefs, "lane.md");
+  writeFileSync(brief, "brief");
+  const deps = withTab(depsFor(world, fakeClock(T0), state.dir));
+  const rename = fs.renameSync;
+  const remove = fs.rmSync;
+  const spies = [
+    spyOn(fs, "renameSync").mockImplementation(((from: fs.PathLike, to: fs.PathLike) => {
+      if (String(to) === brief) throw new Error("EACCES: directory locked");
+      rename(from, to);
+    }) as typeof fs.renameSync),
+    spyOn(fs, "rmSync").mockImplementation(((path: fs.PathLike, options?: fs.RmOptions) => {
+      if (String(path).endsWith(".launch")) throw new Error("EACCES: directory locked");
+      remove(path, options);
+    }) as typeof fs.rmSync),
+  ];
+  try {
+    await expect(launchLane(deps, { key: "brief-lane", title: "t", brief, done: DONE })).rejects.toThrow(
+      "brief not written",
+    );
+  } finally {
+    for (const spy of spies) spy.mockRestore();
+  }
+
+  expect(await deps.registry.read("brief-lane")).toBeNull();
+  expect(world.calls.filter((c) => c[0] === "herdr" && c[2] === "close")).toEqual([["herdr", "tab", "close", "w:t9"]]);
+  expect(readFileSync(brief, "utf8")).toBe("brief");
+});
+
 test("a brief that links to a template is written through the link", async () => {
   const template = join(briefs, "template.md");
   writeFileSync(template, "template");
