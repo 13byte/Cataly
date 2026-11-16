@@ -294,6 +294,32 @@ describe("pane state", () => {
     }
   });
 
+  test("a live process reusing a stale record's pid does not block a new session from recording the pane", async () => {
+    const unrelated = Bun.spawn(["sleep", "30"], { stdin: "ignore", stdout: "ignore", stderr: "inherit" });
+    try {
+      writePaneState(stateDir, {
+        paneId: PANE,
+        role: "lane",
+        sessionId: "stale",
+        cwd: "/tmp",
+        pid: unrelated.pid,
+        startedAt: "2000-01-01T00:00:00.000Z",
+        updatedAt: "2000-01-01T00:00:00.000Z",
+        goal: { status: "none" },
+        approvalPending: false,
+      });
+      const fresh = await load({ session: session("fresh"), flags: { "dori-role": "lane" } });
+      await fresh.emit("session_start");
+      await fresh.emit("agent_start");
+      expect(readPaneState(stateDir, PANE)).toMatchObject({ pid: process.pid, sessionId: "fresh" });
+      await fresh.emit("session_shutdown");
+      expect(readPaneState(stateDir, PANE)).toBeNull();
+    } finally {
+      unrelated.kill();
+      await unrelated.exited;
+    }
+  });
+
   test.each([0, undefined, "17", -1, 1.5, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER + 1])(
     "an invalid incumbent pid %j cannot wedge pane recording or cleanup",
     async (pid) => {

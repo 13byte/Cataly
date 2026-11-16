@@ -59,7 +59,7 @@ The CLI is a thin layer over typed modules you can import in your own scripts:
 | `src/messenger/typing.ts` | `typingWhile`: show typing while a piece of work runs, stop when it ends |
 | `src/messenger/voice.ts` | `transcribe`: voice note to text through your hook |
 | `src/messenger/thread-ledger.ts` | `ThreadLedger`: every thread the Dori posts in, persisted; given to `Slack`, it records each `chat.postMessage` (also raw `call`s) |
-| `src/messenger/slack-inbound.ts` | `pollSlackInbound`: threads view, the ledger's threads and unread counts, deduplicated, own messages filtered |
+| `src/messenger/slack-inbound.ts` | `pollSlackInbound`: threads view, the ledger's threads and unread counts, deduplicated, own messages filtered; each goes to the `emit` callback before any thread position is saved |
 | `src/messenger/telegram-inbound.ts` | `pollTelegramInbound`: owner-gated `getUpdates` long-poll, persisted offset, DMs and the group gate |
 | `src/messenger/slack-presence.ts` | `slackPresence`: hold a user account active |
 | `src/routing.ts` | `canLaunch`, `idleLaneFor`: the routing checks |
@@ -359,7 +359,7 @@ jq '{phase, sourceHash, applicationStateHash, applicationState, candidateOnly}' 
 
 Restored historical checks/review grant no source readiness and are never loaded into the running watcher. Admitted opaque `ref/omp-ulw/` source and its presence/absence are restored with the code; installed packages, Git objects, model sessions/history and authentication are not. No existing source, live state or failed candidate is deleted or overwritten. State writers must remain stopped during a snapshot; changed inputs, links and special files fail rather than producing a misleading recovery copy. This is a source/application-data recovery procedure, not an OS image or an embedded-secret scanner.
 
-Exit codes: `0` unchanged/ready or completed status/recovery, `3` failed/rejected/held candidate or failed reporter, `4` detector unavailable with proven stopped ownership (retryable), `2` configuration/operation error, `130` requested interruption. A timed-out detector is retryable only after its owned process group has stopped and both output pipes have drained; surviving or unproven descendants remain held. Before watcher activation, run `bun test ./test/update*.test.ts`, the repository checks, and a real explicitly configured `stage` cycle, then exercise the generated native guard and application-state restore on owned fixtures.
+Exit codes: `0` unchanged/ready or completed status/recovery, `3` failed/rejected/held candidate or failed reporter, `4` detector unavailable with proven stopped ownership (retryable), `5` updater root locked by a verified live same-host controller (retryable), `2` configuration/operation error, `130` requested interruption. A timed-out detector is retryable only after its owned process group has stopped and both output pipes have drained; surviving or unproven descendants remain held. Before watcher activation, run `bun test ./test/update*.test.ts`, the repository checks, and a real explicitly configured `stage` cycle, then exercise the generated native guard and application-state restore on owned fixtures.
 
 ### Owner-authorized automatic publication and deployment
 
@@ -413,7 +413,7 @@ On failed startup or health, rollback restores the prior execution source and se
 
 ### Resident supervision
 
-Run `scripts/update-supervisor.ts --config FILE --controller DIRECTORY --bun EXECUTABLE` outside the Dori it may replace. The controller directory is a stable link to the accepted controller release; each cycle invokes the actual `upstream check`, so the next cycle loads accepted code. When the link changes, the supervisor exits for the service manager to reload itself. It uses `intervalSeconds` from the config, does not manufacture status messages, and never retries a model merely because the interval elapsed. Completed detector unavailability (exit `4`) waits for the next interval rather than disabling the service; configuration errors still stop it. Unfinished ambiguous model work remains held; only finished ready promotion effects have automatic readback-based recovery.
+Run `scripts/update-supervisor.ts --config FILE --controller DIRECTORY --bun EXECUTABLE` outside the Dori it may replace. The controller directory is a stable link to the accepted controller release; each cycle invokes the actual `upstream check`, so the next cycle loads accepted code. When the link changes, the supervisor exits for the service manager to reload itself. It uses `intervalSeconds` from the config, does not manufacture status messages, and never retries a model merely because the interval elapsed. Completed detector unavailability (exit `4`) and a lock held by a verified live controller (exit `5`) wait for the next interval rather than disabling the service; configuration errors and malformed, stale or unverifiable locks still stop it. Unfinished ambiguous model work remains held; only finished ready promotion effects have automatic readback-based recovery.
 
 On Linux, `SIGUSR1` wakes the supervisor's next check without interrupting an active cycle. An expiring initial quiesce checkpoint can therefore be consumed immediately rather than waiting a full polling interval. The signal does not bypass deployment, publication or review gates.
 

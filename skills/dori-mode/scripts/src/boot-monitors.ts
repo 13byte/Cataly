@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { formatRef } from "../../../../src/runtime/types.ts";
 import { type Lane, sessionOf, statusOf } from "./registry.ts";
@@ -65,17 +65,39 @@ const tokens = (value: unknown): string[] =>
         .map((t) => t.replace(/^['"]+|['"]+$/g, ""))
         .filter(Boolean)
     : [];
+// A command's own words say what it runs, never which lane: the program, and for dori its command and, for a messenger
+// command, the platform. `dori inbound slack` is not lane "dori", "inbound" or "slack".
+// The dori program may run behind a wrapper (`bash -c "... exec dori inbound discord"`) or from source
+// (`bun .../scripts/src/cli.ts inbound slack`), so its words are found wherever it appears.
+const DORI_PROGRAMS: Record<string, true> = { dori: true, "omp-dori": true };
+const PLATFORM_COMMANDS: Record<string, true> = {
+  send: true,
+  presence: true,
+  inbound: true,
+  thread: true,
+  react: true,
+};
+const argumentWords = (argv: readonly string[]): readonly string[] => {
+  const own = new Set([0]);
+  argv.forEach((word, at) => {
+    const name = basename(word);
+    if (DORI_PROGRAMS[name] !== true && !(name === "cli.ts" && basename(argv[at - 1] ?? "") === "bun")) return;
+    own.add(at).add(at + 1);
+    if (PLATFORM_COMMANDS[argv[at + 1] ?? ""] === true) own.add(at + 2);
+  });
+  return argv.filter((_, at) => !own.has(at));
+};
 const tiedBy = (monitor: Monitor, lane: Lane): string | null => {
   const ref = sessionOf(lane);
   const panes = [lane.pane, ref?.id, ref ? formatRef(ref) : undefined].filter((id): id is string => !!id);
   if (Array.isArray(monitor.argv)) {
     if (panes.some((id) => monitor.argv?.includes(id))) return `${lane.key}:argv:pane`;
-    if (monitor.argv.includes(lane.key)) return `${lane.key}:argv:key`;
+    if (argumentWords(monitor.argv).includes(lane.key)) return `${lane.key}:argv:key`;
   }
   for (const field of TIED_FIELDS) {
     const words = tokens(monitor[field]);
     if (panes.some((id) => words.includes(id))) return `${lane.key}:${field}:pane`;
-    if (words.includes(lane.key)) return `${lane.key}:${field}:key`;
+    if ((field === "command" ? argumentWords(words) : words).includes(lane.key)) return `${lane.key}:${field}:key`;
   }
   return null;
 };

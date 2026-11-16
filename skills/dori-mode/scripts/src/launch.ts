@@ -178,19 +178,23 @@ const startLane = async (
   const screen = await launchScreen(deps, rts, ref, input.key);
   if (screen === null) return { lane, startup: `STARTUP_DONE ${input.key}` };
   const ompAgent = isOmpArgv(deps.config.agentCommand);
-  const bad = startupFailure(screen, ompAgent);
-  if (bad) return { lane, startup: `STARTUP_ERROR ${input.key} ${pane}: ${bad}` };
   const { status, error } = await launchStatus(rts, ref, ompAgent);
+  const marker = deps.config.goalMarker;
+  const omp = ompAgent ? { run: deps.run, rts, stateDir: deps.config.stateDir, ref } : undefined;
+  const recordedGoal = () => laneGoalActive(deps.config.sessionsDir, cwd, input.key, launchedAt, omp);
+  const hasGoal = async (shown: string): Promise<boolean> =>
+    (!omp && goalShown(shown, marker)) || (await recordedGoal());
+  // A working agent with its goal may be reading a file or log that quotes a failure phrase, as the re-checks allow. An
+  // empty goal marker opts out of the goal check, so only a recorded goal vouches for one here.
+  const bad = startupFailure(screen, ompAgent);
+  const goalProven = async (): Promise<boolean> => (marker !== "" && (await hasGoal(screen))) || (await recordedGoal());
+  if (bad && !(status === "working" && !error && (await goalProven())))
+    return { lane, startup: `STARTUP_ERROR ${input.key} ${pane}: ${bad}` };
   if (status === "gone" && (await launchFinished(deps, input.key)))
     return { lane, startup: `STARTUP_DONE ${input.key}` };
   // No status and no lookup error is an agent still starting (a slow host can take minutes, #202): it is waited for in
   // the goal wait. A lookup error, a `shell` or any other status ends the launch below at once.
   if (ready(status) || (unreported(status) && !error)) {
-    const marker = deps.config.goalMarker;
-    const omp = ompAgent ? { run: deps.run, rts, stateDir: deps.config.stateDir, ref } : undefined;
-    const hasGoal = async (shown: string): Promise<boolean> =>
-      (!omp && goalShown(shown, marker)) ||
-      (await laneGoalActive(deps.config.sessionsDir, cwd, input.key, launchedAt, omp));
     const rechecks = Math.max(0, Math.ceil((deps.config.startupWaitSeconds * 1000 - FIRST_CHECK_MS) / RECHECK_MS));
     let shown = screen;
     let current = status;
