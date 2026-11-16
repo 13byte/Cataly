@@ -1,8 +1,9 @@
-import { accessSync, readFileSync } from "node:fs";
+import { accessSync, existsSync, readFileSync } from "node:fs";
 import { cpus, loadavg } from "node:os";
 import { join, resolve } from "node:path";
 import { shq } from "./delivery.ts";
 import { memFreePct } from "./host.ts";
+import { doriLaunchEnv, processOmpCommand, resolveConsumerOmpCommand } from "./release/runtime.ts";
 import { type Exec, spawnExec } from "./runtime/exec.ts";
 import { HcRuntime } from "./runtime/hc/index.ts";
 import { HerdrRuntime } from "./runtime/herdr/index.ts";
@@ -55,7 +56,17 @@ export const defaultDeps = (): Deps => {
     choice,
     exec: spawnExec,
     now: Date.now,
-    agentCmd: process.env["DORI_AGENT_CMD"] ?? "omp",
+    get agentCmd() {
+      const selected = processOmpCommand();
+      if (selected) return selected.map(shq).join(" ");
+      if (process.env["DORI_AGENT_CMD"] !== undefined) return process.env["DORI_AGENT_CMD"];
+      const command = resolveConsumerOmpCommand(["omp"]);
+      return command[0] !== "omp"
+        ? command.map(shq).join(" ")
+        : existsSync(join(store.root, ".omp-dori"))
+          ? shq(join(store.root, "bin/omp"))
+          : "omp";
+    },
     doriCmd: process.env["DORI_CMD"] ?? `DORI_HOME=${shq(store.root)} bun ${shq(CLI)}`,
     host: () => ({ load1: loadavg()[0] ?? 0, cores: cpus().length, memFreePct: memFreePct() }),
     usage: new Telemetry(store.root),
@@ -85,6 +96,15 @@ export const agentCommand = (d: Deps, role: "dori" | "lane"): string =>
   isOmpAgentCommand(d.agentCmd) && !/(?:^|\s)--dori-role(?:[=\s]|$)/.test(d.agentCmd)
     ? `${d.agentCmd} --dori-role ${role}`
     : d.agentCmd;
+
+/** Native agents and loop controllers keep this home's selection across the terminal server. */
+export function harnessLaunchEnv(d: Deps): Record<string, string> {
+  const configFile = process.env["DORI_CONFIG"] ?? join(d.store.root, "config.json");
+  return doriLaunchEnv(process.env, configFile, {
+    doriHome: d.store.root,
+    stateDir: ompStateDir({ ...process.env, DORI_CONFIG: configFile }),
+  });
+}
 
 /** `DORI_PROMPTS_DIR` when set, else the repo's `prompts/`. */
 export const promptsDir = (): string => process.env["DORI_PROMPTS_DIR"] || PROMPTS;
