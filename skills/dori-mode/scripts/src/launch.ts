@@ -27,8 +27,11 @@ export type LaunchInput = {
 
 export class LaunchError extends Error {}
 
-// The first check is 20 s after start, then the screen and status are re-read every 10 s until `startupWaitSeconds`.
+// The full first check runs 20 s after start at the latest. Until then the status alone is polled every 2 s and only a
+// ready agent brings the check forward: a start that has not shown yet is no failure. Re-reads are 2 s apart before
+// 20 s and 10 s apart after it, up to the same `startupWaitSeconds` deadline.
 const FIRST_CHECK_MS = 20_000;
+const EARLY_CHECK_MS = 2_000;
 const RECHECK_MS = 10_000;
 const ready = (s: string | undefined): boolean => s === "idle" || s === "working";
 const unreported = (s: string | undefined): boolean => s === undefined || s === "unknown";
@@ -168,10 +171,17 @@ const startLane = async (
     return { lane, startup: `STARTUP_ERROR ${input.key} ${pane}: start failed: ${lastLines(String(e))}` };
   }
   const started = deps.clock.now();
-  await deps.clock.sleep(FIRST_CHECK_MS);
+  const ompAgent = isOmpCommand(deps.config.agentCommand);
+  let slept = 0;
+  const pause = async (): Promise<void> => {
+    const ms = slept < FIRST_CHECK_MS ? EARLY_CHECK_MS : RECHECK_MS;
+    slept += ms;
+    await deps.clock.sleep(ms);
+  };
+  do await pause();
+  while (slept < FIRST_CHECK_MS && !ready((await launchStatus(rts, ref, ompAgent)).status));
   const screen = await launchScreen(deps, rts, ref, input.key);
   if (screen === null) return { lane, startup: `STARTUP_DONE ${input.key}` };
-  const ompAgent = isOmpCommand(deps.config.agentCommand);
   const bad = startupFailure(screen, ompAgent);
   if (bad) return { lane, startup: `STARTUP_ERROR ${input.key} ${pane}: ${bad}` };
   const { status, error } = await launchStatus(rts, ref, ompAgent);
@@ -186,10 +196,11 @@ const startLane = async (
       (!omp && goalShown(shown, marker)) ||
       (await laneGoalActive(deps.config.sessionsDir, cwd, input.key, launchedAt, omp));
     const rechecks = Math.max(0, Math.ceil((deps.config.startupWaitSeconds * 1000 - FIRST_CHECK_MS) / RECHECK_MS));
+    const deadline = FIRST_CHECK_MS + rechecks * RECHECK_MS;
     let shown = screen;
     let current = status;
-    for (let check = 0; !ready(current) || (marker && !(await hasGoal(shown))); check++) {
-      if (check >= rechecks) {
+    while (!ready(current) || (marker && !(await hasGoal(shown)))) {
+      if (slept >= deadline) {
         const waited = Math.round((deps.clock.now() - started) / 1000);
         return {
           lane,
@@ -198,7 +209,7 @@ const startLane = async (
             : `STARTUP_UNCONFIRMED ${input.key} ${pane}: no ready agent status (${current ?? "none"}) after ${waited} s; last lines: ${lastLines(shown)}`,
         };
       }
-      await deps.clock.sleep(RECHECK_MS);
+      await pause();
       const nextScreen = await launchScreen(deps, rts, ref, input.key);
       if (nextScreen === null) return { lane, startup: `STARTUP_DONE ${input.key}` };
       shown = nextScreen;

@@ -35,6 +35,9 @@ test("an agent that has not reported is waited for until startupWaitSeconds; a l
   const brief = join(state.dir, "brief.md");
   writeFileSync(brief, "# brief\n");
   let waits = 0;
+  let slept: number[] = [];
+  // Before the 20 s check, nine 2 s polls read the status alone; the check itself is the tenth lookup.
+  const untilFirstCheck = (s: string | undefined) => Array<string | undefined>(10).fill(s);
   // herdr lists an agent that has not reported as "unknown", and a pane with no agent (undefined here) as a shell.
   const run = async (
     status: (string | undefined)[],
@@ -47,7 +50,12 @@ test("an agent that has not reported is waited for until startupWaitSeconds; a l
     if (Array.isArray(screen)) world.screens = [...screen];
     else world.screen = screen;
     waits = 0;
-    const base = depsFor(world, { ...fakeClock(T0), sleep: async () => void waits++ }, state.dir, {
+    slept = [];
+    const sleep = async (ms: number) => {
+      waits++;
+      slept.push(ms);
+    };
+    const base = depsFor(world, { ...fakeClock(T0), sleep }, state.dir, {
       agentCommand: ["omo", "--model", "{model}", "{prompt}"],
       ...patch,
     });
@@ -76,19 +84,27 @@ test("an agent that has not reported is waited for until startupWaitSeconds; a l
     return (await launchLane(deps, { key, title: "t", brief, done: "closed acme/app#3" })).startup;
   };
   const goal = "❯ \n Pursuing goal (1m)";
+  // A fast host: the ready agent with its goal is confirmed at the first 2 s poll, not after a fixed 20 s.
+  expect(await run(["idle"], goal, "fast")).toBe("STARTUP_OK fast w:p9");
+  expect(slept).toEqual([2_000]);
   // A slow host: the agent has not reported at the first check, then it comes up and sets its goal.
   expect(
-    await run(["unknown", "unknown", "unknown", "idle"], ["PS> & omo", "PS> & omo", "PS> & omo", goal], "slow"),
+    await run(
+      [...untilFirstCheck("unknown"), "unknown", "unknown", "idle"],
+      ["PS> & omo", "PS> & omo", "PS> & omo", goal],
+      "slow",
+    ),
   ).toBe("STARTUP_OK slow w:p9");
   // Every startup read asks herdr for the unwrapped screen, so a wrapped warning stays one line (#202).
   const reads = world.calls.filter((c) => c[0] === "herdr" && c[1] === "pane" && c[2] === "read");
   expect(reads.length).toBe(4);
   expect(reads.every((c) => c.at(-1) === "recent-unwrapped")).toBe(true);
-  // An agent that never comes up is unconfirmed after the whole wait (20 s, then sixteen 10 s re-reads), never OK.
+  // An agent that never comes up is unconfirmed after the whole wait, never OK.
   expect(await run(["unknown"], "PS> & omo", "never")).toStartWith(
     "STARTUP_UNCONFIRMED never w:p9: no ready agent status (unknown) after",
   );
-  expect(waits).toBe(17);
+  // The total wait is unchanged: ten 2 s polls up to the 20 s check, then sixteen 10 s re-reads.
+  expect(slept).toEqual([...Array(10).fill(2_000), ...Array(16).fill(10_000)]);
   // An agent that has not reported is never OK, even when its goal already shows, with or without a goal marker.
   expect(await run(["unknown"], goal, "goal-unreported")).toStartWith(
     "STARTUP_UNCONFIRMED goal-unreported w:p9: no ready agent status (unknown)",
@@ -100,29 +116,29 @@ test("an agent that has not reported is waited for until startupWaitSeconds; a l
   expect(await run(["unknown"], "PS> & omo", "short", { startupWaitSeconds: 60 })).toStartWith(
     "STARTUP_UNCONFIRMED short w:p9",
   );
-  expect(waits).toBe(5);
-  // A lookup error or a shell ends it at once, at the first check or during the wait.
+  expect(waits).toBe(14);
+  // A lookup error or a shell ends it at once, at the 20 s check or during the wait; the early polls only wait for it.
   expect(await run([LOOKUP_ERROR], "PS> & omo", "err-first")).toStartWith(
     "STARTUP_UNCONFIRMED err-first w:p9: status lookup failed",
   );
-  expect(waits).toBe(1);
-  expect(await run(["unknown", LOOKUP_ERROR], "PS> & omo", "err-later")).toStartWith(
+  expect(waits).toBe(10);
+  expect(await run([...untilFirstCheck("unknown"), LOOKUP_ERROR], "PS> & omo", "err-later")).toStartWith(
     "STARTUP_UNCONFIRMED err-later w:p9: status lookup failed",
   );
-  expect(waits).toBe(2);
+  expect(waits).toBe(11);
   expect(await run([undefined], "$ ", "shell-first")).toStartWith(
     "STARTUP_UNCONFIRMED shell-first w:p9: no ready agent status (shell)",
   );
-  expect(waits).toBe(1);
-  expect(await run(["unknown", undefined], "$ ", "shell-later")).toStartWith(
+  expect(waits).toBe(10);
+  expect(await run([...untilFirstCheck("unknown"), undefined], "$ ", "shell-later")).toStartWith(
     "STARTUP_UNCONFIRMED shell-later w:p9: agent status became shell",
   );
-  expect(waits).toBe(2);
+  expect(waits).toBe(11);
   // A failure that shows while the agent has not reported ends the wait too.
   expect(await run(["unknown"], ["PS> & omo", "No API key found\n$ "], "fail-later")).toBe(
     "STARTUP_ERROR fail-later w:p9: No API key",
   );
-  expect(waits).toBe(2);
+  expect(waits).toBe(11);
 });
 
 test("on hc, a program that has not reported a status yet is waited for, and one that never does is unconfirmed", async () => {
@@ -151,13 +167,13 @@ test("on hc, a program that has not reported a status yet is waited for, and one
   expect(await launch("hc-never", { foreground: OMO })).toStartWith(
     "STARTUP_UNCONFIRMED hc-never t1: no ready agent status (none) after",
   );
-  expect(waits).toBe(17);
+  expect(waits).toBe(26);
   // A program that exits back to the shell is no slow start: hc lists it with no status too, but the probe names the
-  // shell in front, so the launch ends at the first check instead of waiting out startupWaitSeconds.
+  // shell in front, so the launch ends at the 20 s check instead of waiting out startupWaitSeconds.
   expect(await launch("hc-shell", { foreground: { name: "zsh", argv: ["zsh"], pid: 950 } })).toStartWith(
     "STARTUP_UNCONFIRMED hc-shell t1: no ready agent status (shell)",
   );
-  expect(waits).toBe(1);
+  expect(waits).toBe(10);
   // The extension warning wraps in a pane narrower than the line; read unwrapped, it is still only the warning (#202).
   // 95, 105 and 110 wrap on a space, which hc cuts, so a wrapped row is one cell short of the width.
   for (const cols of [80, 95, 100, 105, 110]) {

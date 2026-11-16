@@ -119,11 +119,12 @@ test("launch reports STARTUP_OK only on a ready agent status that shows a goal; 
   // ...but a real missing module on another line of the same screen still is, with or without a status.
   const missing = `${warning}\nError: Cannot find module '/repo/dist/cli.js'\n$ `;
   expect(await run(undefined, missing, "module-lane")).toBe("STARTUP_ERROR module-lane w:p9: Cannot find module");
-  expect(waits).toBe(1);
+  // No ready status brings the check forward, so it runs at 20 s, after ten 2 s waits.
+  expect(waits).toBe(10);
   expect(await run(["unknown", "unknown", "idle"], ["PS> & omo", missing], "late-module-lane")).toBe(
     "STARTUP_ERROR late-module-lane w:p9: Cannot find module",
   );
-  expect(waits).toBe(2);
+  expect(waits).toBe(4);
 });
 
 test("STARTUP_NO_GOAL names the time the launch really waited, not the planned 180 s", async () => {
@@ -164,9 +165,10 @@ test("STARTUP_NO_GOAL names the time the launch really waited, not the planned 1
       return inner(argv);
     },
   };
-  // When the launch gives up on the goal; then the message gives the 20 s check plus sixteen 10 s re-reads, each 5 s late.
+  // When the launch gives up on the goal; then the message gives ten 2 s waits up to 20 s plus sixteen 10 s re-reads, each
+  // 5 s late.
   const { startup } = await launchLane(deps, { key: "late-lane", title: "t", brief, done: "closed acme/app#3" });
-  expect(startup).toStartWith("STARTUP_NO_GOAL late-lane w:p9: the agent is running but shows no goal after 265 s;");
+  expect(startup).toStartWith("STARTUP_NO_GOAL late-lane w:p9: the agent is running but shows no goal after 310 s;");
 });
 
 test("launch registers the lane before it starts the agent, so the lane's first dori report is accepted", async () => {
