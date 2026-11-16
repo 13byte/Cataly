@@ -99,7 +99,8 @@ export function reportNativeCache(
   };
   const cacheReal = real(cache);
   const rootsReal = roots.map(real);
-  for (const root of roots)
+  // A root given as a link (a `--reference` alias) is walked at its real path, so its contents are read.
+  for (const root of rootsReal)
     walk(root, (path, kind) => {
       if (kind === "directory") {
         if (lstatSync(join(path, "native-omp.lock"), { throwIfNoEntry: false })) bind(path, `source ${path}`);

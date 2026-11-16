@@ -9,7 +9,21 @@ const NATIVE_VIEWER_FIXTURE = "isolated viewer admission bytes, not an applicati
 
 export function fixtureGit(cwd: string, ...argv: string[]): string {
   const result = Bun.spawnSync(
-    ["/bin/sh", "-c", 'umask 077; exec "$@"', "dori-source-fixture", "git", "-c", "core.hooksPath=/dev/null", ...argv],
+    // No automatic gc or maintenance: a detached one would outlive the call with its working directory in the fixture.
+    [
+      "/bin/sh",
+      "-c",
+      'umask 077; exec "$@"',
+      "dori-source-fixture",
+      "git",
+      "-c",
+      "core.hooksPath=/dev/null",
+      "-c",
+      "gc.auto=0",
+      "-c",
+      "maintenance.auto=false",
+      ...argv,
+    ],
     {
       cwd,
       env: {

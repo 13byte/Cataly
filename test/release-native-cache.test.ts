@@ -60,7 +60,9 @@ test("only an identity no source, reference or process names is pruned, and only
     );
     expect(reasons[discovered.receipt.directory]).toContain(`source ${discovered.source}`);
     expect(reasons[wrapped.receipt.directory]).toEqual([`reference ${join(c.root, "dori/bin/omp")}`]);
-    expect(reasons[running.receipt.directory]).toEqual([`process ${holder.pid}`]);
+    // Only processes keep it, the holder among them (another process may work in that directory too).
+    expect(reasons[running.receipt.directory]).toContain(`process ${holder.pid}`);
+    expect(reasons[running.receipt.directory]?.every((reason) => reason.startsWith("process "))).toBe(true);
     expect(reasons[superseded.receipt.directory]).toEqual([]);
     expect(reasons[unknown]).toEqual(["unrecognized receipt"]);
     expect(dry.entries.find((entry) => entry.directory === superseded.receipt.directory)!.bytes).toBeGreaterThan(0);
@@ -113,7 +115,7 @@ test("a link into the cache, a used detached copy and a partial receipt keep the
     expect(reasons[linked.receipt.directory]).toEqual([`link ${join(bin, "omp")}`]);
     expect(reasons[chained.receipt.directory]).toEqual([`link ${join(bin, "omp-side")}`]);
     expect(reasons[partial.receipt.directory]).toEqual(["unrecognized receipt"]);
-    expect(reasons[detached]).toEqual([`process ${holder.pid}`]);
+    expect(reasons[detached]).toContain(`process ${holder.pid}`);
     expect(reasons[superseded.receipt.directory]).toEqual([]);
     expect(applied.removed).toEqual([]);
     for (const kept of [linked, chained, partial, superseded]) expect(existsSync(kept.receipt.directory)).toBe(true);
@@ -147,6 +149,11 @@ test("a link to a wrapper outside the roots keeps what it names; a link to an un
   expect(report([refs])[free.receipt.directory]).toEqual([held]);
   // Once that directory is scanned too, its link no longer holds anything.
   expect(report([refs, join(c.root, "opt")])[free.receipt.directory]).toEqual([]);
+  // A reference root given as a link is read at its real path.
+  symlinkSync(outside, join(c.root, "wrappers-alias"));
+  expect(report([join(c.root, "wrappers-alias")])[wrapped.receipt.directory]).toEqual([
+    `reference ${join(outside, "omp")}`,
+  ]);
   expect(pruneNativeCache(c.home, [], [refs], true).removed).toEqual([]);
   expect(existsSync(free.receipt.directory)).toBe(true);
 });
