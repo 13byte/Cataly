@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { lstatSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readPaneState } from "../../skills/dori-mode/scripts/src/lane-state.ts";
 import { processIdentity } from "../../src/update/deployment-process.ts";
 import type { RuntimeHealth } from "../../src/update/deployment-types.ts";
 import { type FakePi, load, until, useConfig } from "./fake-pi.ts";
@@ -157,6 +158,24 @@ test("a bootstrap bound to another native session launches nothing", async () =>
   });
   sessions.push(dori);
   await expect(dori.emit("session_start")).rejects.toThrow("session or version");
+  expect(lstatSync(f.healthPath, { throwIfNoEntry: false })).toBeUndefined();
+});
+
+test("a rejected bootstrap leaves no half-initialized role session publishing pane state", async () => {
+  const f = fixture("different-session");
+  const dori = await load({
+    session: { id: "legacy-session", entries: [] },
+    flags: { "dori-role": "dori", "dori-monitor-bootstrap": f.bootstrap },
+  });
+  sessions.push(dori);
+  await expect(dori.emit("session_start")).rejects.toThrow("session or version");
+  await dori.emit("agent_start");
+  await dori.emit("tool_approval_requested", { type: "tool_approval_requested", toolCallId: "pending" });
+  await dori.emit("goal_updated", { goal: { objective: "work", status: "active" } });
+  expect(readPaneState(f.stateDir, "w1:p7")).toBeNull();
+  expect(dori.handlers.get("session_shutdown")?.length ?? 0).toBeGreaterThan(0);
+  await dori.emit("session_shutdown");
+  expect(readPaneState(f.stateDir, "w1:p7")).toBeNull();
   expect(lstatSync(f.healthPath, { throwIfNoEntry: false })).toBeUndefined();
 });
 

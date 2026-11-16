@@ -373,10 +373,20 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       approvals.clear();
       agentStatus = "idle";
     }
-    if (bootstrap && role === "dori" && bootstrapMonitors(pi, branch, sessionId, recordedMonitors(branch)))
-      branch = ctx.sessionManager.getBranch();
-    goal = recordedGoal(branch);
     if (role && !lifecycleRegistered) registerLifecycle();
+    if (bootstrap && role === "dori") {
+      try {
+        if (bootstrapMonitors(pi, branch, sessionId, recordedMonitors(branch))) branch = ctx.sessionManager.getBranch();
+      } catch (error) {
+        // A rejected bootstrap leaves no role session behind: no handler may publish ready or approval-free state.
+        role = undefined;
+        agentRoles.delete(ctx.agent.id);
+        monitors.stopAll();
+        removePane();
+        throw error;
+      }
+    }
+    goal = recordedGoal(branch);
     if (role && loadError && !warned) {
       warned = true;
       ctx.ui.notify(
