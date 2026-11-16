@@ -27,7 +27,14 @@ export function createConsumerSmokeContext(rawOut: string, runtime: string, runt
   );
   mkdirSync(out, { mode: 0o700 });
   for (const path of [
-    home, tools, cwd, join(out, "logs"), join(out, "tmp"), join(out, "s"), join(out, "r"), join(out, "c"),
+    home,
+    tools,
+    cwd,
+    join(out, "logs"),
+    join(out, "tmp"),
+    join(out, "s"),
+    join(out, "r"),
+    join(out, "c"),
   ]) {
     mkdirSync(path, { mode: 0o700 });
   }
@@ -98,7 +105,15 @@ export function createConsumerSmokeContext(rawOut: string, runtime: string, runt
     const candidateTree = (await run("candidate-tree", [git, "-C", source, "rev-parse", "HEAD^{tree}"])).stdout.trim();
     const checkout = join(out, "candidate-qa-source");
     await run("clone-private-candidate", [
-      git, "clone", "--quiet", "--shared", "--no-checkout", "--no-tags", "--", source, checkout,
+      git,
+      "clone",
+      "--quiet",
+      "--shared",
+      "--no-checkout",
+      "--no-tags",
+      "--",
+      source,
+      checkout,
     ]);
     await run("select-private-candidate", [git, "-C", checkout, "switch", "--detach", candidate]);
     const packageFile = join(checkout, "package.json");
@@ -116,8 +131,16 @@ export function createConsumerSmokeContext(rawOut: string, runtime: string, runt
     const staged = await run("private-version-scope", [git, "-C", checkout, "diff", "--cached", "--name-only"]);
     assert.equal(staged.stdout.trim(), "package.json");
     await run("commit-private-version", [
-      git, "-C", checkout, "-c", "user.name=OMP-Dori consumer smoke", "-c", "user.email=consumer-smoke@localhost",
-      "commit", "-m", "test: derive private consumer smoke version 0.1.3",
+      git,
+      "-C",
+      checkout,
+      "-c",
+      "user.name=OMP-Dori consumer smoke",
+      "-c",
+      "user.email=consumer-smoke@localhost",
+      "commit",
+      "-m",
+      "test: derive private consumer smoke version 0.1.3",
     ]);
     const qa = (await run("qa-commit", [git, "-C", checkout, "rev-parse", "HEAD"])).stdout.trim();
     const qaTree = (await run("qa-tree", [git, "-C", checkout, "rev-parse", "HEAD^{tree}"])).stdout.trim();
@@ -143,7 +166,16 @@ export function createConsumerSmokeContext(rawOut: string, runtime: string, runt
     const clean = await run("qa-clean", [git, "-C", checkout, "status", "--porcelain", "--untracked-files=all"]);
     assert.equal(clean.stdout, "");
     const delta = await run("qa-version-delta", [
-      git, "-C", checkout, "diff", "--binary", "--full-index", candidate, qa, "--", "package.json",
+      git,
+      "-C",
+      checkout,
+      "diff",
+      "--binary",
+      "--full-index",
+      candidate,
+      qa,
+      "--",
+      "package.json",
     ]);
     writeFileSync(join(out, "qa-version.patch"), delta.stdout, { flag: "wx", mode: 0o600 });
     const proof = {
@@ -158,11 +190,7 @@ export function createConsumerSmokeContext(rawOut: string, runtime: string, runt
       nonVersionInventoryHash: digest(originalRows.filter(nonVersion).join("\0")),
       statement: "Runtime source B is a private metadata-only version derivation, not raw final-candidate bytes.",
     };
-    writeFileSync(
-      join(out, "qa-derivation.json"),
-      `${JSON.stringify(proof, null, 2)}\n`,
-      { flag: "wx", mode: 0o600 },
-    );
+    writeFileSync(join(out, "qa-derivation.json"), `${JSON.stringify(proof, null, 2)}\n`, { flag: "wx", mode: 0o600 });
     return proof;
   }
   for (const [name, bytes] of Object.entries({

@@ -59,16 +59,17 @@ try {
   assert.equal(version.match(/\b\d+\.\d+\.\d+\b/)?.[0], runtime === "hc" ? "0.1.20" : "0.9.5");
   const derivation = await deriveCandidate(sourceB);
   const manifests: ReleaseManifest[] = [];
-  for (const [source, dist] of [[sourceA, distA], [derivation.checkout, distB]] as const) {
+  for (const [source, dist] of [
+    [sourceA, distA],
+    [derivation.checkout, distB],
+  ] as const) {
     await run("clean-snapshot", [join(tools, "git"), "-C", source, "diff", "--exit-code", "HEAD", "--"]);
     await run("build", [bun, join(source, "scripts/release.ts"), "build", "--out", dist, "--prerelease"]);
     // Each producer is runtime-selected from its committed snapshot, including that snapshot's canonical version.
     const verify =
       "const {verifyDistribution}=await import(process.argv[1]); " +
       "console.log(JSON.stringify((await verifyDistribution(process.argv[2],process.argv[3])).manifest));";
-    await run("verify-distribution", [
-      bun, "-e", verify, join(source, "scripts/release-build.ts"), source, dist,
-    ]);
+    await run("verify-distribution", [bun, "-e", verify, join(source, "scripts/release-build.ts"), source, dist]);
     manifests.push(validateReleaseManifest(JSON.parse(readFileSync(manifestFile(dist), "utf8"))));
   }
   const a = manifests[0]!;
@@ -82,11 +83,25 @@ try {
   assert.notEqual(a.source.hash, b.source.hash);
   assert.notEqual(a.archive.sha256, b.archive.sha256);
   await run("ancestor", [
-    join(tools, "git"), "-C", sourceB, "merge-base", "--is-ancestor", a.commit, derivation.candidate,
+    join(tools, "git"),
+    "-C",
+    sourceB,
+    "merge-base",
+    "--is-ancestor",
+    a.commit,
+    derivation.candidate,
   ]);
   await run("bootstrap-a", [
-    join(tools, "bash"), join(distA, "install.sh"), "--from", distA, "--version", a.tag,
-    "--home", side, "--runtime", runtime,
+    join(tools, "bash"),
+    join(distA, "install.sh"),
+    "--from",
+    distA,
+    "--version",
+    a.tag,
+    "--home",
+    side,
+    "--runtime",
+    runtime,
   ]);
   const config = readFileSync(join(side, "config.json"));
   const wrappersA = snapshot(join(side, "bin"));
@@ -134,8 +149,10 @@ try {
       closeSync(fd);
     }
     started = true;
-    await until("private herdr readiness", async () =>
-      (await run("herdr-ready", [runtimeBin, "--session", namespace, "workspace", "list"], true)).code === 0,
+    await until(
+      "private herdr readiness",
+      async () =>
+        (await run("herdr-ready", [runtimeBin, "--session", namespace, "workspace", "list"], true)).code === 0,
     );
   }
   async function inspect(dist: string, previous: string) {
@@ -149,8 +166,12 @@ try {
     });
     assert.equal((await run("shipped-cli-version", [cli, "--version"])).stdout.trim(), expected.releaseVersion);
     await run("installed-bindings", [
-      bun, join(import.meta.dir, "consumer-smoke-inspect.ts"), side,
-      manifestFile(dist), previous === "-" ? "-" : manifestFile(previous), runtime,
+      bun,
+      join(import.meta.dir, "consumer-smoke-inspect.ts"),
+      side,
+      manifestFile(dist),
+      previous === "-" ? "-" : manifestFile(previous),
+      runtime,
     ]);
     const native = await run("native-version", [join(side, "bin/omp"), "--version"]);
     assert.match(native.stdout, /\b18\.20\.0\b/);

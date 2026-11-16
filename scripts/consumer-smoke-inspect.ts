@@ -39,7 +39,7 @@ if (import.meta.main) {
   // Static imports cannot select the physical installed release: every module below belongs to its runtime path.
   const { consumerPaths } = await import(join(source, "src/release/files.ts"));
   const { loadInstalled, assertInstalledPointer, verifyRelease, releasePath } = await import(
-    join(source, "src/release/state.ts"),
+    join(source, "src/release/state.ts")
   );
   const { prepareConsumerDiscovery } = await import(join(source, "src/release/discovery.ts"));
   const { assertNativeSource } = await import(join(source, "src/release/native.ts"));
