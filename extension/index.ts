@@ -13,6 +13,7 @@
  * - The Dori session gets the `monitor` tool (monitor.ts).
  * - A lane's main agent on GPT-6.1 Sol is told to carry lane bookkeeping along with real work (lane-bookkeeping.ts).
  */
+import { spawnSync } from "node:child_process";
 import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "../skills/dori-mode/scripts/src/config";
@@ -245,7 +246,8 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
    * Only the process that owns the pane reports it. `HERDR_PANE_ID` and `HC_TERMINAL_ID` are inherited by every
    * child, so a nested `omp` run (a `-p` check, a subagent's own session) would otherwise take the pane record of
    * the live session above it and delete that record on its own shutdown — which reads to the watchdog as a dead
-   * lead, so it restarts the lead every tick. An incumbent that is still alive keeps its record.
+   * lead, so it restarts the lead every tick. An incumbent that is still alive, and not a newer process reusing its
+   * pid, keeps its record.
    */
   const paneHeldByAnother = (paneId: string): boolean => {
     if (stateDir === undefined) return false;
@@ -254,11 +256,20 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       return false;
     try {
       process.kill(existing.pid, 0);
-      return true;
     } catch (error) {
       // EPERM still identifies a live owner. Dead processes and invalid pid arguments do not own this pane.
-      return (error as NodeJS.ErrnoException).code === "EPERM";
+      if ((error as NodeJS.ErrnoException).code !== "EPERM") return false;
     }
+    // PIDs are reused: like the reader, a process newer than the record's session cannot be the writer that owns it.
+    // An unreadable start time keeps the incumbent's protection.
+    const ps = spawnSync("ps", ["-o", "lstart=", "-p", String(existing.pid)], {
+      encoding: "utf8",
+      // lstart has no offset; its ps producer and Date.parse observer must use the same zone.
+      env: { ...process.env, LC_ALL: "C", TZ: Intl.DateTimeFormat().resolvedOptions().timeZone },
+      timeout: 1_000,
+    });
+    const started = Date.parse(ps.stdout?.trim() ?? "");
+    return !(ps.status === 0 && Number.isFinite(started) && started > Date.parse(existing.startedAt));
   };
 
   const savePane = (ctx: DoriContext): void => {
