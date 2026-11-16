@@ -116,8 +116,8 @@ function envCommandAt(argv: readonly string[], at: number): number | undefined {
 
 /**
  * What an exact argv runs, after leading `NAME=value` assignments and the `env` utility with its options: the command
- * itself (that prefix removed), as `omp` when it starts OMP and `other` otherwise, or `unparsed` for an `env` prefix
- * whose options are not understood (such as `-S`), which must not be taken for either.
+ * itself (that prefix removed), as `omp` when it starts OMP and `other` otherwise, or `unparsed` when a command prefix
+ * cannot be read unambiguously, which must not be taken for either.
  */
 export type OmpArgv =
   | { readonly kind: "omp" | "other"; readonly command: readonly string[] }
@@ -131,14 +131,16 @@ export function classifyOmpArgv(argv: readonly string[]): OmpArgv {
   const command = argv.slice(start);
   if (sourceOmpArgv(command)) return { kind: "omp", command };
   const name = command[0]?.split("/").at(-1);
-  if (name === "omp") return { kind: "omp", command };
+  if (OMP_EXECUTABLE.test(command[0] ?? "")) return { kind: "omp", command };
   if (name !== "bun" && name !== "node") return { kind: "other", command };
   let script = 1;
   while (command[script]?.startsWith("-")) script++;
-  return { kind: OMP_EXECUTABLE.test(command[script] ?? "") ? "omp" : "other", command };
+  if (OMP_EXECUTABLE.test(command[script] ?? "")) return { kind: "omp", command };
+  if (script > 1 && command.slice(script + 1).some((arg) => OMP_EXECUTABLE.test(arg))) return { kind: "unparsed" };
+  return { kind: "other", command };
 }
 
-/** An exact argv that starts OMP (see classifyOmpArgv); an unparsed `env` prefix is not one. */
+/** An exact argv that starts OMP (see classifyOmpArgv); an unparsed command prefix is not one. */
 export const isOmpArgv = (argv: readonly string[]): boolean => classifyOmpArgv(argv).kind === "omp";
 
 const ompProcess = (p: ForegroundProcess): boolean =>

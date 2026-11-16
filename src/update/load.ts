@@ -111,11 +111,11 @@ const checkAgent = (agent: UpdateCommand, label: string): void => {
     throw new UpdateError(`${label}.argv must consume {prompt} or {brief}`);
   }
   if (agent.cwd !== undefined) throw new UpdateError(`${label}.cwd is fixed to the candidate`);
-  // An env prefix that cannot be read (such as -S) hides which arguments OMP gets, so native checks cannot cover it:
+  // An unreadable command prefix hides which arguments OMP gets, so native checks cannot cover it:
   // only an explicitly external wrapper, which owns its own contract, may use one.
   if (agent.engine !== "external" && classifyOmpArgv(agent.argv).kind === "unparsed") {
     throw new UpdateError(
-      `${label}.argv has an env prefix Dori cannot read; drop -S and unknown env options, or set ${label}.engine to "external"`,
+      `${label}.argv has a command prefix Dori cannot read; drop -S and unknown env options, or set ${label}.engine to "external"`,
     );
   }
   if (!nativeAgent(agent)) return; // an explicit external wrapper owns its own fresh-context and capability contract
