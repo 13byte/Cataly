@@ -22,7 +22,7 @@ test("isolated source releases need no stock OMP and bind both native and ULW de
   const runtime = process.platform === "darwin" ? "hc" : "herdr";
   writeFileSync(join(tools, runtime), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   process.env["PATH"] = tools;
-  expect(Bun.which("omp")).toBeNull();
+  expect(Bun.which("omp", { PATH: tools })).toBeNull();
   prerequisites(runtime, true, false, f.paths);
 
   const one = await installBundle(f.paths, first.bundle, undefined);
