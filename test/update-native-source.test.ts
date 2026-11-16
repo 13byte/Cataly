@@ -96,3 +96,27 @@ test.each([
   expect(() => load(argv, "omp")).toThrow(refused);
   expect(() => load(argv, "external")).not.toThrow();
 });
+
+test.each([
+  ["Bun preload", ["bun", "--preload", "/hook.ts", "/opt/bin/omp"]],
+  ["Bun cwd", ["bun", "--cwd", "/repo", "/opt/bin/omp"]],
+  ["Node require", ["node", "--require", "/otel.js", "/opt/@oh-my-pi/pi-coding-agent/dist/cli.js"]],
+])("%s cannot silently downgrade native update guards", (_, argv) => {
+  const command = [...argv, "--model", "anthropic/claude-opus-5-5", "--resume", "session", "{prompt}"];
+  expect(() => load(command)).toThrow("command prefix");
+  expect(() => load(command, "omp")).toThrow("command prefix");
+  expect(() => load(command, "external")).not.toThrow();
+});
+
+test("a directly executed published OMP CLI retains its native session guard", () => {
+  expect(() =>
+    load([
+      "/opt/@oh-my-pi/pi-coding-agent/dist/cli.js",
+      "--model",
+      "anthropic/claude-opus-5-5",
+      "--resume",
+      "session",
+      "{prompt}",
+    ]),
+  ).toThrow("without session resume");
+});

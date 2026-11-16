@@ -33,8 +33,10 @@ const windowMs = (deps: FlowDeps): number => deps.config.closeAfterMin * 60_000;
  * The line for a change refused because another writer moved the lane on (a claim, objection, pause or close) since it
  * was read. The CLI exits 3 on it: nothing was recorded, so the lane is read again before deciding anew.
  */
-export const movedOn = async (deps: FlowDeps, lane: Lane, what: string): Promise<string> =>
-  `LANE_CHANGED ${lane.key} moved on while this ran (now ${statusOf((await deps.registry.read(lane.key)) ?? lane)}, was ${statusOf(lane)}); ${what} not recorded`;
+export const movedOn = async (deps: FlowDeps, lane: Lane, what: string): Promise<string> => {
+  const current = await deps.registry.read(lane.key);
+  return `LANE_CHANGED ${lane.key} moved on while this ran (now ${current ? statusOf(current) : "not registered"}, was ${statusOf(lane)}); ${what} not recorded`;
+};
 
 export const claimDone = async (deps: FlowDeps, lane: Lane, evidence: string): Promise<string> => {
   const at = iso(deps.clock);
