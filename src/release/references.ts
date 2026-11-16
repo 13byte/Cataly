@@ -163,8 +163,10 @@ export function installIsolatedReferences(paths: ConsumerPaths, source: string):
   references["bin/omp-dori"] = wrapper(
     `case "\${1:-}" in\n  omp) shift; exec ${quote(join(paths.dori, "bin/omp"))} "$@" ;;\n  hc) shift; exec hc "$@" ;;\n  *) exec ${quote(join(paths.dori, "bin/dori"))} "$@" ;;\nesac`,
   );
+  // OMP self-update replaces the first omp on PATH, which is bin/omp above; the replaced wrapper would drop the
+  // extension and the live source selection. The managed deployment keeps the same per-process fence.
   references["omp.yml"] = {
-    bytes: "skills:\n  ignoredSkills:\n    - dori-mode\n",
+    bytes: "skills:\n  ignoredSkills:\n    - dori-mode\nupdate:\n  auto: false\n",
     executable: false,
   };
   const recorded = regularFile(receipt) ? readJson(receipt) : {};

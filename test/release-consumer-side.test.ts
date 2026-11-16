@@ -135,6 +135,35 @@ test("a side OMP launch bypasses foreign Dori wrappers and clears inherited harn
   expect(ompStateDir({ DORI_HOME: f.paths.dori, DORI_CONFIG: f.paths.config })).toBe(join(f.paths.dori, "state"));
 });
 
+test("an isolated OMP launch keeps OMP self-update off, since its wrapper is the first omp on the consumer PATH", async () => {
+  const f = fixture(true);
+  const native = join(f.paths.home, "native");
+  mkdirSync(native);
+  writeFileSync(
+    join(native, "omp"),
+    `#!${process.execPath}\nconsole.log(JSON.stringify({ argv: process.argv.slice(2), path: process.env.PATH }));\n`,
+    { mode: 0o755 },
+  );
+  const previous = process.env["PATH"];
+  process.env["PATH"] = `${native}:${previous ?? ""}`;
+  try {
+    await installBundle(f.paths, f.release("first\n").bundle, undefined);
+  } finally {
+    if (previous === undefined) delete process.env["PATH"];
+    else process.env["PATH"] = previous;
+  }
+  const result = Bun.spawnSync([join(f.paths.dori, "bin/omp"), "--version"], {
+    env: { HOME: f.paths.home, PATH: previous },
+  });
+  expect(result.exitCode, result.stderr.toString()).toBe(0);
+  const { argv, path } = JSON.parse(result.stdout.toString()) as { argv: string[]; path: string };
+  expect(path.split(":")[0]).toBe(join(f.paths.dori, "bin"));
+  const overlays = argv.flatMap((arg, index) => (argv[index - 1] === "--config" ? [arg] : []));
+  expect(overlays).toContain(join(f.paths.dori, "omp.yml"));
+  const merged = Object.assign({}, ...overlays.map((file) => Bun.YAML.parse(readFileSync(file, "utf8")) as object));
+  expect(merged).toMatchObject({ update: { auto: false } });
+});
+
 test("an interrupted initial reference transaction resumes without taking over changed files", async () => {
   const f = fixture(true);
   const bundle = f.release("first\n").bundle;
