@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { formatRef } from "../../../../src/runtime/types.ts";
 import { type Lane, sessionOf, statusOf } from "./registry.ts";
@@ -65,17 +65,25 @@ const tokens = (value: unknown): string[] =>
         .map((t) => t.replace(/^['"]+|['"]+$/g, ""))
         .filter(Boolean)
     : [];
+// A command's own words say what it runs, never which lane: the program, and for dori its command and, for a messenger
+// command, the platform. `dori inbound slack` is not lane "dori", "inbound" or "slack".
+const DORI_PROGRAMS = new Set(["dori", "omp-dori"]);
+const PLATFORM_COMMANDS = new Set(["send", "presence", "inbound", "thread", "react"]);
+const argumentWords = (argv: readonly string[]): readonly string[] =>
+  !DORI_PROGRAMS.has(basename(argv[0] ?? ""))
+    ? argv.slice(1)
+    : argv.slice(PLATFORM_COMMANDS.has(argv[1] ?? "") ? 3 : 2);
 const tiedBy = (monitor: Monitor, lane: Lane): string | null => {
   const ref = sessionOf(lane);
   const panes = [lane.pane, ref?.id, ref ? formatRef(ref) : undefined].filter((id): id is string => !!id);
   if (Array.isArray(monitor.argv)) {
     if (panes.some((id) => monitor.argv?.includes(id))) return `${lane.key}:argv:pane`;
-    if (monitor.argv.includes(lane.key)) return `${lane.key}:argv:key`;
+    if (argumentWords(monitor.argv).includes(lane.key)) return `${lane.key}:argv:key`;
   }
   for (const field of TIED_FIELDS) {
     const words = tokens(monitor[field]);
     if (panes.some((id) => words.includes(id))) return `${lane.key}:${field}:pane`;
-    if (words.includes(lane.key)) return `${lane.key}:${field}:key`;
+    if ((field === "command" ? argumentWords(words) : words).includes(lane.key)) return `${lane.key}:${field}:key`;
   }
   return null;
 };
