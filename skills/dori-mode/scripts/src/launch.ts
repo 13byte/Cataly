@@ -148,9 +148,9 @@ const startLane = async (
     input.brief,
     preamble,
   );
-  if (opened.kind === "create-failed") {
+  if (opened.kind === "failed") {
     const why = opened.error instanceof Error ? opened.error.message : String(opened.error);
-    throw new LaunchError(`session create failed: ${why}`);
+    throw new LaunchError(`${opened.what}: ${why}`);
   }
   if (opened.kind === "taken") throw new LaunchError(`lane ${input.key} is already registered`);
   const { lane, ref } = opened;

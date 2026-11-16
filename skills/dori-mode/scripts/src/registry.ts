@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { SessionRef } from "../../../../src/runtime/types.ts";
@@ -10,11 +10,9 @@ const LOCK_WAIT_MS = 5_000;
 const LOCK_RETRY_MS = 10;
 
 export const LANE_KEY = /^[a-z0-9][a-z0-9._-]{1,60}$/;
-/**
- * `lead` names the lead, never a lane: records the lead writes (lessons with `lane: "lead"`) and lead-only checks tell
- * the two apart by this key, so launch and adopt refuse it. LANE_KEY stays as it is because those records still carry it,
- * and keys are lowercase-only, so the exact match is the whole check.
- */
+// `lead` names the lead, never a lane: records the lead writes (lessons with `lane: "lead"`) and lead-only checks tell
+// the two apart by this key, so launch and adopt refuse it. LANE_KEY stays as it is because those records still carry
+// it, and keys are lowercase-only, so the exact match is the whole check.
 export const RESERVED_LANE_KEY = "lead";
 
 export type LaneStatus = "working" | "paused" | "done-claimed" | "verified-done" | "not-done" | "closed";
@@ -166,18 +164,22 @@ export class Registry {
     await this.locked(lane.key, () => this.writeNow(lane));
   }
 
-  /**
-   * Registers a new lane only while its key has no record, checked and written under the lane's lock: of two launches
-   * or adopts of one key, the second is refused (false) and cannot erase what the first, or a later claim, recorded.
-   */
+  /** Registers a new lane only while its key has no record (false: another launch or adopt holds the key). */
   async create(lane: Lane): Promise<boolean> {
     return (await this.update(lane.key, (current) => (current ? null : lane))) !== null;
   }
 
+  /** Removes `lane`'s record while it is still that registration: a launch undoing its own failed start. */
+  discard(lane: Lane): Promise<void> {
+    return this.locked(lane.key, () => {
+      const current = this.readNow(lane.key);
+      if (current && generation(current) === generation(lane)) rmSync(this.path(lane.key), { force: true });
+    });
+  }
+
   /**
-   * Read-modify-write of one lane under its lock: `fn` gets the lane as stored now (null when there is no record) and
-   * returns the lane to store, or null to leave it. Returns what was stored, or null. A lane read earlier and held
-   * across I/O must be changed here, never written back whole, so a status or claim written meanwhile is kept.
+   * Read-modify-write of one lane under its lock: `fn` gets the stored lane (or null) and returns the lane to store, or
+   * null to leave it. A lane held across I/O is changed here, never written back whole, so a change meanwhile is kept.
    */
   update(key: string, fn: (current: Lane | null) => Lane | null): Promise<Lane | null> {
     return this.locked(key, () => {
@@ -188,9 +190,8 @@ export class Registry {
   }
 
   /**
-   * A change decided from `seen`: applied to the stored lane only while it still has `seen`'s status generation (null
-   * when it moved on meanwhile, so a later claim, objection, pause or close is never overwritten, including a new
-   * objection to a lane that was already not-done).
+   * A change decided from `seen`, applied only while the stored lane has `seen`'s status generation (else null): a later
+   * claim, objection, pause or close, even a second objection to a not-done lane, is never overwritten.
    */
   transition(seen: Lane, next: (current: Lane) => Lane): Promise<Lane | null> {
     return this.update(seen.key, (current) => {
