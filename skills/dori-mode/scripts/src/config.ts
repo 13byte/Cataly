@@ -178,7 +178,13 @@ const checkSupervision = (value: unknown): void => {
 };
 
 export const loadConfig = async (path = configPath(), home = homedir()): Promise<DoriConfig> => {
-  const base = defaultConfig(home);
+  const selectedHome = process.env["DORI_HOME"];
+  const base = {
+    ...defaultConfig(home),
+    ...(selectedHome && path === join(selectedHome, "config.json")
+      ? { stateDir: join(selectedHome, "state"), ompUlwPath: join(selectedHome, "omp-ulw/index.ts") }
+      : {}),
+  };
   const file = Bun.file(path);
   const raw = (await file.exists()) ? ((await file.json()) as Partial<DoriConfig>) : {};
   checkRuntime(raw.runtime);
