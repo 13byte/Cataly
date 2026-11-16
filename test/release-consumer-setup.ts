@@ -21,7 +21,12 @@ import type { ReleaseManifest } from "../src/release/types.ts";
 import { digest, sourceManifest } from "../src/update/source.ts";
 
 const roots: string[] = [];
+const previousPaths: Array<string | undefined> = [];
 afterEach(() => {
+  for (const path of previousPaths.splice(0).reverse()) {
+    if (path === undefined) delete process.env["PATH"];
+    else process.env["PATH"] = path;
+  }
   for (const root of roots.splice(0)) {
     const writable = (path: string) => {
       chmodSync(path, 0o700);
@@ -92,6 +97,13 @@ function git(cwd: string, ...args: string[]): string {
 export function fixture(side = false) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "dori-consumer-")));
   roots.push(root);
+  if (side) {
+    const native = join(root, "native-bin");
+    mkdirSync(native, { mode: 0o700 });
+    writeFileSync(join(native, "omp"), "#!/bin/sh\nprintf '18.18.8\\n'\n", { mode: 0o755 });
+    previousPaths.push(process.env["PATH"]);
+    process.env["PATH"] = `${native}:${process.env["PATH"] ?? ""}`;
+  }
   const home = join(root, "home");
   const paths = consumerPaths(home, join(home, side ? ".omp-dori" : ".dori"));
   initialize(paths);
