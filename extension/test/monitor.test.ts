@@ -91,6 +91,40 @@ describe("Monitors", () => {
     expect(monitors.stop("dup")).toBe(false);
   });
 
+  test("a batch of notices is delivered without waking; any other line or an exit wakes", async () => {
+    const batches: Array<{ content: string; wake: boolean }> = [];
+    const monitors = new Monitors(
+      (content, wake) => batches.push({ content, wake }),
+      () => "s1",
+      100,
+    );
+    const notices = ["LANE_WATCH_READY", "NUDGED a-lane 16 min silent, delivery delivered", "PENDING-REPORT a-lane x"];
+    const { pid } = monitors.start(
+      "notes",
+      ["sh", "-c", `${notices.map((line) => `echo '${line}'`).join("; ")}; exec sleep 30`],
+      ".",
+      "/",
+      "s1",
+    );
+    await until(() => batches.flatMap((b) => b.content.split("\n")).length === notices.length);
+    expect(batches.every((b) => !b.wake)).toBe(true);
+    monitors.stop("notes");
+    await until(() => !alive(pid));
+    batches.length = 0;
+    // INBOUND_READY, a stall and HOST_GUARD COMPUTE_READY wake even beside a notice; so does a monitor's own exit.
+    for (const line of [
+      "INBOUND_READY discord owner=1",
+      "STALLED a-lane idle",
+      "HOST_GUARD COMPUTE_READY load 1 < 2",
+    ]) {
+      monitors.start("mixed", ["sh", "-c", `echo 'POSTED a-lane x'; echo '${line}'`], ".", "/", "s1");
+      await until(() => batches.some((b) => b.content.includes("exited")));
+      expect(batches.every((b) => b.wake)).toBe(true);
+      expect(batches.map((b) => b.content).join("\n")).toContain(line);
+      batches.length = 0;
+    }
+  });
+
   test("rejects an invalid filter before spawning", () => {
     const { monitors } = collect();
     expect(() => monitors.start("bad", ["sleep", "30"], "(", "/", "s1")).toThrow();
@@ -120,6 +154,20 @@ describe("monitor tool", () => {
     await dori.emit("session_shutdown");
     await until(() => !alive(pid));
     expect((await run(dori, { op: "list" }))?.content[0]?.text).toBe("no monitors running");
+  });
+
+  test("a notice is recorded for the next turn without starting one", async () => {
+    await run(dori, {
+      op: "start",
+      name: "fresh",
+      argv: ["sh", "-c", "echo 'NUDGED a-lane 16 min'; exec sleep 30"],
+      filter: ".",
+    });
+    await until(() => dori.messages.length > 0);
+    expect(dori.messages).toEqual([
+      { content: "[fresh] NUDGED a-lane 16 min", options: { triggerTurn: false, deliverAs: "nextTurn" } },
+    ]);
+    await dori.emit("session_shutdown");
   });
 
   test("monitors stop when the Dori session switches away", async () => {

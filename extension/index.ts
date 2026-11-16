@@ -221,8 +221,12 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
   const approvals = new Set<string>();
   let managedRestorePending = process.env.DORI_MANAGED_STARTUP === "1";
   const monitors = new Monitors(
-    (content) =>
-      pi.sendMessage({ customType: "dori-monitor", content, display: true }, { triggerTurn: true, deliverAs: "aside" }),
+    // A notice waits for the next turn: an aside would start one on an idle session whatever triggerTurn says.
+    (content, wake) =>
+      pi.sendMessage(
+        { customType: "dori-monitor", content, display: true },
+        wake ? { triggerTurn: true, deliverAs: "aside" } : { triggerTurn: false, deliverAs: "nextTurn" },
+      ),
     () => (role === "dori" ? session?.id : undefined),
   );
   const runtimeHealth = new RuntimeHealthWriter(monitors);
@@ -500,7 +504,10 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       op: z.enum(["start", "stop", "list"]).describe("start a monitor, stop one, or list running monitors"),
       name: z.string().optional().describe("monitor name (start, stop)"),
       argv: z.array(z.string()).optional().describe("command and arguments, run without a shell (start)"),
-      filter: z.string().optional().describe("regular expression; matching output lines wake the session (start)"),
+      filter: z
+        .string()
+        .optional()
+        .describe("regular expression; matching output lines reach the session and wake it, except notices (start)"),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (role !== "dori" || ctx.agent.kind !== "main" || !session)
