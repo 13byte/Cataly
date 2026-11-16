@@ -119,10 +119,12 @@ describe("Monitors", () => {
       "HOST_GUARD COMPUTE_READY load 1 < 2",
       "NUDGED a-lane 16 min silent, delivery failed",
       "NUDGED a-lane 16 min silent, delivery unconfirmed",
+      // Freshness prints POSTED whatever the thread hook's exit status was.
+      "POSTED a-lane Progress (from the lane's last report): x",
     ]) {
       const running = monitors.start(
         "mixed",
-        ["sh", "-c", `echo 'POSTED a-lane x'; echo '${line}'; exec sleep 30`],
+        ["sh", "-c", `echo 'STALE-REPORT a-lane x'; echo "${line}"; exec sleep 30`],
         ".",
         "/",
         "s1",
@@ -135,7 +137,7 @@ describe("Monitors", () => {
       batches.length = 0;
     }
     // A monitor's own exit wakes even after only notices.
-    monitors.start("ends", ["sh", "-c", "echo 'POSTED a-lane x'"], ".", "/", "s1");
+    monitors.start("ends", ["sh", "-c", "echo 'STALE-REPORT a-lane x'"], ".", "/", "s1");
     await until(() => batches.some((b) => b.content.includes("exited")));
     expect(batches.find((b) => b.content.includes("exited"))?.wake).toBe(true);
   });

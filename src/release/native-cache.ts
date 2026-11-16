@@ -90,6 +90,15 @@ export function reportNativeCache(
     }
   };
   for (const source of sources) bind(source, `source ${source}`);
+  const real = (path: string): string => {
+    try {
+      return realpathSync(path);
+    } catch {
+      return path;
+    }
+  };
+  const cacheReal = real(cache);
+  const rootsReal = roots.map(real);
   for (const root of roots)
     walk(root, (path, kind) => {
       if (kind === "directory") {
@@ -112,6 +121,18 @@ export function reportNativeCache(
         // A dangling link names only its own target text.
       }
       names(`${target}\0${resolved}`, `link ${path}`);
+      // A target inside the cache is identified by its path alone.
+      if (!resolved || resolved === cacheReal || resolved.startsWith(`${cacheReal}/`)) return;
+      // A link to a file (a wrapper elsewhere) keeps what that file names. A link to a directory keeps the source it
+      // binds; one outside the scanned roots and the cache is not walked, so it keeps every identity.
+      const stat = lstatSync(resolved, { throwIfNoEntry: false });
+      if (stat?.isFile()) {
+        if (stat.size <= MAX_REFERENCE) names(readFileSync(resolved, "latin1"), `reference ${path}`);
+      } else if (stat?.isDirectory()) {
+        if (lstatSync(join(resolved, "native-omp.lock"), { throwIfNoEntry: false })) bind(resolved, `source ${path}`);
+        else if (!rootsReal.some((dir) => resolved === dir || resolved.startsWith(`${dir}/`)))
+          for (const key of keys) add(key, `link to an unscanned directory ${path}`);
+      }
     });
   const ps = Bun.spawnSync(["ps", "-A", "-ww", "-o", "pid=,args="], { stdout: "pipe", stderr: "pipe" });
   if (ps.exitCode !== 0) throw new Error("Process table is unavailable; native cache use cannot be ruled out");
@@ -193,7 +214,7 @@ export function pruneNativeCache(
     if (detached !== entry.directory) {
       const older = reported.get(detached);
       if (older?.protectedBy.length) continue;
-      if (older) {
+      if (older && !removed.includes(detached)) {
         rmSync(detached, { recursive: true, force: true });
         removed.push(detached);
       }

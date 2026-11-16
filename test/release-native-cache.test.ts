@@ -124,6 +124,33 @@ test("a link into the cache, a used detached copy and a partial receipt keep the
   }
 });
 
+test("a link to a wrapper outside the roots keeps what it names; a link to an unscanned directory keeps everything", () => {
+  const c = cache();
+  const wrapped = c.native("wrapped");
+  const free = c.native("free");
+  for (const f of [wrapped, free]) rmSync(f.source, { recursive: true });
+  const outside = join(c.root, "opt/wrappers");
+  mkdirSync(outside, { recursive: true });
+  writeFileSync(join(outside, "omp"), `#!/bin/sh\nexec ${wrapped.receipt.omp} "$@"\n`);
+  const refs = join(c.root, "refs");
+  mkdirSync(refs);
+  symlinkSync(join(outside, "omp"), join(refs, "omp"));
+  const report = (roots: string[]) =>
+    Object.fromEntries(
+      pruneNativeCache(c.home, [], roots, false).entries.map((entry) => [entry.directory, entry.protectedBy]),
+    );
+  const linked = report([refs]);
+  expect(linked[wrapped.receipt.directory]).toEqual([`reference ${join(refs, "omp")}`]);
+  expect(linked[free.receipt.directory]).toEqual([]);
+  symlinkSync(outside, join(refs, "wrappers"));
+  const held = `link to an unscanned directory ${join(refs, "wrappers")}`;
+  expect(report([refs])[free.receipt.directory]).toEqual([held]);
+  // Once that directory is scanned too, its link no longer holds anything.
+  expect(report([refs, join(c.root, "opt")])[free.receipt.directory]).toEqual([]);
+  expect(pruneNativeCache(c.home, [], [refs], true).removed).toEqual([]);
+  expect(existsSync(free.receipt.directory)).toBe(true);
+});
+
 test("dori update cache reports by default and removes unreferenced identities only with --prune", () => {
   const c = cache();
   const superseded = c.native("superseded");
