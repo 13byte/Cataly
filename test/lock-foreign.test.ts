@@ -77,16 +77,21 @@ test("--lane is a lane key: spaces, line breaks, owner fields and paths are refu
   expect(ran).toEqual([]);
 });
 
-test.each(["lead", "duty", "duty-loop", "hourly-loop"])("reserved --lane %s is refused before queueing", async (lane) => {
-  const { d } = setup();
-  const { env, ran } = fakeRun(d.store.root, d.now);
+test.each(["lead", "duty", "duty-loop", "hourly-loop"])(
+  "reserved --lane %s is refused before queueing",
+  async (lane) => {
+    const { d } = setup();
+    const { env, ran } = fakeRun(d.store.root, d.now);
 
-  await expect(runLock(d, parse(["lock", "demo", "--lane", lane, "--", "true"]), env)).rejects.toBeInstanceOf(Refusal);
+    await expect(runLock(d, parse(["lock", "demo", "--lane", lane, "--", "true"]), env)).rejects.toBeInstanceOf(
+      Refusal,
+    );
 
-  expect(ran).toEqual([]);
-  expect(existsSync(lockDir(d.store.root, "demo"))).toBe(false);
-  expect(existsSync(join(d.store.root, "state", "locks", "demo"))).toBe(false);
-});
+    expect(ran).toEqual([]);
+    expect(existsSync(lockDir(d.store.root, "demo"))).toBe(false);
+    expect(existsSync(join(d.store.root, "state", "locks", "demo"))).toBe(false);
+  },
+);
 
 test("a valid unrecorded --lane still runs without creating a lane record", async () => {
   const { d } = setup();
