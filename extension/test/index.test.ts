@@ -70,6 +70,23 @@ describe("role", () => {
     expect(normal.handlers.has("tool_approval_requested")).toBe(false);
   });
 
+  test("a fresh session in the same process keeps the role and its monitors", async () => {
+    const started = session("dori-old", [roleEntry("dori")]);
+    const fresh = session("dori-new");
+    const pi = await load({ session: started, flags: { "dori-role": "dori" } });
+    await pi.emit("session_start");
+    expect(pi.active).toContain("monitor");
+
+    pi.session = fresh;
+    await pi.emit("session_switch", { type: "session_switch", reason: "new" });
+    expect(fresh.entries).toContainEqual(roleEntry("dori"));
+    expect(pi.active).toContain("monitor");
+    expect(readPaneState(stateDir, PANE)).toMatchObject({ role: "dori", sessionId: "dori-new" });
+    expect(await pi.emit("before_agent_start", agentStart)).toContainEqual({
+      systemPrompt: ["base prompt", "<fake-ulw-policy>"],
+    });
+  });
+
   test("dori -> normal -> dori switching follows each session's role", async () => {
     const doriSession = session("dori-1");
     const normalSession = session("plain-1");
@@ -180,11 +197,13 @@ describe("goal tool", () => {
     expect(normal.active).toEqual(["read", "bash"]);
   });
 
+  // A plain session is reached by switching to its file, never by creating one in this process (`reason: "new"`),
+  // which keeps the process's own role.
   test("is taken back when a goal-less lane switches to a normal session", async () => {
     const pi = await load({ session: session("lane"), flags: { "dori-role": "lane" } });
     await pi.emit("session_start");
     pi.session = session("plain");
-    await pi.emit("session_switch", { type: "session_switch", reason: "new" });
+    await pi.emit("session_switch", { type: "session_switch", reason: "resume" });
     expect(pi.active).toEqual(["read", "bash"]);
   });
 
@@ -235,6 +254,27 @@ describe("monitor restore", () => {
     await until(() => resumed.messages.some((m) => m.content === "[tick] up"));
     expect(await monitorCall(resumed, { op: "list" })).toContain("tick (pid");
     await resumed.emit("session_shutdown");
+  });
+
+  test("a fresh session in the same process keeps running the monitors it already had", async () => {
+    const started = session("dori-c1", [roleEntry("dori")]);
+    const fresh = session("dori-c2");
+    const pi = await load({ session: started, flags: { "dori-role": "dori" } });
+    await pi.emit("session_start");
+    await monitorCall(pi, tick);
+    expect(await monitorCall(pi, { op: "list" })).toContain("tick (pid");
+
+    pi.session = fresh;
+    await pi.emit("session_switch", { type: "session_switch", reason: "new" });
+    // the new branch records the replay, so a later resume restores it again
+    expect(fresh.entries).toContainEqual({
+      type: "custom",
+      customType: "omp-dori:monitor",
+      data: { ...tick, cwd: "/tmp" },
+    });
+    expect(await monitorCall(pi, { op: "list" })).toContain("tick (pid");
+    await until(() => pi.messages.some((m) => m.content === "[tick] up"));
+    await pi.emit("session_shutdown");
   });
 
   test("a monitor stopped by name, even after it exited on its own, is not restored", async () => {

@@ -435,18 +435,40 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
 
   // Registered before omp-ulw so its restore handlers see this event's role.
   for (const eventName of ["session_start", "session_switch", "session_branch", "session_tree"] as const) {
-    pi.on(eventName, async (_event, ctx) => {
+    pi.on(eventName, async (event, ctx) => {
       const branch = ctx.sessionManager.getBranch();
       if (ctx.agent.kind === "sub") {
         role = ctx.agent.parentId === undefined ? undefined : agentRoles.get(ctx.agent.parentId);
       } else {
-        role = recordedRole(branch);
+        const recorded = recordedRole(branch);
+        // `/new` emits `session_switch` with `reason: "new"`; its empty branch has no role entry to read. Adopting
+        // that emptiness would strip `monitor`, stop the monitors that answer the messenger, and drop the pane record
+        // for the rest of the process lifetime, so the process's own role carries over instead.
+        const carried =
+          eventName === "session_switch" &&
+          typeof event === "object" &&
+          event !== null &&
+          "reason" in event &&
+          event.reason === "new";
+        role = recorded ?? (carried ? role : undefined);
         const flagged = pi.getFlag(ROLE_FLAG);
-        if (eventName === "session_start" && role === undefined && flagged !== undefined) {
+        if (role === undefined && eventName === "session_start" && flagged !== undefined) {
           role = parseRole(flagged);
-          if (role) pi.appendEntry(ROLE_ENTRY, role);
-          else ctx.ui.notify(`omp-dori: --${ROLE_FLAG} must be "dori" or "lane", got "${String(flagged)}"`, "error");
+          if (!role)
+            ctx.ui.notify(`omp-dori: --${ROLE_FLAG} must be "dori" or "lane", got "${String(flagged)}"`, "error");
         }
+        // Re-record so a later resume of this session restores the same role, and replay the monitors this process is
+        // still running: the fresh branch records none, and `syncMain` stops every monitor it cannot find there.
+        if (role && recorded === undefined) pi.appendEntry(ROLE_ENTRY, role);
+        if (carried)
+          for (const spec of monitors.list())
+            pi.appendEntry(MONITOR_ENTRY, {
+              op: "start",
+              name: spec.name,
+              argv: spec.argv,
+              filter: spec.filter,
+              cwd: spec.cwd,
+            });
       }
       if (role) agentRoles.set(ctx.agent.id, role);
       else agentRoles.delete(ctx.agent.id);
