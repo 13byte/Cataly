@@ -39,11 +39,16 @@ export function ompStateDir(env: Env): string {
 const OMP_COMMAND =
   /^(?:(?:\S*\/)?(?:bun|node)(?:\s+-\S+)*\s+)?(?:\S*\/)?omp(?:\s|$)|^(?:\S*\/)?(?:bun|node)(?:\s+-\S+)*\s+\S*@oh-my-pi\/pi-coding-agent\/dist\/cli\.js(?:\s|$)/;
 const SOURCE_OMP_COMMAND =
-  /^(?:\S*\/)?bun\s+--preload\s+(\S*\/packages\/coding-agent\/)scripts\/omp\.ts\s+\1(?:scripts\/\.\.\/)?src\/cli\.ts(?:\s|$)/;
+  /^(?:\S*\/)?bun\s+--preload\s+(.+\/packages\/coding-agent\/)scripts\/omp\.ts\s+\1(?:scripts\/\.\.\/)?src\/cli\.ts(?:\s|$)/;
+const sourceOmpArgv = (argv: readonly string[]): boolean => {
+  if (!/(?:^|\/)bun$/.test(argv[0] ?? "") || argv[1] !== "--preload") return false;
+  const root = /^(.+\/packages\/coding-agent\/)scripts\/omp\.ts$/.exec(argv[2] ?? "")?.[1];
+  return root !== undefined && (argv[3] === `${root}src/cli.ts` || argv[3] === `${root}scripts/../src/cli.ts`);
+};
 const ompProcess = (p: ForegroundProcess): boolean =>
   p.name.split("/").at(-1) === "omp" ||
   p.argv.slice(0, 2).some((arg) => /(?:^|\/)omp$|@oh-my-pi\/pi-coding-agent\/dist\/cli\.js$/.test(arg)) ||
-  SOURCE_OMP_COMMAND.test(p.argv.join(" "));
+  sourceOmpArgv(p.argv);
 
 function readState(stateDir: string, id: string): PaneState | undefined {
   try {

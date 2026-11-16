@@ -4,7 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { up } from "../src/cli-up.ts";
 import { review } from "../src/gate.ts";
-import { agentCommand, defaultDeps } from "../src/harness.ts";
+import { agentCommand, defaultDeps, harnessLaunchEnv } from "../src/harness.ts";
 import { startLane } from "../src/lanes.ts";
 import { ompStateDir } from "../src/runtime/omp.ts";
 import { World } from "./fake.ts";
@@ -64,17 +64,20 @@ describe("OMP harness launches", () => {
     const d = { ...w.deps(), agentCmd: "omp --model 'configured model'" };
     w.gh = () => ({ code: 0, stdout: JSON.stringify({ headRefOid: "a".repeat(40) }) });
     await review(d, "o/r#7", "selected/model");
-    const call = w.calls.find((c) => c.cmd === "sh")!;
-    expect(call.argv.slice(0, 7)).toEqual([
+    const call = w.calls.find((c) => c.cmd === "env")!;
+    const context = Object.entries(harnessLaunchEnv(d)).map(([key, value]) => `${key}=${value}`);
+    expect(call.argv.slice(0, context.length)).toEqual(context);
+    expect(call.argv.slice(context.length, context.length + 8)).toEqual([
+      "sh",
       "-c",
-      "unset HERDR_PANE_ID HERDR_WORKSPACE_ID HC_TERMINAL_ID; omp --model 'configured model' --dori-role lane \"$@\"",
+      "unset HERDR_PANE_ID HERDR_WORKSPACE_ID HC_TERMINAL_ID DORI_MANAGED_STARTUP DORI_LANE; omp --model 'configured model' --dori-role lane \"$@\"",
       "dori-review",
       "-p",
       "--no-session",
       "--model",
       "selected/model",
     ]);
-    expect(call.argv[7]).toContain("o/r#7");
+    expect(call.argv[context.length + 8]).toContain("o/r#7");
     expect(d.store.receipt("o/r#7", "a".repeat(40))!.model).toBe("selected/model");
   });
 

@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { shq } from "./delivery.ts";
-import { agentCommand, promptFile, type Deps } from "./harness.ts";
+import { agentCommand, harnessLaunchEnv, promptFile, type Deps } from "./harness.ts";
 import { refText } from "./refs.ts";
 import { groupId } from "./runtime/group.ts";
 import { openSession, type SessionRef } from "./runtime/types.ts";
@@ -24,12 +24,12 @@ function renderPrompt(d: Deps, name: string): string {
  */
 export async function up(d: Deps, cwd: string): Promise<void> {
   const rt = d.runtimes.default;
-  const env = { DORI_HOME: d.store.root };
+  const env = harnessLaunchEnv(d);
   const agent = (name: string) => `${agentCommand(d, "dori")} --append-system-prompt ${shq(renderPrompt(d, name))}`;
   // herdr ignores the group of a workspace-root session and reports the new workspace as the lead ref's group.
   const lead = await openSession(
     rt,
-    { name: "dori", role: "lead", container: "workspace-root", cwd, env: {}, group: groupId(d.store.root) },
+    { name: "dori", role: "lead", container: "workspace-root", cwd, env, group: groupId(d.store.root) },
     agent("lead.md"),
   );
   d.store.setRole("lead", lead);

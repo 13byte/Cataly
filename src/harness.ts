@@ -3,7 +3,7 @@ import { cpus, loadavg } from "node:os";
 import { join, resolve } from "node:path";
 import { shq } from "./delivery.ts";
 import { memFreePct } from "./host.ts";
-import { processOmpCommand, resolveConsumerOmpCommand } from "./release/runtime.ts";
+import { doriLaunchEnv, processOmpCommand, resolveConsumerOmpCommand } from "./release/runtime.ts";
 import { type Exec, spawnExec } from "./runtime/exec.ts";
 import { HcRuntime } from "./runtime/hc/index.ts";
 import { HerdrRuntime } from "./runtime/herdr/index.ts";
@@ -96,6 +96,15 @@ export const agentCommand = (d: Deps, role: "dori" | "lane"): string =>
   isOmpAgentCommand(d.agentCmd) && !/(?:^|\s)--dori-role(?:[=\s]|$)/.test(d.agentCmd)
     ? `${d.agentCmd} --dori-role ${role}`
     : d.agentCmd;
+
+/** Native agents and loop controllers keep this home's selection across the terminal server. */
+export function harnessLaunchEnv(d: Deps): Record<string, string> {
+  const configFile = process.env["DORI_CONFIG"] ?? join(d.store.root, "config.json");
+  return doriLaunchEnv(process.env, configFile, {
+    doriHome: d.store.root,
+    stateDir: ompStateDir({ ...process.env, DORI_CONFIG: configFile }),
+  });
+}
 
 /** `DORI_PROMPTS_DIR` when set, else the repo's `prompts/`. */
 export const promptsDir = (): string => process.env["DORI_PROMPTS_DIR"] || PROMPTS;

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { consumerPaths, owned, realDirectory, regularFile } from "./files.ts";
 import { assertNativeSource } from "./native.ts";
 import { assertSourceBundle, readSourceBundle, SourceBundleError } from "./source-bundle.ts";
@@ -125,4 +125,27 @@ export function resolveProcessOmpUlwPath(configured: string, home: string): stri
     }
   }
   return selected;
+}
+
+/** Only launch context crosses a terminal server boundary; paths retain the caller's OS resolution. */
+export function doriLaunchEnv(
+  env: Readonly<Record<string, string | undefined>>,
+  configFile: string,
+  resolved: { readonly doriHome?: string; readonly stateDir?: string; readonly ompUlwPath?: string } = {},
+): Record<string, string> {
+  const context: Record<string, string> = { DORI_MANAGED_STARTUP: "" };
+  for (const [key, path] of Object.entries({
+    HOME: env["HOME"],
+    DORI_CONFIG: configFile,
+    DORI_HOME: resolved.doriHome ?? env["DORI_HOME"] ?? dirname(configFile),
+    DORI_STATE_DIR: resolved.stateDir ?? env["DORI_STATE_DIR"],
+    DORI_OMP_ULW_PATH: resolved.ompUlwPath ?? env["DORI_OMP_ULW_PATH"],
+    OMP_ULW_SCOPE_FILE: env["OMP_ULW_SCOPE_FILE"],
+  })) {
+    if (path !== undefined) context[key] = path === "" || isAbsolute(path) ? path : `${process.cwd()}${sep}${path}`;
+  }
+  for (const key of ["DORI_AGENT_ARGV", "DORI_HERDR_SESSION", "HC_SESSION"] as const) {
+    if (env[key] !== undefined) context[key] = env[key];
+  }
+  return context;
 }
