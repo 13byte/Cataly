@@ -94,8 +94,16 @@ export function createConsumerSmokeContext(rawOut: string, runtime: string, runt
     const result = { argv, cwd, code, signal: child.signalCode, stdout, stderr };
     const log = join(out, "logs", `${++sequence}-${label}.json`);
     writeFileSync(log, `${JSON.stringify(result, null, 2)}\n`, { flag: "wx", mode: 0o600 });
-    console.log(JSON.stringify({ label, ...result }));
-    assert(allowFailure || code === 0, `${label} failed (${code}): ${stderr || stdout}; evidence: ${log}`);
+    console.log(JSON.stringify({ label, argv, cwd, code, signal: child.signalCode, log }));
+    for (const [stream, text] of Object.entries({ stdout, stderr })) {
+      console.log(
+        JSON.stringify({ label, stream, total: text.length, bytes: Buffer.byteLength(text), sha256: digest(text) }),
+      );
+      for (let offset = 0; offset < text.length; offset += 2048) {
+        console.log(JSON.stringify({ label, stream, offset, chunk: text.slice(offset, offset + 2048) }));
+      }
+    }
+    assert(allowFailure || code === 0, `${label} failed (${code}); evidence: ${log}`);
     return result;
   }
   async function deriveCandidate(source: string) {
