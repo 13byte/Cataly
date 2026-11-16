@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, renameSync } from "node:fs";
+import { mkdirSync, readdirSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import type { SessionRef } from "../../../../src/runtime/types.ts";
@@ -98,6 +98,8 @@ export const withStatus = (
 
 export class Registry {
   readonly dir: string;
+  /** Parsed closed records by file, each with the stat stamp it was read under; list() keeps only files it saw. */
+  private parsed = new Map<string, { readonly stamp: string; readonly lane: Lane }>();
   constructor(stateDir: string) {
     this.dir = join(stateDir, "lanes");
   }
@@ -131,9 +133,24 @@ export class Registry {
     }
   }
 
+  /**
+   * Every record. A loop lists every tick and most records are closed, so a closed record whose file keeps the inode,
+   * size, mtime and ctime it was parsed under is not parsed again; any write (a fresh file renamed into place, from any
+   * process) changes them. Open records, which the loops act on, are always read. The stamp is taken before the read,
+   * so a write racing the read only causes one more read next time.
+   */
   async list(): Promise<Lane[]> {
     const lanes: Lane[] = [];
-    for (const f of this.files()) lanes.push(upgradeLane((await Bun.file(f).json()) as Lane));
+    const parsed = new Map<string, { readonly stamp: string; readonly lane: Lane }>();
+    for (const f of this.files()) {
+      const st = statSync(f, { bigint: true });
+      const stamp = `${st.ino}:${st.size}:${st.mtimeNs}:${st.ctimeNs}`;
+      const cached = this.parsed.get(f);
+      const lane = cached?.stamp === stamp ? cached.lane : upgradeLane((await Bun.file(f).json()) as Lane);
+      if (statusOf(lane) === "closed") parsed.set(f, { stamp, lane });
+      lanes.push(lane);
+    }
+    this.parsed = parsed;
     return lanes;
   }
 
