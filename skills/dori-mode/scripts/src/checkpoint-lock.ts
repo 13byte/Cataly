@@ -122,14 +122,14 @@ export const takeLock = (lock: string, now: number, fail: (message: string) => E
       rmSync(moved, { recursive: true, force: true });
       continue;
     }
-    // That was a live writer's lock: put it back without replacing a newer one.
+    // That was a live writer's lock: put it back without replacing a newer one. If a third writer took the path
+    // meanwhile, the moved lock is kept where it is, never deleted, and the takeover fails.
     try {
       linkSync(moved, lock);
     } catch (error) {
-      throw fail(`a live writer's lock could not be put back: ${(error as Error).message}`);
-    } finally {
-      rmSync(moved, { recursive: true, force: true });
+      throw fail(`a live writer's lock could not be put back; it is kept at ${moved}: ${(error as Error).message}`);
     }
+    rmSync(moved, { recursive: true, force: true });
   }
   return "the lock changed hands while taking it over; retry";
 };

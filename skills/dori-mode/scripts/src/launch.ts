@@ -2,7 +2,8 @@ import { configPath, fill, isOmpCommand } from "./config.ts";
 import type { FlowDeps } from "./done-flow.ts";
 import { laneGoalActive } from "./goal-record.ts";
 import { BRIEF_START, footer, originalBrief, quoteForPane } from "./launch-footer.ts";
-import { formatRef, parseRef, type SessionRef } from "../../../../src/runtime/types.ts";
+import { parseRef } from "../../../../src/runtime/types.ts";
+import { openLaneSession } from "./launch-session.ts";
 import { LANE_KEY, type Lane, RESERVED_LANE_KEY, sessionFields, upgradeLane } from "./registry.ts";
 import { iso, runtimesOf } from "./run.ts";
 import { Reports } from "./reports.ts";
@@ -138,30 +139,22 @@ const startLane = async (
   } catch (e) {
     throw e instanceof TokenFileError ? new LaunchError(`token file refused: ${e.message}`) : e;
   }
-  let ref: SessionRef;
-  try {
-    const spec = { name: input.key, role: "lane", container: "tab", cwd, env } as const;
-    ref = await rts.default.create(group === undefined ? spec : { ...spec, group });
-  } catch (e) {
-    throw new LaunchError(`session create failed: ${e instanceof Error ? e.message : String(e)}`);
+  const spec = { name: input.key, role: "lane", container: "tab", cwd, env } as const;
+  const opened = await openLaneSession(
+    deps.registry,
+    rts,
+    group === undefined ? spec : { ...spec, group },
+    draft,
+    input.brief,
+    preamble,
+  );
+  if (opened.kind === "create-failed") {
+    const why = opened.error instanceof Error ? opened.error.message : String(opened.error);
+    throw new LaunchError(`session create failed: ${why}`);
   }
+  if (opened.kind === "taken") throw new LaunchError(`lane ${input.key} is already registered`);
+  const { lane, ref } = opened;
   const pane = ref.id;
-  // Registered before the agent starts: dori report refuses an unknown key, so a fast lane's first report would be lost.
-  const lane: Lane = { ...draft, ...sessionFields(ref) };
-  if (!(await deps.registry.create(lane))) {
-    // Another launch or adopt registered this key while the session was created: its record and brief stay, and the
-    // tab this launch opened goes.
-    await rts
-      .for(ref)
-      .close(ref, ref.container ? "container" : "session")
-      .catch((error: unknown) => {
-        const why = error instanceof Error ? error.message : String(error);
-        process.stderr.write(`dori: could not close ${formatRef(ref)} after lane ${input.key} was refused (${why})\n`);
-      });
-    throw new LaunchError(`lane ${input.key} is already registered`);
-  }
-  // The brief is the registered lane's: written only once this launch owns the key, before its agent reads it.
-  await Bun.write(input.brief, preamble);
   // The launch is an activity record, not a report: it starts the journal (so the screen is watched for a stall) but is
   // never posted to the thread as if the agent had reported.
   new Reports(deps.config.stateDir).append({
