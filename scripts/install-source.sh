@@ -121,13 +121,40 @@ bin_dir="$(absolute "${OMP_DORI_BIN_DIR:-${BUN_INSTALL:-$HOME/.bun}/bin}")"
 # Resolve the install mode before checking every wrapper it writes. File identity follows symlinks,
 # including aliased parents, and catches hard links without trusting an existing wrapper's source.
 check_omp_wrapper_collision() {
-  local name
+  local name command_link traverses
   for name in omp dori omp-dori; do
     if [ "$mode" = primary ] && [ "$name" != omp ]; then continue; fi
     if [ "$omp_bin" -ef "$base/bin/$name" ]; then
       fail "Selected OMP executable $omp_bin aliases generated wrapper $base/bin/$name; choose an independent executable with DORI_OMP."
     fi
   done
+  if [ "$mode" = primary ]; then command_link="$bin_dir/dori"; else command_link="$bin_dir/omp-dori"; fi
+  if [ -L "$command_link" ]; then
+    # Relinking changes a pathname, not its target inode. Preserve independent paths to that same target.
+    traverses="$(bun -e '
+      const { lstatSync, readlinkSync, realpathSync } = require("node:fs");
+      const { basename, dirname, isAbsolute, join } = require("node:path");
+      const target = join(realpathSync(dirname(process.argv[2])), basename(process.argv[2]));
+      const pending = process.argv[1].split("/");
+      let current = "/", links = 0;
+      while (pending.length) {
+        const part = pending.shift();
+        if (!part || part === ".") continue;
+        if (part === "..") { current = dirname(current); continue; }
+        const next = join(current, part);
+        if (next === target) { console.log("yes"); break; }
+        if (lstatSync(next).isSymbolicLink()) {
+          if (++links > 40) throw new Error("Too many native executable symbolic links");
+          const destination = readlinkSync(next);
+          if (isAbsolute(destination)) current = "/";
+          pending.unshift(...destination.split("/"));
+        } else {
+          current = next;
+        }
+      }
+    ' "$omp_bin" "$command_link")" || fail "Could not inspect selected OMP path $omp_bin before command publication."
+    [ "$traverses" != yes ] || fail "Selected OMP executable $omp_bin traverses installation command link $command_link; choose an independent executable with DORI_OMP."
+  fi
 }
 if [ -n "$omp_bin" ]; then
   check_omp_wrapper_collision

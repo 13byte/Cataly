@@ -14,6 +14,8 @@ Required managed ULW imports may select a dependency directory or its `index.ts`
 
 Source installation holds when its selected native executable aliases a wrapper that the chosen install mode will overwrite. File identity checks cover direct paths, symlinks, aliased parents and hard links without reading wrapper contents. Explicit overrides are checked before their version probe or installation changes; a bundled native selection is checked as soon as it is available.
 
+The native selection must also avoid traversing a command symlink that installation will replace: the primary `dori` link or side `omp-dori` link. This check follows relative links, parent aliases and directory prefixes without rewriting the selected pathname. Independent paths to the same executable remain valid because relinking leaves their target inode intact.
+
 ## The interface
 
 `SessionRuntime` in `src/runtime/types.ts` is the whole contract. Each runtime has one adapter, `src/runtime/herdr/` and `src/runtime/hc/`, and both run their CLI through one injectable process runner (`src/runtime/exec.ts`), so tests replace the binary with a recorder.
