@@ -80,7 +80,8 @@ while (!stopped) {
     child = undefined;
     if (stopped || code === 130) break;
     if (code === 4) console.error("DORI_SUPERVISOR_RETRY detector=unavailable");
-    if (code !== 0 && code !== 3 && code !== 4) {
+    if (code === 5) console.error("DORI_SUPERVISOR_RETRY lock=live-controller");
+    if (code !== 0 && code !== 3 && code !== 4 && code !== 5) {
       console.error(`DORI_SUPERVISOR_HELD exit=${code}`);
       process.exit(2);
     }
