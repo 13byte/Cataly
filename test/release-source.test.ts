@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { readSourceBundle } from "../src/release/source-bundle.ts";
@@ -12,7 +12,7 @@ afterEach(() => {
 });
 
 test.each(["0000", "0002", "0077"])("release source admits bound payloads under umask %s", async (mask) => {
-  const directory = mkdtempSync(join(tmpdir(), "dori-release-source-test-"));
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "dori-release-source-test-")));
   directories.push(directory);
   const source = join(directory, "source");
   overlayFixture(source, join(directory, "upstream"), true);

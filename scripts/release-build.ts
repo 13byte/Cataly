@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   openSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -38,7 +39,7 @@ export async function buildRelease(root: string, output: string, prerelease: boo
   if (!isReleaseVersion(releaseVersion)) throw new Error("Canonical package version is not a release version");
   const commit = (await git(root, ["rev-parse", "--verify", "HEAD^{commit}"])).toString().trim();
   const tree = (await git(root, ["rev-parse", "--verify", `${commit}^{tree}`])).toString().trim();
-  const temporary = mkdtempSync(join(tmpdir(), "omp-dori-release-"));
+  const temporary = realpathSync(mkdtempSync(join(tmpdir(), "omp-dori-release-")));
   try {
     const archiveRoot = `omp-dori-${releaseVersion}`;
     const source = join(temporary, archiveRoot);
