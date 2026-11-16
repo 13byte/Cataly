@@ -45,8 +45,7 @@ export class ThreadLedger {
     for (let waited = 0; ; waited += LOCK_RETRY_MS) {
       const held = takeLock(lock, Date.now(), fail);
       if (typeof held !== "string") return held;
-      if (waited >= LOCK_WAIT_MS)
-        throw new MessengerError(`slack thread ledger ${lock} stayed locked (${held})`, 0);
+      if (waited >= LOCK_WAIT_MS) throw new MessengerError(`slack thread ledger ${lock} stayed locked (${held})`, 0);
       await this.wait(LOCK_RETRY_MS);
     }
   }
