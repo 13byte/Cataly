@@ -144,9 +144,8 @@ export function installIsolatedReferences(paths: ConsumerPaths, source: string):
   const env = [
     `export DORI_HOME=${quote(paths.dori)}`,
     `export DORI_CONFIG=${quote(paths.config)}`,
-    `export DORI_AGENT_CMD=${quote(join(paths.dori, "bin/omp"))}`,
     `export DORI_CMD=${quote(quote(join(paths.dori, "bin/dori-harness")))}`,
-    "unset DORI_STATE_DIR DORI_LEAD_PANE DORI_RUNTIME DORI_HC_SPACE DORI_PROMPTS_DIR DORI_AGENT_ARGV DORI_OMP_ULW_PATH DORI_MANAGED_STARTUP",
+    "unset DORI_STATE_DIR DORI_LEAD_PANE DORI_RUNTIME DORI_HC_SPACE DORI_PROMPTS_DIR DORI_AGENT_CMD DORI_AGENT_ARGV DORI_OMP_ULW_PATH DORI_MANAGED_STARTUP",
     `if [ "\${HC_SESSION:-}" != ${quote(`omp-dori-${hash(paths.dori).slice(0, 12)}`)} ]; then unset HC_TERMINAL_ID HC_TERMINAL_SOCKET HC_SOCKET; fi`,
     `export HC_SESSION=${quote(`omp-dori-${hash(paths.dori).slice(0, 12)}`)}`,
     `if [ "\${DORI_HERDR_SESSION:-}" != ${quote(`omp-dori-${hash(paths.dori).slice(0, 12)}`)} ]; then unset HERDR_PANE_ID HERDR_WORKSPACE_ID; fi`,
