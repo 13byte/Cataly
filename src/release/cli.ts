@@ -190,6 +190,8 @@ export async function runConsumerUpdate(argv: string[]): Promise<number> {
           : undefined,
       );
     }
+    if ((bundle?.manifest ?? before?.previous)?.requirements.omp === "18.18.8")
+      prerequisites(runtime!, true, true, paths);
     const after = bundle
       ? await installBundle(paths, bundle, before)
       : await rollbackRelease(paths, before, args.values.version);

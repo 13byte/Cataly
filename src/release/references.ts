@@ -134,13 +134,19 @@ export function installIsolatedReferences(paths: ConsumerPaths, source: string):
   const receipt = join(paths.root, "consumer-references.json");
   const references: Record<string, Reference> = {};
   const omp = nativeOmp();
-  if (!omp) throw new Error("The native omp command is unavailable outside Dori wrappers");
+  if (!omp && !regularFile(join(source, "native-omp.lock")))
+    throw new Error("The native omp command is unavailable outside Dori wrappers");
+  const protocol =
+    'const {readFileSync}=require("node:fs"); const {requirements,source}=JSON.parse(readFileSync(process.argv[1],"utf8")); const bound=source.files.some(({path})=>["native-omp.lock","native-omp.patch","omp-ulw.overlay.lock","omp-ulw.patch"].includes(path)); if(requirements.omp!==(bound?"18.20.0":"18.18.8")) throw new Error("Unsupported or inconsistent consumer native protocol"); console.log(requirements.omp);';
+  const legacy = omp
+    ? `omp=${quote(omp)}`
+    : 'echo "An independent native OMP is required for this retained release; reinstall with its toolchain" >&2; exit 1';
   const env = [
     `export DORI_HOME=${quote(paths.dori)}`,
     `export DORI_CONFIG=${quote(paths.config)}`,
     `export DORI_AGENT_CMD=${quote(join(paths.dori, "bin/omp"))}`,
     `export DORI_CMD=${quote(quote(join(paths.dori, "bin/dori-harness")))}`,
-    "unset DORI_STATE_DIR DORI_LEAD_PANE DORI_RUNTIME DORI_HC_SPACE DORI_PROMPTS_DIR",
+    "unset DORI_STATE_DIR DORI_LEAD_PANE DORI_RUNTIME DORI_HC_SPACE DORI_PROMPTS_DIR DORI_AGENT_ARGV DORI_OMP_ULW_PATH DORI_MANAGED_STARTUP",
     `if [ "\${HC_SESSION:-}" != ${quote(`omp-dori-${hash(paths.dori).slice(0, 12)}`)} ]; then unset HC_TERMINAL_ID HC_TERMINAL_SOCKET HC_SOCKET; fi`,
     `export HC_SESSION=${quote(`omp-dori-${hash(paths.dori).slice(0, 12)}`)}`,
     `if [ "\${DORI_HERDR_SESSION:-}" != ${quote(`omp-dori-${hash(paths.dori).slice(0, 12)}`)} ]; then unset HERDR_PANE_ID HERDR_WORKSPACE_ID; fi`,
@@ -158,7 +164,7 @@ export function installIsolatedReferences(paths: ConsumerPaths, source: string):
     `exec ${quote(process.execPath)} ${quote(join(paths.live, "src/cli.ts"))} "$@"`,
   );
   references["bin/omp"] = wrapper(
-    `source=$(cd ${quote(paths.live)} && pwd -P) || exit\nexec ${quote(omp)} --no-extensions -e "$source/extension" --config ${quote(join(paths.dori, "omp.yml"))} --config ${quote(join(paths.root, "consumer-discovery"))}/"\${source##*/}"/omp.yml "$@"`,
+    `source=$(cd ${quote(paths.live)} && pwd -P) || exit\nprotocol=$(${quote(process.execPath)} -e ${quote(protocol)} ${quote(paths.manifests)}/"\${source##*/}".json) || exit\ncase "$protocol" in\n  18.20.0) omp="$source/scripts/consumer/omp" ;;\n  18.18.8) ${legacy} ;;\nesac\nexec "$omp" --no-extensions -e "$source/extension" --config ${quote(join(paths.dori, "omp.yml"))} --config ${quote(join(paths.root, "consumer-discovery"))}/"\${source##*/}"/omp.yml "$@"`,
   );
   references["bin/omp-dori"] = wrapper(
     `case "\${1:-}" in\n  omp) shift; exec ${quote(join(paths.dori, "bin/omp"))} "$@" ;;\n  hc) shift; exec hc "$@" ;;\n  *) exec ${quote(join(paths.dori, "bin/dori"))} "$@" ;;\nesac`,

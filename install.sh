@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Release bootstrap. Requires git, Bun 1.4.4+, OMP 18.18.8+, and the selected runtime.
+# Release bootstrap. Requires git, Bun 1.4.4+, and the selected runtime; provisions release-bound OMP source.
 set -euo pipefail
 command -v bun >/dev/null || { echo "Bun 1.4.4+ is required; install it before OMP-Dori" >&2; exit 1; }
 bun run - "$@" <<'BUN'
 import { createHash } from "node:crypto";
 import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { parseArgs } from "node:util";
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -42,7 +42,9 @@ try {
   if (mode !== "primary" && mode !== "side") fail("DORI_INSTALL_MODE must be primary or side");
   if (args.values.home !== undefined && !args.values.home.trim()) fail("--home requires a directory");
   const primary = resolve(homedir(), ".dori");
-  const home = resolve(args.values.home ?? (mode === "side" ? (process.env.OMP_DORI_HOME || join(homedir(), ".omp-dori")) : primary));
+  const selectedHome = args.values.home ?? (mode === "side" ? (process.env.OMP_DORI_HOME || join(homedir(), ".omp-dori")) : primary);
+  if (!isAbsolute(selectedHome)) fail("--home / OMP_DORI_HOME must be an absolute installation home");
+  const home = resolve(selectedHome);
   // Resolve existing ancestors, including symlinks, without creating the target.
   const physical = (path) => {
     const suffix = [];
@@ -66,10 +68,12 @@ try {
     fail(`Source-owned installation at ${home}; choose another home`);
   for (const [name, target] of [["dori", "skills/dori-mode/scripts/src/cli.ts"], ["dori-harness", "src/cli.ts"], ["omp", null], ["omp-dori", null]]) {
     const path = join(home, "bin", name), entry = stat(path);
-    const managedSide = home !== primary && (stat(join(home, "releases/consumer-references.json")) ||
-      stat(join(home, "releases/consumer-references-pending.json"))) &&
-      stat(join(home, "releases/consumer-owner.json"));
-    if (entry && !managedSide && (!target || !entry.isSymbolicLink() || resolve(dirname(path), readlinkSync(path)) !== join(source, target)))
+    const consumerOwner = stat(join(home, "releases/consumer-owner.json"));
+    const managedSide = home !== primary && consumerOwner && (stat(join(home, "releases/consumer-references.json")) ||
+      stat(join(home, "releases/consumer-references-pending.json")));
+    const managedNative = name === "omp" && home === primary && consumerOwner && entry?.isSymbolicLink() &&
+      /^[a-f0-9]{40}-[a-f0-9]{16}\/scripts\/consumer\/omp$/.test(relative(join(home, "releases/releases"), resolve(dirname(path), readlinkSync(path))));
+    if (entry && !managedSide && !managedNative && (!target || !entry.isSymbolicLink() || resolve(dirname(path), readlinkSync(path)) !== join(source, target)))
       fail(`Unmanaged wrapper at ${path}; choose another home`);
   }
   const configPath = join(home, "config.json"), configEntry = stat(configPath);
@@ -84,19 +88,6 @@ try {
   }
   if (!atLeast(Bun.version, [1, 4, 4])) fail("Bun 1.4.4+ is required");
   for (const name of ["git", runtime]) if (!Bun.which(name)) fail(`${name} is required; install it before OMP-Dori`);
-  let nativeOmp;
-  for (const directory of (process.env.PATH ?? "").split(":")) {
-    const candidate = Bun.which("omp", { PATH: directory });
-    if (!candidate) continue;
-    const resolved = realpathSync(candidate), base = dirname(dirname(resolved));
-    if (stat(join(base, ".omp-dori"))?.isFile() || stat(join(base, "releases/consumer-owner.json"))) continue;
-    nativeOmp = resolved;
-    break;
-  }
-  if (!nativeOmp) fail("omp is required; install it before OMP-Dori");
-  const omp = Bun.spawnSync([nativeOmp, "--version"], { stdout: "pipe", stderr: "pipe", timeout: 10000 });
-  if (omp.exitCode !== 0 || !atLeast(omp.stdout.toString().match(/\d+\.\d+\.\d+(?:[-+][^\s]+)?/)?.[0] ?? "", [18, 18, 8]))
-    fail("OMP 18.18.8+ is required");
   const fetchBytes = async (url, limit) => {
     const response = await fetch(url, { headers: { Accept: url.startsWith(api) ? "application/vnd.github+json" : "application/octet-stream" },
       signal: AbortSignal.timeout(120000) });
@@ -239,7 +230,7 @@ try {
   writeFileSync(join(dist, "SHA256SUMS"), sumsBytes, { flag: "wx", mode: 0o600 });
   writeFileSync(join(dist, manifest.archive.name), archive, { flag: "wx", mode: 0o600 });
   const env = { ...process.env, DORI_HOME: home, DORI_CONFIG: join(home, "config.json") };
-  for (const name of ["DORI_STATE_DIR", "DORI_RUNTIME", "DORI_CMD", "DORI_AGENT_CMD"]) delete env[name];
+  for (const name of ["DORI_STATE_DIR", "DORI_RUNTIME", "DORI_CMD", "DORI_AGENT_CMD", "DORI_AGENT_ARGV", "DORI_OMP_ULW_PATH", "DORI_MANAGED_STARTUP"]) delete env[name];
   const childArgs = [process.execPath, join(extracted, "src/release/cli.ts"), "install", "--from", dist, "--version", manifest.tag];
   if (capabilityFile) childArgs.push("--home", home, "--runtime", runtime);
   const child = Bun.spawn(childArgs,

@@ -1,8 +1,18 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, readlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readlinkSync,
+  renameSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { installBundle, rollbackRelease } from "../src/release/install.ts";
 import { saveJson } from "../src/release/files.ts";
+import { nativeOmp } from "../src/release/provision.ts";
 import { ompStateDir } from "../src/runtime/omp.ts";
 import { fixture } from "./release-consumer-setup.ts";
 
@@ -71,6 +81,7 @@ test("a side OMP launch bypasses foreign Dori wrappers and clears inherited harn
     `#!${process.execPath}\nconsole.log(JSON.stringify({
     home: process.env.DORI_HOME, config: process.env.DORI_CONFIG, command: process.env.DORI_CMD,
     state: process.env.DORI_STATE_DIR, runtime: process.env.DORI_RUNTIME,
+    argv: process.env.DORI_AGENT_ARGV, ulw: process.env.DORI_OMP_ULW_PATH, startup: process.env.DORI_MANAGED_STARTUP,
     hcSession: process.env.HC_SESSION, terminal: process.env.HC_TERMINAL_ID, socket: process.env.HC_SOCKET,
     herdrSession: process.env.DORI_HERDR_SESSION, pane: process.env.HERDR_PANE_ID
   }));\n`,
@@ -92,6 +103,9 @@ test("a side OMP launch bypasses foreign Dori wrappers and clears inherited harn
       DORI_CMD: "primary-harness",
       DORI_STATE_DIR: "primary-state",
       DORI_RUNTIME: "herdr",
+      DORI_AGENT_ARGV: '["/foreign/omp"]',
+      DORI_OMP_ULW_PATH: "/foreign/ulw/index.ts",
+      DORI_MANAGED_STARTUP: "1",
       HC_SESSION: "primary-hc",
       HC_TERMINAL_ID: "primary-terminal",
       HC_SOCKET: "primary-socket",
@@ -111,6 +125,9 @@ test("a side OMP launch bypasses foreign Dori wrappers and clears inherited harn
   expect(observed.herdrSession).not.toBe("primary-herdr");
   expect(observed.state).toBeUndefined();
   expect(observed.runtime).toBeUndefined();
+  expect(observed.argv).toBeUndefined();
+  expect(observed.ulw).toBeUndefined();
+  expect(observed.startup).toBeUndefined();
   expect(observed.terminal).toBeUndefined();
   expect(observed.socket).toBeUndefined();
   expect(observed.pane).toBeUndefined();
@@ -162,6 +179,38 @@ test("an isolated OMP launch keeps OMP self-update off, since its wrapper is the
   expect(overlays).toContain(join(f.paths.dori, "omp.yml"));
   const merged = Object.assign({}, ...overlays.map((file) => Bun.YAML.parse(readFileSync(file, "utf8")) as object));
   expect(merged).toMatchObject({ update: { auto: false } });
+});
+
+test.each([false, true])("a side home is not a source marker (linked=%s)", (linked) => {
+  const f = fixture();
+  const native = join(f.paths.home, "bin");
+  mkdirSync(native);
+  const command = join(native, "omp");
+  writeFileSync(command, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const marker = join(f.paths.home, ".omp-dori");
+  const profile = join(f.paths.home, "side-profile");
+  if (linked) {
+    mkdirSync(profile);
+    symlinkSync(profile, marker);
+  } else mkdirSync(marker);
+  const previous = process.env["PATH"];
+  process.env["PATH"] = `${native}:${previous ?? ""}`;
+  try {
+    expect(nativeOmp()).toBe(command);
+    if (linked) unlinkSync(marker);
+    else renameSync(marker, profile);
+    const target = linked ? join(f.paths.home, "source-marker") : marker;
+    writeFileSync(target, "side\n");
+    if (linked) symlinkSync(target, marker);
+    expect(nativeOmp()).not.toBe(command);
+    if (linked) {
+      unlinkSync(target);
+      expect(nativeOmp()).not.toBe(command);
+    }
+  } finally {
+    if (previous === undefined) delete process.env["PATH"];
+    else process.env["PATH"] = previous;
+  }
 });
 
 test("an interrupted initial reference transaction resumes without taking over changed files", async () => {

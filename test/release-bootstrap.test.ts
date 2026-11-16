@@ -16,6 +16,9 @@ test.each([
       DORI_STATE_DIR: join(f.root, "foreign-state"),
       DORI_CMD: "foreign-command",
       DORI_AGENT_CMD: "foreign-agent",
+      DORI_AGENT_ARGV: '["/foreign/omp"]',
+      DORI_OMP_ULW_PATH: "/foreign/ulw/index.ts",
+      DORI_MANAGED_STARTUP: "1",
     });
     expect(result.exitCode).toBe(0);
     expect(f.selected()).toEqual(f.expected(join(f.home, folder), runtime));
@@ -166,3 +169,43 @@ test("archive checksum mismatch prevents executing the extracted consumer", () =
   expect(existsSync(f.result)).toBe(false);
   expect(existsSync(join(f.home, ".dori"))).toBe(false);
 });
+
+test.each(["flag", "environment"] as const)("bootstrap rejects a relative %s home before reading assets", (kind) => {
+  const f = fixture(linux);
+  rmSync(f.dist, { recursive: true });
+  const result = f.run(kind === "flag" ? ["--home", "relative-home"] : [], {
+    DORI_INSTALL_MODE: "side",
+    OMP_DORI_HOME: "relative-home",
+  });
+  expect(result.exitCode).not.toBe(0);
+  expect(result.stderr.toString()).toContain("must be an absolute installation home");
+  expect(existsSync(f.result)).toBe(false);
+});
+
+test.each([true, false])(
+  "bootstrap preserves primary native ownership while checking its target (valid=%s)",
+  (valid) => {
+    const f = fixture(linux);
+    const home = join(f.home, ".dori");
+    const release = join(home, "releases/releases", `${"a".repeat(40)}-${"b".repeat(16)}`);
+    const target = join(release, valid ? "scripts/consumer/omp" : "owner-command");
+    mkdirSync(dirname(target), { recursive: true });
+    mkdirSync(join(home, "bin"));
+    writeFileSync(target, "owner bytes\n");
+    const owner = JSON.stringify({ version: 1, home: f.home, liveSource: join(home, "src") });
+    writeFileSync(join(home, "releases/consumer-owner.json"), owner);
+    symlinkSync(release, join(home, "src"));
+    symlinkSync(target, join(home, "bin/omp"));
+    const result = f.run();
+    if (valid) {
+      expect(result.exitCode, result.stderr.toString()).toBe(0);
+      expect(f.selected()).toEqual(f.expected(home, "herdr"));
+    } else {
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr.toString()).toContain("Unmanaged wrapper");
+      expect(existsSync(f.result)).toBe(false);
+    }
+    expect(readFileSync(target, "utf8")).toBe("owner bytes\n");
+    expect(readFileSync(join(home, "releases/consumer-owner.json"), "utf8")).toBe(owner);
+  },
+);

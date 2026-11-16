@@ -39,7 +39,8 @@ import { parseArgs } from "node:util";
 const args = parseArgs({ args: process.argv.slice(3), options: { from: { type: "string" }, version: { type: "string" }, home: { type: "string" }, runtime: { type: "string" } } });
 writeFileSync(process.env.BOOTSTRAP_RESULT, JSON.stringify({ home: args.values.home, runtime: args.values.runtime,
   env: { home: process.env.DORI_HOME, config: process.env.DORI_CONFIG, state: process.env.DORI_STATE_DIR ?? null,
-    runtime: process.env.DORI_RUNTIME ?? null, cmd: process.env.DORI_CMD ?? null, agent: process.env.DORI_AGENT_CMD ?? null } }));
+    runtime: process.env.DORI_RUNTIME ?? null, cmd: process.env.DORI_CMD ?? null, agent: process.env.DORI_AGENT_CMD ?? null,
+    argv: process.env.DORI_AGENT_ARGV ?? null, ulw: process.env.DORI_OMP_ULW_PATH ?? null, startup: process.env.DORI_MANAGED_STARTUP ?? null } }));
 `;
   const legacyCli = `import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -50,7 +51,8 @@ mkdirSync(home, { recursive: true });
 writeFileSync(join(home, "legacy-installed"), "installed");
 writeFileSync(process.env.BOOTSTRAP_RESULT, JSON.stringify({ home, runtime: "herdr",
   env: { home: process.env.DORI_HOME, config: process.env.DORI_CONFIG, state: process.env.DORI_STATE_DIR ?? null,
-    runtime: process.env.DORI_RUNTIME ?? null, cmd: process.env.DORI_CMD ?? null, agent: process.env.DORI_AGENT_CMD ?? null } }));
+    runtime: process.env.DORI_RUNTIME ?? null, cmd: process.env.DORI_CMD ?? null, agent: process.env.DORI_AGENT_CMD ?? null,
+    argv: process.env.DORI_AGENT_ARGV ?? null, ulw: process.env.DORI_OMP_ULW_PATH ?? null, startup: process.env.DORI_MANAGED_STARTUP ?? null } }));
 `;
   const base = {
     version: 1,
@@ -102,7 +104,17 @@ writeFileSync(process.env.BOOTSTRAP_RESULT, JSON.stringify({ home, runtime: "her
   const expected = (home: string, runtime: string) => ({
     home,
     runtime,
-    env: { home, config: join(home, "config.json"), state: null, runtime: null, cmd: null, agent: null },
+    env: {
+      home,
+      config: join(home, "config.json"),
+      state: null,
+      runtime: null,
+      cmd: null,
+      agent: null,
+      argv: null,
+      ulw: null,
+      startup: null,
+    },
   });
   return { root, home, dist, result, run, selected, assets, expected };
 }
