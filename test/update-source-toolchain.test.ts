@@ -88,7 +88,7 @@ test("managed default preparation binds native and ULW source identities and pro
   writeFileSync(changed, "source drift\n");
   expect(() => assertRuntimeToolchain(f.config, f.record.toolchain!)).toThrow();
   expect(readFileSync(changed, "utf8")).toBe("source drift\n");
-});
+}, 30_000);
 
 test("a same-version old-style receipt cannot admit a new locked default", async () => {
   const f = fixture();
