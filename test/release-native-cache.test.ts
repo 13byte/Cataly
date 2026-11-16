@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pruneNativeCache } from "../src/release/native-cache.ts";
+import { processCwds } from "../src/release/process-cwd.ts";
 import { nativeCacheFixture, overlayFixture } from "./source-bundle-setup.ts";
 
 const roots: string[] = [];
@@ -156,6 +157,19 @@ test("a link to a wrapper outside the roots keeps what it names; a link to an un
   ]);
   expect(pruneNativeCache(c.home, [], [refs], true).removed).toEqual([]);
   expect(existsSync(free.receipt.directory)).toBe(true);
+});
+
+test.each(["linux", "darwin"] as const)("a process's working directory is read the %s way", async (platform) => {
+  if (platform === "linux" && process.platform !== "linux") return;
+  const c = cache();
+  const holder = Bun.spawn(["/bin/sh", "-c", "echo ready; read line"], { cwd: c.root, stdin: "pipe", stdout: "pipe" });
+  try {
+    expect(new TextDecoder().decode((await holder.stdout.getReader().read()).value)).toBe("ready\n");
+    expect(processCwds([String(holder.pid)], platform)?.get(String(holder.pid))).toBe(realpathSync(c.root));
+  } finally {
+    holder.stdin.end();
+    await holder.exited;
+  }
 });
 
 test("dori update cache reports by default and removes unreferenced identities only with --prune", () => {

@@ -2,6 +2,7 @@ import { lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, renam
 import { join } from "node:path";
 import { owned, readJson, realDirectory } from "./files.ts";
 import type { NativeReceipt } from "./native.ts";
+import { processCwds } from "./process-cwd.ts";
 import { readSourceBundle } from "./source-bundle.ts";
 
 export type NativeCacheEntry = {
@@ -137,16 +138,15 @@ export function reportNativeCache(
     });
   const ps = Bun.spawnSync(["ps", "-A", "-ww", "-o", "pid=,args="], { stdout: "pipe", stderr: "pipe" });
   if (ps.exitCode !== 0) throw new Error("Process table is unavailable; native cache use cannot be ruled out");
-  for (const line of ps.stdout.toString().split("\n")) {
-    const pid = line.trim().split(/\s+/, 1)[0] ?? "";
-    let cwd = "";
-    try {
-      if (process.platform === "linux" && pid) cwd = readlinkSync(`/proc/${pid}/cwd`);
-    } catch {
-      // Another user's or an exited process exposes no working directory; its argv was still checked.
-    }
-    names(`${line}\0${cwd}`, `process ${pid}`);
-  }
+  const lines = ps.stdout.toString().split("\n");
+  const pids = lines.map((line) => line.trim().split(/\s+/, 1)[0] ?? "");
+  // A process also uses an entry through its working directory; when no directory can be read, nothing is pruned.
+  const cwds = processCwds(pids.filter(Boolean));
+  if (!cwds) for (const key of keys) add(key, "process working directories unavailable");
+  lines.forEach((line, at) => {
+    const pid = pids[at] ?? "";
+    names(`${line}\0${cwds?.get(pid) ?? ""}`, `process ${pid}`);
+  });
   return found.map((entry) => {
     const { directory, identity, detached } = entry;
     const protectedBy = [...(reasons.get(keyOf(entry)) ?? [])];
