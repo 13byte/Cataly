@@ -68,9 +68,24 @@ const tokens = (value: unknown): string[] =>
 // A command's own words say what it runs, never which lane: the program, and for dori its command and, for a messenger
 // command, the platform. `dori inbound slack` is not lane "dori", "inbound" or "slack".
 // The dori program may run behind a wrapper (`bash -c "... exec dori inbound discord"`) or from source
-// (`bun .../scripts/src/cli.ts inbound slack`), so its words are found wherever it appears. A legacy record's argv
-// may hold non-strings; they are never a program.
+// (`bun .../scripts/src/cli.ts inbound slack`), so it is found wherever a command starts: first, or after a shell
+// separator, a launcher word or an environment assignment. The same name in an argument position is an argument
+// (`dori checkpoints dori`, `rg -n /src/omp-dori api-fix`) and may name the lane. A legacy record's argv may hold
+// non-strings; they are never a program.
 const DORI_PROGRAMS: Record<string, true> = { dori: true, "omp-dori": true };
+const DORI_SOURCE = /(?:^|\/)scripts\/src\/cli\.ts$/;
+const LAUNCHERS: Record<string, true> = {
+  "&&": true,
+  "||": true,
+  ";": true,
+  "|": true,
+  exec: true,
+  nohup: true,
+  env: true,
+  command: true,
+  "-c": true,
+  "-lc": true,
+};
 const PLATFORM_COMMANDS: Record<string, true> = {
   send: true,
   presence: true,
@@ -78,12 +93,27 @@ const PLATFORM_COMMANDS: Record<string, true> = {
   thread: true,
   react: true,
 };
-const nameOf = (word: unknown): string => (typeof word === "string" ? basename(word) : "");
+const startsCommand = (argv: readonly unknown[], at: number): boolean => {
+  if (at === 0) return true;
+  const before = argv[at - 1];
+  return (
+    typeof before === "string" &&
+    (LAUNCHERS[before] === true || before.endsWith(";") || /^[A-Za-z_][A-Za-z0-9_]*=/.test(before))
+  );
+};
+const doriAt = (argv: readonly unknown[], at: number): boolean => {
+  const word = argv[at];
+  if (typeof word !== "string") return false;
+  if (DORI_PROGRAMS[basename(word)] === true) return startsCommand(argv, at);
+  const before = argv[at - 1];
+  return (
+    DORI_SOURCE.test(word) && typeof before === "string" && basename(before) === "bun" && startsCommand(argv, at - 1)
+  );
+};
 const argumentWords = (argv: readonly unknown[]): readonly unknown[] => {
   const own = new Set([0]);
-  argv.forEach((word, at) => {
-    const name = nameOf(word);
-    if (DORI_PROGRAMS[name] !== true && !(name === "cli.ts" && nameOf(argv[at - 1]) === "bun")) return;
+  argv.forEach((_, at) => {
+    if (!doriAt(argv, at)) return;
     own.add(at).add(at + 1);
     const command = argv[at + 1];
     if (typeof command === "string" && PLATFORM_COMMANDS[command] === true) own.add(at + 2);

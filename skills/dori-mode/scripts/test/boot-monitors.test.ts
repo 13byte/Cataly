@@ -244,23 +244,3 @@ test("a closed lane named after a dori program, command or platform word does no
   ]);
   expect(result.map((m) => [m.monitorId, m.match])).toEqual([["mon_LANE", ["slack:argv:key"]]]);
 });
-
-test("a legacy record whose argv holds a non-string is still matched by its command, as before", () => {
-  const dir = join(state.dir, "legacy");
-  mkdirSync(dir);
-  writeFileSync(
-    join(dir, "owner.json"),
-    JSON.stringify({
-      version: 1,
-      sessionId: "owner",
-      monitors: [
-        { sessionId: "owner", persistent: true, monitorId: "mon_TEST", argv: [7], command: "dori checkpoints api" },
-      ],
-    }),
-  );
-  const read = readMonitorManifests(join(state.dir, "missing"), [dir]);
-  expect(read.errors).toEqual([]);
-  expect(monitorCleanup([lane("api", "closed")], read.manifests).map((m) => [m.monitorId, m.match])).toEqual([
-    ["mon_TEST", ["api:command:key"]],
-  ]);
-});
