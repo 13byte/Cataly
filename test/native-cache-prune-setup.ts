@@ -7,7 +7,7 @@ import {
   type NativeCachePruneOptions,
   pruneNativeCache,
 } from "../src/release/native-cache-prune.ts";
-import { nativeCacheFixture, overlayFixture, ownProcessCwds } from "./source-bundle-setup.ts";
+import { nativeCacheFixture, overlayFixture, ownProcessCwds, ownProcessFiles } from "./source-bundle-setup.ts";
 
 const roots: string[] = [];
 
@@ -45,7 +45,13 @@ export function pruneFixture(): PruneFixture {
   };
   const wrapper = (omp: string) => `#!/bin/sh\nexec ${JSON.stringify(omp)} "$@"\n`;
   const prune = (options: NativeCachePruneOptions = {}, more: readonly string[] = []): NativeCachePrune =>
-    pruneNativeCache(home, [], [refs, ...more], { readCwds: ownProcessCwds, table: () => "", graceMs: 0, ...options });
+    pruneNativeCache(home, [], [refs, ...more], {
+      readCwds: ownProcessCwds,
+      files: ownProcessFiles,
+      table: () => "",
+      graceMs: 0,
+      ...options,
+    });
   return { root, home, refs, native, wrapper, prune };
 }
 

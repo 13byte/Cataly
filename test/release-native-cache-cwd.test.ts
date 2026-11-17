@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { reportNativeCache } from "../src/release/native-cache.ts";
 import { processCwds, processStart } from "../src/release/process-cwd.ts";
-import { nativeCacheFixture, overlayFixture } from "./source-bundle-setup.ts";
+import { nativeCacheFixture, overlayFixture, ownProcessFiles } from "./source-bundle-setup.ts";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -23,7 +23,7 @@ test("when no working directory can be read, the report says so for every identi
   const receipt = nativeCacheFixture(f.source, home, f.checkout);
   rmSync(f.source, { recursive: true });
 
-  const entries = reportNativeCache(home, [], [], () => null);
+  const entries = reportNativeCache(home, [], [], () => null, { files: ownProcessFiles });
 
   expect(entries.map((entry) => [entry.directory, entry.protectedBy])).toEqual([
     [receipt.directory, ["process working directories unavailable"]],

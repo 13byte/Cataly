@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { reportNativeCache } from "../src/release/native-cache.ts";
 import { processCwds } from "../src/release/process-cwd.ts";
-import { nativeCacheFixture, overlayFixture, ownProcessCwds } from "./source-bundle-setup.ts";
+import { nativeCacheFixture, overlayFixture, ownProcessCwds, ownProcessFiles } from "./source-bundle-setup.ts";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -54,7 +54,7 @@ test("the report names what uses each identity and removes none, the unused one 
     expect(new TextDecoder().decode((await reader.read()).value)).toBe("ready\n");
     const sources = [live.source];
     const scanned = [join(c.root, "dori")];
-    const entries = reportNativeCache(c.home, sources, scanned, ownProcessCwds);
+    const entries = reportNativeCache(c.home, sources, scanned, ownProcessCwds, { files: ownProcessFiles });
     const reasons = Object.fromEntries(entries.map((entry) => [entry.directory, entry.protectedBy]));
     expect(reasons[live.receipt.directory]).toEqual(
       expect.arrayContaining([`source ${live.source}`, "receipt source"]),
@@ -100,7 +100,7 @@ test("a link into the cache, a process working in an entry and a partial receipt
   });
   try {
     expect(new TextDecoder().decode((await holder.stdout.getReader().read()).value)).toBe("ready\n");
-    const entries = reportNativeCache(c.home, [], [join(c.root, "dori")], ownProcessCwds);
+    const entries = reportNativeCache(c.home, [], [join(c.root, "dori")], ownProcessCwds, { files: ownProcessFiles });
     const reasons = Object.fromEntries(entries.map((entry) => [entry.directory, entry.protectedBy]));
     expect(reasons[linked.receipt.directory]).toEqual([`link ${join(bin, "omp")}`]);
     expect(reasons[chained.receipt.directory]).toEqual([`link ${join(bin, "omp-side")}`]);
@@ -127,7 +127,10 @@ test("a link to a wrapper outside the roots reports what it names; a link to an 
   symlinkSync(join(outside, "omp"), join(refs, "omp"));
   const report = (roots: string[]) =>
     Object.fromEntries(
-      reportNativeCache(c.home, [], roots, ownProcessCwds).map((entry) => [entry.directory, entry.protectedBy]),
+      reportNativeCache(c.home, [], roots, ownProcessCwds, { files: ownProcessFiles }).map((entry) => [
+        entry.directory,
+        entry.protectedBy,
+      ]),
     );
   const linked = report([refs]);
   expect(linked[wrapped.receipt.directory]).toEqual([`reference ${join(refs, "omp")}`]);
@@ -176,7 +179,7 @@ test("dori update cache reports by default; --prune quarantines, trusting only t
   expect(report).toMatchObject({ removes: "nothing", pending: [] });
   expect(report.entries).toEqual([expect.objectContaining({ directory: superseded.receipt.directory })]);
   // On a real host only unreadable processes (this user's, listed to trust one by one; privileged ones) hold it.
-  const host = /^unreadable working director(?:y of process |ies of \d+ root or privileged processes)/;
+  const host = /^unreadable (?:working directory of process |open files of process |working directories of \d+ root)/;
   expect(report.entries[0].protectedBy.filter((reason: string) => !host.test(reason))).toEqual([]);
   expect(existsSync(superseded.receipt.directory)).toBe(true);
   expect(run("--from", c.root).exitCode).toBe(2);
@@ -189,7 +192,8 @@ test("dori update cache reports by default; --prune quarantines, trusting only t
   // Root's processes come and go between the two runs, but there are some exactly when the report listed some.
   expect(result.rootCwdTrusted > 0).toBe(report.privileged.length > 0);
   // Another lane's launch or a process that started after the report may still hold it; nothing else may.
-  const late = /^(?:Dori cache writer process |unreadable working directory of process |lease of process )/;
+  const late =
+    /^(?:Dori cache writer process |unreadable (?:working directory|open files) of process |lease of process )/;
   const kept = result.kept.flatMap((entry: { protectedBy: string[] }) => entry.protectedBy);
   expect(kept.filter((reason: string) => !late.test(reason))).toEqual([]);
   // Unused, it is only moved aside: removal waits for a prune after the grace period.

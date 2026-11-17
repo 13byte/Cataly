@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFil
 import { dirname, join } from "node:path";
 import { nativeDirectory, nativeLauncher, type NativeReceipt } from "../src/release/native.ts";
 import { type ProcessCwds, processCwds } from "../src/release/process-cwd.ts";
+import { type ProcessFiles, processFiles } from "../src/release/process-files.ts";
 import { readSourceBundle, type SourceBundle } from "../src/release/source-bundle.ts";
 import { digest } from "../src/update/source.ts";
 
@@ -149,4 +150,10 @@ export function nativeCacheFixture(source: string, home: string, upstream: strin
 export const ownProcessCwds = (pids: readonly string[]): ProcessCwds | null => {
   const read = processCwds(pids);
   return read && { cwds: read.cwds, unreadable: [] };
+};
+
+/** The host's process files without its unreadable processes, which no fixture controls (see `ownProcessCwds`). */
+export const ownProcessFiles = (): ProcessFiles | null => {
+  const read = processFiles();
+  return read && { files: read.files, unread: [] };
 };

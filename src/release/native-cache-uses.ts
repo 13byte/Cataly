@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { nativeStage, readLeases } from "./native-cache-lease.ts";
 import { processCwds, processStart } from "./process-cwd.ts";
-import { processFiles, usesDirectory } from "./process-files.ts";
+import { type ProcessFiles, processFiles, usesDirectory } from "./process-files.ts";
 
 /** Commands an update or deployment runs after its program (`<program> update install`, `<program> upstream watch`). */
 const SUBCOMMAND = /^(?:install|rollback|check|stage|watch|restart|recover)$/;
@@ -103,6 +103,10 @@ export type UseHoldOptions = {
   readonly readCwds?: typeof processCwds;
   /** `--trust-root-cwd`: privileged processes whose working directory cannot be read are not held on. */
   readonly trustRootCwd?: boolean;
+  /** The reader of this user's processes' files (`processFiles`). */
+  readonly files?: () => ProcessFiles | null;
+  /** A pid the user vouched for (`--trust-process`): its unreadable files do not keep anything. */
+  readonly trusted?: (pid: string) => boolean;
   /** Receives `PID@START (args)` of every privileged process whose working directory could not be read. */
   readonly privileged?: Set<string>;
 };
@@ -138,9 +142,13 @@ export function useHolds(cache: string, keys: readonly string[], options: UseHol
   const rows = processRows((options.table ?? processTable)());
   for (const reason of writerReasons(cache, rows)) all(reason);
   // What this user's processes run, map or hold open inside an entry, whatever their arguments and working directory
-  // say. A process whose files cannot be read cannot have its working directory read either, which keeps every key.
-  const found = processFiles();
+  // say. A live process whose files cannot be read may use any entry, unless the user trusted it.
+  const found = (options.files ?? processFiles)();
   if (!found) all("open files of processes unavailable");
+  const argsOf = new Map(rows.map((row) => [row.pid, row.args]));
+  for (const pid of found?.unread ?? [])
+    if (!options.trusted?.(pid))
+      all(`unreadable open files of process ${pid}@${processStart(pid) ?? "?"} (${argsOf.get(pid) ?? ""})`);
   const caches = [...new Set([cache, realpathSync(cache)])];
   for (const key of keys) {
     const entries = caches.map((root) => join(root, `native-${process.platform}-${process.arch}-${key}`));

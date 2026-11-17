@@ -15,13 +15,13 @@ import { join, relative, resolve } from "node:path";
 import { leaseNativePath } from "../src/release/native.ts";
 import { reportNativeCache } from "../src/release/native-cache.ts";
 import { leaseNativeIdentity } from "../src/release/native-cache-lease.ts";
-import { cachePending } from "../src/release/native-cache-prune.ts";
+import { cachePending } from "../src/release/native-cache-quarantine.ts";
 import { useHolds } from "../src/release/native-cache-uses.ts";
 import { bootId } from "../src/update/proc.ts";
 import { processCwds } from "../src/release/process-cwd.ts";
 import { keptFor, pruneFixture, removePruneFixtures } from "./native-cache-prune-setup.ts";
 import { script, setup } from "./install-setup.ts";
-import { nativeCacheFixture, overlayFixture, ownProcessCwds } from "./source-bundle-setup.ts";
+import { nativeCacheFixture, overlayFixture, ownProcessCwds, ownProcessFiles } from "./source-bundle-setup.ts";
 
 // Astra's review of the first prune commit: original counterexamples run as written, writers that publish an explicit
 // cache executable, relative writer commands, a thread group outliving its leader and an empty lock directory.
@@ -88,9 +88,10 @@ test("a relative or interpreter-run Dori writer for this cache keeps every ident
     expect(new TextDecoder().decode((await holder.stdout.getReader().read()).value)).toBe("ready\n");
     const uid = process.getuid?.() ?? 0;
     const held = (args: string) =>
-      useHolds(join(c.home, ".cache/omp-dori"), [x.identity], { table: () => `${holder.pid} ${uid} ${args}\n` }).get(
-        x.identity,
-      );
+      useHolds(join(c.home, ".cache/omp-dori"), [x.identity], {
+        table: () => `${holder.pid} ${uid} ${args}\n`,
+        files: ownProcessFiles,
+      }).get(x.identity);
     for (const args of [
       `bun scripts/source-dependencies.ts native /old/source ${c.home}`,
       `bun scripts/source-dependencies.ts assert-native /old/source ${relative(c.root, c.home)}`,
@@ -209,9 +210,10 @@ test.each(["file", "directory", "executable"])(
       // The program is running once /proc shows the entry's copy (a state, so polled for).
       else while (!readlinkSync(`/proc/${holder.pid}/exe`).startsWith(x.directory)) await Bun.sleep(10);
       const reason = `process ${holder.pid} has it open, mapped or running`;
-      expect(reportNativeCache(c.home, [], [c.refs], ownProcessCwds, { table: () => "" })[0]?.protectedBy).toContain(
-        reason,
-      );
+      expect(
+        reportNativeCache(c.home, [], [c.refs], ownProcessCwds, { table: () => "", files: ownProcessFiles })[0]
+          ?.protectedBy,
+      ).toContain(reason);
       const result = c.prune();
       expect(result.quarantined).toEqual([]);
       expect(keptFor(result, x.directory)).toContain(reason);

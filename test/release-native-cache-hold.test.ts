@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, w
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { reportNativeCache } from "../src/release/native-cache.ts";
-import { nativeCacheFixture, overlayFixture, ownProcessCwds } from "./source-bundle-setup.ts";
+import { nativeCacheFixture, overlayFixture, ownProcessCwds, ownProcessFiles } from "./source-bundle-setup.ts";
 
 // What the report cannot confirm unused it reports as a use: a reference of any size and a source lock it cannot read.
 
@@ -27,7 +27,10 @@ function cache() {
   };
   const reasons = () =>
     Object.fromEntries(
-      reportNativeCache(home, [], [refs], ownProcessCwds).map((entry) => [entry.directory, entry.protectedBy]),
+      reportNativeCache(home, [], [refs], ownProcessCwds, { files: ownProcessFiles }).map((entry) => [
+        entry.directory,
+        entry.protectedBy,
+      ]),
     );
   return { root, refs, native, reasons };
 }

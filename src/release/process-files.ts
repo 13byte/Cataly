@@ -1,13 +1,39 @@
 import { readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
+import { liveTasks } from "./process-cwd.ts";
+
+/** What `processFiles` reads: paths by pid, and live pids whose files could not be read (they may use anything). */
+export type ProcessFiles = { readonly files: Map<string, string[]>; readonly unread: readonly string[] };
+
+const ended = (error: unknown) => ["ENOENT", "ESRCH"].includes((error as NodeJS.ErrnoException).code ?? "");
+
+/** The executable, open descriptors and mapped files of one Linux thread group, read through threads that still run. */
+function groupFiles(pid: string, tasks: readonly string[]): string[] {
+  // A leader that exited (a zombie) shows no executable or mappings; any running thread shows the group's.
+  const base = tasks.includes(pid) ? `/proc/${pid}` : `/proc/${pid}/task/${tasks[0]}`;
+  const paths = [readlinkSync(`${base}/exe`)];
+  for (const line of readFileSync(`${base}/maps`, "utf8").split("\n")) {
+    const mapped = /^\S+\s+\S+\s+\S+\s+\S+\s+\d+\s+(\/.*)$/.exec(line)?.[1];
+    if (mapped) paths.push(mapped);
+  }
+  // Threads usually share one descriptor table, but one made without it has its own.
+  for (const tid of tasks)
+    for (const fd of readdirSync(`/proc/${pid}/task/${tid}/fd`)) {
+      try {
+        paths.push(readlinkSync(`/proc/${pid}/task/${tid}/fd/${fd}`));
+      } catch (error) {
+        if (!ended(error)) throw error;
+      }
+    }
+  return paths;
+}
 
 /**
- * Paths this user's running processes use besides their working directory, by pid: on Linux the executable they run
- * (`/proc/<pid>/exe`), every open descriptor (`fd/*`, a directory included) and every mapped file (`maps`); elsewhere
- * what `lsof` lists for this user (open files, the executable, mapped files). `unread` holds live pids whose files
- * could not be read: on Linux the same processes whose working directory cannot be read either. Null when nothing at
- * all could be read.
+ * Paths this user's running processes use besides their working directory, by pid: on Linux the executable they run,
+ * every open descriptor (a directory included) and every mapped file, read through any thread that still runs (a
+ * leader that exited leaves its threads running); elsewhere what `lsof` lists for this user. `unread` holds live pids
+ * whose files could not be read, whatever their working directory shows. Null when nothing at all could be read.
  */
-export function processFiles(): { files: Map<string, string[]>; unread: string[] } | null {
+export function processFiles(): ProcessFiles | null {
   const files = new Map<string, string[]>();
   const unread: string[] = [];
   const uid = process.getuid?.();
@@ -32,27 +58,14 @@ export function processFiles(): { files: Map<string, string[]>; unread: string[]
     } catch {
       continue;
     }
-    const paths: string[] = [];
+    const tasks = liveTasks(pid);
+    if (!tasks) continue;
     try {
-      paths.push(readlinkSync(`/proc/${pid}/exe`));
-      for (const fd of readdirSync(`/proc/${pid}/fd`)) {
-        try {
-          paths.push(readlinkSync(`/proc/${pid}/fd/${fd}`));
-        } catch {
-          // A descriptor closed meanwhile.
-        }
-      }
-      for (const line of readFileSync(`/proc/${pid}/maps`, "utf8").split("\n")) {
-        const mapped = /^\S+\s+\S+\s+\S+\s+\S+\s+\d+\s+(\/.*)$/.exec(line)?.[1];
-        if (mapped) paths.push(mapped);
-      }
+      files.set(pid, groupFiles(pid, tasks));
     } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      // An exited process uses nothing.
-      if (code !== "ENOENT" && code !== "ESRCH") unread.push(pid);
-      continue;
+      // Gone meanwhile uses nothing; still running but unreadable (not dumpable) may use anything.
+      if (!ended(error) || liveTasks(pid)) unread.push(pid);
     }
-    files.set(pid, paths);
   }
   return files.size ? { files, unread } : null;
 }

@@ -5,7 +5,7 @@ import { pruneNativeCache } from "../src/release/native-cache-prune.ts";
 import type { NativeReceipt } from "../src/release/native.ts";
 import { bootId } from "../src/update/proc.ts";
 import { type PruneFixture, pruneFixture, removePruneFixtures } from "./native-cache-prune-setup.ts";
-import { ownProcessCwds } from "./source-bundle-setup.ts";
+import { ownProcessCwds, ownProcessFiles } from "./source-bundle-setup.ts";
 
 // Reviewers' counterexamples against the first prune that removed in one run (Astra B7 and its third-scan and new-root
 // variants, Fable P6, prune-concurrency, process-after-ps), a killed preparation's surviving child and a killed lock
@@ -118,7 +118,13 @@ test("Astra R3: a lock a killed recoverer left mid-takeover (lock and tombstone 
   writeFileSync(lock, JSON.stringify({ pid: Number(ended), startTicks: "1", bootId: bootId() }));
   linkSync(lock, `${lock}.ended-${ended}-1-${bootId()}`);
   const runs = [0, 1].map(() =>
-    pruneNativeCache(c.home, [], [c.refs], { readCwds: ownProcessCwds, table: () => "", graceMs: 0 }),
+    pruneNativeCache(c.home, [], [c.refs], {
+      readCwds: ownProcessCwds,
+      files: ownProcessFiles,
+      table: () => "",
+      graceMs: 0,
+      deleteQuarantined: true,
+    }),
   );
   expect(runs.at(-1)!.removed.map((removal) => removal.directory)).toEqual([x.directory]);
 });
@@ -157,3 +163,54 @@ test.each(["file", "directory"])(
     }
   },
 );
+
+// Owner decision (R1): an older writer's absence cannot be proven, so no prune removes anything unless asked.
+test("Astra R1 (cfbfb77): a reference after the third scan, two prunes past the grace period, removes nothing", () => {
+  const c = pruneFixture();
+  const x = c.native("x");
+  let scans = 0;
+  // The reviewer's run: publish at the third process scan; prunes at now and now + 600001 with the default grace.
+  const readCwds = (pids: readonly string[]) => {
+    if (++scans === 3) wrapper(c, x);
+    return ownProcessCwds(pids);
+  };
+  const runs = [0, 600_001].map((now) => c.prune({ readCwds, graceMs: GRACE, now }));
+  expect(runs.flatMap((run) => run.removed)).toEqual([]);
+  expect(existsSync(x.omp) || existsSync(`${x.directory}.pruning/bin/omp`)).toBe(true);
+});
+
+test("without --delete-quarantined nothing is removed after any grace period; with it only unused copies go", () => {
+  const c = pruneFixture();
+  const unused = c.native("unused");
+  const used = c.native("used");
+  c.prune({ graceMs: GRACE, now: 0 });
+  expect(c.prune({ graceMs: GRACE, now: 100 * GRACE }).removed).toEqual([]);
+  wrapper(c, used);
+  const asked = c.prune({ graceMs: GRACE, now: 100 * GRACE, deleteQuarantined: true });
+  expect(asked.removed.map((removal) => removal.directory)).toEqual([unused.directory]);
+  expect(existsSync(used.omp)).toBe(true);
+  // Before its grace period ends a copy stays even when removal is asked.
+  const fresh = c.native("fresh");
+  c.prune({ graceMs: GRACE, now: 0 });
+  expect(c.prune({ graceMs: GRACE, now: GRACE - 1, deleteQuarantined: true }).removed).toEqual([]);
+  expect(existsSync(`${fresh.directory}.pruning/bin/omp`)).toBe(true);
+});
+
+test("a use that appears after the asked prune's look is seen at its check before removal and puts the copy back", () => {
+  const c = pruneFixture();
+  const x = c.native("x");
+  c.prune({ graceMs: GRACE, now: 0 });
+  let scans = 0;
+  // Scan 1 is the live entries, 2 the quarantined copies (its walk already done), 3 the check of `.deleting-<nonce>`.
+  const readCwds = (pids: readonly string[]) => {
+    if (++scans === 2) wrapper(c, x);
+    return ownProcessCwds(pids);
+  };
+  const asked = c.prune({ readCwds, graceMs: GRACE, now: GRACE, deleteQuarantined: true });
+  expect(scans).toBe(3);
+  expect(asked.removed).toEqual([]);
+  expect(asked.kept.find((entry) => entry.directory === x.directory)?.protectedBy).toEqual(
+    expect.arrayContaining([`reference ${join(c.refs, "omp")}`, "kept at the check before removal"]),
+  );
+  expect(existsSync(x.omp)).toBe(true);
+});

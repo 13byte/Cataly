@@ -6,21 +6,17 @@ import type { processCwds } from "./process-cwd.ts";
 import { processFiles, usesDirectory } from "./process-files.ts";
 
 /**
- * This user's processes with a file open, mapped or running under `path`, the stage itself open as a directory
- * included (openat and readdir work through it), and those whose files cannot be read: the same processes whose working
- * directory `readCwds` cannot read (unless the user trusted them), as those hide both.
+ * This user's processes that run, map or hold open a file under `path`, the stage itself open as a directory included
+ * (openat and readdir work through it), and live ones whose files cannot be read, unless the user trusted them.
  */
-function openUnder(path: string, readCwds: typeof processCwds): string[] {
-  const found = processFiles();
+function openUnder(path: string, uses: UseHoldOptions): string[] {
+  const found = (uses.files ?? processFiles)();
   if (!found) return ["open files of processes cannot be read"];
-  // This process's own directory is always readable, so no answer at all means the reader failed.
-  const read = found.unread.length ? readCwds([String(process.pid), ...found.unread]) : undefined;
-  const hidden = new Set(read === null ? found.unread : (read?.unreadable ?? []));
   return [
     ...[...found.files]
       .filter(([, paths]) => paths.some((used) => usesDirectory(used, path)))
       .map(([pid]) => `process ${pid} has a file open in it`),
-    ...found.unread.filter((pid) => hidden.has(pid)).map((pid) => `open files of process ${pid} cannot be read`),
+    ...found.unread.filter((pid) => !uses.trusted?.(pid)).map((pid) => `open files of process ${pid} cannot be read`),
   ];
 }
 
@@ -39,7 +35,7 @@ export function stageHolds(stage: string, readCwds: typeof processCwds, uses: Us
       ...(leased ?? []),
       ...(protections(cache, [key], [], [], readCwds).get(key) ?? []),
       ...(useHolds(cache, [key], { ...uses, readCwds }).get(key) ?? []),
-      ...openUnder(stage, readCwds),
+      ...openUnder(stage, uses),
     ]),
   ];
 }

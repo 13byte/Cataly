@@ -23,7 +23,9 @@ const leaseDuringPrune = (home: string, identity: string) => {
   expect(() => leaseNativeIdentity(home, identity, process.pid, 0)).toThrow("A native cache prune");
 };
 
-test("a prune quarantines what nothing uses, a later one removes it after the grace period, and says why", () => {
+// Contract (owner decision, R1): a prune never removes an identity by itself; only --delete-quarantined does, after
+// the grace period. The removal steps below therefore ask for it.
+test("a prune quarantines what nothing uses; only an asked prune after the grace period removes it, and says why", () => {
   const c = pruneFixture();
   const free = c.native("free");
   const used = c.native("used");
@@ -44,12 +46,14 @@ test("a prune quarantines what nothing uses, a later one removes it after the gr
   expect(c.prune({ graceMs: 60_000, now: 59_999 }).quarantined.map((entry) => entry.directory)).toEqual([
     free.directory,
   ]);
-  const later = c.prune({ graceMs: 60_000, now: 60_000 });
+  // Past the grace period an ordinary prune still only waits.
+  expect(c.prune({ graceMs: 60_000, now: 60_000 }).removed).toEqual([]);
+  const later = c.prune({ graceMs: 60_000, now: 60_000, deleteQuarantined: true });
   expect(later.removed).toEqual([
     expect.objectContaining({
       directory: free.directory,
       identity: free.identity,
-      why: expect.stringContaining("unused through its quarantine"),
+      why: expect.stringContaining("removal asked"),
     }),
   ]);
   expect(later.removed[0]!.bytes).toBeGreaterThan(0);
@@ -125,7 +129,10 @@ test("B9 a reference that cannot be read stops the prune; once readable it puts 
     chmodSync(reference, 0o600);
   }
   expect(existsSync(`${x.directory}.pruning/bin/omp`)).toBe(true);
-  expect(keptFor(c.prune(), x.directory)).toEqual([`reference ${reference}`, "put back from quarantine"]);
+  // Only this identity's own reasons are checked: the host's processes are read too and may add to them.
+  expect(keptFor(c.prune(), x.directory)).toEqual(
+    expect.arrayContaining([`reference ${reference}`, "put back from quarantine"]),
+  );
   expect(existsSync(x.omp)).toBe(true);
 });
 
@@ -150,19 +157,21 @@ test("a copy moved aside without a quarantine record starts its grace period whe
     expect.objectContaining({ directory: x.directory, since: new Date(5_000).toISOString() }),
   ]);
   writeFileSync(join(c.refs, "omp"), c.wrapper(x.omp));
-  expect(keptFor(c.prune(), x.directory)).toEqual([`reference ${join(c.refs, "omp")}`, "put back from quarantine"]);
+  expect(keptFor(c.prune(), x.directory)).toEqual(
+    expect.arrayContaining([`reference ${join(c.refs, "omp")}`, "put back from quarantine"]),
+  );
   expect(existsSync(x.omp)).toBe(true);
 });
 
-test("a removal an interrupted prune had decided (.deleting) is finished", () => {
+test("a copy an interrupted removal left (.deleting-<nonce>) goes back into quarantine, never removed unchecked", () => {
   const c = pruneFixture();
   const x = c.native("x");
-  renameSync(x.directory, `${x.directory}.deleting`);
+  c.prune();
+  renameSync(`${x.directory}.pruning`, `${x.directory}.deleting-0123456789abcdef`);
   const result = c.prune();
-  expect(result.removed).toEqual([
-    expect.objectContaining({ directory: x.directory, why: "an interrupted prune had decided to remove it" }),
-  ]);
-  expect(existsSync(`${x.directory}.deleting`)).toBe(false);
+  expect(result.removed).toEqual([]);
+  expect(result.quarantined.map((entry) => entry.directory)).toEqual([x.directory]);
+  expect(existsSync(`${x.directory}.pruning/bin/omp`)).toBe(true);
 });
 
 test("a running Dori writer for this cache or an older writer's preparation keeps every identity", () => {
