@@ -18,6 +18,7 @@ export type FakeOptions = {
   session: FakeSession;
   flags?: Record<string, string>;
   agent?: Agent;
+  mode?: DoriContext["mode"];
   active?: string[];
   model?: DoriContext["model"];
 };
@@ -55,7 +56,7 @@ export const fakePi = (options: FakeOptions): FakePi => {
     ctx: () => ({
       cwd: tmpdir(),
       abort: () => void calls.push("abort"),
-      mode: "print",
+      mode: options.mode ?? "print",
       agent,
       model: options.model,
       sessionManager: {

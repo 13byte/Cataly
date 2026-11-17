@@ -53,9 +53,18 @@ beforeEach(() => {
 });
 afterEach(async () => {
   try {
+    const beforeShutdown = readPaneState(stateDir, PANE);
     for (const pi of sessions.splice(0)) await pi.emit("session_shutdown");
     await until(() => [...pids].every((pid) => !alive(pid)));
-    expect(readPaneState(stateDir, PANE)).toBeNull();
+    if (beforeShutdown)
+      expect(readPaneState(stateDir, PANE)).toMatchObject({
+        ...beforeShutdown,
+        pid: 0,
+        agentStatus: "idle",
+        approvalPending: false,
+        updatedAt: expect.any(String),
+      });
+    else expect(readPaneState(stateDir, PANE)).toBeNull();
   } finally {
     pids.clear();
     for (const [key, value] of previousEnv) {
