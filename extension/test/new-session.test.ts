@@ -188,13 +188,26 @@ test("a new Dori session does not reapply its original session-bound bootstrap",
     { type: "custom", customType: "omp-dori:intake", data: intake },
   ]);
   await until(() => !alive(oldPid));
-  await runningPid(pi);
+  const exitedPid = await runningPid(pi);
   expect(JSON.parse(readFileSync(saved, "utf8"))).toEqual({
     version: 1,
     sessionId: fresh.id,
     monitors: [spec],
     intake,
   });
+
+  // A poller exit is not a recorded stop: a later /new must retain its desired start and intake.
+  process.kill(exitedPid, "SIGTERM");
+  await until(() => !alive(exitedPid));
+  const afterExit = session("bootstrap-after-exit");
+  pi.session = afterExit;
+  await pi.emit("session_switch", { type: "session_switch", reason: "new" });
+  expect(readMonitorSet(join(stateDir, "monitors", `${afterExit.id}.json`), afterExit.id, true)).toMatchObject({
+    sessionId: afterExit.id,
+    monitors: [spec],
+    intake,
+  });
+  await runningPid(pi);
 });
 
 test.each([false, true])("rejected bootstrap cannot seed a new session (recorded: %s)", async (recorded) => {

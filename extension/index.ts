@@ -216,7 +216,14 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
   let lifecycleRegistered = false;
   /** The session whose monitor bootstrap was rejected: it stays role-less until a session_start bootstraps it again. */
   let rejectedBootstrap: string | undefined;
-  let session: { id: string; startedAt: string; intake?: ReturnType<typeof recordedIntake> } | undefined;
+  let session:
+    | {
+        id: string;
+        startedAt: string;
+        monitorSpecs?: readonly MonitorSpec[];
+        intake?: ReturnType<typeof recordedIntake>;
+      }
+    | undefined;
   let goal: PaneState["goal"] = { status: "none" };
   let agentStatus: "idle" | "working" = "idle";
   let goalToolAdded = false;
@@ -315,10 +322,12 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
     }
   };
 
-  // Boot reads this desired-state mirror instead of opening private session transcripts.
+  // Cache desired intent for /new; boot reads the same mirror without opening private session transcripts.
   const saveMonitorSpecs = (specs: ReadonlyMap<string, MonitorSpec>, branch: readonly SessionEntry[]): void => {
-    if (!session || !stateDir) return;
+    if (!session) return;
+    session.monitorSpecs = [...specs.values()];
     session.intake = recordedIntake(branch);
+    if (!stateDir) return;
     const dir = join(stateDir, "monitors");
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const path = join(dir, `${encodeURIComponent(session.id)}.json`);
@@ -329,7 +338,7 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
         {
           version: 1,
           sessionId: session.id,
-          monitors: [...specs.values()],
+          monitors: session.monitorSpecs,
           intake: session.intake,
         },
         null,
@@ -486,11 +495,11 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
           else ctx.ui.notify(`omp-dori: --${ROLE_FLAG} must be "dori" or "lane", got "${String(flagged)}"`, "error");
         }
         if (eventName !== "session_start" && rejectedBootstrap === ctx.sessionManager.getSessionId()) role = undefined;
-        // Re-record so a later resume of this session restores the same role, and replay the monitors this process is
-        // still running: the fresh branch records none, and `syncMain` stops every monitor it cannot find there.
+        // Re-record the role and desired monitor starts: an exited child is not a recorded stop, and the fresh
+        // branch otherwise loses the intent that `syncMain` uses to restore it.
         if (carried && role && recorded === undefined) pi.appendEntry(ROLE_ENTRY, role);
         if (carried && role === "dori" && recorded === undefined) {
-          for (const spec of monitors.list())
+          for (const spec of session?.monitorSpecs ?? [])
             pi.appendEntry(MONITOR_ENTRY, {
               op: "start",
               name: spec.name,
