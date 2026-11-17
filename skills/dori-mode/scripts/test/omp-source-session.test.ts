@@ -114,7 +114,10 @@ const wrapped = [
 const ompProc = ["bun", "/opt/bin/omp", "--dori-role", "lane"];
 const wrappedLaunch = (deps: FlowDeps, prefix: readonly string[], key: string, brief: string) =>
   launchLane(
-    { ...deps, config: { ...deps.config, agentCommand: [...prefix, "--dori-role", "lane", "--model", "{model}", "{prompt}"] } },
+    {
+      ...deps,
+      config: { ...deps.config, agentCommand: [...prefix, "--dori-role", "lane", "--model", "{model}", "{prompt}"] },
+    },
     { key, title: key, brief, done: "file /never-checked" },
   );
 
@@ -137,6 +140,17 @@ test.each([...wrapped, ["a Bun option operand", ["bun", "--preload", "/hook.ts",
     expect((await wrappedLaunch(deps, prefix, "quoted", brief)).startup).not.toStartWith("STARTUP_OK");
   },
 );
+
+// A custom agent keeps its screen goal marker: an unreadable env prefix or prose that mentions omp is not OMP.
+test.each([
+  ["an env -S string", ["env", "-S", "claude --verbose"]],
+  ["an unknown env option", ["env", "--bogus", "claude"]],
+  ["an argument mentioning omp", ["claude", "--system", "use omp style"]],
+] as const)("a custom agent behind %s still starts on its goal marker", async (_, prefix) => {
+  const { deps, brief } = setup(["claude"], "custom", false);
+  world.screen = "Pursuing goal: the brief";
+  expect((await wrappedLaunch(deps, prefix, "custom", brief)).startup).toBe(`STARTUP_OK custom ${REF.id}`);
+});
 
 test("a source OMP without its extension record falls back to OMP's start-time session folder", async () => {
   const argv = forms[1][1];

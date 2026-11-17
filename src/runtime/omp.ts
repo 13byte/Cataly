@@ -114,6 +114,56 @@ function envCommandAt(argv: readonly string[], at: number): number | undefined {
   return at < argv.length ? at : undefined;
 }
 
+// Launchers that run their command unchanged: the options that take a separate value and the operands before the
+// command (timeout's duration). Their other options are flags. Others (sudo, xargs, any script) are external commands.
+type Launcher = { readonly values: readonly string[]; readonly operands: number };
+const LAUNCHERS: Record<string, Launcher> = {
+  nohup: { values: [], operands: 0 },
+  nice: { values: ["-n", "--adjustment"], operands: 0 },
+  timeout: { values: ["-k", "--kill-after", "-s", "--signal"], operands: 1 },
+  setsid: { values: [], operands: 0 },
+  stdbuf: { values: ["-i", "-o", "-e", "--input", "--output", "--error"], operands: 0 },
+  caffeinate: { values: ["-t", "-w"], operands: 0 },
+};
+// Package runners: options with a separate value, and those whose value is a command string Dori does not decode.
+const RUNNER_VALUES = new Set(["-p", "--package"]);
+const RUNNER_STRINGS = new Set(["-c", "--call"]);
+const SHELLS = new Set(["sh", "bash", "dash", "zsh", "ksh", "fish"]);
+
+/** The index of a launcher's command after its options and operands, or undefined when there is none. */
+function launcherCommandAt(argv: readonly string[], at: number, launcher: Launcher): number | undefined {
+  while (argv[at]?.startsWith("-") && argv[at] !== "-") {
+    const word = argv[at++]!;
+    if (word === "--") break;
+    // getopt_long accepts an unambiguous prefix of a long option (`--kill` for `--kill-after`).
+    if (launcher.values.some((value) => value === word || (word.startsWith("--") && value.startsWith(word)))) at++;
+  }
+  at += launcher.operands;
+  return at < argv.length ? at : undefined;
+}
+
+/** The index of the bin a package runner (`npx`, `bunx`, `bun x`) executes, or undefined when it cannot be read. */
+function runnerCommandAt(argv: readonly string[], at: number): number | undefined {
+  while (argv[at]?.startsWith("-")) {
+    const word = argv[at++]!;
+    if (word === "--") break;
+    if (RUNNER_STRINGS.has(word.split("=")[0]!)) return undefined;
+    if (RUNNER_VALUES.has(word)) at++;
+  }
+  return at < argv.length ? at : undefined;
+}
+
+// A word naming OMP's executable, published entry or source launcher (the change-before detector's words).
+const OMP_WORD =
+  /(?:^|[/\\])omp(?:\s|$)|pi-coding-agent[/\\]dist[/\\]cli\.js|\/packages\/coding-agent\/scripts\/omp\.ts(?:\s|$)/;
+// A command string (`sh -c`, `env -S`, `npx -c`) also names OMP after a separator: `cd /d && exec omp "$@"`.
+const OMP_IN_SCRIPT = /(?:^|[\s;&|(])omp(?:[\s;&|)]|$)/;
+const SCRIPT_OPTION = /^(?:-[A-Za-z]*c|-S|--split-string|--call)$/;
+const names = (words: readonly string[]): boolean =>
+  words.some(
+    (word, at) => OMP_WORD.test(word) || (SCRIPT_OPTION.test(words[at - 1] ?? "") && OMP_IN_SCRIPT.test(word)),
+  );
+
 /**
  * What an exact argv runs, after leading `NAME=value` assignments and the `env` utility with its options: the command
  * itself (that prefix removed), as `omp` when it starts OMP and `other` otherwise, or `unparsed` when a command prefix
@@ -125,18 +175,43 @@ export type OmpArgv =
 
 export function classifyOmpArgv(argv: readonly string[]): OmpArgv {
   let at = 0;
-  // `env` may run `env` again (`env -i env -u X omp`); each one is read the same way.
+  let launched = false;
+  // Each readable prefix is removed in turn, so `env -i env -u X nice timeout 600 omp` reads like `omp`.
   for (;;) {
     while (ASSIGNMENT.test(argv[at] ?? "")) at++;
-    if (argv[at]?.split("/").at(-1) !== "env") break;
-    const next = envCommandAt(argv, at + 1);
-    if (next === undefined) return { kind: "unparsed" };
+    const word = argv[at]?.split("/").at(-1) ?? "";
+    let next: number | undefined;
+    if (word === "env") next = envCommandAt(argv, at + 1);
+    else if (Object.hasOwn(LAUNCHERS, word)) next = launcherCommandAt(argv, at + 1, LAUNCHERS[word]!);
+    else if (word === "bunx" || word === "npx") next = runnerCommandAt(argv, at + 1);
+    else if (word === "bun" && argv[at + 1] === "x") next = runnerCommandAt(argv, at + 2);
+    // The side wrapper's `omp` subcommand runs this home's OMP with the arguments that follow.
+    else if (word === "omp-dori" && argv[at + 1] === "omp") next = at + 1;
+    else break;
+    if (next === undefined) {
+      // An unreadable launcher prefix matters only when it may run OMP; any other command keeps its own contract.
+      return word === "env" || names(argv.slice(at))
+        ? { kind: "unparsed" }
+        : { kind: "other", command: argv.slice(at) };
+    }
     at = next;
+    launched ||= word !== "env";
+    if (word === "omp-dori") break;
   }
   const command = argv.slice(at);
+  const classified = classifyCommand(command);
+  // A launcher option Dori misread (`timeout --unknown 5 600 omp`) leaves a command that only names OMP: refuse it
+  // rather than drop the guard. An external wrapper behind a launcher must declare its engine the same way.
+  return launched && classified.kind === "other" && names(command) ? { kind: "unparsed" } : classified;
+}
+
+/** What a command without assignment, env or launcher prefixes runs. */
+function classifyCommand(command: readonly string[]): OmpArgv {
   if (sourceOmpArgv(command)) return { kind: "omp", command };
-  const name = command[0]?.split("/").at(-1);
+  const name = command[0]?.split("/").at(-1) ?? "";
   if (OMP_EXECUTABLE.test(command[0] ?? "")) return { kind: "omp", command };
+  // A shell runs a script Dori cannot read: one that names OMP must declare its engine.
+  if (SHELLS.has(name)) return names(command.slice(1)) ? { kind: "unparsed" } : { kind: "other", command };
   if (name !== "bun" && name !== "node") return { kind: "other", command };
   let script = 1;
   while (command[script]?.startsWith("-")) script++;
@@ -153,18 +228,13 @@ export function classifyOmpArgv(argv: readonly string[]): OmpArgv {
 /** An exact argv that starts OMP (see classifyOmpArgv); an unparsed command prefix is not one. */
 export const isOmpArgv = (argv: readonly string[]): boolean => classifyOmpArgv(argv).kind === "omp";
 
-// A word naming OMP's executable, published entry or source launcher, alone or inside a shell command string.
-const OMP_MENTION =
-  /(?:^|[\s/\\])omp(?:\s|$)|pi-coding-agent[/\\]dist[/\\]cli\.js|\/packages\/coding-agent\/scripts\/omp\.ts(?:\s|$)/;
-
 /**
- * Whether an argv may run OMP: it starts OMP, its prefix cannot be read, or a wrapper (`timeout`, `omp-dori omp`,
- * `sh -c`) names OMP in its arguments. Lane startup and pause use it: they prove an OMP goal only from OMP's trusted
- * session record, so a wrapped OMP is never vouched for by quoted screen text. Role flags and update guards need the
- * exact start instead (isOmpArgv, classifyOmpArgv).
+ * Whether an argv may run OMP: it starts OMP, or a word names OMP (an external wrapper's argument, a shell or `env -S`
+ * string); an unreadable prefix of another agent does not. Lane startup and pause use it: they prove an OMP goal
+ * only from OMP's trusted session record, so a wrapped OMP is never vouched for by quoted screen text. Role flags and
+ * update guards need the exact start instead (isOmpArgv, classifyOmpArgv).
  */
-export const mayRunOmpArgv = (argv: readonly string[]): boolean =>
-  classifyOmpArgv(argv).kind !== "other" || argv.some((word) => OMP_MENTION.test(word));
+export const mayRunOmpArgv = (argv: readonly string[]): boolean => isOmpArgv(argv) || names(argv);
 
 const ompProcess = (p: ForegroundProcess): boolean =>
   p.name.split("/").at(-1) === "omp" ||

@@ -115,7 +115,7 @@ const checkAgent = (agent: UpdateCommand, label: string): void => {
   // only an explicitly external wrapper, which owns its own contract, may use one.
   if (agent.engine !== "external" && classifyOmpArgv(agent.argv).kind === "unparsed") {
     throw new UpdateError(
-      `${label}.argv has a command prefix Dori cannot read; attach bun/node option values with = (such as --preload=FILE), drop -S and unknown env options, or set ${label}.engine to "external"`,
+      `${label}.argv has a command prefix Dori cannot read; attach bun/node option values with = (such as --preload=FILE), drop -S and unknown env options, or set ${label}.engine to "external"; a shell script or package runner string that names OMP is not read either`,
     );
   }
   if (!nativeAgent(agent)) return; // an explicit external wrapper owns its own fresh-context and capability contract
