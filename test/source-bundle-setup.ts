@@ -43,13 +43,7 @@ export function fixtureGit(cwd: string, ...argv: string[]): string {
 }
 
 /** Real Git patches, index trees and file bytes; no network or native binary is needed for identity regressions. */
-export function overlayFixture(
-  source: string,
-  checkout: string,
-  native = false,
-  selected = "reviewed-overlay",
-  seed?: (put: (path: string, text: string, executable?: boolean) => void) => void,
-) {
+export function overlayFixture(source: string, checkout: string, native = false, selected = "reviewed-overlay") {
   mkdirSync(source, { recursive: true, mode: 0o700 });
   mkdirSync(checkout, { recursive: true, mode: 0o700 });
   const put = (path: string, text: string, executable = false) => {
@@ -81,7 +75,6 @@ export function overlayFixture(
       }),
     );
   }
-  seed?.(put);
   fixtureGit(checkout, "init", "--quiet");
   fixtureGit(checkout, "add", ".");
   fixtureGit(checkout, "commit", "--quiet", "-m", "Upstream source fixture");

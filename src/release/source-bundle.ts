@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstatSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { lstatSync, readFileSync, readlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { command } from "../update/deployment-process.ts";
 import { digest } from "../update/source.ts";
@@ -103,36 +102,10 @@ export const bundleEnv = (home: string, bun = process.execPath): Record<string, 
 export const bundleGit = (argv: readonly string[], cwd: string, home: string): Promise<string> =>
   command(["/bin/sh", "-c", 'umask 077; exec "$@"', "dori-source-git", ...args(argv)], cwd, bundleEnv(home), 300_000);
 
-// Up to four identical `git hash-object --stdin-paths` processes each hash one contiguous slice; joining their
-// outputs in slice order reproduces the single serial batch line for line, with every file still hashed.
-const HASH_SCRIPT =
-  'd=$1; n=$2; shift 2; i=0; pids=; while [ "$i" -lt "$n" ]; do "$@" <"$d/$i.in" >"$d/$i.out" & pids="$pids $!"; i=$((i + 1)); done; s=0; for p in $pids; do wait "$p" || s=1; done; exit "$s"';
-function hashPaths(checkout: string, home: string, paths: readonly string[]): string[] {
-  if (paths.length === 0) return [];
-  const jobs = Math.min(4, Math.ceil(paths.length / 256));
-  const size = Math.ceil(paths.length / jobs);
-  const dir = mkdtempSync(join(tmpdir(), "dori-source-hash-"));
-  try {
-    for (let at = 0; at < jobs; at++)
-      writeFileSync(join(dir, `${at}.in`), `${paths.slice(at * size, (at + 1) * size).join("\n")}\n`, { mode: 0o600 });
-    const proc = Bun.spawnSync(
-      ["/bin/sh", "-c", HASH_SCRIPT, "dori-source-hash", dir, String(jobs), ...args(["hash-object", "--stdin-paths"])],
-      { cwd: checkout, env: bundleEnv(home), stdin: "ignore", stdout: "ignore", stderr: "pipe" },
-    );
-    if (proc.exitCode !== 0) throw new Error("Bound source checkout changed or its Git identity is unavailable");
-    return Array.from({ length: jobs }, (_, at) => readFileSync(join(dir, `${at}.out`), "utf8"))
-      .join("")
-      .split("\n")
-      .filter(Boolean);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
-
 /**
  * Synchronous admission also runs at launch; a version or a launcher hash alone is never a receipt.
- * Every tracked regular file's content is compared to its index blob through batched attribute-aware
- * hashes, so a legitimate checkout transform is admitted and any real content change is still rejected.
+ * Every tracked regular file's content is compared to its index blob through one batched attribute-aware
+ * hash, so a legitimate checkout transform is admitted and any real content change is still rejected.
  */
 export function assertSourceBundle(checkout: string, bundle: BoundBundle, home: string): void {
   realDirectory(checkout);
@@ -184,13 +157,14 @@ export function assertSourceBundle(checkout: string, bundle: BoundBundle, home: 
       throw new Error(`Bound source tracked type or mode differs: ${match[3]}`);
     regular.push({ path: match[3], oid: match[2] });
   }
-  // Batched hashes over the real paths, with filters enabled, apply each file's authenticated
+  // One batched hash over the real paths, with filters enabled, applies each file's authenticated
   // checkout attributes: `text eol=crlf` returns to its index blob, while mutated bytes never do.
-  const observed = hashPaths(
-    checkout,
-    home,
-    regular.map((file) => file.path),
-  );
+  const observed =
+    regular.length === 0
+      ? []
+      : git(["hash-object", "--stdin-paths"], `${regular.map((file) => file.path).join("\n")}\n`)
+          .split("\n")
+          .filter(Boolean);
   if (observed.length !== regular.length || regular.some((file, at) => observed[at] !== file.oid))
     throw new Error("Bound source tracked content differs from its index after checkout attributes");
   for (const file of bundle.lock.files) {
