@@ -2,7 +2,7 @@ import { configPath, fill } from "./config.ts";
 import type { FlowDeps } from "./done-flow.ts";
 import { laneGoalActive } from "./goal-record.ts";
 import { BRIEF_START, footer, originalBrief, quoteForPane } from "./launch-footer.ts";
-import { mayRunOmpArgv } from "../../../../src/runtime/omp.ts";
+import { mayRunOmpArgv } from "../../../../src/runtime/omp-argv.ts";
 import { parseRef, type SessionRef } from "../../../../src/runtime/types.ts";
 import { LANE_KEY, type Lane, RESERVED_LANE_KEY, sessionFields, upgradeLane } from "./registry.ts";
 import { iso, runtimesOf } from "./run.ts";

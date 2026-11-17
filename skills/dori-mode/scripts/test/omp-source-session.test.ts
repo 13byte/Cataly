@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { isOmpArgv } from "../../../../src/runtime/omp.ts";
+import { isOmpArgv } from "../../../../src/runtime/omp-argv.ts";
 import type { FlowDeps } from "../src/done-flow.ts";
 import { laneGoalActive } from "../src/goal-record.ts";
 import { launchLane } from "../src/launch.ts";

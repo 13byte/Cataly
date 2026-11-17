@@ -1,7 +1,7 @@
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { expandHome } from "../../skills/dori-mode/scripts/src/config.ts";
-import { classifyOmpArgv, isOmpArgv } from "../runtime/omp.ts";
+import { classifyOmpArgv, isOmpArgv } from "../runtime/omp-argv.ts";
 import { canonical, contains, object, UpdateError } from "./config.ts";
 import { checkNativeArgv } from "./native-argv.ts";
 import { parsePromotionConfig } from "./publish-config.ts";

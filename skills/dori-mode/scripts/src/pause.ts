@@ -1,4 +1,4 @@
-import { mayRunOmpArgv } from "../../../../src/runtime/omp.ts";
+import { mayRunOmpArgv } from "../../../../src/runtime/omp-argv.ts";
 import type { SessionRef } from "../../../../src/runtime/types.ts";
 import type { FlowDeps } from "./done-flow.ts";
 import type { GoalStatus } from "./lane-state.ts";
