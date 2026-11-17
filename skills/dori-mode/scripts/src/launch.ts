@@ -3,7 +3,8 @@ import type { FlowDeps } from "./done-flow.ts";
 import { laneGoalActive } from "./goal-record.ts";
 import { BRIEF_START, footer, originalBrief, quoteForPane } from "./launch-footer.ts";
 import { isOmpArgv } from "../../../../src/runtime/omp.ts";
-import { parseRef, type SessionRef } from "../../../../src/runtime/types.ts";
+import { parseRef } from "../../../../src/runtime/types.ts";
+import { openLaneSession } from "./launch-session.ts";
 import { LANE_KEY, type Lane, RESERVED_LANE_KEY, sessionFields, upgradeLane } from "./registry.ts";
 import { iso, runtimesOf } from "./run.ts";
 import { Reports } from "./reports.ts";
@@ -69,7 +70,7 @@ export const adoptLane = async (deps: FlowDeps, input: LaunchInput & { readonly 
   // `hc:t7` or `herdr:w1:p3` names its runtime; any other id is a herdr pane, as before runtimes existed.
   const ref = parseRef(input.pane);
   const lane = ref ? { ...base, ...sessionFields(ref) } : upgradeLane({ ...base, pane: input.pane });
-  await deps.registry.write(lane);
+  if (!(await deps.registry.create(lane))) throw new LaunchError(`lane ${input.key} is already registered`);
   return lane;
 };
 
@@ -131,7 +132,6 @@ const startLane = async (
 ): Promise<{ readonly lane: Lane; readonly startup: string }> => {
   const model = input.model ?? deps.config.defaultModel;
   const cwd = input.cwd ?? deps.config.defaultCwd;
-  await Bun.write(input.brief, preamble);
   const rts = runtimesOf(deps);
   const group = deps.config.laneWorkspace || undefined;
   let env: Record<string, string>;
@@ -140,17 +140,22 @@ const startLane = async (
   } catch (e) {
     throw e instanceof TokenFileError ? new LaunchError(`token file refused: ${e.message}`) : e;
   }
-  let ref: SessionRef;
-  try {
-    const spec = { name: input.key, role: "lane", container: "tab", cwd, env } as const;
-    ref = await rts.default.create(group === undefined ? spec : { ...spec, group });
-  } catch (e) {
-    throw new LaunchError(`session create failed: ${e instanceof Error ? e.message : String(e)}`);
+  const spec = { name: input.key, role: "lane", container: "tab", cwd, env } as const;
+  const opened = await openLaneSession(
+    deps.registry,
+    rts,
+    group === undefined ? spec : { ...spec, group },
+    draft,
+    input.brief,
+    preamble,
+  );
+  if (opened.kind === "failed") {
+    const why = opened.error instanceof Error ? opened.error.message : String(opened.error);
+    throw new LaunchError(`${opened.what}: ${why}`);
   }
+  if (opened.kind === "taken") throw new LaunchError(`lane ${input.key} is already registered`);
+  const { lane, ref } = opened;
   const pane = ref.id;
-  // Registered before the agent starts: dori report refuses an unknown key, so a fast lane's first report would be lost.
-  const lane: Lane = { ...draft, ...sessionFields(ref) };
-  await deps.registry.write(lane);
   // The launch is an activity record, not a report: it starts the journal (so the screen is watched for a stall) but is
   // never posted to the thread as if the agent had reported.
   new Reports(deps.config.stateDir).append({
