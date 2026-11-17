@@ -155,7 +155,8 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
   // subshell or substitution, a new one starting where the one around it is. Only a `cd` that surely runs in this
   // shell replaces the directory: one starting a list, outside a condition or loop body, and not in a pipeline or the
   // background. One after `&&` or `||` or in a body adds its directory as possible; one in a pipeline changes nothing.
-  // The command right after a `cd` with `&&` runs where it moved, with `||` where it was.
+  // The commands after a `cd` joined to it by `&&` run where it moved (`cd X && true && B`), one after `||` where it
+  // was, and an `&&` after that `||` in either.
   const run = (ws: readonly Word[], dirs: Dirs): void => {
     const scopes = new Map<string, Dirs>([["", dirs]]);
     const dirOf = (scope: readonly number[]): Dirs => {
@@ -170,7 +171,9 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
       else last.push(w);
     }
     let bodies = 0;
-    let cd: { readonly to: Dirs; readonly from: Dirs } | undefined;
+    // Per subshell, the last `cd` of the and-or list running now: where its `&&` chain runs (`to`), and where an `||`
+    // after it may run (`from`). A command in another subshell neither reads nor ends it.
+    const chains = new Map<string, { readonly to: Dirs; readonly from: Dirs }>();
     commands.forEach((command, index) => {
       const scope = command[0]?.scope ?? [];
       const key = scope.join("/");
@@ -178,11 +181,15 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
       const first = command[0]?.word ?? "";
       if (OPENS_BODY[first] === true) bodies++;
       if (CLOSES_BODY[first] === true) bodies = Math.max(0, bodies - 1);
-      const here = cd && after === "&&" ? cd.to : cd && after === "||" ? cd.from : dirOf(scope);
+      const chain = chains.get(key);
+      if (chain && after === "||")
+        chains.set(key, { to: [...new Set([...chain.to, ...chain.from])], from: chain.from });
+      else if (after !== "&&") chains.delete(key);
+      const here = chain && after === "&&" ? chain.to : chain && after === "||" ? chain.from : dirOf(scope);
       for (const w of command) for (const substitution of w.substitutions?.() ?? []) run(substitution, here);
       const to = commandOf(command, here);
       const next = commands[index + 1]?.[0]?.after;
-      cd = to === undefined ? undefined : { to, from: here };
+      if (to !== undefined) chains.set(key, { to, from: here });
       if (to === undefined || after === "|" || next === "|" || next === "&") return;
       const sure = OPENS_LIST[after] === true && bodies === 0;
       scopes.set(key, sure ? to : [...new Set([...dirOf(scope), ...to])]);
