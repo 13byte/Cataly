@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { accessSync, chmodSync, constants, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, constants, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 
 import { type CreateSpec, formatRef, type SessionRef } from "../../../../src/runtime/types.ts";
 import { type Lane, type Registry, sessionFields } from "./registry.ts";
@@ -32,10 +32,11 @@ const briefTarget = (brief: string): string => {
 
 /**
  * Opens a lane's session and registers it before its agent starts (dori report refuses an unknown key, so a fast
- * lane's first report would be lost). The brief is staged beside its path first, so a full disk or an unwritable
- * directory fails before anything exists, and it replaces the brief only once this launch owns the key. A key that
- * another launch or adopt registered meanwhile is `taken`: its record and brief stay. Whenever this launch does not
- * open, it closes the session it created and removes its staged brief and its own record.
+ * lane's first report would be lost). The brief is staged beside its path first, so a read-only brief, a full disk or
+ * an unwritable directory fails before anything exists, and the brief is rewritten in place only once this launch owns
+ * the key; the staged copy is then removed. A rewrite that fails puts the original bytes back. A key that another
+ * launch or adopt registered meanwhile is `taken`: its record and brief stay. Whenever this launch does not open, it
+ * closes the session it created and removes its staged brief and its own record.
  */
 export const openLaneSession = async (
   registry: Registry,
@@ -47,12 +48,18 @@ export const openLaneSession = async (
 ): Promise<OpenedLane> => {
   const target = briefTarget(brief);
   const staged = `${target}.${process.pid}.${randomUUID()}.launch`;
+  // The original bytes, also kept beside the brief until the launch is settled: a write that fails part-way puts them
+  // back, and if even that fails the copy stays where the error names it.
+  const backup = `${target}.${process.pid}.${randomUUID()}.original`;
+  let original: Buffer;
   try {
     accessSync(target, constants.W_OK);
     writeFileSync(staged, preamble, { flag: "wx", mode: 0o600 });
-    chmodSync(staged, statSync(target).mode & 0o777);
+    original = readFileSync(target);
+    writeFileSync(backup, original, { flag: "wx", mode: 0o600 });
   } catch (error) {
     removeStaged(staged);
+    removeStaged(backup);
     return { kind: "failed", what: "brief not writable", error };
   }
   let ref: SessionRef;
@@ -60,21 +67,39 @@ export const openLaneSession = async (
     ref = await rts.default.create(spec);
   } catch (error) {
     removeStaged(staged);
+    removeStaged(backup);
     return { kind: "failed", what: "session create failed", error };
   }
   const lane: Lane = { ...draft, ...sessionFields(ref) };
   let registered = false;
+  let keepBackup = false;
   let failure: OpenedLane = { kind: "taken" };
   try {
     registered = await registry.create(lane);
     if (registered) {
-      renameSync(staged, target);
+      // Written in place, as the brief file itself: its inode, hard links, owner, group, mode and ACL stay.
+      writeFileSync(target, preamble);
+      removeStaged(staged);
+      removeStaged(backup);
       return { kind: "opened", lane, ref };
     }
   } catch (error) {
-    failure = { kind: "failed", what: registered ? "brief not written" : "lane not registered", error };
+    failure = { kind: "failed", what: "lane not registered", error };
+    if (registered) {
+      let reason = error;
+      try {
+        writeFileSync(target, original);
+      } catch (restoreError) {
+        keepBackup = true;
+        reason = new Error(
+          `${why(error)}; the original brief is kept at ${backup} (it could not be put back: ${why(restoreError)})`,
+        );
+      }
+      failure = { kind: "failed", what: "brief not written", error: reason };
+    }
   }
   removeStaged(staged);
+  if (!keepBackup) removeStaged(backup);
   if (registered)
     await registry.discard(lane).catch((error: unknown) => {
       process.stderr.write(`dori: could not remove lane ${lane.key} after its launch failed (${why(error)})\n`);
