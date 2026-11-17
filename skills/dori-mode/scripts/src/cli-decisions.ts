@@ -30,7 +30,35 @@ const noteWorklog = (stateDir: string, decision: Decision, now: number): void =>
   }
 };
 
-const decision: Command = async ({ key, positionals, values, opt, need, strings, deps, config }) => {
+const VALUE_FLAGS: Readonly<Record<string, true>> = {
+  source: true,
+  lane: true,
+  thread: true,
+  option: true,
+  recommend: true,
+  worklog: true,
+  message: true,
+  reason: true,
+};
+
+/**
+ * The CLI parses loosely: a value flag at the end becomes `true`, and one followed by another flag takes that flag as
+ * its value (`--option --recommend 1`). A decision record must hold what was meant, so both are refused here; a value
+ * that really starts with `--` is given as `--option=--text`.
+ */
+const checkValues = (rest: readonly string[]): void => {
+  for (let i = 0; i < rest.length; i++) {
+    const arg = rest[i]!;
+    if (arg === "--") return;
+    if (!arg.startsWith("--") || arg.includes("=") || !Object.hasOwn(VALUE_FLAGS, arg.slice(2))) continue;
+    const value = rest[i + 1];
+    if (value === undefined || value.startsWith("--")) die(`${arg} needs a value`);
+    i++;
+  }
+};
+
+const decision: Command = async ({ key, rest, positionals, values, opt, need, strings, deps, config }) => {
+  checkValues(rest);
   const ledger = new Decisions(config.stateDir);
   const id = () => positionals[1] ?? die(`decision ${key} needs a decision id`);
   const now = realClock.now();

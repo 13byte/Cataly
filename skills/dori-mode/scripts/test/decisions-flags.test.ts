@@ -63,12 +63,30 @@ test("match names the ledger's damage and race warnings on stderr and still bind
   expect(lines[1]).toBe(`DECISION_WARNING ${ledger.path}:5: decision ${done.id} was already answered; answer ignored`);
 });
 
-test("a trailing --option with no text is refused and records nothing", async () => {
+test("a value flag with no value, at the end or before another flag, is refused and records nothing", async () => {
   // Given an empty ledger.
   const invoke = cliIn(state.dir);
-  // When the last --option has no value.
-  const result = await invoke("decision", "ask", "Which?", "--source", "s:1", "--option", "A", "--option");
-  // Then it is one line of refusal and nothing was written.
-  expect([result.code, result.out, result.err.trim()]).toEqual([1, "", "--option needs the option text"]);
+  const ask = ["decision", "ask", "Which?", "--source", "s:1"];
+  // When a value flag ends the line, or is followed by another flag that loose parsing would take as its value.
+  for (const [args, flag] of [
+    [[...ask, "--option", "A", "--option"], "--option"],
+    [[...ask, "--option", "A", "--option", "--recommend", "1"], "--option"],
+    [[...ask, "--option", "A", "--recommend"], "--recommend"],
+    [[...ask, "--lane"], "--lane"],
+    [[...ask, "--worklog"], "--worklog"],
+    [[...ask, "--message", "--thread", "t:1"], "--message"],
+    [[...ask, "--thread"], "--thread"],
+    [["decision", "ask", "Which?", "--source"], "--source"],
+  ] as const) {
+    const result = await invoke(...args);
+    // Then it is one line of refusal and nothing was written.
+    expect([result.code, result.out, result.err.trim()]).toEqual([1, "", `${flag} needs a value`]);
+  }
   expect(new Decisions(state.dir).read().items).toEqual([]);
+  // A withdraw whose second --reason has no value is refused too, and a value starting with -- goes after `=`.
+  const asked = JSON.parse((await invoke(...ask, "--option=--verbose", "--option", "quiet")).out);
+  expect(asked.options).toEqual(["--verbose", "quiet"]);
+  const withdraw = await invoke("decision", "withdraw", asked.id, "--reason", "moot", "--reason");
+  expect([withdraw.code, withdraw.err.trim()]).toEqual([1, "--reason needs a value"]);
+  expect(new Decisions(state.dir).read().items[0]?.withdrawnAt).toBeUndefined();
 });
