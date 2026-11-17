@@ -156,7 +156,17 @@ const ROWS: readonly Row[] = [
   [`echo $(cd ${SKILL}) && bun src/cli.ts freshness`, "freshness", 1, { cwd: "/other" }],
   [`true || cd ${SKILL} && bun src/cli.ts freshness`, "freshness", 1, { cwd: "/other" }],
   [`if true; then true || cd ${SKILL} && bun src/cli.ts freshness ; fi`, "freshness", 1, { cwd: "/other" }],
+  // The word `freshness;` is not the key `freshness` (as before), so this line names no lane at all.
   [`if true; then true || cd ${SKILL} && bun src/cli.ts freshness; fi`, "freshness", 0, { cwd: "/other" }],
+  // An `||` is reached from anywhere in the chain before it, before or after its `cd`.
+  ["cd /other && false || bun src/cli.ts freshness", "freshness", 1],
+  ["cd /other && sh -c 'exit 1' || bun src/cli.ts freshness", "freshness", 1],
+  ["cd /other && true && false || bun src/cli.ts freshness", "freshness", 1],
+  ["cd /other && true && bun src/cli.ts freshness", "freshness", 1],
+  ["cd /other; false || bun src/cli.ts freshness", "freshness", 1],
+  ["if true; then cd /other && false || bun src/cli.ts freshness ; fi", "freshness", 1],
+  [`cd ${SKILL} && false || bun src/cli.ts freshness`, "freshness", 1, { cwd: "/other" }],
+  [`cd ${SKILL} || exit 1 && bun src/cli.ts freshness`, "freshness", 1, { cwd: "/other" }],
   [`echo "$(cd ${SKILL})" && bun src/cli.ts freshness`, "freshness", 1, { cwd: "/other" }],
   [`true || cd ${SKILL}; bun src/cli.ts freshness`, "freshness", 1, { cwd: "/other" }],
   [`if true; then cd ${SKILL} && bun src/cli.ts freshness; fi`, "freshness", 0, { cwd: "/other" }],

@@ -156,7 +156,8 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
   // shell replaces the directory: one starting a list, outside a condition or loop body, and not in a pipeline or the
   // background. One after `&&` or `||` or in a body adds its directory as possible; one in a pipeline changes nothing.
   // The commands after a `cd` joined to it by `&&` run where it moved (`cd X && true && B`), unless the `cd` itself
-  // follows an `||` (`true || cd X && B` may run where it was); one after `||` where it was, an `&&` after that in either.
+  // follows an `||` (`true || cd X && B` may run where it was); one after a later `||` in either directory, as anything
+  // before it may have failed (`cd X && false || B`).
   const run = (ws: readonly Word[], dirs: Dirs): void => {
     const scopes = new Map<string, Dirs>([["", dirs]]);
     const dirOf = (scope: readonly number[]): Dirs => {
@@ -182,10 +183,11 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
       if (OPENS_BODY[first] === true) bodies++;
       if (CLOSES_BODY[first] === true) bodies = Math.max(0, bodies - 1);
       const chain = chains.get(key);
-      if (chain && after === "||")
-        chains.set(key, { to: [...new Set([...chain.to, ...chain.from])], from: chain.from });
+      // An `||` is reached when anything before it failed, the `cd` or a command after it: from either directory.
+      const either: Dirs | undefined = chain && [...new Set([...chain.from, ...chain.to])];
+      if (either && after === "||") chains.set(key, { to: either, from: either });
       else if (after !== "&&") chains.delete(key);
-      const here = chain && after === "&&" ? chain.to : chain && after === "||" ? chain.from : dirOf(scope);
+      const here = chain && after === "&&" ? chain.to : either && after === "||" ? either : dirOf(scope);
       for (const w of command) for (const substitution of w.substitutions?.() ?? []) run(substitution, here);
       const to = commandOf(command, here);
       const next = commands[index + 1]?.[0]?.after;
