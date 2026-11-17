@@ -93,7 +93,8 @@ export async function list(cli: HerdrCli, group: string | undefined): Promise<re
         typeof p !== "object" ||
         typeof p["pane_id"] !== "string" ||
         p["pane_id"] === "" ||
-        (group !== undefined && (typeof p["workspace_id"] !== "string" || p["workspace_id"] === "")),
+        // A tab need not belong to any workspace; the group filter excludes it below.
+        (group !== undefined && p["workspace_id"] != null && typeof p["workspace_id"] !== "string"),
     )
   )
     throw new Error("herdr did not return a valid pane list");
