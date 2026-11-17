@@ -1,5 +1,5 @@
+import { isOmpArgv } from "../../../../src/runtime/omp.ts";
 import type { SessionRef } from "../../../../src/runtime/types.ts";
-import { isOmpCommand } from "./config.ts";
 import type { FlowDeps } from "./done-flow.ts";
 import type { GoalStatus } from "./lane-state.ts";
 import { trustedPaneState } from "./session-id.ts";
@@ -34,7 +34,7 @@ const goalCommand = async (
   target: GoalStatus,
 ): Promise<"confirmed" | "unconfirmed" | "failed"> => {
   const rts = runtimesOf(deps);
-  const omp = isOmpCommand(deps.config.agentCommand);
+  const omp = isOmpArgv(deps.config.agentCommand);
   const shown = omp ? NO_GOAL_SHOWN : target === "paused" ? PAUSED_SHOWN : RESUMED_SHOWN;
   const before = count(await readScreen(rts, ref, 200), shown);
   if ((await sendVerified(rts, deps.clock, ref, text)) === "failed") return "failed";
