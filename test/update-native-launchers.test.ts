@@ -66,6 +66,8 @@ test.each([
   ["sh -c exec omp", ["sh", "-c", 'exec omp "$@"', "audit"]],
   ["sh -c exec /path/omp", ["sh", "-c", 'exec /opt/bin/omp "$@"', "audit"]],
   ["sh -c with OMP as $0", ["sh", "-c", 'exec "$0" "$@"', "omp"]],
+  ["sh -cl exec omp", ["sh", "-cl", 'exec omp "$@"', "audit"]],
+  ["sh -c with a quoted OMP path", ["sh", "-c", 'exec "$HOME/bin/omp" "$@"', "audit"]],
   ["the side wrapper", ["omp-dori", "omp"]],
   ["the side wrapper by path", ["/home/user/.omp-dori/bin/omp-dori", "omp"]],
   ["the installed wrapper", ["/home/user/.dori/bin/omp"]],

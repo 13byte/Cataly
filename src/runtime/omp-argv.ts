@@ -120,8 +120,8 @@ const OMP_WORD =
   /(?:^|[/\\])omp(?:\s|$)|pi-coding-agent[/\\]dist[/\\]cli\.js|^\S*\/packages\/coding-agent\/scripts\/omp\.ts$/;
 // The command string of a shell (`sh -c`), `env -S` or a package runner (`npx -c`, `--call=`) names OMP after a
 // separator as well: `cd /d && exec omp "$@"`. Only those programs' strings are read so; another agent's `-c` is not.
-const OMP_IN_SCRIPT = /(?:^|[\s;&|(])omp(?:[\s;&|)]|$)/;
-const SCRIPT_OPTION = /^(?:-[A-Za-z]*c|-S|--split-string|--call)$/;
+const OMP_IN_SCRIPT = /(?:^|[\s;&|("'/])omp(?:[\s;&|)"']|$)/;
+const SCRIPT_OPTION = /^(?:-[A-Za-z]*c[A-Za-z]*|-S|--split-string|--call)$/;
 const SCRIPT_PROGRAMS = new Set([...SHELLS, "env", "npx", "bunx", "bun"]);
 // `words` start at a program (assignments aside): only that program's script option is read as a script.
 const names = (words: readonly string[]): boolean => {
