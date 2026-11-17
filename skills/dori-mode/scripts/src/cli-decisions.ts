@@ -74,9 +74,6 @@ const decision: Command = async ({ key, rest, positionals, values, opt, need, st
       const laneThread = lane?.thread && lane.thread !== "none" ? lane.thread : undefined;
       const given = opt("thread");
       const thread = given === "none" ? undefined : given || laneThread;
-      // parseArgs turns a trailing `--option` with no text into `true`; dropping it would lose an option unseen.
-      const options = values["option"];
-      if (Array.isArray(options) && options.some((o) => typeof o !== "string")) die("--option needs the option text");
       const recommend = opt("recommend");
       if (recommend !== undefined && !/^\d+$/.test(recommend)) die("--recommend must be an option number");
       const worklog = opt("worklog");
