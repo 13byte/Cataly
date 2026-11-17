@@ -111,6 +111,7 @@ const wrapped = [
   ["a shell exec", ["sh", "-c", 'exec /opt/bin/omp "$@"', "sh"]],
   ["an env -S string", ["env", "-S", "/opt/bin/omp --advisor"]],
   ["a shell behind timeout", ["timeout", "600", "sh", "-c", 'exec /opt/bin/omp "$@"', "sh"]],
+  ["a shell given OMP's path by env", ["env", "OMP_BIN=/opt/bin/omp", "sh", "-c", 'exec "$OMP_BIN" "$@"', "sh"]],
 ] as const;
 const ompProc = ["bun", "/opt/bin/omp", "--dori-role", "lane"];
 const wrappedLaunch = (deps: FlowDeps, prefix: readonly string[], key: string, brief: string) =>

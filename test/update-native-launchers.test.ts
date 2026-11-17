@@ -118,6 +118,8 @@ test.each([
   ["a shell running omp through a substitution", ["sh", "-c", 'exec "$(command -v omp)" "$@"', "audit"]],
   ["a shell passing another agent a quoted omp value", ["sh", "-c", 'exec codex -c \'x="omp"\' "$@"', "sh"]],
   ["a shell with an omp comment", ["sh", "-c", 'exec codex "$@" # was omp', "audit"]],
+  ["a shell given OMP's path by env", ["env", "OMP_BIN=/opt/bin/omp", "sh", "-c", 'exec "$OMP_BIN" "$@"', "a"]],
+  ["a shell given OMP's path by an assignment", ["OMP_BIN=/opt/bin/omp", "sh", "-c", 'exec "$OMP_BIN" "$@"', "a"]],
 ])("%s is refused as unreadable even when it declares engine omp", (_, prefix) => {
   for (const engine of [undefined, "omp"] as const) {
     expect(() => load([...prefix, MODEL, "{prompt}"], engine)).toThrow(PREFIX_REFUSED);

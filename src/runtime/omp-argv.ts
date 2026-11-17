@@ -180,9 +180,15 @@ export function classifyOmpArgv(argv: readonly string[]): OmpArgv {
   const command = argv.slice(at);
   const classified = classifyCommand(command);
   // A launcher option Dori misread (`timeout --unknown 5 600 omp`) leaves a command that only names OMP: refuse it
-  // rather than drop the guard. An external wrapper behind a launcher must declare its engine the same way.
-  return launched && classified.kind === "other" && names(command) ? { kind: "unparsed" } : classified;
+  // rather than drop the guard. An external wrapper behind a launcher must declare its engine the same way, as must a
+  // command handed OMP's path in a removed assignment (`env OMP_BIN=/x/omp sh -c 'exec "$OMP_BIN"'`).
+  if (classified.kind !== "other") return classified;
+  return (launched && names(command)) || assignsOmp(argv, at) ? { kind: "unparsed" } : classified;
 }
+
+/** Whether a `NAME=VALUE` word before `at` (a shell or `env` assignment) gives a value naming OMP. */
+const assignsOmp = (argv: readonly string[], at: number): boolean =>
+  argv.slice(0, at).some((word) => /^[^-][^=]*=/.test(word) && OMP_WORD.test(word.slice(word.indexOf("=") + 1)));
 
 /** What a command without assignment, env or launcher prefixes runs. */
 function classifyCommand(command: readonly string[]): OmpArgv {
@@ -216,4 +222,6 @@ export const isOmpArgv = (argv: readonly string[]): boolean => classifyOmpArgv(a
  */
 export const mayRunOmpArgv = (argv: readonly string[]): boolean =>
   // The change-before detector's words, after readable prefixes: `env TERM=x codex -c '…omp…'` stays codex.
-  isOmpArgv(argv) || argv.slice(prefixEnd(argv).at).some((word) => OMP_WORD.test(word));
+  isOmpArgv(argv) ||
+  assignsOmp(argv, prefixEnd(argv).at) ||
+  argv.slice(prefixEnd(argv).at).some((w) => OMP_WORD.test(w));
