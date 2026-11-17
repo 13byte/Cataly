@@ -59,6 +59,8 @@ test.each([
   ["env with a non-shell NAME=VALUE", ["env", "a-b=1", "./x=2", "omp"]],
   ["an abbreviated env --un=NAME", ["env", "--un=FOO", "omp"]],
   ["env -a NAME", ["env", "-a", "omp", "omp"]],
+  ["env running env", ["env", "-i", "/usr/bin/env", "-u", "FOO", "A=1", "omp"]],
+  ["an assignment between two env", ["env", "A=1", "env", "omp"]],
 ])("an OMP argv behind %s keeps the native resume guard", (_, command) => {
   expect(() => load([...command, "--resume", "session", "{prompt}"])).toThrow("without session resume");
 });

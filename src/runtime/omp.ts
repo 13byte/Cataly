@@ -125,10 +125,15 @@ export type OmpArgv =
 
 export function classifyOmpArgv(argv: readonly string[]): OmpArgv {
   let at = 0;
-  while (ASSIGNMENT.test(argv[at] ?? "")) at++;
-  const start = argv[at]?.split("/").at(-1) === "env" ? envCommandAt(argv, at + 1) : at;
-  if (start === undefined) return { kind: "unparsed" };
-  const command = argv.slice(start);
+  // `env` may run `env` again (`env -i env -u X omp`); each one is read the same way.
+  for (;;) {
+    while (ASSIGNMENT.test(argv[at] ?? "")) at++;
+    if (argv[at]?.split("/").at(-1) !== "env") break;
+    const next = envCommandAt(argv, at + 1);
+    if (next === undefined) return { kind: "unparsed" };
+    at = next;
+  }
+  const command = argv.slice(at);
   if (sourceOmpArgv(command)) return { kind: "omp", command };
   const name = command[0]?.split("/").at(-1);
   if (OMP_EXECUTABLE.test(command[0] ?? "")) return { kind: "omp", command };
@@ -147,6 +152,19 @@ export function classifyOmpArgv(argv: readonly string[]): OmpArgv {
 
 /** An exact argv that starts OMP (see classifyOmpArgv); an unparsed command prefix is not one. */
 export const isOmpArgv = (argv: readonly string[]): boolean => classifyOmpArgv(argv).kind === "omp";
+
+// A word naming OMP's executable, published entry or source launcher, alone or inside a shell command string.
+const OMP_MENTION =
+  /(?:^|[\s/\\])omp(?:\s|$)|pi-coding-agent[/\\]dist[/\\]cli\.js|\/packages\/coding-agent\/scripts\/omp\.ts(?:\s|$)/;
+
+/**
+ * Whether an argv may run OMP: it starts OMP, its prefix cannot be read, or a wrapper (`timeout`, `omp-dori omp`,
+ * `sh -c`) names OMP in its arguments. Lane startup and pause use it: they prove an OMP goal only from OMP's trusted
+ * session record, so a wrapped OMP is never vouched for by quoted screen text. Role flags and update guards need the
+ * exact start instead (isOmpArgv, classifyOmpArgv).
+ */
+export const mayRunOmpArgv = (argv: readonly string[]): boolean =>
+  classifyOmpArgv(argv).kind !== "other" || argv.some((word) => OMP_MENTION.test(word));
 
 const ompProcess = (p: ForegroundProcess): boolean =>
   p.name.split("/").at(-1) === "omp" ||

@@ -2,7 +2,7 @@ import { configPath, fill } from "./config.ts";
 import type { FlowDeps } from "./done-flow.ts";
 import { laneGoalActive } from "./goal-record.ts";
 import { BRIEF_START, footer, originalBrief, quoteForPane } from "./launch-footer.ts";
-import { isOmpArgv } from "../../../../src/runtime/omp.ts";
+import { mayRunOmpArgv } from "../../../../src/runtime/omp.ts";
 import { parseRef, type SessionRef } from "../../../../src/runtime/types.ts";
 import { LANE_KEY, type Lane, RESERVED_LANE_KEY, sessionFields, upgradeLane } from "./registry.ts";
 import { iso, runtimesOf } from "./run.ts";
@@ -172,7 +172,7 @@ const startLane = async (
   await deps.clock.sleep(FIRST_CHECK_MS);
   const screen = await launchScreen(deps, rts, ref, input.key);
   if (screen === null) return { lane, startup: `STARTUP_DONE ${input.key}` };
-  const ompAgent = isOmpArgv(deps.config.agentCommand);
+  const ompAgent = mayRunOmpArgv(deps.config.agentCommand);
   const bad = startupFailure(screen, ompAgent);
   if (bad) return { lane, startup: `STARTUP_ERROR ${input.key} ${pane}: ${bad}` };
   const { status, error } = await launchStatus(rts, ref, ompAgent);

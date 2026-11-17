@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { isOmpArgv } from "../../../../src/runtime/omp.ts";
+import type { FlowDeps } from "../src/done-flow.ts";
 import { laneGoalActive } from "../src/goal-record.ts";
 import { launchLane } from "../src/launch.ts";
 import { pauseLane } from "../src/pause.ts";
@@ -102,6 +103,40 @@ test.each(forms)("%s OMP vouches for its session, goal, launch, sync and pause",
   const paused = await pauseLane(deps, launched.lane, "owner said wait");
   expect(paused.code).toBe(0);
 });
+
+// The configured command wraps OMP; the pane's process is OMP itself (`bun /x/omp`), as after exec.
+const wrapped = [
+  ["timeout", ["timeout", "600", "/opt/bin/omp"]],
+  ["the side wrapper", ["/home/user/.omp-dori/bin/omp-dori", "omp"]],
+  ["a shell exec", ["sh", "-c", 'exec /opt/bin/omp "$@"', "sh"]],
+  ["an env -S string", ["env", "-S", "/opt/bin/omp --advisor"]],
+] as const;
+const ompProc = ["bun", "/opt/bin/omp", "--dori-role", "lane"];
+const wrappedLaunch = (deps: FlowDeps, prefix: readonly string[], key: string, brief: string) =>
+  launchLane(
+    { ...deps, config: { ...deps.config, agentCommand: [...prefix, "--dori-role", "lane", "--model", "{model}", "{prompt}"] } },
+    { key, title: key, brief, done: "file /never-checked" },
+  );
+
+test.each(wrapped)("an OMP lane started through %s is proven by its session record", async (_, prefix) => {
+  const { deps, sessionFile, brief } = setup(ompProc, "wrapped");
+  const launched = await wrappedLaunch(deps, prefix, "wrapped", brief);
+  expect(launched.startup).toBe(`STARTUP_OK wrapped ${REF.id}`);
+  world.onSendText = (_id, text) => {
+    if (text === "/goal pause")
+      laneState(state.dir, REF.id, { sessionId: SID, sessionFile, agentStatus: "working", goal: { status: "paused" } });
+  };
+  expect((await pauseLane(deps, launched.lane, "owner said wait")).code).toBe(0);
+});
+
+test.each([...wrapped, ["a Bun option operand", ["bun", "--preload", "/hook.ts", "/opt/bin/omp"]]] as const)(
+  "quoted goal text cannot start an OMP lane run through %s",
+  async (_, prefix) => {
+    const { deps, brief } = setup(ompProc, "quoted", false);
+    world.screen = "cat notes.md\nPursuing goal: a quoted line";
+    expect((await wrappedLaunch(deps, prefix, "quoted", brief)).startup).not.toStartWith("STARTUP_OK");
+  },
+);
 
 test("a source OMP without its extension record falls back to OMP's start-time session folder", async () => {
   const argv = forms[1][1];
