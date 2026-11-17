@@ -175,7 +175,9 @@ export function classifyOmpArgv(argv: readonly string[]): OmpArgv {
   const { at, launched, stuck } = prefixEnd(argv);
   // An unreadable launcher prefix matters only when it may run OMP; any other command keeps its own contract.
   if (stuck !== undefined) {
-    return stuck === "env" || names(argv.slice(at)) ? { kind: "unparsed" } : { kind: "other", command: argv.slice(at) };
+    return stuck === "env" || names(argv.slice(at)) || assignsOmp(argv, at)
+      ? { kind: "unparsed" }
+      : { kind: "other", command: argv.slice(at) };
   }
   const command = argv.slice(at);
   const classified = classifyCommand(command);
@@ -186,9 +188,11 @@ export function classifyOmpArgv(argv: readonly string[]): OmpArgv {
   return (launched && names(command)) || assignsOmp(argv, at) ? { kind: "unparsed" } : classified;
 }
 
-/** Whether a `NAME=VALUE` word before `at` (a shell or `env` assignment) gives a value naming OMP. */
+/** Whether a `NAME=VALUE` word before `at` (a shell or `env` assignment) gives OMP's path, as the old detector read it. */
 const assignsOmp = (argv: readonly string[], at: number): boolean =>
-  argv.slice(0, at).some((word) => /^[^-][^=]*=/.test(word) && OMP_WORD.test(word.slice(word.indexOf("=") + 1)));
+  argv
+    .slice(0, at)
+    .some((word) => /^[^-][^=]*=.*(?:[/\\]omp(?:\s|$)|pi-coding-agent[/\\]dist[/\\]cli\.js)/s.test(word));
 
 /** What a command without assignment, env or launcher prefixes runs. */
 function classifyCommand(command: readonly string[]): OmpArgv {

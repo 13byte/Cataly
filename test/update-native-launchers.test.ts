@@ -120,6 +120,7 @@ test.each([
   ["a shell with an omp comment", ["sh", "-c", 'exec codex "$@" # was omp', "audit"]],
   ["a shell given OMP's path by env", ["env", "OMP_BIN=/opt/bin/omp", "sh", "-c", 'exec "$OMP_BIN" "$@"', "a"]],
   ["a shell given OMP's path by an assignment", ["OMP_BIN=/opt/bin/omp", "sh", "-c", 'exec "$OMP_BIN" "$@"', "a"]],
+  ["OMP's path given past an unreadable launcher", ["X=/x/omp", "timeout", "--unknown", "codex", "-c", "$X"]],
 ])("%s is refused as unreadable even when it declares engine omp", (_, prefix) => {
   for (const engine of [undefined, "omp"] as const) {
     expect(() => load([...prefix, MODEL, "{prompt}"], engine)).toThrow(PREFIX_REFUSED);
@@ -132,6 +133,7 @@ test.each([
   ["a shell running another agent", ["sh", "-c", "exec codex", "sh"]],
   ["npx -c running another agent", ["npx", "-c", "codex"]],
   ["a shell running a tool whose name contains omp", ["sh", "-c", "exec omp-tools --x", "sh"]],
+  ["an agent given a setting whose value is omp", ["env", "PROFILE=omp", "codex"]],
   ["an external script", ["node", "/opt/not-omp.js", "/x/omp"]],
   ["echo", ["echo", "omp"]],
   ["the side wrapper's other commands", ["omp-dori", "hc", "run", "--", "omp"]],
