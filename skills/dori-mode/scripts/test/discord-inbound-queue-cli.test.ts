@@ -1,0 +1,109 @@
+import { expect, test } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { discordInboundQueue } from "../src/messenger/discord-inbound-queue.ts";
+import { fileDiscordInboundStore } from "../src/messenger/discord-inbound-state.ts";
+import { ownerMessage } from "./discord-inbound-fakes.ts";
+import { withState } from "./fakes.ts";
+
+const run = async (dir: string, gateway: boolean) => {
+  const config = join(dir, "config.json");
+  writeFileSync(config, JSON.stringify({ stateDir: dir, runtime: "herdr", hooks: {} }));
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "--preload",
+      join(import.meta.dir, "record-discord-gateway.ts"),
+      join(import.meta.dir, "../src/cli.ts"),
+      "inbound",
+      "discord",
+      ...(gateway ? ["--gateway"] : ["--loop", "0"]),
+    ],
+    {
+      env: {
+        HOME: dir,
+        PATH: "/usr/bin:/bin",
+        DORI_CONFIG: config,
+        DORI_STATE_DIR: dir,
+        DORI_DISCORD_TOKEN: "synthetic-inbound-token",
+        DORI_DISCORD_OWNER_ID: "10",
+        DORI_DISCORD_CHANNEL_ID: "20",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout: 10_000,
+    },
+  );
+  const [out, err, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  expect(`${out}
+${err}`).not.toContain("synthetic-inbound-token");
+  return { out, err, code };
+};
+
+test("public Gateway CLI backfills, emits live text, persists the cursor and closes its queue", async () => {
+  const state = withState();
+  try {
+    const { out, err, code } = await run(state.dir, true);
+    expect({ err, code }).toEqual({ err: "", code: 0 });
+    expect(out).toContain("INBOUND_READY discord owner=10 channel=20 bot=99 mode=gateway");
+    expect(out.split("\n").filter((line) => line.startsWith("INBOUND discord "))).toEqual([
+      'INBOUND discord 20 101 from=owner ref=- "first owner text"',
+      'INBOUND discord 20 103 from=owner ref=- "live owner text"',
+    ]);
+    expect(fileDiscordInboundStore(state.dir, "20").load()).toBe("103");
+    const queue = discordInboundQueue(state.dir);
+    try {
+      expect(queue.first()).toBeNull();
+    } finally {
+      queue.close();
+    }
+    const rest = await run(state.dir, false);
+    expect({ err: rest.err, code: rest.code }).toEqual({ err: "", code: 0 });
+    expect(rest.out).not.toContain("mode=gateway");
+  } finally {
+    state.done();
+  }
+});
+
+test("REST mode refuses pending Gateway work before baselining any channel", async () => {
+  const state = withState();
+  try {
+    const queue = discordInboundQueue(state.dir);
+    queue.push("message", ownerMessage("101", { channel_id: "21" }));
+    queue.close();
+    const { out, err, code } = await run(state.dir, false);
+    expect({ code, out }).toEqual({ code: 1, out: "" });
+    expect(err.trim().split("\n")).toHaveLength(1);
+    expect(err).toContain("restart with --gateway before REST mode");
+    expect(fileDiscordInboundStore(state.dir, "20").load()).toBeUndefined();
+    expect(fileDiscordInboundStore(state.dir, "21").load()).toBeUndefined();
+    const recovered = discordInboundQueue(state.dir);
+    try {
+      expect(JSON.parse(recovered.first()!.payload).id).toBe("101");
+    } finally {
+      recovered.close();
+    }
+  } finally {
+    state.done();
+  }
+});
+
+test("public CLI reports queue corruption as one sanitized nonzero error", async () => {
+  const state = withState();
+  try {
+    const dir = join(state.dir, "discord-inbound");
+    mkdirSync(dir, { mode: 0o700 });
+    writeFileSync(join(dir, "gateway.sqlite"), "corrupt", { mode: 0o600 });
+    const { out, err, code } = await run(state.dir, true);
+    expect({ code, out }).toEqual({ code: 1, out: "" });
+    expect(err.trim().split("\n")).toHaveLength(1);
+    expect(err).toContain("queue storage failed");
+    expect(err).not.toContain(state.dir);
+  } finally {
+    state.done();
+  }
+});

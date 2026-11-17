@@ -1,11 +1,13 @@
 import { discordGateway, type GatewayClock, type GatewaySocket } from "./discord-gateway.ts";
 import { type DiscordInbound, isTransient, type Message } from "./discord-inbound-api.ts";
+import type { DiscordInboundQueue } from "./discord-inbound-queue.ts";
 
 const GUILD_MESSAGES = 1 << 9;
 const DIRECT_MESSAGES = 1 << 12;
 const MESSAGE_CONTENT = 1 << 15; // Privileged: enable it for the bot in the Developer Portal.
 
 type Intake = {
+  accepts(message: Message): boolean;
   sync(emit: (message: DiscordInbound) => void): Promise<void>;
   accept(message: Message, emit: (message: DiscordInbound) => void): void;
 };
@@ -22,8 +24,11 @@ export const discordInboundLive = (
   clock: GatewayClock,
   emit: (message: DiscordInbound) => void,
   report: (line: string) => void,
+  queue: DiscordInboundQueue,
 ) => {
-  let queue = Promise.resolve();
+  let running = Promise.resolve();
+  let draining = false;
+  let failure: unknown;
   let dead = false;
   let timer: unknown;
   let wake: (() => void) | undefined;
@@ -45,25 +50,44 @@ export const discordInboundLive = (
       }
     }
   };
-  const enqueue = (job: () => void | Promise<void>) => {
-    queue = queue.then(async () => {
-      if (dead) return;
+  const fail = (error: unknown) => {
+    failure = error;
+    dead = true; // Leave the failed record and every successor on disk, without advancing their cursors.
+    gateway.close();
+  };
+  const drain = () => {
+    if (draining || dead) return;
+    draining = true;
+    running = (async () => {
       try {
-        await job();
+        for (let job = queue.first(); job && !dead; job = queue.first()) {
+          if (job.kind === "sync") await backfill();
+          else await intake.accept(JSON.parse(job.payload) as Message, emit);
+          if (!dead) queue.remove(job.id);
+        }
       } catch (error) {
-        dead = true; // An undelivered message must not be skipped past, so stop instead of continuing.
-        gateway.close();
-        throw error;
+        fail(error);
+      } finally {
+        draining = false;
       }
-    });
+    })();
+  };
+  const enqueue = (kind: "sync" | "message", data?: unknown) => {
+    if (dead) return;
+    try {
+      queue.push(kind, data);
+      drain();
+    } catch (error) {
+      fail(error);
+    }
   };
   const gateway = discordGateway(open, token, clock, report, {
     label: "DISCORD_GATEWAY",
     intents: GUILD_MESSAGES | DIRECT_MESSAGES | MESSAGE_CONTENT,
     online: false,
-    onReady: () => enqueue(backfill),
+    onReady: () => enqueue("sync"),
     onDispatch: (type, data) => {
-      if (type === "MESSAGE_CREATE") enqueue(() => intake.accept(data as Message, emit));
+      if (type === "MESSAGE_CREATE" && intake.accepts(data as Message)) enqueue("message", data);
     },
   });
   const close = () => {
@@ -74,7 +98,9 @@ export const discordInboundLive = (
   };
   const done = gateway.done.finally(async () => {
     close();
-    await queue; // An in-flight REST read may finish delivery; done owns its complete drain.
+    await running; // An in-flight REST read may finish delivery; pending records remain for the next start.
+    if (failure !== undefined) throw failure;
   });
+  drain();
   return { done, close };
 };

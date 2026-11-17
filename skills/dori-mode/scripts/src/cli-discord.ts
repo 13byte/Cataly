@@ -1,9 +1,12 @@
 /** The Discord Gateway plumbing shared by `dori presence discord` and `dori inbound discord --gateway`. */
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { die, every } from "./cli-context.ts";
 import { Discord } from "./messenger/discord.ts";
 import type { GatewayClock, GatewaySocket } from "./messenger/discord-gateway.ts";
 import { discordInbound, formatDiscordInbound } from "./messenger/discord-inbound.ts";
 import { discordInboundLive } from "./messenger/discord-inbound-live.ts";
+import { discordInboundQueue } from "./messenger/discord-inbound-queue.ts";
 import { discordInboundEnv, fileDiscordInboundStore } from "./messenger/discord-inbound-state.ts";
 import { fetchHttp } from "./messenger/http.ts";
 import { realClock } from "./run.ts";
@@ -58,16 +61,26 @@ export const discordInboundCommand = async (stateDir: string, gateway: boolean, 
   );
   if (!all && channelIds.length === 0) discordInboundEnv("DORI_DISCORD_CHANNEL_ID", env["DORI_DISCORD_CHANNEL_ID"]);
   const token = env["DORI_DISCORD_TOKEN"] || die("DORI_DISCORD_TOKEN is not set");
-  const intake = await discordInbound(
-    new Discord(fetchHttp, realClock, token),
-    (channelId) => fileDiscordInboundStore(stateDir, channelId),
-    { ownerId, channelIds: [...new Set(channelIds)], all },
-  );
-  const watching = all ? "all" : intake.channels().join(",");
-  const emit = (message: Parameters<typeof formatDiscordInbound>[0]) => console.log(formatDiscordInbound(message));
-  console.log(
-    `INBOUND_READY discord owner=${ownerId} channel=${watching} bot=${intake.botId}${gateway ? " mode=gateway" : ""}`,
-  );
-  if (!gateway) return await every(pollMinutes, () => intake.poll(emit));
-  await untilStopped(discordInboundLive(intake, openDiscordSocket, token, discordClock, emit, (l) => console.log(l)));
+  const queue =
+    gateway || existsSync(join(stateDir, "discord-inbound/gateway.sqlite")) ? discordInboundQueue(stateDir) : undefined;
+  try {
+    if (!gateway && queue?.first())
+      die("Discord inbound has pending Gateway work; restart with --gateway before REST mode");
+    const intake = await discordInbound(
+      new Discord(fetchHttp, realClock, token),
+      (channelId) => (queue ? queue.storeFor(channelId) : fileDiscordInboundStore(stateDir, channelId)),
+      { ownerId, channelIds: [...new Set(channelIds)], all },
+    );
+    const watching = all ? "all" : intake.channels().join(",");
+    const emit = (message: Parameters<typeof formatDiscordInbound>[0]) => console.log(formatDiscordInbound(message));
+    console.log(
+      `INBOUND_READY discord owner=${ownerId} channel=${watching} bot=${intake.botId}${gateway ? " mode=gateway" : ""}`,
+    );
+    if (!gateway || !queue) return await every(pollMinutes, () => intake.poll(emit));
+    await untilStopped(
+      discordInboundLive(intake, openDiscordSocket, token, discordClock, emit, (l) => console.log(l), queue),
+    );
+  } finally {
+    queue?.close();
+  }
 };

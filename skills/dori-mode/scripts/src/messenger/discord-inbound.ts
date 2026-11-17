@@ -49,7 +49,7 @@ export const discordInbound = async (
   const explicit = opts.channelIds.map((id) => discordInboundEnv("DORI_DISCORD_CHANNEL_IDS", id));
   const request = inboundRequest(discord);
   const me = await request<{ id?: string; bot?: boolean }>("/users/@me");
-  if (!me || me.bot !== true || !isDiscordSnowflake(me.id)) {
+  if (me?.bot !== true || !isDiscordSnowflake(me.id)) {
     throw new MessengerError("Discord inbound requires an authenticated bot identity; use a bot token", 401);
   }
   const botId = me.id;
@@ -93,6 +93,11 @@ export const discordInbound = async (
       await attach(id);
     }
   };
+  const accepts = (message: Message): boolean =>
+    !!message &&
+    isDiscordSnowflake(message.id) &&
+    isDiscordSnowflake(message.channel_id) &&
+    (opts.all === true || watched.has(message.channel_id));
   const deliver = (message: Message, store: DiscordInboundStore, emit: (message: DiscordInbound) => void) => {
     if (isOwnerMessage(message, ownerId, botId)) emit(toInbound(message));
     store.save(message.id); // Checkpoint only after successful delivery; filtered messages still advance the cursor.
@@ -131,6 +136,7 @@ export const discordInbound = async (
   let polls = 0;
   return {
     botId,
+    accepts,
     channels: (): string[] => [...watched.keys()],
     /** Reads every watched channel from its cursor; the REST path and the Gateway backfill. */
     async poll(emit: (message: DiscordInbound) => void): Promise<void> {
@@ -144,10 +150,9 @@ export const discordInbound = async (
     },
     /** A MESSAGE_CREATE dispatch: delivered only when newer than its channel's cursor. */
     accept(message: Message, emit: (message: DiscordInbound) => void): void {
-      if (!message || !isDiscordSnowflake(message.id) || !isDiscordSnowflake(message.channel_id)) return;
+      if (!accepts(message)) return;
       let store = watched.get(message.channel_id);
       if (!store) {
-        if (!opts.all) return;
         store = storeFor(message.channel_id);
         if (store.load() === undefined) store.save(String(BigInt(message.id) - 1n)); // First sight: this message is new.
         watched.set(message.channel_id, store);

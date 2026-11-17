@@ -1,7 +1,15 @@
+import { afterEach } from "bun:test";
+import { discordInboundQueue } from "../src/messenger/discord-inbound-queue.ts";
+import { withState } from "./fakes.ts";
 import { discordInbound, type DiscordInboundOptions, formatDiscordInbound } from "../src/messenger/discord-inbound.ts";
 import { discordInboundLive } from "../src/messenger/discord-inbound-live.ts";
 import { discordRestWorld, memoryDiscordCursor, type TestDiscordMessage } from "./discord-inbound-fakes.ts";
 import { FakeGateway, gatewayTimers } from "./discord-presence-fakes.ts";
+
+const cleanups: (() => Promise<void>)[] = [];
+afterEach(async () => {
+  for (const cleanup of cleanups.splice(0)) await cleanup();
+});
 
 export const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -25,6 +33,8 @@ export const liveWorld = async (
   const logs: string[] = [];
   const received: string[] = [];
   const lines: string[] = [];
+  const state = withState();
+  const queue = discordInboundQueue(state.dir);
   const live = discordInboundLive(
     intake,
     (url) => {
@@ -40,7 +50,14 @@ export const liveWorld = async (
       lines.push(formatDiscordInbound(message));
     },
     (line) => logs.push(line),
+    queue,
   );
+  cleanups.push(async () => {
+    live.close();
+    await live.done.catch(() => {});
+    queue.close();
+    state.done();
+  });
   live.done.catch(() => {}); // Tests assert on `done` explicitly; this keeps rejections from being unhandled.
   let seq = 0;
   return {
