@@ -8,10 +8,11 @@ export type ShellWord = { readonly text: string; readonly from: number; readonly
 const OPERATORS = ["&&", "||", "$(", ";", "|", "&", "(", ")", "`"];
 
 /**
- * The words of `line[from, to)`: split at whitespace and operators outside quotes, with or without spaces around
- * them (`true&&dori`, `a;b`); a line break starts a new command too. A quoted part stays in its word.
+ * The words of `line`: split at whitespace and operators outside quotes, with or without spaces around them
+ * (`true&&dori`, `a;b`); a line break starts a new command too. A quoted or backslash-escaped part stays in its word
+ * (`rg -F \;`), and a backslash before a line break continues the line.
  */
-export const shellWords = (line: string, from = 0, to = line.length): ShellWord[] => {
+export const shellWords = (line: string): ShellWord[] => {
   const words: ShellWord[] = [];
   let start = -1;
   let starts = true;
@@ -21,8 +22,20 @@ export const shellWords = (line: string, from = 0, to = line.length): ShellWord[
     if (start >= 0) starts = false;
     start = -1;
   };
-  for (let at = from; at < to; at++) {
+  for (let at = 0; at < line.length; at++) {
     const char = line[at] ?? "";
+    if (quote === "'") {
+      if (char === quote) quote = undefined;
+      continue;
+    }
+    if (char === "\\") {
+      if (start < 0 && line[at + 1] === "\n") at++;
+      else {
+        if (start < 0) start = at;
+        at++;
+      }
+      continue;
+    }
     if (quote !== undefined) {
       if (char === quote) quote = undefined;
       continue;
@@ -37,8 +50,33 @@ export const shellWords = (line: string, from = 0, to = line.length): ShellWord[
     if (start < 0) start = at;
     if (char === "'" || char === '"') quote = char;
   }
-  end(to);
+  end(line.length);
   return words;
+};
+
+/**
+ * A word as the shell passes it on: quotes removed, escapes resolved (only `\"`, `\\`, `\$`, `` \` `` inside double
+ * quotes), line continuations dropped; `at` maps each character back to its index in the word.
+ */
+export const unquote = (word: string): { readonly text: string; readonly at: readonly number[] } => {
+  let text = "";
+  const at: number[] = [];
+  let quote: string | undefined;
+  for (let i = 0; i < word.length; i++) {
+    const char = word[i] ?? "";
+    const next = word[i + 1] ?? "";
+    if (quote !== "'" && char === "\\" && next === "\n") i++;
+    else if (quote !== "'" && char === "\\" && next && (quote === undefined || '"\\$`'.includes(next))) {
+      text += next;
+      at.push(++i);
+    } else if (char === quote || (quote === undefined && (char === "'" || char === '"')))
+      quote = quote === undefined ? char : undefined;
+    else {
+      text += char;
+      at.push(i);
+    }
+  }
+  return { text, at };
 };
 
 // GNU env's long options: those that take a separate operand when written without `=`, and those that take none.
@@ -98,6 +136,35 @@ export const LAUNCHERS: Record<string, Launcher> = {
   setsid: { values: [], operands: 0 },
   stdbuf: { values: ["-i", "-o", "-e", "--input", "--output", "--error"], operands: 0 },
   caffeinate: { values: ["-t", "-w"], operands: 0 },
+  // flock's operand is its lock file or descriptor; `flock LOCK -c CMD` runs a shell string (monitor-command.ts).
+  flock: { values: ["-w", "--wait", "--timeout", "-E", "--conflict-exit-code"], operands: 1 },
+  sudo: {
+    values: [
+      "-u",
+      "-g",
+      "-C",
+      "-D",
+      "-h",
+      "-p",
+      "-r",
+      "-t",
+      "-U",
+      "-T",
+      "--user",
+      "--group",
+      "--close-from",
+      "--chdir",
+      "--host",
+      "--prompt",
+      "--role",
+      "--type",
+      "--other-user",
+      "--command-timeout",
+    ],
+    operands: 0,
+  },
+  ionice: { values: ["-c", "-n", "-p", "-P", "-u", "--class", "--classdata", "--pid", "--pgid", "--uid"], operands: 0 },
+  time: { values: ["-o", "-f", "--output", "--format"], operands: 0 },
 };
 
 /** Where a launcher's command starts after its options and operands, or undefined when there is none. */

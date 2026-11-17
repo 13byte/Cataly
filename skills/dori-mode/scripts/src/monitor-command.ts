@@ -1,26 +1,20 @@
 import { basename, join } from "node:path";
-import {
-  bunEntryAt,
-  envCommandAt,
-  LAUNCHERS,
-  launcherCommandAt,
-  type ShellWord,
-  shellWords,
-} from "./monitor-syntax.ts";
+import { bunEntryAt, envCommandAt, LAUNCHERS, launcherCommandAt, shellWords, unquote } from "./monitor-syntax.ts";
 
 // Which words of a watch's own command may name a lane. A command string is cut into commands at operators and line
 // breaks outside quotes (monitor-syntax.ts) and at a shell's `-c` script. Each command's program is its first word
 // after reserved words (`do`, `then`, `if`, `!`, ... only where the command starts), assignments, `exec`, `command`
-// and `builtin`, and after a known launcher's own options and operands (`env -u NAME`, `timeout -vk 5 60`, `nice -n
-// 10`): it is never a lane (`env tail -F` is not lane `tail`). A dori program is `dori`, `omp-dori` or the skill's
-// `dori-mode/scripts/src/cli.ts`, also behind bun's options (`bun --cwd DIR src/cli.ts`); its dori command and, after a
-// messenger command, the platform are its own words, past options and their values. Every other word may name a lane,
-// as before: an argument (`dori checkpoints --cwd X dori`), a path (`ls /x/dori freshness`) or another program's word
-// (`env rg -c dori freshness`). A legacy record's non-string argv word is never a program.
+// and `builtin`, and after a known launcher's own options and operands (`env -u NAME`, `timeout -vk 5 60`, `sudo -u
+// USER`, `flock LOCK`; `flock LOCK -c CMD` runs CMD as a script): it is never a lane (`env tail -F` is not lane
+// `tail`). A dori program is `dori`, `omp-dori` or the skill's `dori-mode/scripts/src/cli.ts`, also behind bun's options
+// (`bun --cwd DIR src/cli.ts`); its dori command and, after a messenger command, the platform are its own words, past
+// options and their values. Every other word may name a lane, as before: an argument (`dori checkpoints --cwd X
+// dori`), a path (`ls /x/dori freshness`) or another program's word (`env rg -c dori freshness`). A legacy record's
+// non-string argv word holds a program's place and is never dori.
 // Known limits: a relative `cli.ts` is read against every `cd`, `-C` or `--chdir` directory in the command, not only
 // the one it runs in (`git -C DIR ... && bun src/cli.ts`); an option value that is a platform word is taken for the
-// platform (`dori send --text slack`); behind `sudo`, `flock`, `ionice` or `time`, whose options are not read, and
-// inside a quoted `$(...)`, the first dori word is taken for the program (`sudo -u dori dori ...`).
+// platform (`dori send --text slack`); a `$(...)` inside double quotes and a `#` comment are not read as shell
+// syntax; behind an `env` option this does not read (`-S`), the first dori word is taken for the program.
 /** Every `dori` command: cli.ts's own and its command tables (test/boot-monitor-words.test.ts keeps them in step). */
 export const DORI_COMMANDS: Record<string, true> = {
   adopt: true,
@@ -68,11 +62,16 @@ const SKILL_SOURCE = /(?:^|\/)dori-mode\/scripts\/src\/cli\.ts$/;
 // A Set: a `then` key on an object literal reads as a thenable.
 const RESERVED = new Set(["do", "then", "else", "elif", "if", "while", "until", "!", "{"]);
 const PREFIXES: Record<string, true> = { exec: true, command: true, builtin: true };
-const OPAQUE_LAUNCHERS: Record<string, true> = { sudo: true, flock: true, ionice: true, time: true };
 const SHELLS: Record<string, true> = { sh: true, bash: true, dash: true, zsh: true, ksh: true, fish: true };
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
-type Word = { readonly word: string; readonly base: number; readonly shell?: ShellWord };
+/** A word as passed on, the whitespace-split word it is in, and, in a command string, its own words as a script. */
+type Word = {
+  readonly word: string;
+  readonly base: number;
+  readonly starts?: boolean;
+  readonly script?: () => readonly Word[];
+};
 
 /** Where a shell's `-c` script is, past its other options (`-O extglob`, `-o pipefail`); undefined without one. */
 const scriptAt = (words: readonly string[], at: number): number | undefined => {
@@ -99,12 +98,21 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
     if (!/\s/.test(line?.[at] ?? "") && (at === 0 || /\s/.test(line?.[at - 1] ?? ""))) base++;
     baseOf.push(base);
   }
-  const read = (words: readonly ShellWord[]): Word[] =>
-    words.map((shell) => ({ word: shell.text.replace(/['"]/g, ""), base: baseOf[shell.from] ?? -1, shell }));
+  // A string's words; `bases` maps each of its characters to the whitespace-split word of the line it came from.
+  const read = (text: string, bases: readonly number[]): Word[] =>
+    shellWords(text).map(({ text: word, from, starts }) => {
+      const passed = unquote(word);
+      const script = () =>
+        read(
+          passed.text,
+          passed.at.map((i) => bases[from + i] ?? -1),
+        );
+      return { word: passed.text, base: bases[from] ?? -1, starts, script };
+    });
   const all: readonly Word[] =
     line === undefined
       ? raw.map((word, base) => ({ word: typeof word === "string" ? word : "", base }))
-      : read(shellWords(line));
+      : read(line, baseOf);
   const dirs = typeof cwd === "string" ? [cwd] : [];
   all.forEach(({ word }, at) => {
     if (word.startsWith("--chdir=")) dirs.push(word.slice("--chdir=".length));
@@ -145,7 +153,7 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
       return found < 0 ? undefined : found;
     };
     let at = 0;
-    while (RESERVED.has(words[at] ?? "") || words[at] === "") own.add(ws[at++]?.base ?? -1);
+    while (RESERVED.has(words[at] ?? "")) own.add(ws[at++]?.base ?? -1);
     while (ASSIGNMENT.test(words[at] ?? "")) at++;
     while (PREFIXES[words[at] ?? ""] === true) {
       own.add(ws[at++]?.base ?? -1);
@@ -165,18 +173,22 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
       else if (name === "env") {
         next = envCommandAt(words, at + 1);
         if (next === undefined) program = firstDori(at + 1);
-      } else if (launcher !== undefined && Object.hasOwn(LAUNCHERS, name))
+      } else if (launcher !== undefined && Object.hasOwn(LAUNCHERS, name)) {
         next = launcherCommandAt(words, at + 1, launcher);
-      else if (OPAQUE_LAUNCHERS[name] === true) program = firstDori(at + 1);
-      else if (name === "bun") {
+        // `flock LOCK -c CMD` runs CMD as a shell string.
+        if (name === "flock" && next !== undefined && ["-c", "--command"].includes(words[next] ?? "")) {
+          const script = ws[next + 1]?.script;
+          if (script) run(script());
+          next = undefined;
+        }
+      } else if (name === "bun") {
         const entry = bunEntryAt(words, at + 1);
         if (entry === undefined || !isDori(words[entry.at] ?? "", entry.cwd)) break;
         for (let i = at; i < entry.at; i++) own.add(ws[i]?.base ?? -1);
         program = entry.at;
       } else if (line !== undefined && SHELLS[name] === true) {
-        const script = ws[scriptAt(words, at + 1) ?? -1]?.shell;
-        const quoted = script && /^(['"]).*\1$/s.test(script.text) ? 1 : 0;
-        if (script) run(read(shellWords(line, script.from + quoted, script.to - quoted)));
+        const script = ws[scriptAt(words, at + 1) ?? -1]?.script;
+        if (script) run(script());
       }
     }
     if (program !== undefined) doriWords(ws, program);
@@ -186,7 +198,7 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
   const run = (ws: readonly Word[]): void => {
     let from = 0;
     for (let at = 1; at <= ws.length; at++) {
-      if (at < ws.length && !ws[at]?.shell?.starts) continue;
+      if (at < ws.length && !ws[at]?.starts) continue;
       commandOf(ws.slice(from, at));
       from = at;
     }
