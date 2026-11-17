@@ -163,6 +163,9 @@ test.each([
   ],
   ["its own -c option", ["mycli", "-c", "use omp here"]],
   ["its own -c option behind env", ["env", "TERM=xterm", "codex", "-c", 'instructions="Compare omp and codex"']],
+  ["an argument naming a runner and OMP's package", ["echo", "npx", "@oh-my-pi/pi-coding-agent"]],
+  ["an external wrapper naming a runner", ["/opt/wrapper", "npx", "@oh-my-pi/pi-coding-agent"]],
+  ["an env option operand naming a runner", ["env", "-u", "npm", "codex", "@oh-my-pi/pi-coding-agent"]],
   ["a shell running another agent", ["sh", "-c", 'exec codex "$@"', "sh"]],
 ] as const)("a custom agent behind %s still starts on its goal marker", async (_, prefix) => {
   const { deps, brief } = setup(["claude"], "custom", false);

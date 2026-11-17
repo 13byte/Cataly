@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isOmpAgentCommand } from "../src/harness.ts";
+import { classifyOmpArgv, mayRunOmpArgv } from "../src/runtime/omp-argv.ts";
 import { loadUpdateConfig, nativeAgent } from "../src/update/load.ts";
 
 const directories: string[] = [];
@@ -159,4 +160,16 @@ test.each([
   expect(nativeAgent(load(argv).worker)).toBe(false);
   // The harness gives the OMP role only to OMP: an option value that names omp does not make the command OMP.
   expect(isOmpAgentCommand(prefix.join(" "))).toBe(false);
+});
+
+test.each([
+  ["an empty command", []],
+  ["assignments without a command", ["TASK=1"]],
+  ["echo naming a runner and OMP's package", ["echo", "npx", "@oh-my-pi/pi-coding-agent"]],
+  ["an external wrapper naming a runner", ["/opt/wrapper", "npx", "@oh-my-pi/pi-coding-agent"]],
+  ["an env option operand naming a runner", ["env", "-u", "npm", "codex", "@oh-my-pi/pi-coding-agent"]],
+])("%s is not an OMP launch", (_, argv) => {
+  expect(classifyOmpArgv(argv).kind).toBe("other");
+  expect(mayRunOmpArgv(argv)).toBe(false);
+  expect(isOmpAgentCommand(argv.join(" "))).toBe(false);
 });

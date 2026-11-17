@@ -30,7 +30,7 @@ const runsOmpPackage = (argv: readonly string[]): boolean =>
   argv.some((_, at) => isRunner(argv, at)) && argv.some((word) => OMP_PACKAGE_MENTION.test(word));
 // A package manager word, or Bun with its `x` subcommand later in the argv.
 const isRunner = (argv: readonly string[], at: number): boolean => {
-  const name = argv[at]!.split("/").at(-1)!;
+  const name = argv[at]?.split("/").at(-1) ?? "";
   return RUNNERS.includes(name) || (name === "bun" && argv.slice(at + 1).includes("x"));
 };
 
@@ -93,7 +93,7 @@ export function classifyOmpArgv(argv: readonly string[]): OmpArgv {
   // command handed OMP's path in a removed assignment (`env OMP_BIN=/x/omp sh -c 'exec "$OMP_BIN"'`).
   if (classified.kind !== "other") return classified;
   // A package manager running a command (`pnpm exec omp`) is read like a launcher Dori cannot fully parse.
-  return ((launched || isRunner(command, 0)) && names(command)) || assignsOmp(argv, at) || runsOmpPackage(argv)
+  return ((launched || isRunner(command, 0)) && (names(command) || runsOmpPackage(argv))) || assignsOmp(argv, at)
     ? { kind: "unparsed" }
     : classified;
 }
@@ -136,8 +136,13 @@ export const isOmpArgv = (argv: readonly string[]): boolean => classifyOmpArgv(a
  * outside a script stays a custom agent. Role flags and update guards need the exact start (isOmpArgv).
  */
 export const mayRunOmpArgv = (argv: readonly string[]): boolean => {
-  const { at } = prefixEnd(argv);
+  const { at, launched, stuck } = prefixEnd(argv);
   // Readable prefixes are removed first: `env TERM=x codex -c '…omp…'` is codex's own option.
   const command = argv.slice(at);
-  return isOmpArgv(argv) || assignsOmp(argv, at) || names(command) || runsOmpPackage(argv);
+  return (
+    isOmpArgv(argv) ||
+    assignsOmp(argv, at) ||
+    names(command) ||
+    ((launched || stuck !== undefined || isRunner(command, 0)) && runsOmpPackage(argv))
+  );
 };
