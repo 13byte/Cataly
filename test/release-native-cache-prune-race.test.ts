@@ -181,17 +181,17 @@ test("a removal an interrupted prune had decided (.deleting) is finished", () =>
   expect(existsSync(`${x.directory}.deleting`)).toBe(false);
 });
 
-test("a running Dori writer for this cache or a preparation in progress keeps every identity", () => {
+test("a running Dori writer for this cache or an older writer's preparation keeps every identity", () => {
   const c = pruneFixture();
   const x = c.native("x");
   const uid = process.getuid?.() ?? 0;
   // An older checkout's launcher for this home; one for another home works on another cache.
   const writer = `bun /old/scripts/source-dependencies.ts assert-native /old ${c.home}`;
-  const other = "bun /old/scripts/source-dependencies.ts native /old /elsewhere/home";
+  const other = `bun /old/scripts/source-dependencies.ts native /old ${c.refs}`;
   const held = c.prune({ table: () => `4242 ${uid} ${writer}\n4343 ${uid} ${other}\n` });
   expect(keptFor(held, x.directory)).toEqual([`Dori cache writer process 4242 (${writer})`]);
   const stage = join(c.home, ".cache/omp-dori/native-stage-abc123");
   mkdirSync(stage);
-  expect(keptFor(c.prune(), x.directory)).toEqual([`native preparation in progress or interrupted ${stage}`]);
+  expect(keptFor(c.prune(), x.directory)).toEqual([`native preparation of an older writer ${stage}`]);
   expect(existsSync(x.omp)).toBe(true);
 });

@@ -1,20 +1,34 @@
-import { readdirSync, readFileSync, realpathSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { procStat } from "../update/proc.ts";
-import { readLeases } from "./native-cache-lease.ts";
+import { readdirSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
+import { isAbsolute, join, resolve } from "node:path";
+import { cacheHolder, holderEnded, leaseName, readLeases } from "./native-cache-lease.ts";
 import { processCwds, processStart } from "./process-cwd.ts";
 
+/** Commands an update or deployment runs after its program (`<program> update install`, `<program> upstream watch`). */
+const SUBCOMMAND = /^(?:install|rollback|check|stage|watch|restart|recover)$/;
+/** Actions of `source-dependencies.ts` that prepare, verify or lease a native identity; its next two words are source and home. */
+const SOURCE_ACTION = /^(?:native|assert-native|consumer|lease-path)$/;
+
 /**
- * Dori processes that create, verify or launch identities. Writers from this release lease what they use; an already
- * running older checkout does not, so while any of them runs for this cache no identity is confirmed unused.
+ * Whether a process is a Dori writer that creates, verifies or launches identities, judged by the base names of its
+ * words so absolute and relative paths (`bun scripts/source-dependencies.ts native ...`) count alike: the home it
+ * names for `source-dependencies.ts`, `"env"` when its environment's HOME decides, undefined when it is no writer.
+ * Writers from this release lease what they use; an older running checkout does not, so while one runs for this cache
+ * no identity is confirmed unused.
  */
-const WRITER = [
-  /\/scripts\/install-source\.sh(?:\s|$)/,
-  /\/src\/release\/cli\.ts\s+(?:install|rollback)(?:\s|$)/,
-  /\/cli\.ts\s+(?:update|upstream)\s+(?:install|rollback|check|stage|watch|restart|recover)(?:\s|$)/,
-];
-/** Its cache home is an argument (`<action> <source> <home>`), not the environment. */
-const SOURCE_WRITER = /\/scripts\/source-dependencies\.ts\s+(?:native|assert-native|consumer)(?:\s|$)/;
+function writerHome(args: string): string | undefined {
+  const words = args.split(/\s+/);
+  const base = words.map((word) => word.slice(word.lastIndexOf("/") + 1));
+  for (let at = 0; at < words.length; at++) {
+    const next = base[at + 1] ?? "";
+    if (base[at] === "source-dependencies.ts" && SOURCE_ACTION.test(next)) return words[at + 3] ?? "";
+    if (base[at] === "install-source.sh") return "env";
+    if (base[at] === "cli.ts" && /^(?:install|rollback)$/.test(next)) return "env";
+    if (["cli.ts", "dori", "dori-harness"].includes(base[at]!) && /^(?:update|upstream)$/.test(next))
+      if (SUBCOMMAND.test(base[at + 2] ?? "")) return "env";
+  }
+  return undefined;
+}
+
 /** Linux `PF_KTHREAD`: a kernel thread has no working directory in a user's files. */
 const KERNEL_THREAD = 0x0020_0000n;
 /** `CAP_DAC_OVERRIDE` and `CAP_DAC_READ_SEARCH`: a process holding either can enter an owner-only directory. */
@@ -25,16 +39,6 @@ function processTable(): string {
   const ps = Bun.spawnSync(["ps", "-A", "-ww", "-o", "pid=,uid=,args="], { stdout: "pipe", stderr: "pipe" });
   if (ps.exitCode !== 0) throw new Error("Process table is unavailable; native cache use cannot be ruled out");
   return ps.stdout.toString();
-}
-
-/** A process's start as the report prints it and `--trust-process` names it; a reused pid has another. */
-export function startOf(pid: string): string | undefined {
-  if (process.platform === "linux") return processStart(pid);
-  try {
-    return procStat(Number(pid)).startTicks;
-  } catch {
-    return undefined;
-  }
 }
 
 /**
@@ -55,18 +59,61 @@ function entersAny(pid: string, uid: number): boolean {
   }
 }
 
-/** Whether a Dori writer works on the cache under `homes`: by its home argument, else by its environment's HOME. */
-function writesHere(pid: string, args: string, homes: readonly string[]): boolean {
+/**
+ * Whether a writer works on the cache under `homes`: by the home it names (relative to its working directory), else by
+ * its environment's HOME. Only a home that resolves to another existing directory rules it out.
+ */
+function writesHere(pid: string, args: string, named: string, homes: readonly string[]): boolean {
   if (homes.some((home) => args.includes(home))) return true;
-  // A source dependency writer that does not name this home works on another cache.
-  if (SOURCE_WRITER.test(args)) return false;
-  if (process.platform !== "linux") return true;
+  if (process.platform !== "linux" && !isAbsolute(named)) return true;
   try {
-    const home = /(?:^|\0)HOME=([^\0]*)/.exec(readFileSync(`/proc/${pid}/environ`, "latin1"))?.[1];
-    return home === undefined || homes.includes(resolve(home));
+    let home: string | undefined;
+    if (named === "env") home = /(?:^|\0)HOME=([^\0]*)/.exec(readFileSync(`/proc/${pid}/environ`, "latin1"))?.[1];
+    else if (named) home = isAbsolute(named) ? named : resolve(readlinkSync(`/proc/${pid}/cwd`), named);
+    return home === undefined || homes.includes(realpathSync(home));
   } catch {
     return true;
   }
+}
+
+type ProcessRow = { readonly pid: string; readonly uid: number; readonly args: string };
+const processRows = (table: string): ProcessRow[] =>
+  table.split("\n").flatMap((line) => {
+    const row = /^\s*(\d+)\s+(\d+)\s(.*)$/.exec(line);
+    return row ? [{ pid: row[1]!, uid: Number(row[2]), args: row[3]!.trim() }] : [];
+  });
+
+/** The running Dori writers for the cache `cache` (see `writerHome`), as reasons that keep every identity. */
+function writerReasons(cache: string, rows: readonly ProcessRow[]): string[] {
+  const home = resolve(cache, "../..");
+  const homes = [...new Set([home, realpathSync(home)])];
+  return rows.flatMap(({ pid, args }) => {
+    const named = writerHome(args);
+    return named !== undefined && writesHere(pid, args, named, homes)
+      ? [`Dori cache writer process ${pid} (${args})`]
+      : [];
+  });
+}
+
+/** The running Dori writers for `cache`; a prune removes an ended preparation only while there are none. */
+export const cacheWriters = (cache: string, table: () => string = processTable): string[] =>
+  writerReasons(cache, processRows(table()));
+
+/** `native-stage-<identity>-<pid>-<start>-<boot>-XXXXXX`: a preparation of one identity by the process that owns it. */
+const STAGE = /^native-stage-([a-f0-9]{64})-([1-9]\d*)-(\d+)-([A-Za-z0-9-]+)-[A-Za-z0-9]{6}$/;
+
+/** The prefix `mkdtemp` completes for this process's preparation of `identity`. */
+export const nativeStagePrefix = (identity: string): string =>
+  `native-stage-${identity}-${leaseName(cacheHolder(process.pid))}-`;
+
+/** A preparation's identity and whether its owner has ended (killed before it could clean up); undefined if unnamed. */
+export function nativeStage(name: string): { readonly identity: string; readonly ended: boolean } | undefined {
+  const match = STAGE.exec(name);
+  if (!match) return undefined;
+  return {
+    identity: match[1]!,
+    ended: holderEnded({ pid: Number(match[2]), startTicks: match[3]!, bootId: match[4]! }),
+  };
 }
 
 export type UseHoldOptions = {
@@ -98,21 +145,18 @@ export function useHolds(cache: string, keys: readonly string[], options: UseHol
   const leases = readLeases(cache, options.sweep === true);
   for (const reason of leases.unread) all(reason);
   for (const key of keys) for (const reason of leases.byIdentity.get(key.slice(0, 64)) ?? []) add(key, reason);
-  for (const name of readdirSync(cache))
-    if (name.startsWith("native-stage-")) all(`native preparation in progress or interrupted ${join(cache, name)}`);
-  const home = resolve(cache, "../..");
-  const homes = [...new Set([home, realpathSync(home)])];
-  const uid = process.getuid?.();
-  const privileged: { pid: string; args: string }[] = [];
-  for (const line of (options.table ?? processTable)().split("\n")) {
-    const row = /^\s*(\d+)\s+(\d+)\s(.*)$/.exec(line);
-    if (!row) continue;
-    const [, pid, owner, raw] = row as unknown as [string, string, string, string];
-    const args = raw.trim();
-    if ((SOURCE_WRITER.test(args) || WRITER.some((writer) => writer.test(args))) && writesHere(pid, args, homes))
-      all(`Dori cache writer process ${pid} (${args})`);
-    if (Number(owner) !== uid && entersAny(pid, Number(owner))) privileged.push({ pid, args });
+  for (const name of readdirSync(cache)) {
+    if (!name.startsWith("native-stage-")) continue;
+    const stage = nativeStage(name);
+    // An older writer's preparation names no identity or owner; an ended one holds nothing (a prune removes it).
+    if (!stage) all(`native preparation of an older writer ${join(cache, name)}`);
+    else if (!stage.ended)
+      for (const key of keys) if (key.startsWith(stage.identity)) add(key, `native preparation ${join(cache, name)}`);
   }
+  const rows = processRows((options.table ?? processTable)());
+  for (const reason of writerReasons(cache, rows)) all(reason);
+  const uid = process.getuid?.();
+  const privileged = rows.filter((row) => row.uid !== uid && entersAny(row.pid, row.uid));
   if (!privileged.length) return reasons;
   // This process's own directory is always readable, so no answer at all means the reader failed.
   const read = (options.readCwds ?? processCwds)([String(process.pid), ...privileged.map((row) => row.pid)]);
@@ -120,7 +164,7 @@ export function useHolds(cache: string, keys: readonly string[], options: UseHol
   const unread = privileged.filter((row) => read?.unreadable.includes(row.pid));
   for (const { pid } of privileged)
     for (const key of keys) if (read?.cwds.get(pid)?.includes(key)) add(key, `process ${pid}`);
-  for (const { pid, args } of unread) options.privileged?.add(`${pid}@${startOf(pid) ?? "?"} (${args})`);
+  for (const { pid, args } of unread) options.privileged?.add(`${pid}@${processStart(pid) ?? "?"} (${args})`);
   if (unread.length && !options.trustRootCwd)
     all(`unreadable working directories of ${unread.length} root or privileged processes (see --trust-root-cwd)`);
   return reasons;

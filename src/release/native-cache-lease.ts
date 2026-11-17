@@ -1,19 +1,20 @@
 import { randomUUID } from "node:crypto";
 import {
   closeSync,
+  linkSync,
   lstatSync,
-  mkdtempSync,
   openSync,
   readdirSync,
   readFileSync,
-  renameSync,
   rmdirSync,
   rmSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import { bootId, processExists, procStat } from "../update/proc.ts";
 import { owned, realDirectory } from "./files.ts";
+import { liveTasks } from "./process-cwd.ts";
 
 /**
  * Shared leases and the exclusive prune lock of the native cache.
@@ -24,7 +25,7 @@ import { owned, realDirectory } from "./files.ts";
  */
 
 /** A process as a lease or the lock records it. `exec` keeps all three, so a shell's lease covers what it execs. */
-type CacheHolder = { readonly pid: number; readonly startTicks: string; readonly bootId: string };
+export type CacheHolder = { readonly pid: number; readonly startTicks: string; readonly bootId: string };
 
 const LEASES = "native-leases";
 const LOCK = "native-prune.lock";
@@ -36,7 +37,7 @@ const WAIT_MS = 300_000;
 export const nativeCacheRoot = (home: string): string => join(home, ".cache/omp-dori");
 
 /** The running process `pid` as a holder; a process that is gone or a zombie cannot hold anything. */
-function cacheHolder(pid: number): CacheHolder {
+export function cacheHolder(pid: number): CacheHolder {
   try {
     const stat = procStat(pid);
     if (Number.isSafeInteger(pid) && pid > 0 && /^\d+$/.test(stat.startTicks) && !stat.zombie)
@@ -48,11 +49,13 @@ function cacheHolder(pid: number): CacheHolder {
 }
 
 /** Whether a recorded holder has certainly ended; what cannot be confirmed counts as still running. */
-function holderEnded(holder: CacheHolder, boot = bootId()): boolean {
+export function holderEnded(holder: CacheHolder, boot = bootId()): boolean {
   if (holder.bootId !== boot) return true;
   try {
     const stat = procStat(holder.pid);
-    return stat.zombie || stat.startTicks !== holder.startTicks;
+    if (stat.startTicks !== holder.startTicks) return true;
+    // A Linux thread group lives on after its leader exits (the leader then shows as a zombie).
+    return stat.zombie && (process.platform !== "linux" || liveTasks(String(holder.pid)) === undefined);
   } catch {
     try {
       return !processExists(holder.pid);
@@ -62,7 +65,7 @@ function holderEnded(holder: CacheHolder, boot = bootId()): boolean {
   }
 }
 
-const leaseName = (holder: CacheHolder): string => `${holder.pid}-${holder.startTicks}-${holder.bootId}`;
+export const leaseName = (holder: CacheHolder): string => `${holder.pid}-${holder.startTicks}-${holder.bootId}`;
 function parseLease(name: string): CacheHolder | undefined {
   const match = LEASE.exec(name);
   return match ? { pid: Number(match[1]), startTicks: match[2]!, bootId: match[3]! } : undefined;
@@ -92,7 +95,7 @@ function directory(path: string): void {
 
 function readHolder(lock: string): CacheHolder | undefined {
   try {
-    const value = JSON.parse(readFileSync(join(lock, "owner.json"), "utf8")) as Partial<CacheHolder> | null;
+    const value = JSON.parse(readFileSync(lock, "utf8")) as Partial<CacheHolder> | null;
     const { pid, startTicks, bootId: boot } = value ?? {};
     if (Number.isSafeInteger(pid) && pid! > 0 && typeof startTicks === "string" && /^\d+$/.test(startTicks))
       if (typeof boot === "string" && boot !== "") return { pid: pid!, startTicks, bootId: boot };
@@ -191,33 +194,49 @@ export function claimNativePrune(home: string): () => void {
   const own = cacheHolder(process.pid);
   const held = (holder?: CacheHolder) =>
     new Error(`Another native cache prune holds ${lock}${holder ? ` (pid ${holder.pid})` : ""}; nothing was removed`);
-  // The lock appears whole: its owner is written before the claim is renamed into place.
-  const claim = mkdtempSync(join(cache, "native-prune.claim-"));
+  // The lock is a file that appears whole: its owner is written first, then hard-linked into place, which never
+  // replaces anything already there (an empty directory included).
+  const claim = join(cache, `native-prune.claim-${randomUUID()}`);
+  writeFileSync(claim, JSON.stringify(own), { flag: "wx", mode: 0o600 });
   try {
-    writeFileSync(join(claim, "owner.json"), JSON.stringify(own), { flag: "wx", mode: 0o600 });
     try {
-      renameSync(claim, lock);
+      linkSync(claim, lock);
     } catch (error) {
-      if (!["EEXIST", "ENOTEMPTY"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+      // A claim another prune swept away under its lock (see below) lost to that prune.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") throw held();
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       const holder = readHolder(lock);
       if (!holder || !holderEnded(holder)) throw held(holder);
-      // An ended holder's lock moves to a tombstone named after it, so a second recoverer cannot move a newer lock.
+      // An ended holder's lock is first linked to a tombstone named after it, which only one recoverer can create; one
+      // that read the holder late may link a newer lock, which it then sees by its owner and leaves in place.
+      const tomb = `${lock}.ended-${leaseName(holder)}`;
       try {
-        renameSync(lock, `${lock}.ended-${leaseName(holder)}`);
-        renameSync(claim, lock);
+        linkSync(lock, tomb);
+      } catch {
+        throw held();
+      }
+      const linked = readHolder(tomb);
+      if (linked?.pid !== holder.pid || linked.startTicks !== holder.startTicks) {
+        unlinkSync(tomb);
+        throw held(linked);
+      }
+      try {
+        unlinkSync(lock);
+        linkSync(claim, lock);
       } catch {
         throw held();
       }
     }
   } finally {
-    rmSync(claim, { recursive: true, force: true });
+    rmSync(claim, { force: true });
   }
+  // Under the lock, what ended prunes left goes: tombstones (see above) and claims never linked.
+  for (const name of readdirSync(cache))
+    if (/^native-prune\.(?:lock\.ended-|claim-)/.test(name)) rmSync(join(cache, name), { force: true });
   return () => {
     const holder = readHolder(lock);
     if (holder?.pid !== own.pid || holder.startTicks !== own.startTicks)
       throw new Error(`Native cache prune lock changed: ${lock}`);
-    const released = `${lock}.released-${randomUUID()}`;
-    renameSync(lock, released);
-    rmSync(released, { recursive: true, force: true });
+    unlinkSync(lock);
   };
 }

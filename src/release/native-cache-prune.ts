@@ -1,10 +1,10 @@
 import { lstatSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { claimNativePrune, nativeCacheRoot } from "./native-cache-lease.ts";
+import { claimNativePrune, nativeCacheRoot, readLeases } from "./native-cache-lease.ts";
 import { exclusiveBytes, type NativeCacheEntry, receiptHolds, reportNativeCache } from "./native-cache.ts";
-import { protections } from "./native-cache-refs.ts";
-import { startOf, type UseHoldOptions, useHolds } from "./native-cache-uses.ts";
-import { processCwds } from "./process-cwd.ts";
+import { pathStamp, protections } from "./native-cache-refs.ts";
+import { cacheWriters, nativeStage, type UseHoldOptions, useHolds } from "./native-cache-uses.ts";
+import { processCwds, processStart } from "./process-cwd.ts";
 
 type NativeCacheRemoval = {
   readonly directory: string;
@@ -32,13 +32,22 @@ export type NativeCachePruneOptions = {
 const LEFTOVER = new RegExp(`^native-${process.platform}-${process.arch}-([a-f0-9]{64})\\.(pruning|deleting)$`);
 const AGAIN = "detached copy kept: its live name exists again; remove it by hand once nothing uses it";
 
-/** What an interrupted prune left: `.pruning` (detached, not decided) and `.deleting` (removal decided under the lock). */
+/**
+ * What an interrupted run left: a prune's `.pruning` (detached, not decided) and `.deleting` (removal decided under the
+ * lock), and a preparation (`stage`) whose owner ended or that names no owner (`older stage`, remove it by hand once no
+ * older checkout prepares anything).
+ */
 export function interruptedPrune(home: string): { directory: string; identity: string; state: string }[] {
   const cache = nativeCacheRoot(home);
   if (!lstatSync(cache, { throwIfNoEntry: false })) return [];
   return readdirSync(cache).flatMap((name) => {
+    const directory = join(cache, name);
     const match = LEFTOVER.exec(name);
-    return match ? [{ directory: join(cache, name), identity: match[1]!, state: match[2]! }] : [];
+    if (match) return [{ directory, identity: match[1]!, state: match[2]! }];
+    if (!name.startsWith("native-stage-")) return [];
+    const stage = nativeStage(name);
+    if (!stage) return [{ directory, identity: "", state: "older stage" }];
+    return stage.ended ? [{ directory, identity: stage.identity, state: "stage" }] : [];
   });
 }
 
@@ -64,6 +73,42 @@ function restore(entries: readonly NativeCacheEntry[], error: unknown): never {
   throw new Error(left.length ? `${message}; kept detached: ${left.join(", ")}` : message);
 }
 
+/** How many times the last look reads again what changed while it looked before it gives up and keeps everything. */
+const SETTLE = 4;
+
+/**
+ * The last look before removal. A writer that takes no lease may publish while it runs, so every path it read is
+ * stamped first and compared after; what changed (a file, or a directory with a new entry) is read again the same way
+ * until a pass finds nothing changed. Nothing settling within `SETTLE` passes keeps every key.
+ */
+function lastLook(
+  cache: string,
+  keys: readonly string[],
+  sources: readonly string[],
+  roots: readonly string[],
+  readCwds: typeof processCwds,
+): Map<string, string[]> {
+  let stamps = new Map<string, string>();
+  const reasons = protections(cache, keys, sources, roots, readCwds, stamps);
+  const merge = (more: Map<string, string[]>) => {
+    for (const [key, found] of more) reasons.set(key, [...new Set([...(reasons.get(key) ?? []), ...found])]);
+  };
+  for (let pass = 1; ; pass++) {
+    const changed = [...stamps].filter(([path, stamp]) => pathStamp(path) !== stamp).map(([path]) => path);
+    if (!changed.length) break;
+    if (pass === SETTLE) {
+      for (const key of keys)
+        reasons.set(key, [...(reasons.get(key) ?? []), `kept changing while the prune looked: ${changed[0]}`]);
+      return reasons;
+    }
+    stamps = new Map();
+    merge(protections(cache, keys, [], changed, readCwds, stamps));
+  }
+  // Processes once more, last: one that started while the files were read (a shell entering a detached copy).
+  merge(protections(cache, keys, [], [], readCwds));
+  return reasons;
+}
+
 /**
  * Remove the native cache identities nothing uses, holding the prune lock from the first look to the last removal.
  *
@@ -86,7 +131,7 @@ export function pruneNativeCache(
     tokens.set(match[1]!, match[2]!);
   }
   // A trusted pid counts only while it is still the process the user named; a reused pid is not trusted.
-  const trusted = (pid: string) => tokens.has(pid) && startOf(pid) === tokens.get(pid);
+  const trusted = (pid: string) => tokens.has(pid) && processStart(pid) === tokens.get(pid);
   const read = options.readCwds ?? processCwds;
   const readCwds: typeof processCwds = (pids, platform) => {
     const found = read(pids, platform);
@@ -106,6 +151,20 @@ export function pruneNativeCache(
     const removed: NativeCacheRemoval[] = [];
     const kept: NativeCacheEntry[] = [];
     for (const { directory, identity, state } of interruptedPrune(home)) {
+      if (state === "older stage") continue;
+      // A killed preparation's stage goes once nothing may still finish it: no lease on its identity, no writer.
+      if (state === "stage") {
+        if (!readLeases(cache, false).byIdentity.has(identity) && !cacheWriters(cache, options.table).length) {
+          removed.push({
+            directory,
+            identity,
+            bytes: exclusiveBytes(directory),
+            why: "a preparation whose owner ended",
+          });
+          rmSync(directory, { recursive: true, force: true });
+        }
+        continue;
+      }
       const live = directory.slice(0, -`.${state}`.length);
       const bytes = exclusiveBytes(directory);
       if (state === "deleting") {
@@ -131,7 +190,7 @@ export function pruneNativeCache(
         }
       }
       const keys = detached.flatMap(({ identity }) => [identity, `${identity}.pruning`]);
-      const refs = detached.length ? protections(cache, keys, sources, roots, readCwds) : new Map<string, string[]>();
+      const refs = detached.length ? lastLook(cache, keys, sources, roots, readCwds) : new Map<string, string[]>();
       const held = detached.length ? useHolds(cache, keys, uses) : new Map<string, string[]>();
       for (const entry of detached) {
         const reasons = new Set(
@@ -142,6 +201,8 @@ export function pruneNativeCache(
         );
         for (const reason of receiptHolds(`${entry.directory}.pruning`, entry.identity, entry.directory))
           reasons.add(reason);
+        if (lstatSync(entry.directory, { throwIfNoEntry: false }))
+          reasons.add("its live name was made again meanwhile");
         if (!reasons.size) confirmed.push(entry);
         else if (attach(entry)) kept.push({ ...entry, protectedBy: [...reasons] });
         else kept.push({ ...entry, directory: `${entry.directory}.pruning`, protectedBy: [...reasons, AGAIN] });

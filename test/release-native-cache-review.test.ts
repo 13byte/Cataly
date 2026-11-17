@@ -1,0 +1,238 @@
+import { afterEach, expect, test } from "bun:test";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
+import { leaseNativePath } from "../src/release/native.ts";
+import { leaseNativeIdentity } from "../src/release/native-cache-lease.ts";
+import { interruptedPrune } from "../src/release/native-cache-prune.ts";
+import { useHolds } from "../src/release/native-cache-uses.ts";
+import { bootId } from "../src/update/proc.ts";
+import { processCwds } from "../src/release/process-cwd.ts";
+import { keptFor, pruneFixture, removePruneFixtures } from "./native-cache-prune-setup.ts";
+import { script, setup } from "./install-setup.ts";
+import { nativeCacheFixture, overlayFixture, ownProcessCwds } from "./source-bundle-setup.ts";
+
+// Astra's review of the first prune commit: original counterexamples run as written, writers that publish an explicit
+// cache executable, relative writer commands, a thread group outliving its leader and an empty lock directory.
+
+afterEach(removePruneFixtures);
+
+test.each([false, true])(
+  "original Astra B7 / Fable P6 (live name made again: %p): a late reference keeps it",
+  (again) => {
+    const c = pruneFixture();
+    const x = c.native(again ? "P6" : "B7");
+    let scans = 0;
+    // As the reviewers wrote it: no lease, the reference lands while the last look reads processes.
+    const result = c.prune({
+      readCwds: (pids) => {
+        if (++scans === 2) {
+          writeFileSync(join(c.refs, "omp"), c.wrapper(x.omp));
+          if (again) mkdirSync(x.directory);
+        }
+        return ownProcessCwds(pids);
+      },
+    });
+    expect(result.removed).toEqual([]);
+    expect(existsSync(again ? `${x.directory}.pruning/bin/omp` : x.omp)).toBe(true);
+  },
+);
+
+test("original prune-concurrency: a reference published beside a refused second prune keeps it", () => {
+  const c = pruneFixture();
+  const x = c.native("x");
+  const module = resolve(import.meta.dir, "../src/release/native-cache-prune.ts");
+  const code = `const { pruneNativeCache } = await import(${JSON.stringify(module)}); pruneNativeCache(process.argv[1], [], [process.argv[2]], { table: () => "" });`;
+  let scans = 0;
+  let child = -1;
+  const result = c.prune({
+    readCwds: (pids) => {
+      if (++scans === 2) {
+        writeFileSync(join(c.refs, "omp"), x.omp);
+        child = Bun.spawnSync([process.execPath, "-e", code, c.home, c.refs]).exitCode;
+      }
+      return ownProcessCwds(pids);
+    },
+  });
+  expect(child).not.toBe(0);
+  expect(result.removed).toEqual([]);
+  expect(existsSync(x.omp)).toBe(true);
+});
+
+test("an explicit executable in the cache is leased before anything publishes it; one elsewhere leases nothing", () => {
+  const c = pruneFixture();
+  const x = c.native("x");
+  const alias = join(c.root, "omp-alias");
+  symlinkSync(x.omp, alias);
+  leaseNativePath(c.home, alias);
+  const leases = join(c.home, ".cache/omp-dori/native-leases");
+  expect(readdirSync(join(leases, x.identity))).toEqual([expect.stringMatching(new RegExp(`^${process.pid}-`))]);
+  leaseNativePath(c.home, "/bin/sh");
+  expect(readdirSync(leases)).toEqual([x.identity]);
+  expect(() => leaseNativePath(c.home, join(x.directory, "bin/missing"))).toThrow("is gone from the native cache");
+});
+
+test("an installer given DORI_OMP inside the cache holds its lease while it publishes the wrapper", async () => {
+  const s = setup();
+  const f = overlayFixture(join(s.root, "native-source"), join(s.root, "native-upstream"), true, "explicit-native");
+  mkdirSync(join(f.source, "scripts"));
+  symlinkSync(
+    resolve(import.meta.dir, "../scripts/source-dependencies.ts"),
+    join(f.source, "scripts/source-dependencies.ts"),
+  );
+  const x = nativeCacheFixture(f.source, s.home, f.checkout);
+  // The installer stops at its first package install, after the lease and before it writes the wrapper.
+  const bun = join(s.root, "bin/bun");
+  const gate = join(s.root, "gate");
+  const stop = `if [ "$1" = install ] && [ ! -e '${gate}' ]; then touch '${gate}'; echo WRITER_GATE; read -r answer; fi\n`;
+  writeFileSync(bun, readFileSync(bun, "utf8").replace('case "$1" in', `${stop}case "$1" in`));
+  const env = s.env({ DORI_INSTALL_MODE: "side", DORI_NO_PULL: "1", DORI_OMP: x.omp });
+  const child = Bun.spawn([script], { cwd: s.root, env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+  const reader = child.stdout.getReader();
+  let stdout = "";
+  try {
+    while (!stdout.includes("WRITER_GATE")) {
+      const read = await reader.read();
+      if (read.done) throw new Error(`installer exited early: ${await new Response(child.stderr).text()}`);
+      stdout += new TextDecoder().decode(read.value);
+    }
+    const leases = join(s.home, ".cache/omp-dori/native-leases", x.identity);
+    expect(readdirSync(leases).some((name) => name.startsWith(`${child.pid}-`))).toBe(true);
+  } finally {
+    child.stdin.write("continue\n");
+    child.stdin.end();
+    await child.exited;
+  }
+});
+
+test("a relative or interpreter-run Dori writer for this cache keeps every identity", async () => {
+  const c = pruneFixture();
+  const x = c.native("x");
+  // A process whose HOME is the fixture's and whose working directory is the fixture root stands in for the writer.
+  const holder = Bun.spawn(["/bin/sh", "-c", "echo ready; read line"], {
+    cwd: c.root,
+    env: { HOME: c.home, PATH: process.env["PATH"] },
+    stdin: "pipe",
+    stdout: "pipe",
+  });
+  try {
+    expect(new TextDecoder().decode((await holder.stdout.getReader().read()).value)).toBe("ready\n");
+    const uid = process.getuid?.() ?? 0;
+    const held = (args: string) =>
+      useHolds(join(c.home, ".cache/omp-dori"), [x.identity], { table: () => `${holder.pid} ${uid} ${args}\n` }).get(
+        x.identity,
+      );
+    for (const args of [
+      `bun scripts/source-dependencies.ts native /old/source ${c.home}`,
+      `bun scripts/source-dependencies.ts assert-native /old/source ${relative(c.root, c.home)}`,
+      "bun src/release/cli.ts install",
+      "bash scripts/install-source.sh",
+      "bun skills/dori-mode/scripts/src/cli.ts update install",
+    ])
+      expect(held(args)).toEqual([`Dori cache writer process ${holder.pid} (${args})`]);
+    // A writer naming another existing home works on another cache.
+    expect(held(`bun scripts/source-dependencies.ts native /old/source ${c.refs}`)).toBeUndefined();
+  } finally {
+    holder.stdin.end();
+    await holder.exited;
+  }
+});
+
+test("a lease and a working directory outlive a thread group's leader while its other threads run", async () => {
+  if (process.platform !== "linux") return;
+  const c = pruneFixture();
+  const x = c.native("x");
+  // The leader leaves with pthread_exit (a zombie without a working directory); its worker goes on inside the entry.
+  const code =
+    "import ctypes,sys,threading\ndef work():\n  print('worker', flush=True); sys.stdin.readline()\n" +
+    "print('leader', flush=True); sys.stdin.readline(); threading.Thread(target=work).start(); ctypes.CDLL(None).pthread_exit(None)\n";
+  const child = Bun.spawn(["python3", "-c", code], { cwd: x.directory, stdin: "pipe", stdout: "pipe" });
+  const reader = child.stdout.getReader();
+  const line = async () => new TextDecoder().decode((await reader.read()).value);
+  try {
+    expect(await line()).toBe("leader\n");
+    leaseNativeIdentity(c.home, x.identity, child.pid);
+    child.stdin.write("go\n");
+    child.stdin.flush();
+    expect(await line()).toBe("worker\n");
+    const pid = String(child.pid);
+    // The leader leaves right after starting the worker (a state in /proc, so polled for).
+    while (readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1]?.[0] !== "Z") await Bun.sleep(10);
+    expect(processCwds([pid])?.cwds.get(pid)).toBe(x.directory);
+    // The real reader, without the host's other unreadable processes.
+    const readCwds = (pids: readonly string[]) => {
+      const read = processCwds(pids);
+      return read && { cwds: read.cwds, unreadable: read.unreadable.filter((other) => other === pid) };
+    };
+    const result = c.prune({ readCwds });
+    expect(result.removed).toEqual([]);
+    expect(result.kept[0]?.protectedBy).toEqual(expect.arrayContaining([`lease of process ${pid}`, `process ${pid}`]));
+  } finally {
+    child.stdin.write("done\n");
+    child.stdin.end();
+    await child.exited;
+  }
+});
+
+test("an empty prune lock directory is not replaced: the prune refuses and removes nothing", () => {
+  const c = pruneFixture();
+  const x = c.native("x");
+  mkdirSync(join(c.home, ".cache/omp-dori/native-prune.lock"));
+  expect(() => c.prune()).toThrow("Another native cache prune holds");
+  expect(existsSync(x.omp)).toBe(true);
+});
+
+test("original process-after-ps: a shell that enters a detached copy while processes are read keeps it", async () => {
+  const c = pruneFixture();
+  const x = c.native("x");
+  let scans = 0;
+  let holder: ReturnType<typeof Bun.spawn> | undefined;
+  try {
+    const result = c.prune({
+      readCwds: (pids) => {
+        if (++scans === 2)
+          holder = Bun.spawn(["/bin/sh", "-c", "read line"], { cwd: `${x.directory}.pruning`, stdin: "pipe" });
+        return ownProcessCwds(pids);
+      },
+    });
+    expect(result.removed).toEqual([]);
+    expect(existsSync(x.omp)).toBe(true);
+  } finally {
+    holder?.kill();
+    await holder?.exited;
+  }
+});
+
+test("a preparation killed before it cleaned up is removed under the lock, unless its identity is still leased", () => {
+  const c = pruneFixture();
+  const x = c.native("x");
+  const cache = join(c.home, ".cache/omp-dori");
+  // A preparation whose owner was killed (a pid that has exited), as nativeStagePrefix names it.
+  const ended = Bun.spawnSync(["/bin/sh", "-c", "echo $$"]).stdout.toString().trim();
+  const stage = join(cache, `native-stage-${x.identity}-${ended}-1-${bootId()}-AbC123`);
+  mkdirSync(stage);
+  expect(interruptedPrune(c.home)).toEqual([{ directory: stage, identity: x.identity, state: "stage" }]);
+  // A live preparation of the identity: its lease keeps both.
+  leaseNativeIdentity(c.home, x.identity, process.pid);
+  const held = c.prune();
+  expect(existsSync(stage)).toBe(true);
+  expect(held.removed).toEqual([]);
+  rmSync(join(cache, "native-leases"), { recursive: true });
+  const freed = c.prune();
+  expect(freed.removed.map((removal) => removal.directory)).toEqual([stage, x.directory]);
+  // One that names no owner (an older writer's) holds every identity and is only listed.
+  const older = join(cache, "native-stage-XyZ987");
+  mkdirSync(older);
+  const y = c.native("y");
+  expect(keptFor(c.prune(), y.directory)).toEqual([`native preparation of an older writer ${older}`]);
+  expect(interruptedPrune(c.home)).toEqual([{ directory: older, identity: "", state: "older stage" }]);
+});
+
+test("what an ended prune left beside the lock (tombstones, claims) goes under the next prune's lock", () => {
+  const c = pruneFixture();
+  c.native("x");
+  const cache = join(c.home, ".cache/omp-dori");
+  const left = [`native-prune.lock.ended-1-1-${bootId()}`, "native-prune.claim-0b1f"];
+  for (const name of left) writeFileSync(join(cache, name), "{}");
+  c.prune();
+  expect(readdirSync(cache).filter((name) => name.startsWith("native-prune"))).toEqual([]);
+});

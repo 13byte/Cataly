@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { claimNativePrune, scriptLeaseHolder } from "../src/release/native-cache-lease.ts";
 import { processCwds, processStart } from "../src/release/process-cwd.ts";
@@ -77,17 +77,17 @@ test("a prune lock whose holder ended is taken over; a live or unreadable one re
   const x = c.native("x");
   const lock = join(c.home, ".cache/omp-dori/native-prune.lock");
   const own = { pid: process.pid, startTicks: processStart(String(process.pid)), bootId: bootId() };
-  mkdirSync(lock);
-  writeFileSync(join(lock, "owner.json"), JSON.stringify(own));
+  writeFileSync(lock, JSON.stringify(own));
   expect(() => c.prune()).toThrow(`Another native cache prune holds ${lock} (pid ${process.pid})`);
-  writeFileSync(join(lock, "owner.json"), "{");
+  writeFileSync(lock, "{");
   expect(() => c.prune()).toThrow(`Another native cache prune holds ${lock}`);
   // A process that has exited cannot hold it any more.
   const ended = Bun.spawnSync(["/bin/sh", "-c", "echo $$"]).stdout.toString().trim();
-  writeFileSync(join(lock, "owner.json"), JSON.stringify({ ...own, pid: Number(ended), startTicks: "1" }));
+  writeFileSync(lock, JSON.stringify({ ...own, pid: Number(ended), startTicks: "1" }));
   expect(c.prune().removed.map((removal) => removal.directory)).toEqual([x.directory]);
   expect(existsSync(lock)).toBe(false);
-  expect(existsSync(`${lock}.ended-${ended}-1-${bootId()}`)).toBe(true);
+  // Its tombstone kept a late recoverer off the new lock and went once that prune held it.
+  expect(existsSync(`${lock}.ended-${ended}-1-${bootId()}`)).toBe(false);
 });
 
 test("--trust-process lets one unreadable process pass only while it is still that process", async () => {

@@ -1,11 +1,49 @@
-import { readFileSync, readlinkSync } from "node:fs";
+import { readdirSync, readFileSync, readlinkSync } from "node:fs";
+import { procStat } from "../update/proc.ts";
 
-/** A Linux process's start time in clock ticks since boot (`/proc/<pid>/stat` field 22), which a reused pid changes. */
+/**
+ * A process's start, which a reused pid changes: on Linux its start time in clock ticks since boot (`/proc/<pid>/stat`
+ * field 22), elsewhere the start `procStat` reads. Undefined once it has exited.
+ */
 export function processStart(pid: string): string | undefined {
   try {
+    if (process.platform !== "linux") return procStat(Number(pid)).startTicks || undefined;
     const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
     // The command name (field 2) is parenthesized and may hold spaces; fields after it are space-separated from 3 on.
     return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Thread ids of a Linux thread group that still run (not zombies), or undefined once none does. A group whose threads
+ * cannot be listed counts as running, with its leader as the only known thread.
+ */
+export function liveTasks(pid: string): string[] | undefined {
+  let tasks: string[];
+  try {
+    tasks = readdirSync(`/proc/${pid}/task`);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === "ENOENT" || code === "ESRCH" ? undefined : [pid];
+  }
+  const live = tasks.filter((tid) => {
+    try {
+      const stat = readFileSync(`/proc/${pid}/task/${tid}/stat`, "utf8");
+      return stat.slice(stat.lastIndexOf(")") + 2, stat.lastIndexOf(")") + 3) !== "Z";
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      return code !== "ENOENT" && code !== "ESRCH";
+    }
+  });
+  return live.length ? live : undefined;
+}
+
+/** One thread's working directory; undefined while the thread runs but its directory cannot be read. */
+function taskCwd(pid: string, tid: string): string | undefined {
+  try {
+    return readlinkSync(`/proc/${pid}/task/${tid}/cwd`);
   } catch {
     return undefined;
   }
@@ -30,6 +68,13 @@ export function processCwds(pids: readonly string[], platform = process.platform
       } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
         if (code !== "ENOENT" && code !== "ESRCH") unreadable.push(pid);
+        // A leader that exited leaves no directory while its other threads still run: theirs are read instead.
+        else {
+          const tasks = liveTasks(pid);
+          const read = tasks?.map((tid) => taskCwd(pid, tid));
+          if (read?.some((cwd) => cwd === undefined)) unreadable.push(pid);
+          else if (read?.length) cwds.set(pid, read.join("\0"));
+        }
       }
     }
     return cwds.size > 0 ? { cwds, unreadable } : null;

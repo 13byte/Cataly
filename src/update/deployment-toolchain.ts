@@ -1,6 +1,6 @@
 import { lstatSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
-import { assertNativeSource, provisionNativeSource, type NativeReceipt } from "../release/native.ts";
+import { assertNativeSource, leaseNativePath, provisionNativeSource, type NativeReceipt } from "../release/native.ts";
 import { assertSourceBundle, readSourceBundle } from "../release/source-bundle.ts";
 import { provisionSourceOverlay } from "../release/source-checkout.ts";
 import { saveDeploymentJson } from "./deployment-files.ts";
@@ -9,6 +9,8 @@ import type { DeploymentConfig, DeploymentRecord, ToolchainReceipt } from "./dep
 import { digest } from "./source.ts";
 
 export function assertRuntimeToolchain(config: DeploymentConfig, receipt: ToolchainReceipt): void {
+  // Leased before anything is read, so a native cache prune keeps it or has finished.
+  leaseNativePath(config.home, receipt.omp);
   if (
     receipt.nativeConfig !== join(config.releaseRoot, "native-config.json") ||
     receipt.ompEntry !== realpathSync(receipt.omp) ||
@@ -114,6 +116,8 @@ export async function prepareRuntimeToolchain(config: DeploymentConfig, record: 
     locked && !config.omp ? await provisionNativeSource(record.releasePath, config.home, config.bun) : undefined;
   const omp = native?.omp ?? config.omp;
   if (!omp) throw new DeploymentHeld("older source protocol needs its explicit native executable");
+  // An explicit executable in the native cache is held like a prepared one while this record comes to name it.
+  if (!native) leaseNativePath(config.home, omp);
   record.toolchain = await inspectRuntimeToolchain(config, record, omp, false, native);
   if (locked) {
     const entry = await provisionSourceOverlay(record.releasePath, config.home);

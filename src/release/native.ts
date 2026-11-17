@@ -18,6 +18,7 @@ import { command } from "../update/deployment-process.ts";
 import { digest } from "../update/source.ts";
 import { owned, readJson, realDirectory, regularFile, saveJson } from "./files.ts";
 import { leaseNativeIdentity } from "./native-cache-lease.ts";
+import { nativeStagePrefix } from "./native-cache-uses.ts";
 import { assertNativeExport } from "./native-export.ts";
 import { assertSourceBundle, bundleEnv, readSourceBundle } from "./source-bundle.ts";
 import { checkoutSourceBundle } from "./source-checkout.ts";
@@ -43,6 +44,31 @@ export function nativeDirectory(source: string, home: string): string {
     ".cache/omp-dori",
     `native-${process.platform}-${process.arch}-${readSourceBundle(source, true).identity}`,
   );
+}
+
+/**
+ * Lease the identity an explicitly chosen executable lies in (by its own path or once resolved), so a writer that
+ * publishes it (a wrapper, a deployment record) holds it like one that prepared it. Then the executable must still be
+ * there: a prune may have removed it before the lease. Paths outside the cache lease nothing.
+ */
+export function leaseNativePath(home: string, path: string, holder = process.pid): void {
+  const cache = join(home, ".cache/omp-dori");
+  const entry = new RegExp(`^native-${process.platform}-${process.arch}-([a-f0-9]{64})$`);
+  const inside = (candidate: string, root: string) =>
+    candidate.startsWith(`${root}/`) ? entry.exec(candidate.slice(root.length + 1).split("/", 1)[0]!)?.[1] : undefined;
+  const real = (candidate: string) => {
+    try {
+      return realpathSync(candidate);
+    } catch {
+      return candidate;
+    }
+  };
+  const identities = new Set(
+    [inside(path, cache), inside(real(path), cache), inside(real(path), real(cache))].filter((id) => id !== undefined),
+  );
+  for (const identity of identities) leaseNativeIdentity(home, identity, holder);
+  if (identities.size && !lstatSync(real(path), { throwIfNoEntry: false })?.isFile())
+    throw new Error(`Selected native executable ${path} is gone from the native cache; prepare it again`);
 }
 
 /** The cache launcher always validates source then execs the protected upstream launcher through the recorded Bun. */
@@ -126,7 +152,8 @@ export async function provisionNativeSource(
   const cache = join(home, ".cache/omp-dori");
   realDirectory(cache, true);
   owned(cache);
-  const stage = mkdtempSync(join(cache, "native-stage-"));
+  // The stage names its identity and owner, so a prune can tell one whose owner was killed (Bun skips finally on a signal).
+  const stage = mkdtempSync(join(cache, nativeStagePrefix(bundle.identity)));
   const checkout = join(stage, "source");
   const addon = join(stage, "addon");
   const natives = join(stage, "natives");

@@ -264,6 +264,9 @@ if [ -z "$omp_bin" ]; then
   native="$(DORI_NATIVE_LEASE_PID=$$ bun "$src/scripts/source-dependencies.ts" native "$src" "$HOME")"
   omp_bin="$native/bin/omp"
   check_omp_wrapper_collision
+else
+  # An explicit executable inside the native cache is leased by the installer too before a wrapper names it.
+  DORI_NATIVE_LEASE_PID=$$ bun "$src/scripts/source-dependencies.ts" lease-path "$src" "$HOME" "$omp_bin"
 fi
 
 if [ "$mode" = primary ] && { [ -n "$other" ] ||
