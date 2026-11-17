@@ -20,7 +20,6 @@ export const OWE_TTL_MS = 30 * 60_000;
 /** Continuations per owe before the gate gives up loudly rather than looping the session forever. */
 export const MAX_CONTINUATIONS = 3;
 const KEEP_LINES = 200;
-
 export type InboundOwe = {
   /** `<channel>:<message>` — the Discord ids already identify the message uniquely. */
   readonly id: string;
@@ -31,10 +30,12 @@ export type InboundOwe = {
 };
 
 type SentReceipt = { readonly channel: string; readonly at: number };
+type MarkReceipt = { readonly channel: string; readonly message: string; readonly at: number };
 
 const dir = (stateDir: string): string => join(stateDir, "owes");
 const inboundPath = (stateDir: string): string => join(dir(stateDir), "inbound.jsonl");
 const sentPath = (stateDir: string): string => join(dir(stateDir), "sent.jsonl");
+const marksPath = (stateDir: string): string => join(dir(stateDir), "marks.jsonl");
 const attemptsPath = (stateDir: string): string => join(dir(stateDir), "attempts.json");
 
 const ensureDir = (stateDir: string): void => {
@@ -77,6 +78,14 @@ const isReceipt = (v: unknown): v is SentReceipt => {
   return typeof r.channel === "string" && typeof r.at === "number" && Number.isFinite(r.at);
 };
 
+const isMark = (v: unknown): v is MarkReceipt => {
+  if (typeof v !== "object" || v === null) return false;
+  const m = v as Partial<MarkReceipt>;
+  return (
+    typeof m.channel === "string" && typeof m.message === "string" && typeof m.at === "number" && Number.isFinite(m.at)
+  );
+};
+
 /**
  * The obligation lines in one monitor delivery: `INBOUND discord <ch> <msg> from=owner ref=- "<text>"`, optionally
  * behind the `[name] ` prefix every monitor line carries.
@@ -110,37 +119,50 @@ export const recordOwes = (stateDir: string, text: string, at: number): number =
   const path = inboundPath(stateDir);
   const known = new Set(readLines(path).map((line) => parse(line, isOwe)?.id));
   const fresh = found.filter((owe) => !known.has(owe.id));
-  if (fresh.length === 0) return 0;
-  const previous = readLines(path);
-  if (previous.length + fresh.length > KEEP_LINES) {
-    const temporary = `${path}.${process.pid}.tmp`;
-    writeFileSync(
-      temporary,
-      `${[...previous.slice(-KEEP_LINES), ...fresh.map((o) => JSON.stringify(o))].join("\n")}\n`,
-      {
-        mode: 0o600,
-      },
-    );
-    renameSync(temporary, path);
-    return fresh.length;
-  }
-  appendFileSync(path, `${fresh.map((owe) => JSON.stringify(owe)).join("\n")}\n`, { mode: 0o600 });
+  for (const owe of fresh) appendCapped(path, JSON.stringify(owe));
   return fresh.length;
+};
+
+/** Appends one line to a capped jsonl, rewriting only when the cap is passed so a hot path stays one append. */
+const appendCapped = (path: string, line: string): void => {
+  const previous = readLines(path);
+  if (previous.length < KEEP_LINES) {
+    appendFileSync(path, `${line}\n`, { mode: 0o600 });
+    return;
+  }
+  const temporary = `${path}.${process.pid}.tmp`;
+  writeFileSync(temporary, `${[...previous.slice(-KEEP_LINES + 1), line].join("\n")}\n`, { mode: 0o600 });
+  renameSync(temporary, path);
 };
 
 /** Records that a message was accepted by Discord, which is what closes every earlier owe on that channel. */
 export const recordSent = (stateDir: string, channel: string, at: number): void => {
   ensureDir(stateDir);
-  const path = sentPath(stateDir);
-  const kept = readLines(path).slice(-KEEP_LINES);
-  appendFileSync(path, `${[...kept, JSON.stringify({ channel, at })].join("\n")}\n`, { mode: 0o600 });
+  appendCapped(sentPath(stateDir), JSON.stringify({ channel, at }));
 };
 
-/** One send answers every owner message on that channel that arrived before it. */
+/**
+ * Records that the owner's exact message got its read receipt. A send on the channel does not imply it: the owner
+ * said twice that the answer arrived with no reaction on their message, which reads as being ignored. A mark names
+ * one message, so nothing else can stand in for it.
+ */
+export const recordMark = (stateDir: string, channel: string, message: string, at: number): void => {
+  if (!/^\d{1,20}$/.test(channel) || !/^\d{1,20}$/.test(message)) return;
+  ensureDir(stateDir);
+  appendCapped(marksPath(stateDir), JSON.stringify({ channel, message, at }));
+};
+
+/**
+ * An owe is settled only by both halves: a message Discord accepted on the channel, and the read receipt on that
+ * exact message. Both must come after the owner wrote, so an earlier reply cannot settle a later question.
+ */
 export const openOwes = (stateDir: string, now: number): InboundOwe[] => {
   const receipts = readLines(sentPath(stateDir))
     .map((line) => parse(line, isReceipt))
     .filter((r): r is SentReceipt => r !== undefined);
+  const marks = readLines(marksPath(stateDir))
+    .map((line) => parse(line, isMark))
+    .filter((m): m is MarkReceipt => m !== undefined);
   const seen = new Set<string>();
   const open: InboundOwe[] = [];
   for (const line of readLines(inboundPath(stateDir))) {
@@ -148,7 +170,9 @@ export const openOwes = (stateDir: string, now: number): InboundOwe[] => {
     if (!owe || seen.has(owe.id)) continue;
     seen.add(owe.id);
     if (now - owe.at > OWE_TTL_MS) continue;
-    if (receipts.some((r) => r.channel === owe.channel && r.at >= owe.at)) continue;
+    const answered = receipts.some((r) => r.channel === owe.channel && r.at >= owe.at);
+    const marked = marks.some((m) => m.channel === owe.channel && m.message === owe.message && m.at >= owe.at);
+    if (answered && marked) continue;
     open.push(owe);
   }
   return open.sort((a, b) => a.at - b.at);
@@ -185,8 +209,9 @@ export const reminder = (owes: readonly InboundOwe[]): string => {
   );
   if (owes.length > shown.length) lines.push(`- and ${owes.length - shown.length} more`);
   return [
-    "BLOCKED: the owner wrote to you on Discord and no answer was sent to that channel.",
-    "A terminal-only reply is silence to the owner. Answer now with exactly this form:",
+    "BLOCKED: the owner wrote to you and this settle is missing one or both halves of the answer.",
+    "A terminal-only reply is silence to the owner. Do both now, for every message listed:",
+    "  dori-signal check <owner message id>",
     '  dori send discord --to <channel> --text "<the answer you just gave>"',
     ...lines,
   ].join("\n");

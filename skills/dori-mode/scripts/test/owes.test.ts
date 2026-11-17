@@ -8,6 +8,7 @@ import {
   openOwes,
   OWE_TTL_MS,
   owesInText,
+  recordMark,
   recordOwes,
   recordSent,
   reminder,
@@ -45,7 +46,58 @@ describe("owesInText", () => {
 });
 
 describe("ledger", () => {
-  test("a send receipt closes the owes on that channel that came before it, and only those", () => {
+  test("a reply alone does not settle an owe: the owner's message also needs its read receipt", () => {
+    const state = withState();
+    try {
+      recordOwes(state.dir, inbound(CHANNEL, "100", "first"), at);
+      recordSent(state.dir, CHANNEL, at + 2);
+      expect(openOwes(state.dir, at + 3).map((owe) => owe.id)).toEqual([`${CHANNEL}:100`]);
+
+      recordMark(state.dir, CHANNEL, "100", at + 4);
+      expect(openOwes(state.dir, at + 5)).toEqual([]);
+    } finally {
+      state.done();
+    }
+  });
+
+  test("a read receipt alone does not settle it either: the owner still has to be answered", () => {
+    const state = withState();
+    try {
+      recordOwes(state.dir, inbound(CHANNEL, "100", "first"), at);
+      recordMark(state.dir, CHANNEL, "100", at + 1);
+      expect(openOwes(state.dir, at + 2).map((owe) => owe.id)).toEqual([`${CHANNEL}:100`]);
+      recordSent(state.dir, CHANNEL, at + 3);
+      expect(openOwes(state.dir, at + 4)).toEqual([]);
+    } finally {
+      state.done();
+    }
+  });
+
+  test("a receipt on a different message does not count: the mark names one message", () => {
+    const state = withState();
+    try {
+      recordOwes(state.dir, inbound(CHANNEL, "100", "first"), at);
+      recordSent(state.dir, CHANNEL, at + 1);
+      recordMark(state.dir, CHANNEL, "999", at + 2);
+      expect(openOwes(state.dir, at + 3).map((owe) => owe.id)).toEqual([`${CHANNEL}:100`]);
+    } finally {
+      state.done();
+    }
+  });
+
+  test("a receipt from before the message cannot settle it, on either half", () => {
+    const state = withState();
+    try {
+      recordSent(state.dir, CHANNEL, at - 10);
+      recordMark(state.dir, CHANNEL, "100", at - 10);
+      recordOwes(state.dir, inbound(CHANNEL, "100", "later"), at);
+      expect(openOwes(state.dir, at + 1).map((owe) => owe.id)).toEqual([`${CHANNEL}:100`]);
+    } finally {
+      state.done();
+    }
+  });
+
+  test("a send receipt closes only its own channel, and only for answered messages", () => {
     const state = withState();
     try {
       recordOwes(state.dir, inbound(CHANNEL, "100", "first"), at);
@@ -53,9 +105,9 @@ describe("ledger", () => {
       expect(openOwes(state.dir, at + 1).map((owe) => owe.id)).toEqual([`${CHANNEL}:100`, "999:200"]);
 
       recordSent(state.dir, CHANNEL, at + 2);
+      recordMark(state.dir, CHANNEL, "100", at + 2);
       expect(openOwes(state.dir, at + 3).map((owe) => owe.id)).toEqual(["999:200"]);
 
-      // Only replies after the message count: a receipt from before it cannot settle it.
       recordOwes(state.dir, inbound(CHANNEL, "300", "later"), at + 4);
       expect(openOwes(state.dir, at + 5).map((owe) => owe.id)).toEqual(["999:200", `${CHANNEL}:300`]);
     } finally {
@@ -113,6 +165,22 @@ describe("ledger", () => {
         expect(statSync(path).mode & 0o777).toBe(0o600);
       }
       expect(statSync(dir).mode & 0o777).toBe(0o700);
+    } finally {
+      state.done();
+    }
+  });
+
+  test("the ledgers stay capped instead of growing with every send", () => {
+    const state = withState();
+    try {
+      for (let i = 0; i < 250; i++) recordSent(state.dir, CHANNEL, at + i);
+      const lines = readFileSync(join(state.dir, "owes", "sent.jsonl"), "utf8")
+        .trim()
+        .split("\n");
+      expect(lines.length).toBeLessThanOrEqual(200);
+      // The newest receipt survives the trim, so an answer sent just now still settles its owe.
+      recordOwes(state.dir, inbound(CHANNEL, "900", "now"), at + 300);
+      expect(openOwes(state.dir, at + 400).map((owe) => owe.id)).toEqual([`${CHANNEL}:900`]);
     } finally {
       state.done();
     }

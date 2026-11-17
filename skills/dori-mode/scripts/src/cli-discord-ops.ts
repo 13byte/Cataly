@@ -7,7 +7,7 @@ import { type DcChannel, Discord, isForumType } from "./messenger/discord.ts";
 import { discordInboundEnv } from "./messenger/discord-inbound-state.ts";
 import { fetchHttp } from "./messenger/http.ts";
 import { TranscriptionError } from "./messenger/voice.ts";
-import { recordSent } from "./owes.ts";
+import { recordMark, recordSent } from "./owes.ts";
 import { realClock } from "./run.ts";
 
 const client = () =>
@@ -123,11 +123,13 @@ export const threadDiscord: Command = async ({ positionals, need, strings, value
   } else die("thread discord needs create or set");
 };
 
-export const reactDiscord: Command = async ({ need, opt, values }) => {
+export const reactDiscord: Command = async ({ need, opt, values, config }) => {
   const thread = opt("thread");
   const channel = thread === undefined ? discordInboundEnv("--to", need("to")) : discordInboundEnv("--thread", thread);
   const message = discordInboundEnv("--message", need("message"));
   const remove = values["remove"] === true;
   await client().react(channel, message, opt("emoji") || "\u{1f440}", remove);
+  // A read receipt on the owner's exact message is half of the answer; the gate reads this to settle the owe.
+  if (!remove) recordMark(config.stateDir, channel, message, Date.now());
   console.log(`REACTED ${channel} ${remove ? "-" : "+"}`);
 };

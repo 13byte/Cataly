@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { MAX_CONTINUATIONS, openOwes, recordOwes, recordSent } from "../../skills/dori-mode/scripts/src/owes";
+import {
+  MAX_CONTINUATIONS,
+  openOwes,
+  recordMark,
+  recordOwes,
+  recordSent,
+} from "../../skills/dori-mode/scripts/src/owes";
 import { type FakePi, load, until, useConfig } from "./fake-pi";
 
 const FAKE_ULW = join(import.meta.dir, "fake-ulw.ts");
@@ -43,12 +49,18 @@ describe("session_stop owes gate", () => {
     expect(blocked?.additionalContext).toContain("owner message 100");
   });
 
-  test("a send receipt settles it, so the next settle is clean", async () => {
+  test("a send receipt alone leaves the settle blocked until the read receipt is recorded too", async () => {
     const pi = await doriSession();
     const at = Date.now();
     recordOwes(stateDir, inbound("100"), at);
     expect((await stop(pi))?.continue).toBe(true);
+
     recordSent(stateDir, CHANNEL, at + 1);
+    const stillBlocked = await stop(pi);
+    expect(stillBlocked?.continue).toBe(true);
+    expect(stillBlocked?.additionalContext).toContain("dori-signal check <owner message id>");
+
+    recordMark(stateDir, CHANNEL, "100", at + 2);
     expect(await stop(pi)).toBeUndefined();
   });
 
