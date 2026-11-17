@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Manifest, type Monitor, monitorCleanup, readMonitorManifests } from "../src/boot-monitors.ts";
+import { DORI_COMMANDS } from "../src/monitor-command.ts";
 import type { Lane, LaneStatus } from "../src/registry.ts";
 import { withState } from "./fakes.ts";
 
-// Which words of a watch's own command may name a lane: base matched every word; a dori program's own words are
-// excluded only where that program starts a command, and never by crashing on a legacy record.
+// Which words of a watch's own command may name a lane: base matched every word; a dori program word, its dori command
+// and its platform are excluded wherever they stand, and a legacy record never crashes the match.
 const lane = (key: string, status: LaneStatus): Lane => ({
   key,
   status,
@@ -94,7 +95,7 @@ test("a shared dori watch behind a launcher with options is still not claimed by
   expect(monitorCleanup(lanes, [manifest(monitors)])).toEqual([]);
 });
 
-test("a relative source entry is read from the watch's cwd: the skill CLI is dori, the harness CLI is not", () => {
+test("a relative cli.ts entry is dori's own, and an argument after its command still names a lane", () => {
   const lanes = ["freshness", "api-fix"].map((key) => lane(key, "closed"));
   const skill = "/w/skills/dori-mode/scripts";
   const result = monitorCleanup(lanes, [
@@ -107,7 +108,7 @@ test("a relative source entry is read from the watch's cwd: the skill CLI is dor
   expect(result.map((m) => [m.monitorId, m.match])).toEqual([["mon_HARNESS", ["api-fix:argv:key"]]]);
 });
 
-test("-c starts a script only after a shell: rg -c dori api-fix still names lane api-fix", () => {
+test("a word after a dori program that is no dori command still names a lane: rg -c dori api-fix", () => {
   const result = monitorCleanup(
     [lane("api-fix", "closed")],
     [
@@ -121,4 +122,38 @@ test("-c starts a script only after a shell: rg -c dori api-fix still names lane
     ["mon_ARGV", ["api-fix:argv:key"]],
     ["mon_COMMAND", ["api-fix:command:key"]],
   ]);
+});
+
+test("a shared dori watch inside a loop, a condition, a subshell, a cd or an env -C stays unclaimed", () => {
+  const scripts = "/w/skills/dori-mode/scripts";
+  const lanes = ["slack", "freshness"].map((key) => lane(key, "closed"));
+  const monitors: Monitor[] = [
+    { command: "while true; do dori inbound slack --loop 1; sleep 3; done" },
+    { command: "while true; do exec dori inbound slack --loop 1; done" },
+    { command: "if test -f /ready; then dori inbound slack --loop 1; fi" },
+    { command: "( dori inbound slack --loop 1 )" },
+    { command: `cd ${scripts} && bun src/cli.ts freshness`, cwd: "/repo" },
+    { argv: ["env", "-C", scripts, "bun", "src/cli.ts", "freshness"], cwd: "/repo" },
+    { argv: ["bun", "src/cli.ts", "freshness"], cwd: scripts },
+    { argv: ["timeout", "-vk", "5", "60", "dori", "inbound", "slack"] },
+    { command: "bash -O extglob -c 'exec dori inbound slack --loop 1'" },
+  ];
+  expect(monitorCleanup(lanes, [manifest(monitors)])).toEqual([]);
+  // An open lane named anywhere still keeps the watch.
+  const open = [lane("slack", "working"), lane("api", "closed")];
+  expect(monitorCleanup(open, [manifest([{ command: "while true; do dori inbound slack; done # api" }])])).toEqual([]);
+});
+
+test("the dori command vocabulary is every command the CLI dispatches", async () => {
+  const tables = [
+    (await import("../src/cli-journal.ts")).journalCommands,
+    (await import("../src/cli-lanes.ts")).laneCommands,
+    (await import("../src/cli-ops.ts")).opsCommands,
+    (await import("../src/cli-messenger.ts")).messengerCommands,
+  ];
+  // cli.ts dispatches these three before its command tables.
+  const dispatched = ["harness", "update", "upstream", ...tables.flatMap((table) => Object.keys(table))];
+  expect(Object.keys(DORI_COMMANDS).sort()).toEqual([...new Set(dispatched)].sort());
+  for (const name of ["harness", "update", "upstream"])
+    expect(readFileSync(join(import.meta.dir, "../src/cli.ts"), "utf8")).toContain(`command === "${name}"`);
 });

@@ -72,12 +72,12 @@ const tiedBy = (monitor: Monitor, lane: Lane): string | null => {
   const panes = [lane.pane, ref?.id, ref ? formatRef(ref) : undefined].filter((id): id is string => !!id);
   if (Array.isArray(monitor.argv)) {
     if (panes.some((id) => monitor.argv?.includes(id))) return `${lane.key}:argv:pane`;
-    if (laneWords(monitor.argv, monitor.cwd).includes(lane.key)) return `${lane.key}:argv:key`;
+    if (laneWords(monitor.argv).includes(lane.key)) return `${lane.key}:argv:key`;
   }
   for (const field of TIED_FIELDS) {
     const words = tokens(monitor[field]);
     if (panes.some((id) => words.includes(id))) return `${lane.key}:${field}:pane`;
-    if ((field === "command" ? laneWords(monitor.command, monitor.cwd) : words).includes(lane.key))
+    if ((field === "command" ? laneWords(monitor.command) : words).includes(lane.key))
       return `${lane.key}:${field}:key`;
   }
   return null;
