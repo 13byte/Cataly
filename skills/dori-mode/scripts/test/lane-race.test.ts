@@ -232,6 +232,41 @@ test("a failed thread hook leaves the report unposted and the next tick sends it
   expect(hookCalls).toHaveLength(2);
 });
 
+test("a thread hook that keeps failing is tried every tick but reported once per failure", async () => {
+  const clock = fakeClock(T0 + 30 * MIN);
+  const base = depsFor(world, clock, state.dir, {
+    nudgeAfterMin: 999,
+    postAfterMin: 1,
+    hooks: { threadReply: ["notify", "{thread}", "{text}"] },
+  });
+  const reporting: Lane = { ...lane, thread: "telegram:1/2", reportProtocol: "jsonl-v1" };
+  await base.registry.write(reporting);
+  new Reports(state.dir).report(reporting.key, "blocker", "needs owner decision", T0);
+  const outcomes = [1, 1, 2, 0];
+  let hookCalls = 0;
+  const deps: FlowDeps = {
+    ...base,
+    run: async (argv, opts) => {
+      if (argv[0] !== "notify") return base.run(argv, opts);
+      hookCalls++;
+      return { code: outcomes.shift() ?? 0, out: "", err: "" };
+    },
+  };
+  const tick = async () => {
+    const acts = await freshnessTick(deps, "/home/test");
+    clock.at += 2 * MIN;
+    return acts.map((a) => `${a.kind} ${a.detail}`);
+  };
+
+  expect(await tick()).toEqual(["post-failed thread hook failed (exit 1)"]);
+  // The same failure again is retried silently: a monitor on POST-FAILED is not woken every tick.
+  expect(await tick()).toEqual([]);
+  expect(await tick()).toEqual(["post-failed thread hook failed (exit 2)"]);
+  expect((await tick()).map((a) => a.split(" ")[0])).toEqual(["posted"]);
+  expect(hookCalls).toBe(4);
+  expect((await stored(deps)).lastFreshnessNote).toBeUndefined();
+});
+
 test("a lane lock left by a dead writer is taken over and released after the update", async () => {
   const deps = depsFor(world, fakeClock(T0), state.dir);
   await deps.registry.write(lane);

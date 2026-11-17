@@ -228,10 +228,13 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
       }
       const text = `Progress (from the lane's last report): ${scrubForThread(report ?? "", home)}`;
       const sent = await deps.run(fill(hook, { thread: lane.thread, text, key: lane.key }));
-      // Only a delivered report counts as posted: a failed hook leaves it unposted, so the next tick sends it again.
+      // Only a delivered report counts as posted: a failed hook leaves it unposted, so the next tick sends it again. Like
+      // a held-back report, the same failure is printed once, not on every retry.
       if (sent.code !== 0) {
-        await remember(deps, lane.key, { lastSeenReport: current.lastSeenReport });
-        acts.push({ kind: "post-failed", lane: lane.key, detail: `thread hook failed (exit ${sent.code})` });
+        const detail = `thread hook failed (exit ${sent.code})`;
+        const note = `post-failed|${detail}|${report}`;
+        if (note !== current.lastFreshnessNote) acts.push({ kind: "post-failed", lane: lane.key, detail });
+        await remember(deps, lane.key, { lastSeenReport: current.lastSeenReport, lastFreshnessNote: note });
         continue;
       }
       await remember(deps, lane.key, {
