@@ -135,13 +135,13 @@ export function classifyOmpArgv(argv: readonly string[]): OmpArgv {
   if (name !== "bun" && name !== "node") return { kind: "other", command };
   let script = 1;
   while (command[script]?.startsWith("-")) script++;
-  // Bun's `run` executes the following script, with its own leading flag words.
-  if (name === "bun" && command[script] === "run") {
+  const prefix = name === "bun" && command[script] === "run" ? 2 : 1;
+  if (prefix === 2) {
     script++;
     while (command[script]?.startsWith("-")) script++;
   }
   if (OMP_EXECUTABLE.test(command[script] ?? "")) return { kind: "omp", command };
-  if (script > 1 && command.slice(script + 1).some((arg) => OMP_EXECUTABLE.test(arg))) return { kind: "unparsed" };
+  if (script > prefix && command.slice(script + 1).some((arg) => OMP_EXECUTABLE.test(arg))) return { kind: "unparsed" };
   return { kind: "other", command };
 }
 

@@ -119,6 +119,7 @@ test.each([
   ["Node's ordinary script named run", ["node", "run", "/x/omp"]],
   ["a Node wrapper", ["node", "/opt/wrapper.js", "/x/omp"]],
   ["a Bun wrapper", ["bun", "/opt/wrapper.ts", "/x/omp"]],
+  ["a Bun run wrapper", ["bun", "run", "/opt/wrapper.ts", "/x/omp"]],
   ["another Bun subcommand", ["bun", "install", "/x/omp"]],
   ["an external wrapper", ["/opt/wrapper", "bun", "run", "/x/omp"]],
 ])("%s is not inferred to execute OMP from its arguments", (_, prefix) => {
