@@ -238,8 +238,7 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
   );
   const runtimeHealth = new RuntimeHealthWriter(monitors);
 
-  // Only the file this process wrote: another process may have taken the pane since. A tombstone (`retirePane`) carries
-  // no pid and belongs to the record's own history, so a role-less session must not erase the resume pointer.
+  // Only remove a live record this process wrote. Inactive pointers are handled separately on plain TUI takeover.
   const removePane = (): void => {
     runtimeHealth.stop();
     if (
@@ -266,8 +265,8 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
         approvalPending: false,
         updatedAt: new Date().toISOString(),
       });
+      if (process.env.HC_TERMINAL_ID) process.stdout.write("\x1b]7501;state=unknown:app=omp\x1b\\");
     }
-    if (process.env.HC_TERMINAL_ID) process.stdout.write("\x1b]7501;state=unknown:app=omp\x1b\\");
     paneWritten = undefined;
   };
 
@@ -307,11 +306,8 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
     // Only an interactive session taking over the pane clears an inactive resume pointer. Print/RPC children
     // inherit pane ids too, but do not own the terminal. A record another live process owns stays untouched.
     if (!role) {
-      if (ctx.mode === "tui" && !paneHeldByAnother(paneId)) {
-        rmSync(paneStatePath(stateDir, paneId), { force: true });
-        if (process.env.HC_TERMINAL_ID) process.stdout.write("\x1b]7501;state=unknown:app=omp\x1b\\");
-      }
       removePane();
+      if (ctx.mode === "tui" && !paneHeldByAnother(paneId)) rmSync(paneStatePath(stateDir, paneId), { force: true });
       return;
     }
     if (paneHeldByAnother(paneId)) return;
