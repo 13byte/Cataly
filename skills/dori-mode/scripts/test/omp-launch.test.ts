@@ -216,10 +216,6 @@ test("finished OMP lanes disappearing during either startup check are done, not 
 
 test("a completed lane does not hide a real runtime read failure", async () => {
   await expect(
-    start(
-      "broken-read",
-      { goal: { status: "none" } },
-      { finish: { after: 20_000, kind: "closed", readFailure: "server unavailable" } },
-    ),
+    start("broken-read", {}, { finish: { after: 20_000, kind: "closed", readFailure: "server unavailable" } }),
   ).rejects.toThrow("server unavailable");
 });

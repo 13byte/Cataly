@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { launchLane } from "../src/launch.ts";
 import { depsFor, fakeClock, newWorld, withState, type World } from "./fakes.ts";
 
-// What a ready status may bring forward before the 20 s startup check, and what it may not.
+// Nothing seen before the 20 s startup check confirms a start: a failure can still show on the screen it reads.
 
 const T0 = Date.parse("2026-01-01T12:00:00.000Z");
 
@@ -19,7 +19,7 @@ beforeEach(() => {
 
 afterEach(() => state.done());
 
-test("a ready status alone never confirms a start before the 20 s check reads the screen the way it always did", async () => {
+test("neither a ready status nor an early goal confirms a start before the 20 s check reads the screen", async () => {
   // Given a herdr pane whose screen changes with the time launch has waited, as a provider failure shows a few
   // seconds after the agent came up.
   const brief = join(state.dir, "brief.md");
@@ -68,7 +68,11 @@ test("a ready status alone never confirms a start before the 20 s check reads th
   expect(await launch("working-late", "working", failsFrom(10_000))).toBe(
     "STARTUP_ERROR working-late w:p9: No API key",
   );
-  // A clean start is still confirmed: at 20 s with no marker, at once with a goal.
+  // A goal that shows at once does not confirm the start before the 20 s screen is checked: an idle agent that shows a
+  // failure by then has not started.
+  const goalThenFail = (ms: number) => `❯ \n Pursuing goal (1m)${ms < 10_000 ? "" : "\nNo API key found\n$ "}`;
+  expect(await launch("goal-then-fail", "idle", goalThenFail)).toBe("STARTUP_ERROR goal-then-fail w:p9: No API key");
+  // A clean start is still confirmed at the 20 s check, with or without a marker.
   expect(await launch("optout-clean", "idle", () => "❯ ", { goalMarker: "" })).toBe("STARTUP_OK optout-clean w:p9");
   expect(await launch("goal-clean", "idle", () => "❯ \n Pursuing goal (1m)")).toBe("STARTUP_OK goal-clean w:p9");
 });

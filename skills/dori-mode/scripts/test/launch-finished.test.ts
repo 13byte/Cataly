@@ -31,8 +31,7 @@ for (const check of [1, 2]) {
             agentCommand: ["omo", "--model", "{model}", "{prompt}"],
           });
           const run = async (argv: readonly string[]) => {
-            // Gone from the check on: an earlier 2 s status poll that sees it gone only waits for the full check.
-            if (waits >= check && argv[0] === "hc" && argv[1] === "--json") {
+            if (waits === check && argv[0] === "hc" && argv[1] === "--json") {
               if (disappearance === "read" && argv[2] === "read") return { code: 3, out: "", err: "not found" };
               if (argv[2] === "ls" && disappearance === "list") return { code: 3, out: "", err: "not found" };
               if (argv[2] === "ls" && disappearance === "missing")
