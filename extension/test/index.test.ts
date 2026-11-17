@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
 import { paneStatePath, readPaneState, writePaneState } from "../../skills/dori-mode/scripts/src/lane-state";
@@ -68,23 +69,6 @@ describe("role", () => {
     expect(existsSync(paneStatePath(stateDir, PANE))).toBe(false);
     // approval hooks would make omp emit approval events and drop read speculation in every session
     expect(normal.handlers.has("tool_approval_requested")).toBe(false);
-  });
-
-  test("a fresh session in the same process keeps the role and its monitors", async () => {
-    const started = session("dori-old", [roleEntry("dori")]);
-    const fresh = session("dori-new");
-    const pi = await load({ session: started, flags: { "dori-role": "dori" } });
-    await pi.emit("session_start");
-    expect(pi.active).toContain("monitor");
-
-    pi.session = fresh;
-    await pi.emit("session_switch", { type: "session_switch", reason: "new" });
-    expect(fresh.entries).toContainEqual(roleEntry("dori"));
-    expect(pi.active).toContain("monitor");
-    expect(readPaneState(stateDir, PANE)).toMatchObject({ role: "dori", sessionId: "dori-new" });
-    expect(await pi.emit("before_agent_start", agentStart)).toContainEqual({
-      systemPrompt: ["base prompt", "<fake-ulw-policy>"],
-    });
   });
 
   test("dori -> normal -> dori switching follows each session's role", async () => {
@@ -235,7 +219,7 @@ describe("monitor restore", () => {
     const result = await pi.tools.get("monitor")?.execute("call", params, undefined, undefined, pi.ctx());
     return result?.content[0]?.text ?? "";
   };
-  const tick = { op: "start", name: "tick", argv: ["sh", "-c", "echo up; sleep 30"], filter: "^up" };
+  const tick = { op: "start", name: "tick", argv: ["sh", "-c", "echo up; exec sleep 30"], filter: "^up" };
 
   test("a resumed Dori session restarts the monitors it recorded and their lines wake it again", async () => {
     const s = session("dori-r1");
@@ -256,25 +240,82 @@ describe("monitor restore", () => {
     await resumed.emit("session_shutdown");
   });
 
-  test("a fresh session in the same process keeps running the monitors it already had", async () => {
+  test("a fresh Dori session restores carried monitors from a native branch snapshot", async () => {
     const started = session("dori-c1", [roleEntry("dori")]);
     const fresh = session("dori-c2");
     const pi = await load({ session: started, flags: { "dori-role": "dori" } });
-    await pi.emit("session_start");
-    await monitorCall(pi, tick);
-    expect(await monitorCall(pi, { op: "list" })).toContain("tick (pid");
+    let resumed: FakePi | undefined;
+    const pids: number[] = [];
+    const alive = (pid: number): boolean => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    try {
+      await pi.emit("session_start");
+      await monitorCall(pi, tick);
+      const initial = await monitorCall(pi, { op: "list" });
+      expect(initial).toContain("tick (pid");
+      const oldPid = Number(/pid (\d+)/.exec(initial)?.[1]);
+      pids.push(oldPid);
+      expect(alive(oldPid)).toBe(true);
+      await until(() => pi.messages.some((m) => m.content === "[tick] up"));
+      pi.messages.length = 0;
 
-    pi.session = fresh;
-    await pi.emit("session_switch", { type: "session_switch", reason: "new" });
-    // the new branch records the replay, so a later resume restores it again
-    expect(fresh.entries).toContainEqual({
-      type: "custom",
-      customType: "omp-dori:monitor",
-      data: { ...tick, cwd: "/tmp" },
-    });
-    expect(await monitorCall(pi, { op: "list" })).toContain("tick (pid");
-    await until(() => pi.messages.some((m) => m.content === "[tick] up"));
-    await pi.emit("session_shutdown");
+      pi.session = fresh;
+      const snapshot = pi.ctx().sessionManager.getBranch();
+      await pi.emit("session_switch", { type: "session_switch", reason: "new" });
+      expect(snapshot).toEqual([]);
+      expect(fresh.entries).toEqual([
+        roleEntry("dori"),
+        { type: "custom", customType: "omp-dori:monitor", data: { ...tick, cwd: tmpdir() } },
+      ]);
+      expect(pi.active).toContain("monitor");
+      expect(await pi.emit("before_agent_start", agentStart)).toContainEqual({
+        systemPrompt: ["base prompt", "<fake-ulw-policy>"],
+      });
+      const carried = await monitorCall(pi, { op: "list" });
+      expect(carried).toContain("tick (pid");
+      expect(carried.split("\n")).toHaveLength(1);
+      const carriedPid = Number(/pid (\d+)/.exec(carried)?.[1]);
+      pids.push(carriedPid);
+      await until(() => !alive(oldPid));
+      expect(alive(carriedPid)).toBe(true);
+      await until(() => pi.messages.some((m) => m.content === "[tick] up"));
+      expect(pi.messages.filter((m) => m.content === "[tick] up")).toEqual([
+        { content: "[tick] up", options: { triggerTurn: true, deliverAs: "aside" } },
+      ]);
+      const metadata = join(stateDir, "monitors", `${fresh.id}.json`);
+      expect(JSON.parse(readFileSync(metadata, "utf8"))).toEqual({
+        version: 1,
+        sessionId: fresh.id,
+        monitors: [{ name: tick.name, argv: tick.argv, filter: tick.filter, cwd: tmpdir() }],
+      });
+      expect(lstatSync(metadata).mode & 0o777).toBe(0o600);
+      expect(readPaneState(stateDir, PANE)).toMatchObject({ role: "dori", sessionId: fresh.id });
+      await pi.emit("session_shutdown");
+      await until(() => pids.every((pid) => !alive(pid)));
+      expect(await monitorCall(pi, { op: "list" })).toBe("no monitors running");
+
+      // A later process needs only the destination records, not the original role flag or monitor process.
+      resumed = await load({ session: fresh });
+      await resumed.emit("session_start");
+      const restored = await monitorCall(resumed, { op: "list" });
+      expect(restored).toContain("tick (pid");
+      expect(restored.split("\n")).toHaveLength(1);
+      pids.push(Number(/pid (\d+)/.exec(restored)?.[1]));
+      const restoredSession = resumed;
+      await until(() => restoredSession.messages.some((m) => m.content === "[tick] up"));
+      expect(fresh.entries).toHaveLength(2);
+      expect(resumed.active).toContain("monitor");
+    } finally {
+      await pi.emit("session_shutdown");
+      await resumed?.emit("session_shutdown");
+      await until(() => pids.every((pid) => !alive(pid)));
+    }
   });
 
   test("a monitor stopped by name, even after it exited on its own, is not restored", async () => {
@@ -331,6 +372,32 @@ describe("pane state", () => {
     } finally {
       if (owner.exitCode === null) owner.kill();
       await owner.exited;
+    }
+  });
+
+  test("a live process reusing a stale record's pid does not block a new session from recording the pane", async () => {
+    const unrelated = Bun.spawn(["sleep", "30"], { stdin: "ignore", stdout: "ignore", stderr: "inherit" });
+    try {
+      writePaneState(stateDir, {
+        paneId: PANE,
+        role: "lane",
+        sessionId: "stale",
+        cwd: "/tmp",
+        pid: unrelated.pid,
+        startedAt: "2000-01-01T00:00:00.000Z",
+        updatedAt: "2000-01-01T00:00:00.000Z",
+        goal: { status: "none" },
+        approvalPending: false,
+      });
+      const fresh = await load({ session: session("fresh"), flags: { "dori-role": "lane" } });
+      await fresh.emit("session_start");
+      await fresh.emit("agent_start");
+      expect(readPaneState(stateDir, PANE)).toMatchObject({ pid: process.pid, sessionId: "fresh" });
+      await fresh.emit("session_shutdown");
+      expect(readPaneState(stateDir, PANE)).toBeNull();
+    } finally {
+      unrelated.kill();
+      await unrelated.exited;
     }
   });
 

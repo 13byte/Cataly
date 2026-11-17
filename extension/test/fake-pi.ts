@@ -61,7 +61,7 @@ export const fakePi = (options: FakeOptions): FakePi => {
       sessionManager: {
         getSessionId: () => fake.session.id,
         getSessionFile: () => fake.session.file,
-        getBranch: () => fake.session.entries,
+        getBranch: () => [...fake.session.entries],
       },
       ui: { notify: (message: string) => void fake.notes.push(message) },
     }),
