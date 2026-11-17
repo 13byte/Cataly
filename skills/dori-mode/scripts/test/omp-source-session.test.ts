@@ -110,6 +110,7 @@ const wrapped = [
   ["the side wrapper", ["/home/user/.omp-dori/bin/omp-dori", "omp"]],
   ["a shell exec", ["sh", "-c", 'exec /opt/bin/omp "$@"', "sh"]],
   ["an env -S string", ["env", "-S", "/opt/bin/omp --advisor"]],
+  ["a shell behind timeout", ["timeout", "600", "sh", "-c", 'exec omp "$@"', "sh"]],
 ] as const;
 const ompProc = ["bun", "/opt/bin/omp", "--dori-role", "lane"];
 const wrappedLaunch = (deps: FlowDeps, prefix: readonly string[], key: string, brief: string) =>
@@ -152,6 +153,7 @@ test.each([
   ],
   ["its own -c option", ["mycli", "-c", "use omp here"]],
   ["its own -c option behind env", ["env", "TERM=xterm", "codex", "-c", 'instructions="Compare omp and codex"']],
+  ["a shell passing a quoted omp value", ["sh", "-c", 'exec codex -c \'instructions="omp"\' "$@"', "sh"]],
 ] as const)("a custom agent behind %s still starts on its goal marker", async (_, prefix) => {
   const { deps, brief } = setup(["claude"], "custom", false);
   world.screen = "Pursuing goal: the brief";

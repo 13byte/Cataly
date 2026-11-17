@@ -120,7 +120,8 @@ const OMP_WORD =
   /(?:^|[/\\])omp(?:\s|$)|pi-coding-agent[/\\]dist[/\\]cli\.js|^\S*\/packages\/coding-agent\/scripts\/omp\.ts$/;
 // The command string of a shell (`sh -c`), `env -S` or a package runner (`npx -c`, `--call=`) names OMP after a
 // separator as well: `cd /d && exec omp "$@"`. Only those programs' strings are read so; another agent's `-c` is not.
-const OMP_IN_SCRIPT = /(?:^|[\s;&|("'/])omp(?:[\s;&|)"']|$)/;
+// A quoted path (`"$HOME/bin/omp"`) counts; a quoted value (`instructions="omp"`) or comment word does not.
+const OMP_IN_SCRIPT = /(?:^|[\s;&|(])omp(?:[\s;&|)]|$)|\/omp(?:[\s;&|)"']|$)/;
 const SCRIPT_OPTION = /^(?:-[A-Za-z]*c[A-Za-z]*|-S|--split-string|--call)$/;
 const SCRIPT_PROGRAMS = new Set([...SHELLS, "env", "npx", "bunx", "bun"]);
 // `words` start at a program (assignments aside): only that program's script option is read as a script.
@@ -144,10 +145,13 @@ export type OmpArgv =
   | { readonly kind: "omp" | "other"; readonly command: readonly string[] }
   | { readonly kind: "unparsed" };
 
-export function classifyOmpArgv(argv: readonly string[]): OmpArgv {
+/**
+ * Where the command starts once each readable prefix is removed in turn (`env -i env -u X nice timeout 600 omp` reads
+ * like `omp`): `stuck` names the prefix word whose options could not be read, which then starts the command.
+ */
+function prefixEnd(argv: readonly string[]): { at: number; launched: boolean; stuck?: string } {
   let at = 0;
   let launched = false;
-  // Each readable prefix is removed in turn, so `env -i env -u X nice timeout 600 omp` reads like `omp`.
   for (;;) {
     while (ASSIGNMENT.test(argv[at] ?? "")) at++;
     const word = argv[at]?.split("/").at(-1) ?? "";
@@ -158,16 +162,19 @@ export function classifyOmpArgv(argv: readonly string[]): OmpArgv {
     else if (word === "bun" && argv[at + 1] === "x") next = launcherCommandAt(argv, at + 2, RUNNER);
     // The side wrapper's `omp` subcommand runs this home's OMP with the arguments that follow.
     else if (word === "omp-dori" && argv[at + 1] === "omp") next = at + 1;
-    else break;
-    if (next === undefined) {
-      // An unreadable launcher prefix matters only when it may run OMP; any other command keeps its own contract.
-      return word === "env" || names(argv.slice(at))
-        ? { kind: "unparsed" }
-        : { kind: "other", command: argv.slice(at) };
-    }
+    else return { at, launched };
+    if (next === undefined) return { at, launched, stuck: word };
     at = next;
     launched ||= word !== "env";
-    if (word === "omp-dori") break;
+    if (word === "omp-dori") return { at, launched };
+  }
+}
+
+export function classifyOmpArgv(argv: readonly string[]): OmpArgv {
+  const { at, launched, stuck } = prefixEnd(argv);
+  // An unreadable launcher prefix matters only when it may run OMP; any other command keeps its own contract.
+  if (stuck !== undefined) {
+    return stuck === "env" || names(argv.slice(at)) ? { kind: "unparsed" } : { kind: "other", command: argv.slice(at) };
   }
   const command = argv.slice(at);
   const classified = classifyCommand(command);
@@ -205,8 +212,7 @@ export const isOmpArgv = (argv: readonly string[]): boolean => classifyOmpArgv(a
  * only from OMP's trusted session record, so a wrapped OMP is never vouched for by quoted screen text. Role flags and
  * update guards need the exact start instead (isOmpArgv, classifyOmpArgv).
  */
-export const mayRunOmpArgv = (argv: readonly string[]): boolean => {
-  const classified = classifyOmpArgv(argv);
-  // A readable prefix is removed first, so `env TERM=x codex -c '…omp…'` is read as codex's own option.
-  return classified.kind === "omp" || names(classified.kind === "other" ? classified.command : argv);
-};
+export const mayRunOmpArgv = (argv: readonly string[]): boolean =>
+  // Readable prefixes are removed first, so `env TERM=x codex -c '…omp…'` is codex's own option and
+  // `timeout 600 sh -c 'exec omp'` is the shell's script.
+  isOmpArgv(argv) || names(argv.slice(prefixEnd(argv).at));
