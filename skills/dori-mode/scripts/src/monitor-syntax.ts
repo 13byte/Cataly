@@ -2,14 +2,15 @@
 // command substitutions inside double quotes, and `env -S`'s own splitting.
 
 /**
- * One word of a command string: its text with quotes, where it is, whether a new command starts at it, and the
- * subshells and command substitutions it is in, innermost last.
+ * One word of a command string: its text with quotes, where it is, the subshells and command substitutions it is in
+ * (innermost last), and, where a new command starts at it, the operator before it (`;`, `&&`, `|`, `(`, ...; a line
+ * break or the line's start is `;`).
  */
 export type ShellWord = {
   readonly text: string;
   readonly from: number;
   readonly to: number;
-  readonly starts: boolean;
+  readonly after: string | undefined;
   readonly scope: readonly number[];
 };
 
@@ -53,15 +54,15 @@ const substitutionEnd = (text: string, from: number): number => {
 export const shellWords = (line: string): ShellWord[] => {
   const words: ShellWord[] = [];
   let start = -1;
-  let starts = true;
+  let after: string | undefined = ";";
   let quote: string | undefined;
   // The open subshells and substitutions: their ids, and whether each is a backtick one.
   const scope: number[] = [];
   const backtick: boolean[] = [];
   let groups = 0;
   const end = (at: number): void => {
-    if (start >= 0) words.push({ text: line.slice(start, at), from: start, to: at, starts, scope: [...scope] });
-    if (start >= 0) starts = false;
+    if (start >= 0) words.push({ text: line.slice(start, at), from: start, to: at, after, scope: [...scope] });
+    if (start >= 0) after = undefined;
     start = -1;
   };
   for (let at = 0; at < line.length; at++) {
@@ -87,7 +88,8 @@ export const shellWords = (line: string): ShellWord[] => {
     const operator = OPERATORS.find((op) => line.startsWith(op, at));
     if (/\s/.test(char) || operator !== undefined) {
       end(at);
-      if (char === "\n" || operator !== undefined) starts = true;
+      if (char === "\n" || operator === ")") after = ";";
+      else if (operator !== undefined) after = operator;
       if (operator === ")" || (operator === "`" && backtick.at(-1) === true)) {
         scope.pop();
         backtick.pop();

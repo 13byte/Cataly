@@ -140,6 +140,16 @@ const ROWS: readonly Row[] = [
   [`(cd ${SKILL} && bun src/cli.ts freshness)`, "freshness", 0, { cwd: "/other" }],
   [`(cd ${SKILL}; (true); bun src/cli.ts freshness)`, "freshness", 0, { cwd: "/other" }],
   [`{ cd ${SKILL}; } ; bun src/cli.ts freshness`, "freshness", 0, { cwd: "/other" }],
+  // A `cd` that may not run, or runs in a pipeline's own process, leaves the old directory possible too.
+  [`false && cd ${SKILL}; bun src/cli.ts freshness`, "freshness", 1, { cwd: "/other" }],
+  [`true || cd ${SKILL}; bun src/cli.ts freshness`, "freshness", 1, { cwd: "/other" }],
+  [`if false; then cd ${SKILL}; fi; bun src/cli.ts freshness`, "freshness", 1, { cwd: "/other" }],
+  [`while false; do cd ${SKILL}; done; bun src/cli.ts freshness`, "freshness", 1, { cwd: "/other" }],
+  [`cd ${SKILL} | cat; bun src/cli.ts freshness`, "freshness", 1, { cwd: "/other" }],
+  [`cd ${SKILL} & bun src/cli.ts freshness`, "freshness", 1, { cwd: "/other" }],
+  [`false && cd /other; bun src/cli.ts freshness`, "freshness", 1],
+  [`if true; then cd ${SKILL} && bun src/cli.ts freshness; fi`, "freshness", 0, { cwd: "/other" }],
+  [`cd /other; if true; then cd ${SKILL}; fi; cd ${SKILL}; bun src/cli.ts freshness`, "freshness", 0],
   [`cd ${SKILL} && bun src/cli.ts freshness`, "freshness", 0, { cwd: "/other" }],
   [["env", `--chdir=${SKILL}`, "bun", "src/cli.ts", "freshness"], "freshness", 0, { cwd: "/other" }],
   // A dori option's value is a value, never the command's platform.

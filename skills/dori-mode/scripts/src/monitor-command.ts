@@ -15,7 +15,9 @@ import { quotedSubstitutions, shellWords, splitString, unquote } from "./monitor
 // are its own words (monitor-dori.ts), an option's value never (`dori send --text slack discord`). Every other word may
 // name a lane, as before: an argument (`dori checkpoints --cwd X dori`), a path (`ls /x/dori freshness`) or another
 // program's word (`env rg -c dori freshness`). A legacy record's non-string argv word holds a program's place.
-// A `cd` holds for the commands after it in its own subshell or command substitution only.
+// A `cd` holds for the commands after it in its own subshell or command substitution only, and replaces the directory
+// only where it surely runs in that shell; elsewhere it adds a possible one, and a relative entry must be the skill CLI
+// in every possible directory (`false && cd SKILL; bun src/cli.ts` may run elsewhere).
 // Known limits: a `#` comment is read as words; behind an `env` option this does not know, no program is read, so
 // every word after it may name a lane as before.
 const DORI_NAMES: Record<string, true> = { dori: true, "omp-dori": true };
@@ -28,13 +30,13 @@ const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 /**
  * A word as passed on and the whitespace-split word of the line each of its characters is in; in a command string,
- * whether a new command starts at it, the subshells and substitutions it is in, its own words as a script, and its
+ * the operator before it where a new command starts at it, the subshells and substitutions it is in, its own words as a script, and its
  * quoted command substitutions.
  */
 type Word = {
   readonly word: string;
   readonly baseAt: (at: number) => number;
-  readonly starts?: boolean;
+  readonly after?: string | undefined;
   readonly scope?: readonly number[];
   readonly script?: () => readonly Word[];
   readonly substitutions?: () => readonly (readonly Word[])[];
@@ -52,9 +54,14 @@ const scriptAt = (words: readonly string[], at: number): number | undefined => {
   return undefined;
 };
 
-// `path` as run in `dir`; undefined when the directory is not known.
-const within = (dir: string | undefined, path: string): string | undefined =>
-  path.startsWith("/") ? path : dir === undefined ? undefined : join(dir, path);
+/** The directories a command may run in; undefined is one not known. */
+type Dirs = readonly (string | undefined)[];
+// `path` as run in each of `dirs`.
+const within = (dirs: Dirs, path: string): Dirs =>
+  path.startsWith("/") ? [path] : dirs.map((dir) => (dir === undefined ? undefined : join(dir, path)));
+const OPENS_LIST: Record<string, true> = { ";": true, "(": true, "$(": true, "`": true };
+const OPENS_BODY: Record<string, true> = { if: true, while: true, until: true, for: true, case: true };
+const CLOSES_BODY: Record<string, true> = { fi: true, done: true, esac: true };
 
 /**
  * The words of a watch's argv (exact) or command string (split at whitespace, quotes trimmed) that may name a lane:
@@ -71,19 +78,20 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
   }
   // A string's words, where `baseAt` maps its characters to the line's whitespace-split words.
   const read = (text: string, baseAt: (at: number) => number): Word[] =>
-    shellWords(text).map(({ text: word, from, starts, scope }) => {
+    shellWords(text).map(({ text: word, from, after, scope }) => {
       const passed = unquote(word);
       const at = (i: number) => baseAt(from + (passed.at[i] ?? 0));
       const substitutions = () =>
         quotedSubstitutions(word).map((s) => read(word.slice(s.from, s.to), (i) => baseAt(from + s.from + i)));
-      return { word: passed.text, baseAt: at, starts, scope, script: () => read(passed.text, at), substitutions };
+      return { word: passed.text, baseAt: at, after, scope, script: () => read(passed.text, at), substitutions };
     });
-  const isDori = (word: string, dir: string | undefined): boolean =>
-    DORI_NAMES[basename(word)] === true || SKILL_SOURCE.test(within(dir, word) ?? word);
+  // A relative entry is the skill CLI only when it is in every directory the command may run in.
+  const isDori = (word: string, dirs: Dirs): boolean =>
+    DORI_NAMES[basename(word)] === true || within(dirs, word).every((path) => SKILL_SOURCE.test(path ?? word));
   const own = new Set<number>();
 
-  // One command run in `dir`; the directory the commands after it run in.
-  const commandOf = (ws: readonly Word[], dir: string | undefined): string | undefined => {
+  // One command run in `dir`; for a `cd`, the directories it moves to.
+  const commandOf = (ws: readonly Word[], dir: Dirs): Dirs | undefined => {
     const words = ws.map((w) => w.word);
     const mine = (at: number) => own.add(ws[at]?.baseAt(0) ?? -1);
     let at = 0;
@@ -107,7 +115,7 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
       if (isDori(words[at] ?? "", here)) program = at;
       else if (name === "cd") {
         const target = words.slice(at + 1).find((word) => !word.startsWith("-"));
-        return target === undefined ? undefined : within(dir, target);
+        return target === undefined ? [undefined] : within(dir, target);
       } else if (name === "env") {
         const env = envCommandAt(words, at + 1);
         if (env?.chdir !== undefined) here = within(here, env.chdir);
@@ -140,34 +148,51 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
       }
     }
     if (program !== undefined) for (const i of doriOwnWords(words, program)) mine(i);
-    return dir;
+    return undefined;
   };
 
   // Each command of a run of words, cut where a new command starts. A `cd` moves the commands after it in its own
-  // subshell or substitution; a new one starts in the directory around it.
-  const run = (ws: readonly Word[], dir: string | undefined): void => {
-    const dirs = new Map<string, string | undefined>([["", dir]]);
-    const dirOf = (scope: readonly number[]): string | undefined => {
+  // subshell or substitution, a new one starting where the one around it is. Only a `cd` that surely runs in this
+  // shell replaces the directory: one starting a list, outside a condition or loop body, and not in a pipeline or the
+  // background. One after `&&` or `||` or in a body adds its directory as possible; one in a pipeline changes nothing.
+  // The command right after a `cd` with `&&` runs where it moved, with `||` where it was.
+  const run = (ws: readonly Word[], dirs: Dirs): void => {
+    const scopes = new Map<string, Dirs>([["", dirs]]);
+    const dirOf = (scope: readonly number[]): Dirs => {
       const key = scope.join("/");
-      if (!dirs.has(key)) dirs.set(key, dirOf(scope.slice(0, -1)));
-      return dirs.get(key);
+      if (!scopes.has(key)) scopes.set(key, dirOf(scope.slice(0, -1)));
+      return scopes.get(key) ?? [undefined];
     };
-    let from = 0;
-    for (let at = 1; at <= ws.length; at++) {
-      if (at < ws.length && !ws[at]?.starts) continue;
-      const command = ws.slice(from, at);
-      const scope = command[0]?.scope ?? [];
-      const here = dirOf(scope);
-      for (const w of command) for (const substitution of w.substitutions?.() ?? []) run(substitution, here);
-      dirs.set(scope.join("/"), commandOf(command, here));
-      from = at;
+    const commands: Word[][] = [];
+    for (const w of ws) {
+      const last = commands.at(-1);
+      if (last === undefined || w.after !== undefined) commands.push([w]);
+      else last.push(w);
     }
+    let bodies = 0;
+    let cd: { readonly to: Dirs; readonly from: Dirs } | undefined;
+    commands.forEach((command, index) => {
+      const scope = command[0]?.scope ?? [];
+      const key = scope.join("/");
+      const after = command[0]?.after ?? ";";
+      const first = command[0]?.word ?? "";
+      if (OPENS_BODY[first] === true) bodies++;
+      if (CLOSES_BODY[first] === true) bodies = Math.max(0, bodies - 1);
+      const here = cd && after === "&&" ? cd.to : cd && after === "||" ? cd.from : dirOf(scope);
+      for (const w of command) for (const substitution of w.substitutions?.() ?? []) run(substitution, here);
+      const to = commandOf(command, here);
+      const next = commands[index + 1]?.[0]?.after;
+      cd = to === undefined ? undefined : { to, from: here };
+      if (to === undefined || after === "|" || next === "|" || next === "&") return;
+      const sure = OPENS_LIST[after] === true && bodies === 0;
+      scopes.set(key, sure ? to : [...new Set([...dirOf(scope), ...to])]);
+    });
   };
   run(
     line === undefined
       ? raw.map((word, base) => ({ word: typeof word === "string" ? word : "", baseAt: () => base }))
       : read(line, (at) => baseOf[at] ?? -1),
-    typeof cwd === "string" ? cwd : undefined,
+    [typeof cwd === "string" ? cwd : undefined],
   );
   return line === undefined
     ? raw.filter((_, at) => !own.has(at))
