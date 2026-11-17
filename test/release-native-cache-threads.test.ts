@@ -83,6 +83,27 @@ test("a live process whose open files cannot be read keeps every identity, even 
   );
 });
 
+// Astra (9bf008e): a stage is removed at once, so a descriptor opened after an earlier stage's check must still be
+// seen. Two killed owners' stages; a process opens a file in the one left once the other is gone.
+test("a dead owner's stage is checked against processes' files read afresh, not an earlier stage's look", () => {
+  const c = pruneFixture();
+  const ended = Bun.spawnSync(["/bin/sh", "-c", "echo $$"]).stdout.toString().trim();
+  const stages = ["a", "b"].map((name) => {
+    const x = c.native(name);
+    const stage = join(c.home, ".cache/omp-dori", `native-stage-${x.identity}-${ended}-1-${bootId()}-AbC123`);
+    mkdirSync(stage);
+    writeFileSync(join(stage, "still-needed"), "payload");
+    return stage;
+  });
+  const files = () => {
+    const left = stages.filter(existsSync);
+    const open = left.length < stages.length ? left.map((stage) => join(stage, "still-needed")) : [];
+    return { files: new Map([[String(process.pid), open]]), unread: [] };
+  };
+  c.prune({ files });
+  expect(stages.filter(existsSync)).toHaveLength(1);
+});
+
 test("process files are read the macOS way through lsof, and are unavailable where lsof is missing", async () => {
   const c = pruneFixture();
   const x = c.native("x");

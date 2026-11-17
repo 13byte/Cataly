@@ -119,7 +119,8 @@ export function pruneNativeCache(
     const waiting: { identity: string; directory: string; since: string }[] = [];
     for (const { directory, identity, state, since } of cachePending(home)) {
       if (state === "stage") {
-        const held = stageHolds(directory, readCwds, uses);
+        // A stage is removed at once, so its check reads processes' files afresh rather than the look's snapshot.
+        const held = stageHolds(directory, readCwds, { ...uses, files: readFiles });
         const entry = { directory, identity, bytes: exclusiveBytes(directory) };
         if (held.length) result.kept.push({ ...entry, protectedBy: held });
         else {
