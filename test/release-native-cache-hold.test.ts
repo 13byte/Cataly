@@ -20,7 +20,7 @@ function cache() {
   mkdirSync(refs);
   // Each identity's own source is gone, so only the reference under test can name it.
   const native = (name: string) => {
-    const f = overlayFixture(join(root, `source-${name}`), join(root, `upstream-${name}`), true, name);
+    const f = overlayFixture(join(root, `source-${name}`), join(root, `upstream-${name}`), true, `${name} ${root}`);
     const receipt = nativeCacheFixture(f.source, home, f.checkout);
     rmSync(f.source, { recursive: true });
     return receipt;
@@ -59,7 +59,7 @@ test("a linked directory the scan does not walk is reported against every identi
   const wrapper = `#!/bin/sh\nexec ${wrapped.omp} "$@"\n`;
   // A valid source of another identity outside the roots, holding a wrapper of this one.
   const outside = join(c.root, "outside");
-  overlayFixture(outside, join(c.root, "upstream-other"), true, "other");
+  overlayFixture(outside, join(c.root, "upstream-other"), true, `other ${c.root}`);
   writeFileSync(join(outside, "omp"), wrapper);
   symlinkSync(outside, join(c.refs, "release"));
   // A directory inside a root that the walk skips (node_modules), reached through a link.

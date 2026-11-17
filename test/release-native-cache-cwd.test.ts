@@ -19,7 +19,7 @@ test("when no working directory can be read, the report says so for every identi
   const root = realpathSync(mkdtempSync(join(tmpdir(), "dori-native-cwd-")));
   roots.push(root);
   const home = join(root, "home");
-  const f = overlayFixture(join(root, "source"), join(root, "upstream"), true, "unused");
+  const f = overlayFixture(join(root, "source"), join(root, "upstream"), true, `unused ${root}`);
   const receipt = nativeCacheFixture(f.source, home, f.checkout);
   rmSync(f.source, { recursive: true });
 
@@ -36,7 +36,7 @@ test("a live process whose working directory cannot be read is reported by pid; 
   const root = realpathSync(mkdtempSync(join(tmpdir(), "dori-native-cwd-")));
   roots.push(root);
   const home = join(root, "home");
-  const f = overlayFixture(join(root, "source"), join(root, "upstream"), true, "hidden");
+  const f = overlayFixture(join(root, "source"), join(root, "upstream"), true, `hidden ${root}`);
   const receipt = nativeCacheFixture(f.source, home, f.checkout);
   rmSync(f.source, { recursive: true });
   // Not dumpable, so even its own user cannot read its /proc cwd; it works inside the cache entry.

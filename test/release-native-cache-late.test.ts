@@ -49,10 +49,12 @@ test.each(Object.keys(LATE))("%s keeps the identity: it is put back before its g
   const c = pruneFixture();
   const x = c.native("x");
   if (name.includes("did not exist")) rmSync(c.refs, { recursive: true });
-  // Every scan of every prune can see the publication; the reviewers' scan numbers count from the quarantining prune.
-  let scans = 0;
+  // The reviewers' scan numbers count from the quarantining prune's one scan: scan 2 is the first scan that finds the
+  // copy quarantined (the live entries of the next prune), scan 3 the second (its look at the quarantined copies). They
+  // are counted by that state, not by calls, which differ between platforms.
+  let quarantinedScans = 0;
   const readCwds = (pids: readonly string[]) => {
-    if (++scans === scan) publish(c, x);
+    if (existsSync(`${x.directory}.pruning`) && ++quarantinedScans === scan - 1) publish(c, x);
     return ownProcessCwds(pids);
   };
   const runs = [0, GRACE / 2, 2 * GRACE].map((now) => c.prune({ readCwds, graceMs: GRACE, now }));

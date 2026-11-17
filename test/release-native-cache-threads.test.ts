@@ -1,7 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { processStart } from "../src/release/process-cwd.ts";
+import { processFiles } from "../src/release/process-files.ts";
 import { bootId } from "../src/update/proc.ts";
 import { keptFor, pruneFixture, removePruneFixtures } from "./native-cache-prune-setup.ts";
 
@@ -80,4 +81,27 @@ test("a live process whose open files cannot be read keeps every identity, even 
   expect(c.prune({ files, trust: [`${process.pid}@${processStart(String(process.pid))}`] }).quarantined).toHaveLength(
     1,
   );
+});
+
+test("process files are read the macOS way through lsof, and are unavailable where lsof is missing", async () => {
+  const c = pruneFixture();
+  const x = c.native("x");
+  const target = join(x.directory, "receipt.json");
+  const code =
+    "import os,sys; fd=os.open(os.environ['TARGET'], os.O_RDONLY); print('ready', flush=True); sys.stdin.readline()";
+  const holder = Bun.spawn(["python3", "-c", code], {
+    cwd: c.root,
+    env: { PATH: process.env["PATH"], TARGET: target },
+    stdin: "pipe",
+    stdout: "pipe",
+  });
+  try {
+    expect(new TextDecoder().decode((await holder.stdout.getReader().read()).value)).toBe("ready\n");
+    const read = processFiles("darwin");
+    if (!Bun.which("lsof")) return expect(read).toBeNull();
+    expect(read?.files.get(String(holder.pid))).toContain(realpathSync(target));
+  } finally {
+    holder.stdin.end();
+    await holder.exited;
+  }
 });

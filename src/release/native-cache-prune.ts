@@ -8,7 +8,7 @@ import { protections } from "./native-cache-refs.ts";
 import { stageHolds } from "./native-cache-stage.ts";
 import { type UseHoldOptions, useHolds } from "./native-cache-uses.ts";
 import { processCwds, processStart } from "./process-cwd.ts";
-import type { ProcessFiles } from "./process-files.ts";
+import { type ProcessFiles, processFiles } from "./process-files.ts";
 
 export type NativeCacheRemoval = {
   readonly directory: string;
@@ -84,13 +84,17 @@ export function pruneNativeCache(
     return found && { cwds: found.cwds, unreadable: found.unreadable.filter((pid) => !trusted(pid)) };
   };
   const privileged = new Set<string>();
+  // Processes' files are read once for this prune's one look (on macOS each read is a full lsof run); the check before
+  // a removal asked for reads them again.
+  const readFiles = options.files ?? processFiles;
+  let snapshot: ProcessFiles | null | undefined;
   const uses: UseHoldOptions = {
     readCwds,
     trusted,
     privileged,
     trustRootCwd: options.trustRootCwd === true,
+    files: () => (snapshot === undefined ? (snapshot = readFiles()) : snapshot),
     ...(options.table ? { table: options.table } : {}),
-    ...(options.files ? { files: options.files } : {}),
   };
   const graceMs = options.graceMs ?? GRACE_MS;
   const now = options.now ?? Date.now();
@@ -155,7 +159,8 @@ export function pruneNativeCache(
         result.quarantined.push({ directory, identity, bytes, since, removableAfter });
       } else doomed.push({ identity, directory, bytes, since });
     }
-    if (doomed.length) deleteQuarantined(cache, doomed, sources, roots, readCwds, uses, result);
+    if (doomed.length)
+      deleteQuarantined(cache, doomed, sources, roots, readCwds, { ...uses, files: readFiles }, result);
     for (const entry of entries) {
       if (entry.protectedBy.length) result.kept.push(entry);
       else if (waiting.some(({ identity }) => identity === entry.identity))

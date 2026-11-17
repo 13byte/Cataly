@@ -33,17 +33,23 @@ function groupFiles(pid: string, tasks: readonly string[]): string[] {
  * leader that exited leaves its threads running); elsewhere what `lsof` lists for this user. `unread` holds live pids
  * whose files could not be read, whatever their working directory shows. Null when nothing at all could be read.
  */
-export function processFiles(): ProcessFiles | null {
+export function processFiles(platform = process.platform): ProcessFiles | null {
   const files = new Map<string, string[]>();
   const unread: string[] = [];
   const uid = process.getuid?.();
-  if (process.platform !== "linux") {
-    const lsof = Bun.spawnSync(["lsof", "-n", ...(uid === undefined ? [] : ["-u", String(uid)]), "-F", "pn"], {
-      stdout: "pipe",
-      stderr: "pipe",
-      timeout: 60_000,
-    });
-    if (lsof.exitedDueToTimeout || lsof.signalCode || !lsof.stdout.length) return null;
+  if (platform !== "linux") {
+    let lsof: ReturnType<typeof Bun.spawnSync>;
+    try {
+      lsof = Bun.spawnSync(["lsof", "-n", ...(uid === undefined ? [] : ["-u", String(uid)]), "-F", "pn"], {
+        stdout: "pipe",
+        stderr: "pipe",
+        timeout: 60_000,
+      });
+    } catch {
+      return null;
+    }
+    // A run cut short printed only part of the table.
+    if (lsof.exitedDueToTimeout || lsof.signalCode || !lsof.stdout?.length) return null;
     let pid = "";
     for (const line of lsof.stdout.toString().split("\n")) {
       if (line.startsWith("p")) pid = line.slice(1);

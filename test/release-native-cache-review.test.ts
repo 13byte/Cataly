@@ -43,7 +43,12 @@ test("an explicit executable in the cache is leased before anything publishes it
 
 test("an installer given DORI_OMP inside the cache holds its lease while it publishes the wrapper", async () => {
   const s = setup();
-  const f = overlayFixture(join(s.root, "native-source"), join(s.root, "native-upstream"), true, "explicit-native");
+  const f = overlayFixture(
+    join(s.root, "native-source"),
+    join(s.root, "native-upstream"),
+    true,
+    `explicit-native ${s.root}`,
+  );
   mkdirSync(join(f.source, "scripts"));
   symlinkSync(
     resolve(import.meta.dir, "../scripts/source-dependencies.ts"),
@@ -187,9 +192,11 @@ test.each(["file", "directory", "executable"])(
     let argv: string[];
     if (kind === "executable") {
       // The entry's own copy of a program, run through a link outside the cache: only /proc/<pid>/exe shows the entry.
-      copyFileSync(realpathSync("/bin/sleep"), join(x.directory, "bin/sleeper"));
-      symlinkSync(join(x.directory, "bin/sleeper"), join(c.root, "sleeper"));
-      argv = [join(c.root, "sleeper"), "60"];
+      // Named `sleep` throughout, as a multi-call coreutils binary picks its program by that name.
+      copyFileSync(realpathSync("/bin/sleep"), join(x.directory, "bin/sleep"));
+      mkdirSync(join(c.root, "outside"));
+      symlinkSync(join(x.directory, "bin/sleep"), join(c.root, "outside/sleep"));
+      argv = [join(c.root, "outside/sleep"), "60"];
     } else {
       // The path comes through the environment, so neither the arguments nor the working directory name it.
       const open =
@@ -210,6 +217,8 @@ test.each(["file", "directory", "executable"])(
       // The program is running once /proc shows the entry's copy (a state, so polled for).
       else while (!readlinkSync(`/proc/${holder.pid}/exe`).startsWith(x.directory)) await Bun.sleep(10);
       const reason = `process ${holder.pid} has it open, mapped or running`;
+      // Still running when the report and the prune look, or the test proves nothing.
+      expect(holder.exitCode).toBeNull();
       expect(
         reportNativeCache(c.home, [], [c.refs], ownProcessCwds, { table: () => "", files: ownProcessFiles })[0]
           ?.protectedBy,
@@ -218,6 +227,7 @@ test.each(["file", "directory", "executable"])(
       expect(result.quarantined).toEqual([]);
       expect(keptFor(result, x.directory)).toContain(reason);
       expect(existsSync(x.omp)).toBe(true);
+      expect(holder.exitCode).toBeNull();
     } finally {
       holder.kill();
       await holder.exited;

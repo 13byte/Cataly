@@ -25,7 +25,7 @@ function cache() {
   roots.push(root);
   const home = join(root, "home");
   const native = (name: string, source = join(root, `source-${name}`)) => {
-    const f = overlayFixture(source, join(root, `upstream-${name}`), true, name);
+    const f = overlayFixture(source, join(root, `upstream-${name}`), true, `${name} ${root}`);
     return { source: f.source, receipt: nativeCacheFixture(f.source, home, f.checkout) };
   };
   return { root, home, native };

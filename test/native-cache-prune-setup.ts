@@ -26,8 +26,11 @@ export type PruneFixture = {
 };
 
 /**
- * A home with one reference root. An identity's own source is removed unless kept, so only what a test adds uses it.
- * `prune` has no grace period unless a test sets one, so a second prune removes what the first quarantined. It sees
+ * A home with one reference root. Each identity's bound text names this fixture's directory, so identities differ
+ * between fixtures and tests running at the same time cannot see each other's processes as users. An identity's own
+ * source is removed unless kept, so only what a test adds uses it.
+ * `prune` has no grace period unless a test sets one, so a second prune asked to remove (`deleteQuarantined`) removes
+ * what the first quarantined. It sees
  * only the fixture's processes: the host's unreadable or privileged processes and its Dori writers (other
  * lanes' launches) stay out unless a test passes its own reader or process table.
  */
@@ -38,7 +41,7 @@ export function pruneFixture(): PruneFixture {
   const refs = join(root, "refs");
   mkdirSync(refs);
   const native = (name: string, keepSource = false) => {
-    const f = overlayFixture(join(root, `source-${name}`), join(root, `upstream-${name}`), true, name);
+    const f = overlayFixture(join(root, `source-${name}`), join(root, `upstream-${name}`), true, `${name} ${root}`);
     const receipt = nativeCacheFixture(f.source, home, f.checkout);
     if (!keepSource) rmSync(f.source, { recursive: true });
     return receipt;

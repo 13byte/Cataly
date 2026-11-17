@@ -152,8 +152,13 @@ export const ownProcessCwds = (pids: readonly string[]): ProcessCwds | null => {
   return read && { cwds: read.cwds, unreadable: [] };
 };
 
-/** The host's process files without its unreadable processes, which no fixture controls (see `ownProcessCwds`). */
+/**
+ * The host's process files without its unreadable processes, which no fixture controls (see `ownProcessCwds`). Off
+ * Linux it reads nothing: the tests that hold files run on Linux only, and each read there is a full lsof run that
+ * slows every other test on the runner; `processFiles("darwin")` is tested on its own.
+ */
 export const ownProcessFiles = (): ProcessFiles | null => {
+  if (process.platform !== "linux") return { files: new Map(), unread: [] };
   const read = processFiles();
   return read && { files: read.files, unread: [] };
 };
