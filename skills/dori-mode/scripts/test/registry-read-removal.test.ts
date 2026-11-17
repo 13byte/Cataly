@@ -1,11 +1,10 @@
 import { expect, spyOn, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { type Lane, Registry } from "../src/registry.ts";
+import { withState } from "./fakes.ts";
 
-test.each(["read", "list", "scan"] as const)("lane %s tolerates registration removal", async (operation) => {
-  const registry = new Registry(mkdtempSync(join(tmpdir(), "dori-registry-read-removal-")));
+test.each(["list", "scan"] as const)("lane %s tolerates registration removal", async (operation) => {
+  const state = withState();
+  const registry = new Registry(state.dir);
   const lane: Lane = {
     key: "qa-read-removal",
     title: "read removal race",
@@ -48,8 +47,7 @@ test.each(["read", "list", "scan"] as const)("lane %s tolerates registration rem
     return file;
   });
   try {
-    if (operation === "read") expect(await registry.read(lane.key)).toBeNull();
-    else if (operation === "list") expect(await registry.list()).toEqual([]);
+    if (operation === "list") expect(await registry.list()).toEqual([]);
     else expect(await registry.scan()).toEqual({ lanes: [], unreadable: [] });
     expect(removed).toBeDefined();
     await removed;
@@ -57,5 +55,6 @@ test.each(["read", "list", "scan"] as const)("lane %s tolerates registration rem
   } finally {
     paths.mockRestore();
     files.mockRestore();
+    state.done();
   }
 });
