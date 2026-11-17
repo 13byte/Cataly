@@ -132,6 +132,10 @@ test.each([
   ["pnpm dlx", ["pnpm", "dlx", "@oh-my-pi/pi-coding-agent"]],
   ["yarn dlx", ["yarn", "dlx", "@oh-my-pi/pi-coding-agent"]],
   ["npm exec -c naming OMP", ["npm", "exec", "--offline", "-c", 'exec omp "$@"']],
+  ["pnpm exec running omp", ["pnpm", "exec", "omp"]],
+  ["yarn exec running an OMP path", ["yarn", "exec", "/x/omp"]],
+  ["a bun x package alias", ["bun", "x", "omp-alias@npm:@oh-my-pi/pi-coding-agent@18.20.0"]],
+  ["bun x past an option", ["bun", "--no-env-file", "x", "@oh-my-pi/pi-coding-agent"]],
 ])("%s is refused as unreadable even when it declares engine omp", (_, prefix) => {
   for (const engine of [undefined, "omp"] as const) {
     expect(() => load([...prefix, MODEL, "{prompt}"], engine)).toThrow(PREFIX_REFUSED);

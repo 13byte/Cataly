@@ -27,7 +27,12 @@ const names = (words: readonly string[]): boolean => {
 // manager form Dori does not read exactly (`npm --silent exec`, `pnpm dlx`, an alias) that names it is unreadable.
 const OMP_PACKAGE_MENTION = /(?:^|[\s:=])@oh-my-pi\/pi-coding-agent(?:@|\s|$)/;
 const runsOmpPackage = (argv: readonly string[]): boolean =>
-  argv.some((word) => RUNNERS.includes(word.split("/").at(-1)!)) && argv.some((word) => OMP_PACKAGE_MENTION.test(word));
+  argv.some((_, at) => isRunner(argv, at)) && argv.some((word) => OMP_PACKAGE_MENTION.test(word));
+// A package manager word, or Bun with its `x` subcommand later in the argv.
+const isRunner = (argv: readonly string[], at: number): boolean => {
+  const name = argv[at]!.split("/").at(-1)!;
+  return RUNNERS.includes(name) || (name === "bun" && argv.slice(at + 1).includes("x"));
+};
 
 /**
  * What an exact argv runs, after leading `NAME=value` assignments and the `env` utility with its options: the command
@@ -87,7 +92,8 @@ export function classifyOmpArgv(argv: readonly string[]): OmpArgv {
   // rather than drop the guard. An external wrapper behind a launcher must declare its engine the same way, as must a
   // command handed OMP's path in a removed assignment (`env OMP_BIN=/x/omp sh -c 'exec "$OMP_BIN"'`).
   if (classified.kind !== "other") return classified;
-  return (launched && names(command)) || assignsOmp(argv, at) || runsOmpPackage(argv)
+  // A package manager running a command (`pnpm exec omp`) is read like a launcher Dori cannot fully parse.
+  return ((launched || isRunner(command, 0)) && names(command)) || assignsOmp(argv, at) || runsOmpPackage(argv)
     ? { kind: "unparsed" }
     : classified;
 }
