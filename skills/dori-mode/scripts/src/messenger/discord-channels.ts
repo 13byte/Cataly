@@ -130,6 +130,8 @@ export type InboundContext = {
 const THREAD_TYPES = new Set([10, 11, 12]);
 const DM_TYPES = new Set([1, 3]);
 const CACHE_MS = 60_000;
+/** Most lookups held at once; a burst across more channels than this in one minute evicts the oldest. */
+const CACHE_MAX = 500;
 const TIMED_OUT = Symbol("timed out");
 
 /**
@@ -147,6 +149,14 @@ export const inboundContext = (discord: Discord, channels: DiscordChannels, now:
     const hit = cache.get(id);
     if (hit && now() - hit.at < CACHE_MS)
       return { value: hit.value, stuck: !hit.settled && now() - hit.at >= timeoutMs };
+    // A long-running intake meets many channels and threads once: drop every expired entry, and past the cap the
+    // oldest, so the cache holds at most the channels of the last minute, never more than CACHE_MAX.
+    for (const [key, old] of cache) if (now() - old.at >= CACHE_MS) cache.delete(key);
+    cache.delete(id);
+    for (const key of cache.keys()) {
+      if (cache.size < CACHE_MAX) break;
+      cache.delete(key);
+    }
     const entry: Entry = { at: now(), value: discord.channel(id), settled: false };
     const settle = () => {
       entry.settled = true;
@@ -155,7 +165,7 @@ export const inboundContext = (discord: Discord, channels: DiscordChannels, now:
     cache.set(id, entry);
     return { value: entry.value, stuck: false };
   };
-  return async (channelId: string): Promise<InboundContext> => {
+  const where = async (channelId: string): Promise<InboundContext> => {
     const errors: string[] = [];
     let purposes: Purposes = {};
     try {
@@ -205,4 +215,6 @@ export const inboundContext = (discord: Discord, channels: DiscordChannels, now:
     } else record = { channel: channel(channelId, here), thread: null };
     return errors.length ? { ...record, error: errors.join("; ") } : record;
   };
+  /** `cached()`: how many lookups are held, so the eviction can be checked. */
+  return Object.assign(where, { cached: (): number => cache.size });
 };

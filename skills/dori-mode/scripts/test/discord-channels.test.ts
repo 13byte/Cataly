@@ -112,6 +112,30 @@ test("context names a thread under its parent, marks a DM, caches lookups and ne
   }
 });
 
+test("a long-running context drops expired lookups and never holds more than 500", async () => {
+  const state = withState();
+  try {
+    const table: Record<string, DcChannel> = {};
+    for (let i = 1; i <= 700; i++) table[String(1000 + i)] = { id: String(1000 + i), type: 0, name: `c${i}` };
+    const { discord, looked } = fakeDiscord(table);
+    let now = 0;
+    const where = inboundContext(discord, new DiscordChannels(state.dir), () => now, 20);
+    for (let i = 1; i <= 100; i++) await where(String(1000 + i));
+    expect(where.cached()).toBe(100);
+    // Channels seen once are not kept past their minute, even if never looked up again.
+    now = 60_000;
+    await where("1101");
+    expect(where.cached()).toBe(1);
+    // A burst across more channels than the cap keeps the newest 500 and still answers each one.
+    for (let i = 102; i <= 700; i++) await where(String(1000 + i));
+    expect(where.cached()).toBe(500);
+    expect((await where("1700")).channel.name).toBe("c700");
+    expect(looked.filter((id) => id === "1700")).toHaveLength(1);
+  } finally {
+    state.done();
+  }
+});
+
 test("dori channel discord sets a looked-up channel's purpose, lists and clears it; bad input sends nothing", async () => {
   await withDiscordCli(async (f) => {
     const set = await f.invoke(["channel", "discord", "set", ids.text, "--purpose", "omp-dori development"]);
