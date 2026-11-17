@@ -49,7 +49,7 @@ export const discordInbound = async (
   const explicit = opts.channelIds.map((id) => discordInboundEnv("DORI_DISCORD_CHANNEL_IDS", id));
   const request = inboundRequest(discord);
   const me = await request<{ id?: string; bot?: boolean }>("/users/@me");
-  if (!me || me.bot !== true || !isDiscordSnowflake(me.id)) {
+  if (me?.bot !== true || !isDiscordSnowflake(me.id)) {
     throw new MessengerError("Discord inbound requires an authenticated bot identity; use a bot token", 401);
   }
   const botId = me.id;
@@ -106,7 +106,15 @@ export const discordInbound = async (
     if (after === undefined) {
       throw new MessengerError("Discord inbound cursor disappeared; restore its state before retrying", 0);
     }
-    const pending = new Map<string, Message>();
+    const latest = await readPage(channelId, 1);
+    if (latest === undefined) return;
+    if (latest.some((message) => message.channel_id !== channelId)) {
+      throw inboundProtocolError("Discord inbound channel response does not match the configured channel");
+    }
+    const head = latest[0];
+    if (!head || !newer(head.id, after)) return; // Empty, unchanged or deleted head: no new messages to drain.
+    // Keep the probed message even if it disappears before the full history read.
+    const pending = new Map<string, Message>([[head.id, head]]);
     let before: string | undefined;
     for (;;) {
       const messages = await readPage(channelId, 100, before);

@@ -132,7 +132,10 @@ for (const failure of [429, 500, 502, 503, 504, "network"] as const) {
       world.rest.state.unreachable.clear();
       world.advance(2_000);
       await settle();
-      expect(world.rest.requests).toHaveLength(requests + 1);
+      expect(world.rest.requests).toHaveLength(requests + 2);
+      expect(
+        world.rest.requests.slice(requests).map((request) => new URL(request.url).searchParams.get("limit")),
+      ).toEqual(["1", "100"]);
       expect(world.received).toEqual(["20:101", "20:102", "20:103"]);
       expect(world.cursor("20")).toBe("103");
       await world.dispatch(socket, ownerMessage("102"));
