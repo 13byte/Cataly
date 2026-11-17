@@ -121,6 +121,8 @@ describe("Monitors", () => {
       "NUDGED a-lane 16 min silent, delivery unconfirmed",
       // Freshness prints POSTED whatever the thread hook's exit status was.
       "POSTED a-lane Progress (from the lane's last report): x",
+      // A silent lane with nothing to post leaves its thread without an update: the lead is told, as before.
+      "NO-REPORT a-lane report journal has no report",
     ]) {
       const running = monitors.start(
         "mixed",

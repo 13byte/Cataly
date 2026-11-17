@@ -14,11 +14,12 @@ const BATCH_MAX_LINES = 100;
  * Notices that need no turn of their own: a loop that started (INBOUND_READY still wakes, for onboarding), a presence
  * heartbeat, and freshness outcomes that are already done (a NUDGED whose delivery was confirmed) or held for a later
  * tick. Every other line wakes, including a nudge whose delivery failed or is unconfirmed (it is not retried), POSTED
- * (freshness prints it without checking the thread hook's exit status), STALLED, JOURNAL-ERROR, WORKING-WHILE-PAUSED,
+ * (freshness prints it without checking the thread hook's exit status), NO-REPORT (a silent lane's thread gets no
+ * update), STALLED, JOURNAL-ERROR, WORKING-WHILE-PAUSED,
  * BLOCKED, warnings, errors and an exited monitor.
  */
 const NOTICE =
-  /^(?:(?:LANE_WATCH_READY|HOST_GUARD_READY|PRESENCE_READY|PRESENCE_ACK|NO-REPORT|PENDING-REPORT|STALE-REPORT)(?:\s|$)|NUDGED\s.*, delivery delivered\s*$)/;
+  /^(?:(?:LANE_WATCH_READY|HOST_GUARD_READY|PRESENCE_READY|PRESENCE_ACK|PENDING-REPORT|STALE-REPORT)(?:\s|$)|NUDGED\s.*, delivery delivered\s*$)/;
 
 type Running = {
   readonly name: string;
@@ -146,7 +147,7 @@ export class Monitors {
 
 export const MONITOR_DESCRIPTION = [
   "Persistent background monitors for this Dori session.",
-  'op "start" runs `argv` (an argument array, never a shell string) in the session cwd and reads its stdout and stderr line by line. Every line matching the `filter` regular expression reaches this session as a message `[name] line`; lines arriving together are delivered in one message. Such a message wakes the session unless all its lines are notices that need no action (LANE_WATCH_READY, HOST_GUARD_READY, PRESENCE_READY, PRESENCE_ACK, a NUDGED line ending "delivery delivered", NO-REPORT, PENDING-REPORT, STALE-REPORT): those are recorded for the next turn without starting one. When a monitor process exits on its own, that is reported the same way; restarting it is your decision.',
+  'op "start" runs `argv` (an argument array, never a shell string) in the session cwd and reads its stdout and stderr line by line. Every line matching the `filter` regular expression reaches this session as a message `[name] line`; lines arriving together are delivered in one message. Such a message wakes the session unless all its lines are notices that need no action (LANE_WATCH_READY, HOST_GUARD_READY, PRESENCE_READY, PRESENCE_ACK, a NUDGED line ending "delivery delivered", PENDING-REPORT, STALE-REPORT): those are recorded for the next turn without starting one. When a monitor process exits on its own, that is reported the same way; restarting it is your decision.',
   'op "stop" kills the monitor `name` and forgets it. op "list" shows running monitors. Names are unique: starting a running name fails.',
   "Started monitors are recorded in this session. Their processes stop when omp exits, and when the session is resumed (herdr restoring it after a restart, or `omp --resume`) every monitor that was not stopped is started again and announced as `[monitor] restored ...`; you do not need to start them again.",
 ].join("\n");
