@@ -478,9 +478,13 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       }
       if (role) agentRoles.set(ctx.agent.id, role);
       else agentRoles.delete(ctx.agent.id);
-      if (ctx.agent.kind === "main") await syncMain(ctx, branch, eventName === "session_start");
-      // The flag's role is recorded only once its session started: a rejected bootstrap has thrown before this.
-      if (flaggedRole && role) pi.appendEntry(ROLE_ENTRY, role);
+      try {
+        if (ctx.agent.kind === "main") await syncMain(ctx, branch, eventName === "session_start");
+      } finally {
+        // A rejected bootstrap has cleared the role, so it is not recorded; any other failure keeps the role this
+        // process runs with, and its record, as a later resume without the flag must restore it.
+        if (flaggedRole && role) pi.appendEntry(ROLE_ENTRY, role);
+      }
     });
   }
 

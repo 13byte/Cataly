@@ -48,6 +48,17 @@ describe("role", () => {
     });
   });
 
+  test("a flagged role whose session start fails for another reason than a rejected bootstrap is still recorded", async () => {
+    const s = session("tools-fail");
+    const lane = await load({ session: s, flags: { "dori-role": "lane" } });
+    lane.api.setActiveTools = async () => {
+      throw new Error("tool list unavailable");
+    };
+    await expect(lane.emit("session_start")).rejects.toThrow("tool list unavailable");
+    // The process keeps the role it was started with, so a later resume without the flag must restore it too.
+    expect(s.entries).toEqual([roleEntry("lane")]);
+  });
+
   test("a session without a role runs no omp-ulw handler and never sends a user message", async () => {
     const normal = await load({ session: session("plain") });
     await normal.emit("session_start");
