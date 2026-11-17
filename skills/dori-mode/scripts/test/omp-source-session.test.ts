@@ -151,6 +151,7 @@ test.each([
     ["claude", "--append-system-prompt", "Read /x/packages/coding-agent/scripts/omp.ts"],
   ],
   ["its own -c option", ["mycli", "-c", "use omp here"]],
+  ["its own -c option behind env", ["env", "TERM=xterm", "codex", "-c", 'instructions="Compare omp and codex"']],
 ] as const)("a custom agent behind %s still starts on its goal marker", async (_, prefix) => {
   const { deps, brief } = setup(["claude"], "custom", false);
   world.screen = "Pursuing goal: the brief";

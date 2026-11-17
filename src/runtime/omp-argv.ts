@@ -123,8 +123,10 @@ const OMP_WORD =
 const OMP_IN_SCRIPT = /(?:^|[\s;&|(])omp(?:[\s;&|)]|$)/;
 const SCRIPT_OPTION = /^(?:-[A-Za-z]*c|-S|--split-string|--call)$/;
 const SCRIPT_PROGRAMS = new Set([...SHELLS, "env", "npx", "bunx", "bun"]);
+// `words` start at a program (assignments aside): only that program's script option is read as a script.
 const names = (words: readonly string[]): boolean => {
-  const scripted = words.some((word) => SCRIPT_PROGRAMS.has(word.split("/").at(-1)!));
+  const program = words.find((word) => !ASSIGNMENT.test(word)) ?? "";
+  const scripted = SCRIPT_PROGRAMS.has(program.split("/").at(-1)!);
   return words.some((word, at) => {
     if (OMP_WORD.test(word)) return true;
     if (!scripted) return false;
@@ -203,4 +205,8 @@ export const isOmpArgv = (argv: readonly string[]): boolean => classifyOmpArgv(a
  * only from OMP's trusted session record, so a wrapped OMP is never vouched for by quoted screen text. Role flags and
  * update guards need the exact start instead (isOmpArgv, classifyOmpArgv).
  */
-export const mayRunOmpArgv = (argv: readonly string[]): boolean => isOmpArgv(argv) || names(argv);
+export const mayRunOmpArgv = (argv: readonly string[]): boolean => {
+  const classified = classifyOmpArgv(argv);
+  // A readable prefix is removed first, so `env TERM=x codex -c '…omp…'` is read as codex's own option.
+  return classified.kind === "omp" || names(classified.kind === "other" ? classified.command : argv);
+};
