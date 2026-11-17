@@ -119,7 +119,7 @@ test.each([
 test.each([
   ["a launcher running another agent", ["timeout", "600", "codex"]],
   ["a shell running another agent", ["sh", "-c", "exec codex", "sh"]],
-  ["a shell passing another agent a quoted omp value", ["sh", "-c", "exec codex -c 'x=\"omp\"' \"$@\"", "sh"]],
+  ["a shell passing another agent a quoted omp value", ["sh", "-c", 'exec codex -c \'x="omp"\' "$@"', "sh"]],
   ["npx -c running another agent", ["npx", "-c", "codex"]],
   ["an external script", ["node", "/opt/not-omp.js", "/x/omp"]],
   ["echo", ["echo", "omp"]],
