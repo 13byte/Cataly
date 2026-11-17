@@ -112,6 +112,8 @@ const wrapped = [
   ["an env -S string", ["env", "-S", "/opt/bin/omp --advisor"]],
   ["a shell behind timeout", ["timeout", "600", "sh", "-c", 'exec /opt/bin/omp "$@"', "sh"]],
   ["a shell given OMP's path by env", ["env", "OMP_BIN=/opt/bin/omp", "sh", "-c", 'exec "$OMP_BIN" "$@"', "sh"]],
+  ["a shell exec of a bare omp", ["sh", "-c", 'exec omp "$@"', "agent"]],
+  ["a shell loop running omp", ["bash", "-c", 'cd /repo && while true; do omp "$@"; done', "agent"]],
 ] as const;
 const ompProc = ["bun", "/opt/bin/omp", "--dori-role", "lane"];
 const wrappedLaunch = (deps: FlowDeps, prefix: readonly string[], key: string, brief: string) =>
@@ -155,6 +157,7 @@ test.each([
   ["its own -c option", ["mycli", "-c", "use omp here"]],
   ["its own -c option behind env", ["env", "TERM=xterm", "codex", "-c", 'instructions="Compare omp and codex"']],
   ["a shell passing a quoted omp value", ["sh", "-c", 'exec codex -c \'instructions="omp"\' "$@"', "sh"]],
+  ["a shell commenting on omp", ["sh", "-c", 'exec codex "$@" # was omp', "sh"]],
 ] as const)("a custom agent behind %s still starts on its goal marker", async (_, prefix) => {
   const { deps, brief } = setup(["claude"], "custom", false);
   world.screen = "Pursuing goal: the brief";
