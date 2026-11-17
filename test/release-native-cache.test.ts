@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { pruneNativeCache } from "../src/release/native-cache.ts";
+import { reportNativeCache } from "../src/release/native-cache.ts";
 import { processCwds } from "../src/release/process-cwd.ts";
 import { nativeCacheFixture, overlayFixture } from "./source-bundle-setup.ts";
 
@@ -31,7 +31,7 @@ function cache() {
   return { root, home, native };
 }
 
-test("only an identity no source, reference or process names is pruned, and only when applied", async () => {
+test("the report names what uses each identity and removes none, the unused one included", async () => {
   const c = cache();
   const live = c.native("live");
   const releases = join(c.root, "dori/releases");
@@ -54,8 +54,8 @@ test("only an identity no source, reference or process names is pruned, and only
     expect(new TextDecoder().decode((await reader.read()).value)).toBe("ready\n");
     const sources = [live.source];
     const scanned = [join(c.root, "dori")];
-    const dry = pruneNativeCache(c.home, sources, scanned, false);
-    const reasons = Object.fromEntries(dry.entries.map((entry) => [entry.directory, entry.protectedBy]));
+    const entries = reportNativeCache(c.home, sources, scanned);
+    const reasons = Object.fromEntries(entries.map((entry) => [entry.directory, entry.protectedBy]));
     expect(reasons[live.receipt.directory]).toEqual(
       expect.arrayContaining([`source ${live.source}`, "receipt source"]),
     );
@@ -66,33 +66,24 @@ test("only an identity no source, reference or process names is pruned, and only
     expect(reasons[running.receipt.directory]?.every((reason) => reason.startsWith("process "))).toBe(true);
     expect(reasons[superseded.receipt.directory]).toEqual([]);
     expect(reasons[unknown]).toEqual(["unrecognized receipt"]);
-    expect(dry.entries.find((entry) => entry.directory === superseded.receipt.directory)!.bytes).toBeGreaterThan(0);
-    expect(dry.removed).toEqual([]);
-    expect(existsSync(superseded.receipt.directory)).toBe(true);
-
-    // An interrupted earlier prune left a detached copy that nothing can resolve.
-    const leftover = `${live.receipt.directory}.pruning`;
-    mkdirSync(leftover, { mode: 0o700 });
-    const applied = pruneNativeCache(c.home, sources, scanned, true);
-    expect(applied.removed.sort()).toEqual([superseded.receipt.directory, leftover].sort());
-    for (const kept of [live, discovered, wrapped, running]) expect(existsSync(kept.receipt.omp)).toBe(true);
+    expect(entries.find((entry) => entry.directory === superseded.receipt.directory)!.bytes).toBeGreaterThan(0);
+    for (const kept of [live, discovered, wrapped, running, superseded])
+      expect(existsSync(kept.receipt.omp)).toBe(true);
     expect(existsSync(unknown)).toBe(true);
-    expect(existsSync(superseded.receipt.directory)).toBe(false);
-    expect(existsSync(leftover)).toBe(false);
-    expect(existsSync(`${superseded.receipt.directory}.pruning`)).toBe(false);
   } finally {
     holder.stdin.end();
     await holder.exited;
   }
 });
 
-test("a link into the cache, a used detached copy and a partial receipt keep their identities", async () => {
+test("a link into the cache, a process working in an entry and a partial receipt are reported as uses", async () => {
   const c = cache();
   const linked = c.native("linked");
   const chained = c.native("chained");
   const partial = c.native("partial");
-  const superseded = c.native("superseded");
-  for (const f of [linked, chained, partial, superseded]) rmSync(f.source, { recursive: true });
+  const worked = c.native("worked");
+  const free = c.native("free");
+  for (const f of [linked, chained, partial, worked, free]) rmSync(f.source, { recursive: true });
   const bin = join(c.root, "dori/bin");
   mkdirSync(bin, { recursive: true });
   symlinkSync(linked.receipt.omp, join(bin, "omp"));
@@ -101,33 +92,29 @@ test("a link into the cache, a used detached copy and a partial receipt keep the
   symlinkSync(join(c.root, "hop"), join(bin, "omp-side"));
   const { identity, source } = partial.receipt;
   writeFileSync(join(partial.receipt.directory, "receipt.json"), JSON.stringify({ identity, source }));
-  // A process still runs from the copy an interrupted prune detached; the live entry beside it is unused.
-  const detached = `${superseded.receipt.directory}.pruning`;
-  mkdirSync(detached, { mode: 0o700 });
+  // A process works inside one entry without naming it in its arguments.
   const holder = Bun.spawn(["/bin/sh", "-c", "echo ready; read line"], {
-    cwd: detached,
+    cwd: worked.receipt.directory,
     stdin: "pipe",
     stdout: "pipe",
   });
   try {
     expect(new TextDecoder().decode((await holder.stdout.getReader().read()).value)).toBe("ready\n");
-    const applied = pruneNativeCache(c.home, [], [join(c.root, "dori")], true);
-    const reasons = Object.fromEntries(applied.entries.map((entry) => [entry.directory, entry.protectedBy]));
+    const entries = reportNativeCache(c.home, [], [join(c.root, "dori")]);
+    const reasons = Object.fromEntries(entries.map((entry) => [entry.directory, entry.protectedBy]));
     expect(reasons[linked.receipt.directory]).toEqual([`link ${join(bin, "omp")}`]);
     expect(reasons[chained.receipt.directory]).toEqual([`link ${join(bin, "omp-side")}`]);
     expect(reasons[partial.receipt.directory]).toEqual(["unrecognized receipt"]);
-    expect(reasons[detached]).toContain(`process ${holder.pid}`);
-    expect(reasons[superseded.receipt.directory]).toEqual([]);
-    expect(applied.removed).toEqual([]);
-    for (const kept of [linked, chained, partial, superseded]) expect(existsSync(kept.receipt.directory)).toBe(true);
-    expect(existsSync(detached)).toBe(true);
+    expect(reasons[worked.receipt.directory]).toContain(`process ${holder.pid}`);
+    expect(reasons[free.receipt.directory]).toEqual([]);
+    for (const kept of [linked, chained, partial, worked, free]) expect(existsSync(kept.receipt.directory)).toBe(true);
   } finally {
     holder.stdin.end();
     await holder.exited;
   }
 });
 
-test("a link to a wrapper outside the roots keeps what it names; a link to an unscanned directory keeps everything", () => {
+test("a link to a wrapper outside the roots reports what it names; a link to an unscanned directory every identity", () => {
   const c = cache();
   const wrapped = c.native("wrapped");
   const free = c.native("free");
@@ -139,9 +126,7 @@ test("a link to a wrapper outside the roots keeps what it names; a link to an un
   mkdirSync(refs);
   symlinkSync(join(outside, "omp"), join(refs, "omp"));
   const report = (roots: string[]) =>
-    Object.fromEntries(
-      pruneNativeCache(c.home, [], roots, false).entries.map((entry) => [entry.directory, entry.protectedBy]),
-    );
+    Object.fromEntries(reportNativeCache(c.home, [], roots).map((entry) => [entry.directory, entry.protectedBy]));
   const linked = report([refs]);
   expect(linked[wrapped.receipt.directory]).toEqual([`reference ${join(refs, "omp")}`]);
   expect(linked[free.receipt.directory]).toEqual([]);
@@ -155,7 +140,6 @@ test("a link to a wrapper outside the roots keeps what it names; a link to an un
   expect(report([join(c.root, "wrappers-alias")])[wrapped.receipt.directory]).toEqual([
     `reference ${join(outside, "omp")}`,
   ]);
-  expect(pruneNativeCache(c.home, [], [refs], true).removed).toEqual([]);
   expect(existsSync(free.receipt.directory)).toBe(true);
 });
 
@@ -172,7 +156,7 @@ test.each(["linux", "darwin"] as const)("a process's working directory is read t
   }
 });
 
-test("dori update cache reports by default and removes unreferenced identities only with --prune", () => {
+test("dori update cache only reports; --prune is refused and nothing is ever removed", () => {
   const c = cache();
   const superseded = c.native("superseded");
   renameSync(superseded.source, join(c.root, "moved-away"));
@@ -184,14 +168,15 @@ test("dori update cache reports by default and removes unreferenced identities o
   const listed = run();
   expect(listed.exitCode).toBe(0);
   const report = JSON.parse(listed.stdout.toString());
-  expect(report.pruned).toBe(false);
+  expect(report.removes).toBe("nothing");
   expect(report.entries).toEqual([
     expect.objectContaining({ directory: superseded.receipt.directory, protectedBy: [] }),
   ]);
   expect(existsSync(superseded.receipt.directory)).toBe(true);
   expect(run("--from", c.root).exitCode).toBe(2);
+  // An unreferenced identity is only reported: a request to remove it fails loudly and leaves it in place.
   const pruned = run("--prune");
-  expect(pruned.exitCode).toBe(0);
-  expect(JSON.parse(pruned.stdout.toString()).removed).toEqual([superseded.receipt.directory]);
-  expect(existsSync(superseded.receipt.directory)).toBe(false);
+  expect(pruned.exitCode).toBe(2);
+  expect(pruned.stderr.toString()).toContain("cache only reports; --prune is not supported");
+  expect(existsSync(superseded.receipt.directory)).toBe(true);
 });

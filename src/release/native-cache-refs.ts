@@ -4,8 +4,8 @@ import type { processCwds } from "./process-cwd.ts";
 import { readSourceBundle } from "./source-bundle.ts";
 
 const CHUNK = 1024 * 1024;
-/** The longest name a key can have (`<identity>.pruning`), so one cut by a chunk edge is whole in the next window. */
-const OVERLAP = 64 + ".pruning".length;
+/** An identity's length, so one cut by a chunk edge is whole in the next window. */
+const OVERLAP = 64;
 
 /** Walk without following links; `visit` sees every directory, every symbolic link and every regular file. */
 function walk(root: string, visit: (path: string, kind: "directory" | "file" | "link") => void): void {
@@ -41,11 +41,11 @@ function readWindows(path: string, read: (text: string) => void): void {
 }
 
 /**
- * The reasons each key (an identity, or a detached `<identity>.pruning` name) must be kept: a source under
- * `sources`/`roots` binds it, a file of any size under `roots` (wrappers, consumer state, deployment records/toolchains)
- * names it, or a running process names it. What cannot be confirmed keeps every key: a source lock that cannot be read,
- * a link that cannot be read or leads to an unscanned directory, and process working directories that cannot be read.
- * An unreadable process table or reference file throws instead of reporting nothing as protected.
+ * What uses each identity: a source under `sources`/`roots` binds it, a file of any size under `roots` (wrappers,
+ * consumer state, deployment records/toolchains) names it, or a running process names it. What this scan cannot
+ * confirm is reported against every identity: a source lock that cannot be read, a link that cannot be read or leads to
+ * an unscanned directory, and process working directories that cannot be read. An unreadable process table or reference
+ * file throws instead of reporting nothing as used.
  */
 export function protections(
   cache: string,
@@ -63,8 +63,7 @@ export function protections(
     for (const key of keys) add(key, reason);
   };
   const names = (text: string, reason: string) => {
-    for (const key of keys)
-      if ((key.endsWith(".pruning") ? text : text.replaceAll(`${key}.pruning`, "")).includes(key)) add(key, reason);
+    for (const key of keys) if (text.includes(key)) add(key, reason);
   };
   const bind = (source: string, where: string) => {
     // No lock binds nothing; a lock that cannot be read could bind any identity.
@@ -120,7 +119,7 @@ export function protections(
   if (ps.exitCode !== 0) throw new Error("Process table is unavailable; native cache use cannot be ruled out");
   const lines = ps.stdout.toString().split("\n");
   const pids = lines.map((line) => line.trim().split(/\s+/, 1)[0] ?? "");
-  // A process also uses an entry through its working directory; when no directory can be read, nothing is pruned.
+  // A process also uses an entry through its working directory; with none readable, any identity may be in use.
   const cwds = readCwds(pids.filter(Boolean));
   if (!cwds) all("process working directories unavailable");
   lines.forEach((line, at) => {
