@@ -106,6 +106,24 @@ test("a closed PR's one-read check that succeeds ends its warning, so the same f
   expect(await pass()).toEqual([warn]);
 });
 
+test("a reopened PR whose full read keeps failing warns once, not on every pass", async () => {
+  await pass();
+  pr.state = "closed";
+  await pass();
+  pr.state = "open";
+  gh.failing.set("/pulls/7/comments", "HTTP 502: Bad Gateway");
+  expect(await pass()).toHaveLength(1);
+  expect(await pass()).toEqual([]);
+  expect(await pass()).toEqual([]);
+});
+
+test("an open PR with no commits (its branch reset to the base) is followed, not held", async () => {
+  pr.commits = [];
+  expect(await pass()).toHaveLength(1);
+  pr.comments.push(row(7, "maintainer", "branch is empty now"));
+  expect(await pass()).toHaveLength(1);
+});
+
 test("our push landing between the head read and the commit list is read again, never saved as a stranger's", async () => {
   const push = () => {
     pr.commits.push({ sha: sha("b"), author: "me" });
@@ -127,6 +145,19 @@ test("our push landing between the head read and the commit list is read again, 
   });
   expect(await pass()).toEqual([
     "PR_WATCH_WARN acme/app#7 the PR head moved while it was read; reading again next pass",
+  ]);
+  expect(await pass()).toEqual([]);
+});
+
+test("a push that takes the list to exactly 250 commits during the read is read again too", async () => {
+  pr.commits = Array.from({ length: 249 }, (_, i) => ({ sha: hex(i + 1), author: "me" }));
+  pr.head = hex(249);
+  gh.before.set("/pulls/7/commits", () => {
+    pr.commits.push({ sha: hex(250), author: "me" });
+    pr.head = hex(250);
+  });
+  expect(await pass()).toEqual([
+    `PR_WATCH_BASELINE acme/app#7 lane=fix-7 thread=- head=${hex(250).slice(0, 7)} state=open known=0`,
   ]);
   expect(await pass()).toEqual([]);
 });

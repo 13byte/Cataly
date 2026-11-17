@@ -223,9 +223,11 @@ export const fetchPr = async (
   ];
   const commits =
     head === knownHead ? undefined : (await pages(api, `${root}/commits`, list("commit list"))).map(commitRow);
-  // Below GitHub's 250-commit cap the list ends at the head; anything else is a push during the read, read once more so
-  // the head and commits saved together agree.
-  if (commits && commits.length < 250 && commits.at(-1)?.sha !== head) {
+  // The list ends at the head, unless GitHub's 250-commit cap cut it before the head; a head elsewhere in it, or missing
+  // from a shorter list, is a push during the read, read once more so the head and commits saved together agree. An
+  // empty list (a branch reset to its base) has no head to check and goes on to the compare.
+  const at = commits?.findIndex((c) => c.sha === head) ?? -1;
+  if (commits?.length && (at >= 0 ? at !== commits.length - 1 : commits.length < 250)) {
     if (retry) return fetchPr(api, ref, knownHead, false);
     throw new Error("the PR head moved while it was read; reading again next pass");
   }

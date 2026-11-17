@@ -162,11 +162,13 @@ export const prWatchPass = async (
     try {
       if (!due(pr, prev)) {
         // A merge is final, but a PR closed unmerged can be reopened (and merged before the next pass): one metadata
-        // read per pass notices either. That read succeeding also ends an earlier warning.
+        // read per pass notices either. A read finding it still closed ends an earlier warning; a reopened PR's
+        // warning ends only when its full read succeeds.
         if (prev?.state !== "closed") continue;
-        const left = await prLeftClosed(api, pr);
-        quiet(prName(pr));
-        if (!left) continue;
+        if (!(await prLeftClosed(api, pr))) {
+          quiet(prName(pr));
+          continue;
+        }
       }
       const snap = await fetchPr(api, pr, prev?.head);
       const diff = diffPr(pr, prev, snap, memory.self!, options, at);
