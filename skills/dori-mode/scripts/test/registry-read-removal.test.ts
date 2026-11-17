@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Lane, Registry } from "../src/registry.ts";
 
-test("a public lane read remains coherent when registration disappears after an existence probe", async () => {
+test.each(["read", "list", "scan"] as const)("lane %s tolerates registration removal", async (operation) => {
   const registry = new Registry(mkdtempSync(join(tmpdir(), "dori-registry-read-removal-")));
   const lane: Lane = {
     key: "qa-read-removal",
@@ -15,6 +15,20 @@ test("a public lane read remains coherent when registration disappears after an 
     openedAt: "2026-01-01T00:00:00.000Z",
   };
   expect(await registry.create(lane)).toBe(true);
+  const target = registry.path(lane.key);
+  const originalPath = registry.path.bind(registry);
+  let removing = false;
+  let removed: ReturnType<Registry["discard"]> | undefined;
+  const remove = () => {
+    if (removing) return;
+    removing = true;
+    removed = registry.discard(lane);
+  };
+  const paths = spyOn(registry, "path").mockImplementation((key) => {
+    const path = originalPath(key);
+    if (key === lane.key) remove();
+    return path;
+  });
   const originalFile = Bun.file.bind(Bun);
   const files = spyOn(Bun, "file").mockImplementation((path, options) => {
     const file =
@@ -23,18 +37,25 @@ test("a public lane read remains coherent when registration disappears after an 
         : typeof path === "string" || path instanceof URL
           ? originalFile(path, options)
           : originalFile(path, options);
-    const exists = file.exists.bind(file);
-    file.exists = async () => {
-      const existed = await exists();
-      if (String(path) === registry.path(lane.key)) await registry.discard(lane);
-      return existed;
+    const json = file.json.bind(file);
+    file.json = async () => {
+      if (String(path) === target) {
+        remove();
+        await removed;
+      }
+      return json();
     };
     return file;
   });
   try {
-    // The read may precede or follow discard, but must not reject between two filesystem observations.
-    expect([null, lane]).toContainEqual(await registry.read(lane.key));
+    if (operation === "read") expect(await registry.read(lane.key)).toBeNull();
+    else if (operation === "list") expect(await registry.list()).toEqual([]);
+    else expect(await registry.scan()).toEqual({ lanes: [], unreadable: [] });
+    expect(removed).toBeDefined();
+    await removed;
+    expect(await originalFile(target).exists()).toBe(false);
   } finally {
+    paths.mockRestore();
     files.mockRestore();
   }
 });
