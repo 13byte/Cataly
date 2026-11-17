@@ -38,7 +38,10 @@ export const movedOn = async (deps: FlowDeps, lane: Lane, what: string): Promise
   return `LANE_CHANGED ${lane.key} moved on while this ran (now ${current ? statusOf(current) : "not registered"}, was ${statusOf(lane)}); ${what} not recorded`;
 };
 
-/** `onRecorded` runs once the claim is recorded and before the lane is told, so a failed notification cannot skip it. */
+/**
+ * `onRecorded` runs once the claim is recorded and before the lane is told, so a failed notification cannot skip it.
+ * It must not throw: a throw would skip telling the lane.
+ */
 export const claimDone = async (
   deps: FlowDeps,
   lane: Lane,
