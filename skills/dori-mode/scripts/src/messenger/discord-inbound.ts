@@ -49,7 +49,7 @@ export const discordInbound = async (
   const explicit = opts.channelIds.map((id) => discordInboundEnv("DORI_DISCORD_CHANNEL_IDS", id));
   const request = inboundRequest(discord);
   const me = await request<{ id?: string; bot?: boolean }>("/users/@me");
-  if (!me || me.bot !== true || !isDiscordSnowflake(me.id)) {
+  if (me?.bot !== true || !isDiscordSnowflake(me.id)) {
     throw new MessengerError("Discord inbound requires an authenticated bot identity; use a bot token", 401);
   }
   const botId = me.id;
@@ -125,7 +125,10 @@ export const discordInbound = async (
       before = oldest;
     }
     const ordered = [...pending.values()].sort((a, b) => (newer(a.id, b.id) ? 1 : newer(b.id, a.id) ? -1 : 0));
-    for (const message of ordered) deliver(message, store, emit);
+    for (const [index, message] of ordered.entries()) {
+      // An owner checkpoint also covers the preceding filtered run; only a trailing run needs its own save.
+      if (isOwnerMessage(message, ownerId, botId) || index === ordered.length - 1) deliver(message, store, emit);
+    }
   };
   await refresh();
   let polls = 0;
