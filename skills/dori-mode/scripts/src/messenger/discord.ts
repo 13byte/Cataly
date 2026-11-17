@@ -14,6 +14,7 @@ export type DcChannel = {
   readonly id: string;
   readonly type: number;
   readonly name?: string;
+  readonly topic?: string | null;
   readonly parent_id?: string | null;
   readonly available_tags?: readonly { readonly id: string; readonly name: string }[];
 };
