@@ -184,12 +184,13 @@ export class Supervision {
         undelivered.set(message, error instanceof Error ? error.message : String(error));
       }
     }
-    // Save the post-blocker signature so our own report does not count as progress; with nothing appended it is unchanged.
+    // Save the post-blocker signature so our own report, or what the usage hook wrote in the lane's cwd, does not count as
+    // progress; with neither it is unchanged.
     const observation: Observation = {
       at: now,
       timer: timer?.seconds ?? null,
       timerKind: timer?.kind ?? null,
-      activity: appended ? await this.activity(lane) : activity,
+      activity: appended || this.options.usageArgv?.length ? await this.activity(lane) : activity,
       activeAt,
       alerts: alerts.filter((message) => !undelivered.has(message)),
     };
