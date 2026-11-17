@@ -326,7 +326,7 @@ describe("pane state", () => {
       await replacement.emit("session_start");
       expect(readPaneState(stateDir, PANE)).toMatchObject({ pid: process.pid, sessionId: "replacement" });
       await replacement.emit("session_shutdown");
-      expect(readPaneState(stateDir, PANE)).toBeNull();
+      expect(readPaneState(stateDir, PANE)).toMatchObject({ pid: 0, sessionId: "replacement" });
       await lead.emit("session_shutdown");
     } finally {
       if (owner.exitCode === null) owner.kill();
@@ -349,7 +349,7 @@ describe("pane state", () => {
       await next.emit("goal_updated", { goal: { objective: "recover pane", status: "active" } });
       expect(readPaneState(stateDir, PANE)?.goal).toEqual({ objective: "recover pane", status: "active" });
       await next.emit("session_shutdown");
-      expect(readPaneState(stateDir, PANE)).toBeNull();
+      expect(readPaneState(stateDir, PANE)).toMatchObject({ pid: 0, sessionId: "next" });
       await first.emit("session_shutdown");
     },
   );
@@ -427,12 +427,21 @@ describe("pane state", () => {
     expect(pi.active).toEqual(["read", "bash", "goal"]);
   });
 
-  test("is removed at session shutdown, unless another process has taken the pane since", async () => {
+  test("is retired to a pid-less tombstone at session shutdown, unless another process has taken the pane since", async () => {
     const pi = await load({ session: session("lane-4"), flags: { "dori-role": "lane" } });
     await pi.emit("session_start");
     expect(existsSync(paneStatePath(stateDir, PANE))).toBe(true);
     await pi.emit("session_shutdown");
-    expect(existsSync(paneStatePath(stateDir, PANE))).toBe(false);
+    // The tombstone is what `dori-lead` resumes: it must keep the session file and stop claiming a live pid, or the
+    // next start opens a fresh session with no `inbound` monitor and the owner's messages are never read.
+    expect(readPaneState(stateDir, PANE)).toMatchObject({
+      pid: 0,
+      sessionId: "lane-4",
+      role: "lane",
+      sessionFile: "/sessions/lane-4.jsonl",
+      approvalPending: false,
+      agentStatus: "idle",
+    });
 
     const again = await load({ session: session("lane-5"), flags: { "dori-role": "lane" } });
     await again.emit("session_start");
@@ -441,6 +450,19 @@ describe("pane state", () => {
     writePaneState(stateDir, { ...other, pid: process.pid + 1, sessionId: "other" });
     await again.emit("session_shutdown");
     expect(readPaneState(stateDir, PANE)?.sessionId).toBe("other");
+  });
+
+  test("a session without a role clears the tombstone the pane inherited", async () => {
+    const lead = await load({ session: session("dori-9"), flags: { "dori-role": "dori" } });
+    await lead.emit("session_start");
+    await lead.emit("session_shutdown");
+    expect(readPaneState(stateDir, PANE)?.sessionId).toBe("dori-9");
+
+    const plain = await load({ session: session("plain-9") });
+    await plain.emit("session_start");
+    expect(readPaneState(stateDir, PANE)).toBeNull();
+    await plain.emit("session_shutdown");
+    expect(readPaneState(stateDir, PANE)).toBeNull();
   });
 
   test("approvals in a normal session reached from a Dori session leave no pane file", async () => {
@@ -467,7 +489,7 @@ describe("pane state", () => {
     await pi.emit("goal_updated", { type: "goal_updated", goal: { objective: "hc port", status: "paused" } });
     expect(readPaneState(stateDir, "t1b")?.goal.status).toBe("paused");
     await pi.emit("session_shutdown");
-    expect(readPaneState(stateDir, "t1b")).toBeNull();
+    expect(readPaneState(stateDir, "t1b")).toMatchObject({ pid: 0, sessionId: "hc-lane" });
   });
 
   test("is not written without a runtime session id", async () => {

@@ -227,7 +227,8 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
   );
   const runtimeHealth = new RuntimeHealthWriter(monitors);
 
-  // Only the file this process wrote: another process may have taken the pane since.
+  // Only the file this process wrote: another process may have taken the pane since. A tombstone (`retirePane`) carries
+  // no pid and belongs to the record's own history, so a role-less session must not erase the resume pointer.
   const removePane = (): void => {
     runtimeHealth.stop();
     if (
@@ -238,6 +239,31 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       rmSync(paneStatePath(stateDir, paneWritten), { force: true });
       if (process.env.HC_TERMINAL_ID) process.stdout.write("\x1b]7501;state=unknown:app=omp\x1b\\");
     }
+    paneWritten = undefined;
+  };
+
+  /**
+   * Shutdown retires the record instead of deleting it. `~/.dori/dori-lead` resumes the session file recorded here,
+   * and the monitors that read the messenger live only in that session's branch: deleting the record on shutdown made
+   * every restart open a FRESH session with no `inbound` at all, so the bot stayed connected and answered nothing
+   * (2026-11-17 17:38, the owner's symptom was silence). A tombstone keeps `sessionId`/`sessionFile` reachable for
+   * `--resume` while `pid: 0` reads as "no live owner" to every reader that probes the pid — `paneHeldByAnother`,
+   * `trustedPaneState`, and the update shell/runtime checks.
+   */
+  const retirePane = (): void => {
+    runtimeHealth.stop();
+    if (paneWritten === undefined || stateDir === undefined) return;
+    const state = readPaneState(stateDir, paneWritten);
+    if (state !== null && state.pid === process.pid) {
+      writePaneState(stateDir, {
+        ...state,
+        pid: 0,
+        agentStatus: "idle",
+        approvalPending: false,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    if (process.env.HC_TERMINAL_ID) process.stdout.write("\x1b]7501;state=unknown:app=omp\x1b\\");
     paneWritten = undefined;
   };
 
@@ -264,8 +290,14 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
   const savePane = (ctx: DoriContext): void => {
     const paneId = process.env.HC_TERMINAL_ID || process.env.HERDR_PANE_ID;
     if (!paneId || stateDir === undefined || !session) return;
-    // The pane now runs a session without a role: a leftover file would point `dori` at the previous session.
+    // The pane now runs a session without a role: a leftover file would point `dori` at the previous session. That
+    // includes the pid-less tombstone `retirePane` leaves for a resume, so it goes once the pane is taken by a
+    // session that is not a role session. A record a live process still owns is left alone.
     if (!role) {
+      if (!paneHeldByAnother(paneId)) {
+        rmSync(paneStatePath(stateDir, paneId), { force: true });
+        if (process.env.HC_TERMINAL_ID) process.stdout.write("\x1b]7501;state=unknown:app=omp\x1b\\");
+      }
       removePane();
       return;
     }
@@ -360,7 +392,7 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
     });
     pi.on("session_shutdown", () => {
       monitors.stopAll();
-      removePane();
+      retirePane();
     });
   };
 
