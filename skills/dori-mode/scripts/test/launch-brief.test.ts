@@ -10,6 +10,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { FlowDeps } from "../src/done-flow.ts";
@@ -61,11 +62,15 @@ test("a brief that cannot be put in place after registration undoes the record, 
   const brief = join(briefs, "lane.md");
   writeFileSync(brief, "brief");
   const deps = withTab(depsFor(world, fakeClock(T0), state.dir));
-  const original = fs.renameSync;
-  const spy = spyOn(fs, "renameSync").mockImplementation(((from: fs.PathLike, to: fs.PathLike) => {
-    if (String(to) === brief) throw new Error("EACCES: permission changed");
-    original(from, to);
-  }) as typeof fs.renameSync);
+  const original = fs.writeFileSync;
+  let refused = false;
+  const spy = spyOn(fs, "writeFileSync").mockImplementation(((...args: Parameters<typeof fs.writeFileSync>) => {
+    if (String(args[0]) === brief && !refused) {
+      refused = true;
+      throw new Error("EACCES: permission changed");
+    }
+    original(...args);
+  }) as typeof fs.writeFileSync);
   try {
     await expect(launchLane(deps, { key: "brief-lane", title: "t", brief, done: DONE })).rejects.toThrow(
       "brief not written: EACCES: permission changed",
@@ -84,13 +89,13 @@ test("a staged brief that cannot be removed does not stop the record and tab rol
   const brief = join(briefs, "lane.md");
   writeFileSync(brief, "brief");
   const deps = withTab(depsFor(world, fakeClock(T0), state.dir));
-  const rename = fs.renameSync;
+  const write = fs.writeFileSync;
   const remove = fs.rmSync;
   const spies = [
-    spyOn(fs, "renameSync").mockImplementation(((from: fs.PathLike, to: fs.PathLike) => {
-      if (String(to) === brief) throw new Error("EACCES: directory locked");
-      rename(from, to);
-    }) as typeof fs.renameSync),
+    spyOn(fs, "writeFileSync").mockImplementation(((...args: Parameters<typeof fs.writeFileSync>) => {
+      if (String(args[0]) === brief) throw new Error("EACCES: directory locked");
+      write(...args);
+    }) as typeof fs.writeFileSync),
     spyOn(fs, "rmSync").mockImplementation(((path: fs.PathLike, options?: fs.RmOptions) => {
       if (String(path).endsWith(".launch")) throw new Error("EACCES: directory locked");
       remove(path, options);
@@ -138,6 +143,69 @@ test.each([0o600, 0o640])("staging preserves an existing brief's %s permissions 
   } finally {
     process.umask(before);
   }
+});
+
+// A group the test may give a file without privileges: one of ours other than the one new files get.
+const egid = process.getegid?.();
+const otherGroup = process.getgroups?.().find((gid) => gid !== egid);
+
+test.skipIf(otherGroup === undefined)("staging keeps an existing brief's group and its readers", async () => {
+  const brief = join(briefs, "shared.md");
+  writeFileSync(brief, "team instructions");
+  chmodSync(brief, 0o640);
+  fs.chownSync(brief, process.geteuid?.() ?? -1, otherGroup!);
+  const deps = withTab(depsFor(world, fakeClock(T0), state.dir));
+
+  await launchLane(deps, { key: "shared-lane", title: "t", brief, done: DONE });
+
+  expect(readFileSync(brief, "utf8")).toContain("team instructions");
+  expect([statSync(brief).gid, statSync(brief).mode & 0o777]).toEqual([otherGroup!, 0o640]);
+});
+
+test("the brief is written in place: its inode and a hard link to it stay", async () => {
+  const brief = join(briefs, "lane.md");
+  const shared = join(briefs, "shared.md");
+  writeFileSync(brief, "linked instructions");
+  fs.linkSync(brief, shared);
+  const inode = statSync(brief).ino;
+  const deps = withTab(depsFor(world, fakeClock(T0), state.dir));
+
+  await launchLane(deps, { key: "inode-lane", title: "t", brief, done: DONE });
+
+  expect([statSync(brief).ino, statSync(brief).nlink]).toEqual([inode, 2]);
+  expect(readFileSync(shared, "utf8")).toBe(readFileSync(brief, "utf8"));
+  expect(readdirSync(briefs).sort()).toEqual(["lane.md", "shared.md"]);
+});
+
+// POSIX ACLs: the file's own entries, and a directory default a new file would inherit.
+const setAcl = (...args: string[]): boolean => Bun.spawnSync(["setfacl", ...args]).exitCode === 0;
+const aclGroup = otherGroup ?? egid;
+const aclsWork = (() => {
+  if (aclGroup === undefined || !Bun.which("setfacl") || !Bun.which("getfacl")) return false;
+  const probe = fs.mkdtempSync(join(fs.realpathSync(tmpdir()), "dori-acl-"));
+  try {
+    return setAcl("-m", `g:${aclGroup}:r`, probe);
+  } finally {
+    fs.rmSync(probe, { recursive: true, force: true });
+  }
+})();
+
+test.skipIf(!aclsWork).each(["own", "inherited"] as const)("the brief keeps its ACL (%s entries)", async (kind) => {
+  const brief = join(briefs, "lane.md");
+  writeFileSync(brief, "acl instructions");
+  chmodSync(brief, 0o640);
+  // own: a named group may read while the owning group may not; inherited: the directory would grant a reader.
+  expect(
+    kind === "own" ? setAcl("-m", `g::-,g:${aclGroup}:r`, brief) : setAcl("-d", "-m", `g:${aclGroup}:r`, briefs),
+  ).toBe(true);
+  const getAcl = ["getfacl", "-cp", brief];
+  const before = Bun.spawnSync(getAcl).stdout.toString();
+  const deps = withTab(depsFor(world, fakeClock(T0), state.dir));
+
+  await launchLane(deps, { key: "acl-lane", title: "t", brief, done: DONE });
+
+  expect(readFileSync(brief, "utf8")).toContain("acl instructions");
+  expect(Bun.spawnSync(getAcl).stdout.toString()).toBe(before);
 });
 
 test.each([false, true])("a read-only brief or linked template refuses replacement (%s)", async (linked) => {
