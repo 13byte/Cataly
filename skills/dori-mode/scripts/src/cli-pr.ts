@@ -27,7 +27,9 @@ const track = async (cli: Cli): Promise<void> => {
   const laneKey = opt("lane");
   const lane = laneKey === undefined ? undefined : await deps.registry.read(laneKey);
   if (laneKey !== undefined && !lane) die(`no registered lane "${laneKey}"`);
-  const thread = opt("thread") ?? (lane ? laneThread(lane) : undefined);
+  const given = opt("thread");
+  // `none` means no thread, as it does for `launch --thread none`.
+  const thread = given !== undefined ? (given === "none" ? undefined : given) : lane ? laneThread(lane) : undefined;
   if (thread !== undefined && !isToken(thread)) die("--thread must be one token without spaces or control characters");
   const pr = new PrTracking(config.stateDir).track(
     ref,
@@ -85,8 +87,9 @@ const pr: Command = async (cli) => {
         console.error(`PR_WATCH_WARNING ${e.message}`);
       }
       const watched = (p: TrackedPr) => {
+        // A cursor from an earlier tracking of the same PR is not this tracking's, as in the watcher.
         const entry = state[prKey(p)];
-        if (!entry) return null;
+        if (!entry || entry.since !== p.since) return null;
         const { seen, commits: _commits, ...rest } = entry;
         return { ...rest, known: seen.length };
       };

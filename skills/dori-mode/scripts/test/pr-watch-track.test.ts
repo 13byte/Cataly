@@ -86,9 +86,18 @@ test("pr track, list and untrack; a lane gives its thread; an unknown lane or a 
       watch: null,
     },
   ]);
+  // A cursor saved for this tracking shows in the list; after untrack and track it belongs to the old tracking.
+  const tracking = new PrTracking(state.dir);
+  const entry = { since: listed[0].since, head: "a".repeat(40), commits: [], seen: ["ic:1"], state: "closed" };
+  tracking.saveState({ "acme/app#7": { ...entry, state: "closed", polledAt: listed[0].since } });
+  expect(JSON.parse((await run("pr", "list")).out)[0].watch).toMatchObject({ state: "closed", known: 1 });
   expect((await run("pr", "untrack", "ACME/app#7")).out).toBe("PR_UNTRACKED acme/app#7");
   expect((await run("pr", "untrack", "acme/app#7")).out).toBe("PR_NOT_TRACKED acme/app#7");
   expect(JSON.parse((await run("pr", "list")).out)).toEqual([]);
+  expect((await run("pr", "track", "acme/app#7", "--lane", "fix-7", "--thread", "none")).out).toBe(
+    "PR_TRACKED acme/app#7 lane=fix-7 thread=-",
+  );
+  expect(JSON.parse((await run("pr", "list")).out)[0].watch).toBeNull();
 });
 
 test("the tracking record skips a torn last line, names other damage, and keeps one tracking across re-tracks", () => {

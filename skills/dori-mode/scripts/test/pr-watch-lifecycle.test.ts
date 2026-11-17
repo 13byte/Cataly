@@ -61,6 +61,38 @@ test("a PR closed unmerged is checked for a reopen with one read per pass, then 
   expect(await pass()).toHaveLength(1);
 });
 
+test("a PR closed unmerged, then reopened and merged between two passes, is reported merged", async () => {
+  await pass();
+  pr.state = "closed";
+  await pass();
+  pr.merged = true;
+  pr.mergeSha = sha("e");
+  pr.comments.push(row(6, "maintainer", "merging after all"));
+  expect(await pass()).toEqual([
+    "PR_FEEDBACK acme/app#7 lane=fix-7 thread=- kind=comment by=maintainer https://github.com/acme/app/pull/7#c6 | merging after all",
+    `PR_MERGED acme/app#7 lane=fix-7 thread=- sha=${sha("e")}`,
+  ]);
+  const reads = gh.calls.length;
+  expect(await pass()).toEqual([]);
+  expect(gh.calls.length).toBe(reads);
+});
+
+test("past 250 commits, an old head GitHub no longer has is a rewrite with no commit named, not a stuck PR", async () => {
+  pr.commits = Array.from({ length: 250 }, (_, i) => ({ sha: hex(i + 1), author: "me" }));
+  pr.head = hex(250);
+  await pass();
+  pr.commits = Array.from({ length: 251 }, (_, i) => ({ sha: hex(i + 1001), author: "me" }));
+  pr.head = hex(1251);
+  gh.failing.set("/compare/", "gh: Not Found (HTTP 404)");
+  expect(await pass()).toEqual([
+    `PR_HEAD_MOVED acme/app#7 lane=fix-7 thread=- by=unknown +0 ${hex(250).slice(0, 7)}..${hex(1251).slice(0, 7)} rewritten https://github.com/acme/app/pull/7`,
+  ]);
+  gh.failing.set("/compare/", "HTTP 502: Bad Gateway");
+  pr.commits.push({ sha: hex(1252), author: "me" });
+  pr.head = hex(1252);
+  expect((await pass())[0]).toStartWith("PR_WATCH_WARN acme/app#7 gh api repos/acme/app/compare/");
+});
+
 test("tracking a merged PR again with the same lane reads it once more; a merge is never polled after", async () => {
   await pass();
   pr.state = "closed";

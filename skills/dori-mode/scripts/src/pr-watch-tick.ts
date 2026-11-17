@@ -1,5 +1,5 @@
 /** `dori pr watch`: one pass over the tracked PRs, turning what is new since the last pass into PR_* lines. */
-import { fetchPr, type PrSnapshot, prIsOpen } from "./pr-watch-fetch.ts";
+import { fetchPr, type PrSnapshot, prLeftClosed } from "./pr-watch-fetch.ts";
 import { PrTracking, type PrWatchEntry, prKey, prName, type TrackedPr, UNSAFE } from "./pr-watch.ts";
 import type { Runner } from "./run.ts";
 import { ghGet } from "./verify-pr.ts";
@@ -160,8 +160,9 @@ export const prWatchPass = async (
     const prev = cursor(pr);
     if (prev) next[key] = prev;
     try {
-      // A merge is final, but a PR closed unmerged can be reopened: one metadata read per pass notices it.
-      if (!due(pr, prev) && !(prev?.state === "closed" && (await prIsOpen(api, pr)))) continue;
+      // A merge is final, but a PR closed unmerged can be reopened (and merged before the next pass): one metadata
+      // read per pass notices either.
+      if (!due(pr, prev) && !(prev?.state === "closed" && (await prLeftClosed(api, pr)))) continue;
       const snap = await fetchPr(api, pr, prev?.head);
       const diff = diffPr(pr, prev, snap, memory.self!, options, at);
       lines.push(...diff.lines);

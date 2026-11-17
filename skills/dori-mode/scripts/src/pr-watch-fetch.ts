@@ -141,12 +141,21 @@ const commitRow = (value: unknown): PrCommitAuthors => {
 /** What `head` has that `base` lacks, and whether `base` is still behind it (false after a rewrite). */
 const compare = async (api: Api, repo: string, base: string, head: string): Promise<PrCompare> => {
   let status = "";
-  const rows = await pages(api, `repos/${repo}/compare/${base}...${head}`, (body) => {
-    const value = record(body, "compare");
-    if (!Array.isArray(value["commits"]) || typeof value["status"] !== "string") throw new Error("incomplete compare");
-    status = value["status"];
-    return value["commits"];
-  });
+  let rows: unknown[];
+  try {
+    rows = await pages(api, `repos/${repo}/compare/${base}...${head}`, (body) => {
+      const value = record(body, "compare");
+      if (!Array.isArray(value["commits"]) || typeof value["status"] !== "string")
+        throw new Error("incomplete compare");
+      status = value["status"];
+      return value["commits"];
+    });
+  } catch (e) {
+    // An old head GitHub no longer has (gone after a force-push) can never be compared: report the rewrite with no
+    // commit to name, instead of holding the PR on that error forever. Other failures are retried as usual.
+    if (e instanceof Error && /\bHTTP 404\b/.test(e.message)) return { added: [], rewritten: true };
+    throw e;
+  }
   return { added: rows.map(commitRow), rewritten: status !== "ahead" };
 };
 
@@ -191,9 +200,11 @@ const metadata = async (api: Api, root: string): Promise<{ pr: Record<string, un
   return { pr, head };
 };
 
-/** One read: is the PR open (again)? */
-export const prIsOpen = async (api: Api, ref: PrRef): Promise<boolean> =>
-  (await metadata(api, `repos/${ref.repo}/pulls/${ref.number}`)).pr["state"] === "open";
+/** One read of a PR last seen closed unmerged: has it left that state (reopened, or reopened and merged since)? */
+export const prLeftClosed = async (api: Api, ref: PrRef): Promise<boolean> => {
+  const { pr } = await metadata(api, `repos/${ref.repo}/pulls/${ref.number}`);
+  return pr["state"] === "open" || pr["merged"] === true;
+};
 
 /** Reads everything first, so a failure part-way changes nothing: the caller records a snapshot or nothing. */
 export const fetchPr = async (api: Api, ref: PrRef, knownHead: string | undefined): Promise<PrSnapshot> => {
