@@ -60,6 +60,13 @@ const sourceOmpArgv = (argv: readonly string[]): boolean => {
 export const isOmpProcessCommand = (command: string): boolean =>
   OMP_COMMAND.test(command) || SOURCE_OMP_COMMAND.test(command);
 
+/**
+ * A `ps` command line that names OMP anywhere, as `bun run <omp>` or a published CLI under a spaced root does. Only
+ * discovery without the extension's record uses it (the start-time session folder); trust keeps the exact forms above.
+ */
+export const namesOmpProcess = (command: string): boolean =>
+  isOmpProcessCommand(command) || /(?:^|\s)(?:\S*\/)?omp(?:\s|$)|pi-coding-agent\/dist\/cli\.js/.test(command);
+
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 // GNU env's long options: those that take a separate operand when written without `=`, and those that take none.
 const ENV_LONG: Record<string, "flag" | "operand"> = {

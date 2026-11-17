@@ -165,6 +165,23 @@ test("a source OMP without its extension record falls back to OMP's start-time s
 });
 
 test.each([
+  ["Bun run of the published CLI", ["bun", "run", "/opt/tools/node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js"]],
+  [
+    "the published CLI under a spaced root",
+    ["bun", "/opt/agent tools/node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js"],
+  ],
+  ["Bun run of omp", ["bun", "--smol", "run", "/opt/bin/omp"]],
+] as const)("%s without its extension record is still found in OMP's start-time session folder", async (_, argv) => {
+  const { deps, rts, sessionsDir } = setup([...argv, "--dori-role", "lane"], "fallback", false);
+  const run = async (cmd: readonly string[]) =>
+    cmd[0] === "ps" && cmd.includes("lstart=")
+      ? { code: 0, out: "Thu Jan  1 12:00:01 2026 GMT", err: "" }
+      : deps.run(cmd);
+  const hit = await resolveSession(REF, "/repo", world.procs ?? [], { run, rts, stateDir: state.dir, sessionsDir });
+  expect(hit).toEqual({ id: SID, via: "start-time", pid: 4242 });
+});
+
+test.each([
   ["a shell quoting the source command", ["/bin/sh", "-c", source("/opt/native/source").join(" ")]],
   ["another CLI under the source preload", [...source("/opt/native/source").slice(0, 3), "/elsewhere/src/cli.ts"]],
   ["a Node interpreter", ["node", ...source("/opt/native/source").slice(1)]],
