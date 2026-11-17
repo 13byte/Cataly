@@ -123,10 +123,12 @@ describe("Monitors", () => {
       "POSTED a-lane Progress (from the lane's last report): x",
       // A silent lane with nothing to post leaves its thread without an update: the lead is told, as before.
       "NO-REPORT a-lane report journal has no report",
+      // So does one whose last report was already posted: the thread still has nothing new.
+      "STALE-REPORT a-lane the last [REPORT] line was already posted",
     ]) {
       const running = monitors.start(
         "mixed",
-        ["sh", "-c", `echo 'STALE-REPORT a-lane x'; echo "${line}"; exec sleep 30`],
+        ["sh", "-c", `echo 'PENDING-REPORT a-lane x'; echo "${line}"; exec sleep 30`],
         ".",
         "/",
         "s1",
@@ -139,7 +141,7 @@ describe("Monitors", () => {
       batches.length = 0;
     }
     // A monitor's own exit wakes even after only notices.
-    monitors.start("ends", ["sh", "-c", "echo 'STALE-REPORT a-lane x'"], ".", "/", "s1");
+    monitors.start("ends", ["sh", "-c", "echo 'PENDING-REPORT a-lane x'"], ".", "/", "s1");
     await until(() => batches.some((b) => b.content.includes("exited")));
     expect(batches.find((b) => b.content.includes("exited"))?.wake).toBe(true);
   });
