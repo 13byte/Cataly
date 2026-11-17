@@ -2,7 +2,7 @@ import type { Runner } from "../src/run.ts";
 
 /** A GitHub stand-in for `gh api --method GET`: one repository's PRs, read the way `dori pr watch` reads them. */
 export type Row = { id: number; user: { login: string } | null; html_url: string; body: string | null; state?: string };
-export type FakeCommit = { sha: string; author: string | null; committer?: string };
+export type FakeCommit = { sha: string; author: string | null; committer?: string; email?: string };
 export type FakePr = {
   state: "open" | "closed";
   merged: boolean;
@@ -54,6 +54,25 @@ export const fakeGitHub = (prs: Record<string, FakePr>, login: string | null = "
     const [path, query = ""] = endpoint.split("?");
     const page = Number(new URLSearchParams(query).get("page") ?? 1);
     const slice = <T>(rows: T[]) => rows.slice((page - 1) * 100, page * 100);
+    // A commit committed by its author unless stated; `email` is the Git identity GitHub could not link to an account.
+    const commitJson = (c: FakeCommit) => {
+      const committer = c.committer ?? c.author;
+      return {
+        sha: c.sha,
+        author: c.author ? { login: c.author } : null,
+        committer: committer ? { login: committer } : null,
+        commit: { author: { email: c.email ?? "" }, committer: { email: c.email ?? "" } },
+      };
+    };
+    const compared = /^repos\/[^/]+\/[^/]+\/compare\/([0-9a-f]{40})\.\.\.([0-9a-f]{40})$/.exec(path!);
+    if (compared) {
+      // Linear history only: what follows base in the one PR whose commits hold both, else a diverged rewrite.
+      const pr = Object.values(prs).find((p) => p.commits.some((c) => c.sha === compared[2]));
+      const at = pr?.commits.findIndex((c) => c.sha === compared[1]) ?? -1;
+      const upto = pr?.commits.findIndex((c) => c.sha === compared[2]) ?? -1;
+      const added = at >= 0 ? pr!.commits.slice(at + 1, upto + 1) : (pr?.commits.slice(0, upto + 1) ?? []);
+      return ok({ status: at >= 0 ? "ahead" : "diverged", commits: slice(added).map(commitJson) });
+    }
     const m = /^repos\/([^/]+\/[^/]+)\/(pulls|issues|commits)\/([^/]+)(?:\/(.+))?$/.exec(path!);
     if (!m) throw new Error(`unexpected read ${endpoint}`);
     const [, repo, kind, id, rest] = m;
@@ -63,7 +82,10 @@ export const fakeGitHub = (prs: Record<string, FakePr>, login: string | null = "
         const runs = pr?.checks[id!] ?? [];
         return ok({ total_count: runs.length, check_runs: slice(runs) });
       }
-      if (rest === "status") return ok({ state: "pending", statuses: pr?.statuses[id!] ?? [] });
+      if (rest === "status") {
+        const statuses = pr?.statuses[id!] ?? [];
+        return ok({ state: "pending", total_count: statuses.length, statuses: slice(statuses) });
+      }
     }
     const pr = prs[`${repo}#${id}`];
     if (!pr) return { code: 1, out: "", err: "HTTP 404: Not Found" };
@@ -78,14 +100,8 @@ export const fakeGitHub = (prs: Record<string, FakePr>, login: string | null = "
       });
     if (kind === "pulls" && rest === "comments") return ok(slice(pr.reviewComments));
     if (kind === "pulls" && rest === "reviews") return ok(slice(pr.reviews));
-    if (kind === "pulls" && rest === "commits")
-      return ok(
-        slice(pr.commits).map((c) => ({
-          sha: c.sha,
-          author: c.author ? { login: c.author } : null,
-          committer: c.committer ? { login: c.committer } : null,
-        })),
-      );
+    // GitHub lists only the first 250 commits of a PR.
+    if (kind === "pulls" && rest === "commits") return ok(slice(pr.commits.slice(0, 250)).map(commitJson));
     throw new Error(`unexpected read ${endpoint}`);
   };
   return { run, calls, failing };

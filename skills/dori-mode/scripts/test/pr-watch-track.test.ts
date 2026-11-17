@@ -2,7 +2,8 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ConfigError, loadConfig } from "../src/config.ts";
-import { autoTrack, parsePrRef, PrTracking, prLinks } from "../src/pr-watch.ts";
+import { autoTrack } from "../src/cli-pr.ts";
+import { parsePrRef, PrTracking, prLinks } from "../src/pr-watch.ts";
 import { type Lane, Registry } from "../src/registry.ts";
 import { run } from "../src/run.ts";
 import { type TestState, withState } from "./fakes.ts";
@@ -80,6 +81,7 @@ test("pr track, list and untrack; a lane gives its thread; an unknown lane or a 
       source: "dori pr track",
       lane: "fix-7",
       thread: "discord:123",
+      since: expect.any(String),
       trackedAt: expect.any(String),
       watch: null,
     },
@@ -89,18 +91,22 @@ test("pr track, list and untrack; a lane gives its thread; an unknown lane or a 
   expect(JSON.parse((await run("pr", "list")).out)).toEqual([]);
 });
 
-test("the tracking record skips a torn last line, names other damage, and an identical re-track appends nothing", () => {
+test("the tracking record skips a torn last line, names other damage, and keeps one tracking across re-tracks", () => {
   const tracking = new PrTracking(state.dir);
   tracking.track({ repo: "acme/app", number: 7 }, { source: "test", lane: "a" }, T0);
-  tracking.track({ repo: "acme/app", number: 7 }, { source: "again", lane: "a" }, T0 + 1);
-  expect(readFileSync(tracking.path, "utf8").trim().split("\n")).toHaveLength(1);
+  const again = tracking.track({ repo: "acme/app", number: 7 }, { source: "again", lane: "a" }, T0 + 1);
+  expect(readFileSync(tracking.path, "utf8").trim().split("\n")).toHaveLength(2);
+  expect([again.since, again.trackedAt]).toEqual([new Date(T0).toISOString(), new Date(T0 + 1).toISOString()]);
+  // A repeated auto-tracking with the same lane writes nothing more.
+  autoTrack(state.dir, { key: "a", thread: "" }, "https://github.com/acme/app/pull/7", "claim-done a", T0 + 2);
+  expect(readFileSync(tracking.path, "utf8").trim().split("\n")).toHaveLength(2);
   appendFileSync(tracking.path, 'not json\n{"op":"track","repo":"x/y","number":1,"at":"2026-11-17T00:00:00.000Z"}\n');
   appendFileSync(tracking.path, '{"op":"track","repo":"acme/app","nu');
   const read = tracking.read();
   expect(read.prs.map((p) => p.number)).toEqual([7]);
   expect(read.problems).toEqual([
-    `${tracking.path}:2: JSON Parse error: Unexpected identifier "not"`,
-    `${tracking.path}:3: field "source" must be one line`,
+    `${tracking.path}:3: JSON Parse error: Unexpected identifier "not"`,
+    `${tracking.path}:4: field "source" must be one line`,
   ]);
   // The next append starts on its own line, so only the torn record is lost.
   tracking.track({ repo: "acme/app", number: 8 }, { source: "test" }, T0 + 2);

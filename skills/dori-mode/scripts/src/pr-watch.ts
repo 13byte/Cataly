@@ -21,12 +21,16 @@ import { join } from "node:path";
 
 export type PrRef = { readonly repo: string; readonly number: number };
 export type TrackedPr = PrRef & {
+  /** When this tracking began: the first track since the PR was last untracked. Its cursor carries the same time. */
+  readonly since: string;
+  /** The latest track; a PR the watcher saw close is read again when tracked after that. */
   readonly trackedAt: string;
   readonly source: string;
   readonly lane?: string;
   readonly thread?: string;
 };
 export type PrWatchEntry = {
+  readonly since: string;
   readonly head: string;
   readonly commits: readonly string[];
   readonly seen: readonly string[];
@@ -132,8 +136,9 @@ export class PrTracking {
       try {
         const event = parseEvent(JSON.parse(raw));
         const { op: _op, at, ...rest } = event;
+        const since = prs.get(prKey(event))?.since ?? at;
         if (event.op === "untrack") prs.delete(prKey(event));
-        else prs.set(prKey(event), { ...(rest as Omit<TrackedPr, "trackedAt">), trackedAt: at });
+        else prs.set(prKey(event), { ...(rest as Omit<TrackedPr, "since" | "trackedAt">), since, trackedAt: at });
       } catch (error) {
         if (error instanceof SyntaxError && isTorn(raw)) continue; // a write cut off halfway
         if (!(error instanceof SyntaxError || error instanceof PrWatchError)) throw error;
@@ -143,10 +148,11 @@ export class PrTracking {
     return { prs: [...prs.values()], problems };
   }
 
-  /** Track (or re-track with a new lane or thread) one PR. An identical open tracking is left as it is. */
+  /**
+   * Track one PR, or track it again: a new lane or thread replaces the old one, and a PR the watcher saw close is read
+   * once more. The tracking (and its cursor) carries on; only an untrack ends it.
+   */
   track(ref: PrRef, from: { source: string; lane?: string; thread?: string }, now: number): TrackedPr {
-    const current = this.read().prs.find((pr) => prKey(pr) === prKey(ref));
-    if (current && current.lane === from.lane && current.thread === from.thread) return current;
     this.append({ op: "track", at: new Date(now).toISOString(), repo: ref.repo, number: ref.number, ...from });
     return this.read().prs.find((pr) => prKey(pr) === prKey(ref)) ?? this.lost(ref);
   }
@@ -174,6 +180,7 @@ export class PrTracking {
     for (const [key, raw] of Object.entries(value.prs)) {
       const e = raw as Partial<Record<keyof PrWatchEntry, unknown>> | null;
       if (
+        !isoTime(e?.since) ||
         typeof e?.head !== "string" ||
         !strings(e.commits) ||
         !strings(e.seen) ||
@@ -216,22 +223,3 @@ export class PrTracking {
     }
   }
 }
-
-/** Opt-in (`prAutoTrack`): PR links in a claim's evidence or a checkpoint's receipts are tracked for the lane. */
-export const autoTrack = (
-  stateDir: string,
-  lane: { readonly key: string; readonly thread: string },
-  text: string,
-  source: string,
-  now: number,
-): string[] => {
-  const tracking = new PrTracking(stateDir);
-  const thread = isToken(lane.thread) ? lane.thread : undefined;
-  return prLinks(text).map((ref) => {
-    const pr = tracking.track(ref, { source, lane: lane.key, ...(thread !== undefined ? { thread } : {}) }, now);
-    return trackedLine(pr);
-  });
-};
-
-export const trackedLine = (pr: TrackedPr): string =>
-  `PR_TRACKED ${prName(pr)} lane=${pr.lane ?? "-"} thread=${pr.thread ?? "-"}`;

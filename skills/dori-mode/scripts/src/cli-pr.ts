@@ -1,6 +1,16 @@
 /** dori pr track, untrack, list and watch: follow a PR's reviews, CI, outside commits and merge after its lane. */
 import { type Cli, type Command, die, every } from "./cli-context.ts";
-import { autoTrack, isToken, parsePrRef, PrTracking, PrWatchError, prKey, prName, trackedLine } from "./pr-watch.ts";
+import {
+  isToken,
+  parsePrRef,
+  PrTracking,
+  PrWatchError,
+  type PrWatchState,
+  prKey,
+  prLinks,
+  prName,
+  type TrackedPr,
+} from "./pr-watch.ts";
 import { prWatchPass, type WatchMemory } from "./pr-watch-tick.ts";
 import { realClock, run } from "./run.ts";
 
@@ -17,7 +27,7 @@ const track = async (cli: Cli): Promise<void> => {
   const laneKey = opt("lane");
   const lane = laneKey === undefined ? undefined : await deps.registry.read(laneKey);
   if (laneKey !== undefined && !lane) die(`no registered lane "${laneKey}"`);
-  const thread = opt("thread") ?? (lane && isToken(lane.thread) ? lane.thread : undefined);
+  const thread = opt("thread") ?? (lane ? laneThread(lane) : undefined);
   if (thread !== undefined && !isToken(thread)) die("--thread must be one token without spaces or control characters");
   const pr = new PrTracking(config.stateDir).track(
     ref,
@@ -31,15 +41,24 @@ const watch = async ({ loopMinutes, strings, opt, config }: Cli): Promise<void> 
   const self = opt("self");
   const options = {
     ignore: new Set(strings("ignore-author").map((login) => login.trim().toLowerCase())),
+    selfEmails: new Set(Object.values(config.repoIdentities).map((identity) => identity.email.trim().toLowerCase())),
     ...(self ? { self } : {}),
   };
   const memory: WatchMemory = { warned: new Map() };
   const minutes = loopMinutes();
   console.log("PR_WATCH_READY");
   await every(minutes, async () => {
-    const pass = await prWatchPass(config.stateDir, run, options, memory, realClock.now());
-    for (const line of pass.lines) console.log(line);
-    pass.commit();
+    // An unreadable tracking record or a cursor that cannot be saved must reach the monitor's ^PR_ filter, once.
+    try {
+      const pass = await prWatchPass(config.stateDir, run, options, memory, realClock.now());
+      for (const line of pass.lines) console.log(line);
+      pass.commit();
+      memory.warned.delete("run");
+    } catch (e) {
+      const reason = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").slice(0, 300);
+      if (memory.warned.get("run") !== reason) console.log(`PR_WATCH_WARN run ${reason}`);
+      memory.warned.set("run", reason);
+    }
   });
 };
 
@@ -57,8 +76,15 @@ const pr: Command = async (cli) => {
     case "list": {
       const read = tracking.read();
       for (const problem of read.problems) console.error(`PR_WATCH_WARNING ${problem}`);
-      const state = tracking.loadState();
-      const watched = (p: (typeof read.prs)[number]) => {
+      // A damaged cursor is the watcher's to hold on; the tracking list is still worth reading.
+      let state: PrWatchState = {};
+      try {
+        state = tracking.loadState();
+      } catch (e) {
+        if (!(e instanceof PrWatchError)) throw e;
+        console.error(`PR_WATCH_WARNING ${e.message}`);
+      }
+      const watched = (p: TrackedPr) => {
         const entry = state[prKey(p)];
         if (!entry) return null;
         const { seen, commits: _commits, ...rest } = entry;
@@ -96,3 +122,34 @@ export const autoTrackLinks = (
     console.error(`PR_TRACK_WARNING ${e instanceof Error ? e.message : String(e)}`);
   }
 };
+
+/** A lane's thread to route PR lines to; `launch` records a lane without one as `none`. */
+export const laneThread = (lane: { readonly thread: string }): string | undefined =>
+  lane.thread !== "none" && isToken(lane.thread) ? lane.thread : undefined;
+
+/** Opt-in (`prAutoTrack`): PR links in a claim's evidence or a checkpoint's receipts are tracked for the lane. */
+export const autoTrack = (
+  stateDir: string,
+  lane: { readonly key: string; readonly thread: string },
+  text: string,
+  source: string,
+  now: number,
+): string[] => {
+  const tracking = new PrTracking(stateDir);
+  const thread = laneThread(lane);
+  const tracked = tracking.read().prs;
+  return prLinks(text).map((ref) => {
+    // A claim and its checkpoints often repeat a link: the same tracking is not written again, so a closed PR the
+    // watcher already reported is not read once more on every repeat.
+    const current = tracked.find((pr) => prKey(pr) === prKey(ref));
+    const same = current && current.lane === lane.key && current.thread === thread;
+    return trackedLine(
+      same
+        ? current
+        : tracking.track(ref, { source, lane: lane.key, ...(thread !== undefined ? { thread } : {}) }, now),
+    );
+  });
+};
+
+export const trackedLine = (pr: TrackedPr): string =>
+  `PR_TRACKED ${prName(pr)} lane=${pr.lane ?? "-"} thread=${pr.thread ?? "-"}`;
