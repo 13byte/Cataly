@@ -1,15 +1,5 @@
 import { randomUUID } from "node:crypto";
-import {
-  accessSync,
-  chmodSync,
-  chownSync,
-  constants,
-  realpathSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { accessSync, constants, realpathSync, rmSync, writeFileSync } from "node:fs";
 
 import { type CreateSpec, formatRef, type SessionRef } from "../../../../src/runtime/types.ts";
 import { type Lane, type Registry, sessionFields } from "./registry.ts";
@@ -42,10 +32,11 @@ const briefTarget = (brief: string): string => {
 
 /**
  * Opens a lane's session and registers it before its agent starts (dori report refuses an unknown key, so a fast
- * lane's first report would be lost). The brief is staged beside its path first, so a full disk or an unwritable
- * directory fails before anything exists, and it replaces the brief only once this launch owns the key. A key that
- * another launch or adopt registered meanwhile is `taken`: its record and brief stay. Whenever this launch does not
- * open, it closes the session it created and removes its staged brief and its own record.
+ * lane's first report would be lost). The brief is staged beside its path first, so a read-only brief, a full disk or
+ * an unwritable directory fails before anything exists, and the brief is rewritten in place only once this launch owns
+ * the key; the staged copy is then removed. A key that another launch or adopt registered meanwhile is `taken`: its
+ * record and brief stay. Whenever this launch does not open, it closes the session it created and removes its staged
+ * brief and its own record.
  */
 export const openLaneSession = async (
   registry: Registry,
@@ -57,19 +48,12 @@ export const openLaneSession = async (
 ): Promise<OpenedLane> => {
   const target = briefTarget(brief);
   const staged = `${target}.${process.pid}.${randomUUID()}.launch`;
-  let what = "brief not writable";
   try {
     accessSync(target, constants.W_OK);
     writeFileSync(staged, preamble, { flag: "wx", mode: 0o600 });
-    // The replacement keeps the brief's owner, group and mode, so the same users can read it; one this user cannot
-    // give them (another user's brief, a group this user left) is refused here, before anything exists.
-    const kept = statSync(target);
-    what = "brief owner or group cannot be kept";
-    chownSync(staged, kept.uid, kept.gid);
-    chmodSync(staged, kept.mode & 0o777);
   } catch (error) {
     removeStaged(staged);
-    return { kind: "failed", what, error };
+    return { kind: "failed", what: "brief not writable", error };
   }
   let ref: SessionRef;
   try {
@@ -84,7 +68,9 @@ export const openLaneSession = async (
   try {
     registered = await registry.create(lane);
     if (registered) {
-      renameSync(staged, target);
+      // Written in place, as the brief file itself: its inode, hard links, owner, group, mode and ACL stay.
+      writeFileSync(target, preamble);
+      removeStaged(staged);
       return { kind: "opened", lane, ref };
     }
   } catch (error) {
