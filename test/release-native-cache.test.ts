@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { reportNativeCache } from "../src/release/native-cache.ts";
 import { processCwds } from "../src/release/process-cwd.ts";
-import { nativeCacheFixture, overlayFixture } from "./source-bundle-setup.ts";
+import { nativeCacheFixture, overlayFixture, ownProcessCwds } from "./source-bundle-setup.ts";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -54,7 +54,7 @@ test("the report names what uses each identity and removes none, the unused one 
     expect(new TextDecoder().decode((await reader.read()).value)).toBe("ready\n");
     const sources = [live.source];
     const scanned = [join(c.root, "dori")];
-    const entries = reportNativeCache(c.home, sources, scanned);
+    const entries = reportNativeCache(c.home, sources, scanned, ownProcessCwds);
     const reasons = Object.fromEntries(entries.map((entry) => [entry.directory, entry.protectedBy]));
     expect(reasons[live.receipt.directory]).toEqual(
       expect.arrayContaining([`source ${live.source}`, "receipt source"]),
@@ -100,7 +100,7 @@ test("a link into the cache, a process working in an entry and a partial receipt
   });
   try {
     expect(new TextDecoder().decode((await holder.stdout.getReader().read()).value)).toBe("ready\n");
-    const entries = reportNativeCache(c.home, [], [join(c.root, "dori")]);
+    const entries = reportNativeCache(c.home, [], [join(c.root, "dori")], ownProcessCwds);
     const reasons = Object.fromEntries(entries.map((entry) => [entry.directory, entry.protectedBy]));
     expect(reasons[linked.receipt.directory]).toEqual([`link ${join(bin, "omp")}`]);
     expect(reasons[chained.receipt.directory]).toEqual([`link ${join(bin, "omp-side")}`]);
@@ -126,7 +126,9 @@ test("a link to a wrapper outside the roots reports what it names; a link to an 
   mkdirSync(refs);
   symlinkSync(join(outside, "omp"), join(refs, "omp"));
   const report = (roots: string[]) =>
-    Object.fromEntries(reportNativeCache(c.home, [], roots).map((entry) => [entry.directory, entry.protectedBy]));
+    Object.fromEntries(
+      reportNativeCache(c.home, [], roots, ownProcessCwds).map((entry) => [entry.directory, entry.protectedBy]),
+    );
   const linked = report([refs]);
   expect(linked[wrapped.receipt.directory]).toEqual([`reference ${join(refs, "omp")}`]);
   expect(linked[free.receipt.directory]).toEqual([]);
@@ -149,7 +151,7 @@ test.each(["linux", "darwin"] as const)("a process's working directory is read t
   const holder = Bun.spawn(["/bin/sh", "-c", "echo ready; read line"], { cwd: c.root, stdin: "pipe", stdout: "pipe" });
   try {
     expect(new TextDecoder().decode((await holder.stdout.getReader().read()).value)).toBe("ready\n");
-    expect(processCwds([String(holder.pid)], platform)?.get(String(holder.pid))).toBe(realpathSync(c.root));
+    expect(processCwds([String(holder.pid)], platform)?.cwds.get(String(holder.pid))).toBe(realpathSync(c.root));
   } finally {
     holder.stdin.end();
     await holder.exited;
@@ -169,9 +171,10 @@ test("dori update cache only reports; --prune is refused and nothing is ever rem
   expect(listed.exitCode).toBe(0);
   const report = JSON.parse(listed.stdout.toString());
   expect(report.removes).toBe("nothing");
-  expect(report.entries).toEqual([
-    expect.objectContaining({ directory: superseded.receipt.directory, protectedBy: [] }),
-  ]);
+  expect(report.entries).toEqual([expect.objectContaining({ directory: superseded.receipt.directory })]);
+  // Only this user's host processes whose working directory cannot be read (not dumpable) may be listed against it.
+  const unread = "unreadable working directory of process ";
+  expect(report.entries[0].protectedBy.filter((reason: string) => !reason.startsWith(unread))).toEqual([]);
   expect(existsSync(superseded.receipt.directory)).toBe(true);
   expect(run("--from", c.root).exitCode).toBe(2);
   // An unreferenced identity is only reported: a request to remove it fails loudly and leaves it in place.

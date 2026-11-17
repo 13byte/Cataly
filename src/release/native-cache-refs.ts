@@ -1,11 +1,13 @@
 import { closeSync, lstatSync, openSync, readdirSync, readlinkSync, readSync, realpathSync } from "node:fs";
-import { join } from "node:path";
-import type { processCwds } from "./process-cwd.ts";
+import { isAbsolute, join, relative, sep } from "node:path";
+import { type processCwds, processStart } from "./process-cwd.ts";
 import { readSourceBundle } from "./source-bundle.ts";
 
 const CHUNK = 1024 * 1024;
 /** An identity's length, so one cut by a chunk edge is whole in the next window. */
 const OVERLAP = 64;
+/** Directories the walk does not enter. */
+const SKIP = new Set([".git", "node_modules"]);
 
 /** Walk without following links; `visit` sees every directory, every symbolic link and every regular file. */
 function walk(root: string, visit: (path: string, kind: "directory" | "file" | "link") => void): void {
@@ -18,8 +20,7 @@ function walk(root: string, visit: (path: string, kind: "directory" | "file" | "
     else if (stat.isFile()) visit(path, "file");
     else if (stat.isDirectory()) {
       visit(path, "directory");
-      for (const name of readdirSync(path))
-        if (name !== ".git" && name !== "node_modules") stack.push(join(path, name));
+      for (const name of readdirSync(path)) if (!SKIP.has(name)) stack.push(join(path, name));
     }
   }
 }
@@ -84,6 +85,14 @@ export function protections(
   };
   const cacheReal = real(cache);
   const rootsReal = roots.map(real);
+  // Whether the walk reads this real directory: it lies in a root and under no directory the walk skips.
+  const walked = (directory: string): boolean =>
+    rootsReal.some((dir) => {
+      const rel = relative(dir, directory);
+      return (
+        rel === "" || (!rel.startsWith("..") && !isAbsolute(rel) && !rel.split(sep).some((part) => SKIP.has(part)))
+      );
+    });
   // A root given as a link (a `--reference` alias) is walked at its real path, so its contents are read.
   for (const root of rootsReal)
     walk(root, (path, kind) => {
@@ -99,32 +108,45 @@ export function protections(
       let resolved = "";
       try {
         resolved = realpathSync(path);
-      } catch {
-        // A dangling link names only its own target text.
+      } catch (error) {
+        // Only a missing target makes a dangling link, which names only its own target text. A target that cannot be
+        // reached (no permission, a loop) may be anything.
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") all(`unresolved link ${path}`);
       }
       names(`${target}\0${resolved}`, `link ${path}`);
       // A target inside the cache is identified by its path alone.
       if (!resolved || resolved === cacheReal || resolved.startsWith(`${cacheReal}/`)) return;
       // A link to a file (a wrapper elsewhere) keeps what that file names. A link to a directory keeps the source it
-      // binds; one outside the scanned roots and the cache is not walked, so it keeps every identity.
+      // binds, and unless the walk reads that directory itself, what is inside it is unknown: it keeps every identity.
       const stat = lstatSync(resolved, { throwIfNoEntry: false });
       if (stat?.isFile()) readWindows(resolved, (text) => names(text, `reference ${path}`));
       else if (stat?.isDirectory()) {
-        if (lstatSync(join(resolved, "native-omp.lock"), { throwIfNoEntry: false })) bind(resolved, path);
-        else if (!rootsReal.some((dir) => resolved === dir || resolved.startsWith(`${dir}/`)))
-          all(`link to an unscanned directory ${path}`);
+        bind(resolved, path);
+        if (!walked(resolved)) all(`link to an unscanned directory ${path}`);
       }
     });
-  const ps = Bun.spawnSync(["ps", "-A", "-ww", "-o", "pid=,args="], { stdout: "pipe", stderr: "pipe" });
+  const ps = Bun.spawnSync(["ps", "-A", "-ww", "-o", "pid=,uid=,args="], { stdout: "pipe", stderr: "pipe" });
   if (ps.exitCode !== 0) throw new Error("Process table is unavailable; native cache use cannot be ruled out");
-  const lines = ps.stdout.toString().split("\n");
-  const pids = lines.map((line) => line.trim().split(/\s+/, 1)[0] ?? "");
-  // A process also uses an entry through its working directory; with none readable, any identity may be in use.
-  const cwds = readCwds(pids.filter(Boolean));
-  if (!cwds) all("process working directories unavailable");
-  lines.forEach((line, at) => {
-    const pid = pids[at] ?? "";
-    names(`${line}\0${cwds?.get(pid) ?? ""}`, `process ${pid}`);
-  });
+  const processes = ps.stdout
+    .toString()
+    .split("\n")
+    .flatMap((line) => {
+      const row = /^\s*(\d+)\s+(\d+)\s(.*)$/.exec(line);
+      return row ? [{ pid: row[1]!, uid: Number(row[2]), args: row[3]!.trim() }] : [];
+    });
+  // A process also uses an entry through its working directory. Only this user's processes can be inside an entry
+  // (0700 under an owned cache; root is judged by its arguments alone), and any of them whose directory cannot be read
+  // may use any identity.
+  const uid = process.getuid?.();
+  const read = readCwds(processes.filter((row) => row.uid === uid).map((row) => row.pid));
+  if (!read) all("process working directories unavailable");
+  const unreadable = new Set(read?.unreadable);
+  for (const { pid, args } of processes) {
+    if (unreadable.has(pid)) {
+      const start = processStart(pid);
+      all(`unreadable working directory of process ${start ? `${pid}@${start}` : pid} (${args})`);
+    }
+    names(`${args}\0${read?.cwds.get(pid) ?? ""}`, `process ${pid}`);
+  }
   return reasons;
 }

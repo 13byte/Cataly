@@ -1,6 +1,7 @@
 import { chmodSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { nativeDirectory, nativeLauncher, type NativeReceipt } from "../src/release/native.ts";
+import { type ProcessCwds, processCwds } from "../src/release/process-cwd.ts";
 import { readSourceBundle, type SourceBundle } from "../src/release/source-bundle.ts";
 import { digest } from "../src/update/source.ts";
 
@@ -147,3 +148,12 @@ export function nativeCacheFixture(source: string, home: string, upstream: strin
   writeFileSync(join(directory, "receipt.json"), JSON.stringify(receipt), { mode: 0o600 });
   return receipt;
 }
+
+/**
+ * The host's process working directories without the host's own unreadable processes (a session manager or agent that
+ * is not dumpable), which no fixture controls; a fixture's own unreadable process is tested against the real reader.
+ */
+export const ownProcessCwds = (pids: readonly string[]): ProcessCwds | null => {
+  const read = processCwds(pids);
+  return read && { cwds: read.cwds, unreadable: [] };
+};
