@@ -102,6 +102,7 @@ Real work runs in its own session, called a lane: a herdr tab, or a labelled ter
 - Build memory as you work and consult it before asking the owner something it already answers.
 - Keep going until the work is done. Stop only when nothing can move without the owner.
 - Keep the worklog: `dori worklog add` the moment an owner request arrives, `next` and `note` as the plan, decisions and owners change, `close --result` with what came of it. After a restart or a compaction, read the worklog first (`dori boot` lists each open item with its Next line) and continue each open item from its Next line, not from memory.
+- Record every product choice you put to the owner with `dori decision ask` (with `--message` once it is posted, or `dori decision posted` after), bind a reply with `dori decision match <replied-to message>` before reading it as an answer (a reply to any other message is an ordinary message), and record the answer with `dori decision answer`. Silence is never an answer. To re-post what is still waiting, paste `dori decision digest` instead of rewriting the list from memory. Owner requests stay in the worklog.
 - When the owner says wait, stop or hold on, pause the lane with `dori pause <key>` in the same turn; if they name no lane, pause every working lane on that topic and say which. A reply alone leaves it running: the freshness sweep nudges it and its goal keeps continuing. `PAUSE_UNVERIFIED` (exit 3) means the goal was not confirmed paused, so the lane is still running: check the pane and retry. `LANE_CHANGED` (exit 3, from `claim-done`, `object-done`, `close`, `pause` or `resume`) means another writer moved the lane on while the command ran and nothing was recorded: read the lane again before deciding. `dori resume <key>` when they say go.
 
 ## Scripts
@@ -112,7 +113,7 @@ Real work runs in its own session, called a lane: a herdr tab, or a labelled ter
 |---|---|
 | `dori launch` / `dori adopt` | open a lane in a new tab, or register one already running |
 | `dori sync [--write]` | rebuild the registry from live panes, report drift |
-| `dori boot` | after a restart or compaction: vanished panes, drift count, workspace-filter mismatch, lane journals, open worklog items, watches left on finished lanes; read-only, non-zero exit on drift or a config warning |
+| `dori boot` | after a restart or compaction: vanished panes, drift count, workspace-filter mismatch, lane journals, open worklog items, open owner decisions, watches left on finished lanes; read-only, non-zero exit on drift or a config warning |
 | `dori update` | consumer verified-release check/install/status/rollback; no porting models or live-session restart |
 | `dori upstream ... --config FILE` | maintainer source candidates, fresh review, optional explicitly authorized publication/managed rollout, restart, status and recovery |
 | `dori report` | a lane records a milestone, blocker, question, halt or done in its `reports.jsonl` and prints the `[REPORT]` line |
@@ -121,6 +122,7 @@ Real work runs in its own session, called a lane: a herdr tab, or a labelled ter
 | `dori claim-done` / `dori object-done` / `dori close` | the done flow |
 | `dori lesson add` / `list` / `mark` | keep what a lane learned about a repo, or with `--global` a standing rule for every lane; `launch` puts the current ones above the next brief |
 | `dori worklog add` / `next` / `note` / `close` / `list` | the lead's record of owner requests, each with its source, next step, notes and result; survives compaction |
+| `dori decision ask` / `posted` / `answer` / `withdraw` / `match` / `list` / `digest` | the lead's record of choices put to the owner: numbered options, the posted message a reply binds to, the answer and its source; survives compaction |
 | `dori pause` / `dori resume` | the owner said wait: no nudges, goal paused, running turn stopped; and back |
 | `dori watch` | the 5-minute auto-close watcher (run it as a persistent monitor) |
 | `dori freshness` | nudge silent lanes, post their last report to their thread; block lanes at their wall, token or cost ceiling; flag hung calls |
