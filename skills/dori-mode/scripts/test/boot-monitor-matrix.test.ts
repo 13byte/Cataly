@@ -115,6 +115,31 @@ const ROWS: readonly Row[] = [
   [["ionice", "-c", "3", "rg", "-c", "pattern", "dori"], "dori", 1],
   [["time", "-o", "/tmp/t", "tail", "-F", "/logs/out"], "tail", 0],
   [["time", "-p", "dori", "inbound", "slack"], "slack", 0],
+  // `env -S STRING` runs STRING's first word.
+  [["env", "-S", "rg", "-c", "pattern", "dori"], "dori", 1],
+  [["env", "-S", "tail", "-n", "1", "freshness"], "tail", 0],
+  ["env -S 'dori inbound slack --loop 1'", "slack", 0],
+  [["env", "-S", "dori inbound slack"], "slack", 0],
+  [["env", "--split-string=tail -F", "/logs/out"], "tail", 0],
+  // A directory holds only where it applies: after a `cd`, or for `env -C`'s own command; another program's -C never.
+  [`git -C ${SKILL} status --short && bun src/cli.ts freshness`, "freshness", 1, { cwd: "/other" }],
+  [`cd ${SKILL} && cd /other && bun src/cli.ts freshness`, "freshness", 1, { cwd: "/other" }],
+  [`env -C ${SKILL} true && bun src/cli.ts freshness`, "freshness", 1, { cwd: "/other" }],
+  [`bun src/cli.ts freshness ; cd ${SKILL}`, "freshness", 1, { cwd: "/other" }],
+  [`cd ${SKILL}; bun src/cli.ts freshness`, "freshness", 0, { cwd: "/other" }],
+  [`cd ${SKILL} && bun src/cli.ts freshness`, "freshness", 0, { cwd: "/other" }],
+  [["env", `--chdir=${SKILL}`, "bun", "src/cli.ts", "freshness"], "freshness", 0, { cwd: "/other" }],
+  // A dori option's value is a value, never the command's platform.
+  [["dori", "send", "--text", "slack", "discord", "--to", "123"], "slack", 1],
+  [["dori", "send", "--text", "slack", "discord", "--to", "123"], "discord", 0],
+  [["dori", "inbound", "--cwd", "slack", "discord", "--loop", "1"], "discord", 0],
+  [["dori", "inbound", "--cwd", "slack", "discord", "--loop", "1"], "slack", 1],
+  [["dori", "send", "--to=C1", "slack"], "slack", 0],
+  [["dori", "send", "--gateway", "slack"], "slack", 0],
+  // A command substitution inside double quotes runs its own command.
+  ['x="$(dori inbound slack --loop 1)"', "slack", 0],
+  ['echo "`dori inbound slack `"', "slack", 0],
+  ["echo '$(dori inbound slack )'", "slack", 1],
   // A non-string argv word holds the program's place; the words after it name lanes as before.
   [[7, "checkpoints", "api"], "checkpoints", 1],
   // Bun's own options come before the entry; --cwd reads a relative entry.

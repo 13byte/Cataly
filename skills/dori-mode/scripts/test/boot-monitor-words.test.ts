@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Manifest, type Monitor, monitorCleanup, readMonitorManifests } from "../src/boot-monitors.ts";
-import { DORI_COMMANDS } from "../src/monitor-command.ts";
+import { DORI_COMMANDS, DORI_VALUE_OPTIONS } from "../src/monitor-dori.ts";
 import type { Lane, LaneStatus } from "../src/registry.ts";
 import { withState } from "./fakes.ts";
 
@@ -155,6 +155,9 @@ test("the dori command vocabulary is every command the CLI dispatches", async ()
   // cli.ts dispatches these three before its command tables.
   const dispatched = ["harness", "update", "upstream", ...tables.flatMap((table) => Object.keys(table))];
   expect(Object.keys(DORI_COMMANDS).sort()).toEqual([...new Set(dispatched)].sort());
-  for (const name of ["harness", "update", "upstream"])
-    expect(readFileSync(join(import.meta.dir, "../src/cli.ts"), "utf8")).toContain(`command === "${name}"`);
+  const cli = readFileSync(join(import.meta.dir, "../src/cli.ts"), "utf8");
+  for (const name of ["harness", "update", "upstream"]) expect(cli).toContain(`command === "${name}"`);
+  // The options cli.ts parses with a value: the words a dori command line never takes for its platform.
+  const values = [...cli.matchAll(/^\s+"?([\w-]+)"?: \{ type: "string"/gm)].map((m) => m[1] ?? "");
+  expect(Object.keys(DORI_VALUE_OPTIONS).sort()).toEqual(values.sort());
 });
