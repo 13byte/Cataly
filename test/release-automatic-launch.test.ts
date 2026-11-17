@@ -1,21 +1,44 @@
 import { expect, test } from "bun:test";
-import { chmodSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { readArchive } from "../src/release/archive.ts";
 import { automaticLaunch, automaticUpdate } from "../src/release/automatic.ts";
 import { readAutomaticState } from "../src/release/automatic-state.ts";
 import type { VerifiedBundle } from "../src/release/bundle.ts";
+import { saveJson } from "../src/release/files.ts";
 import { installBundle } from "../src/release/install.ts";
 import { nativeDirectory } from "../src/release/native.ts";
-import { releasePath } from "../src/release/state.ts";
+import { loadInstalled, releasePath } from "../src/release/state.ts";
 import { digest } from "../src/update/source.ts";
-import { archive, fixture, withArchive } from "./release-consumer-setup.ts";
+import { archive, portableFixture as fixture, withArchive } from "./release-consumer-setup.ts";
 import { boundRelease } from "./release-native-recovery-setup.ts";
 
 test("ordinary source directories are never enrolled or checked by the consumer launcher", async () => {
   const f = fixture();
   expect(await automaticLaunch(f.root, f.paths.home)).toBe(f.root);
   expect(readAutomaticState(f.paths).nextCheck).toBe(0);
+});
+
+test("a candidate without support for the configured host/runtime profile is never activated", async () => {
+  const f = fixture();
+  const one = await installBundle(f.paths, f.release("one").bundle, undefined);
+  const config = JSON.parse(readFileSync(f.paths.config, "utf8"));
+  config.runtime = process.platform === "darwin" ? "herdr" : "hc";
+  saveJson(f.paths.config, config);
+  const settings = readFileSync(f.paths.config);
+  const pointer = readlinkSync(f.paths.live);
+  const next = f.release("two").bundle;
+  const candidate = { ...next, manifest: { ...next.manifest, prerelease: false } };
+  expect(await automaticUpdate(f.paths, { now: 42, acquire: async () => candidate, checkTools: () => {} })).toBe(
+    releasePath(f.paths, one.current),
+  );
+  expect(loadInstalled(f.paths)?.current).toEqual(one.current);
+  expect(readlinkSync(f.paths.live)).toBe(pointer);
+  expect(readFileSync(f.paths.config)).toEqual(settings);
+  expect(readAutomaticState(f.paths)).toMatchObject({
+    outcome: "failed",
+    detail: "Available release does not support this installation profile",
+  });
 });
 
 test("bound automatic activation admits native and ULW bundles without mutating the old release", async () => {

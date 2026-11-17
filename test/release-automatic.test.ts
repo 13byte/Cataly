@@ -6,8 +6,9 @@ import { readAutomaticState, setAutomaticEnabled } from "../src/release/automati
 import type { VerifiedBundle } from "../src/release/bundle.ts";
 import { saveJson } from "../src/release/files.ts";
 import { installBundle, rollbackRelease } from "../src/release/install.ts";
+import { supportsReleaseProfile } from "../src/release/manifest.ts";
 import { loadInstalled, releasePath } from "../src/release/state.ts";
-import { fixture } from "./release-consumer-setup.ts";
+import { portableFixture as fixture } from "./release-consumer-setup.ts";
 
 const stable = (bundle: VerifiedBundle): VerifiedBundle => ({
   ...bundle,
@@ -24,6 +25,12 @@ test.each([false, true])(
     const config = readFileSync(f.paths.config);
     writeFileSync(join(f.paths.dori, "auth.json"), "owner auth\n", { mode: 0o600 });
     const candidate = stable(f.release("two").bundle);
+    const capabilities = candidate.files.find((file) => file.path === "release-capabilities.json")?.bytes;
+    for (const profile of [
+      { platform: "linux", arch: "x64", runtime: "herdr" },
+      { platform: "darwin", arch: "arm64", runtime: "hc" },
+    ])
+      expect(supportsReleaseProfile(candidate.manifest, profile, capabilities)).toBe(true);
     let checks = 0;
     const acquire = async (signal: AbortSignal) => {
       expect(signal.aborted).toBe(false);

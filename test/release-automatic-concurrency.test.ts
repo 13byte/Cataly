@@ -8,7 +8,7 @@ import { installBundle } from "../src/release/install.ts";
 import { acquireLaunchGate, assertNoConsumerLaunches, registerConsumerLaunch } from "../src/release/launch-leases.ts";
 import { loadInstalled, releasePath } from "../src/release/state.ts";
 import { processIdentity } from "../src/update/deployment-process.ts";
-import { fixture } from "./release-consumer-setup.ts";
+import { portableFixture as fixture } from "./release-consumer-setup.ts";
 import { blockStatePublication } from "./release-native-recovery-setup.ts";
 
 test.each(["due", "disabled", "ttl", "managed", "-h", "-v", "--help", "--version"])(
