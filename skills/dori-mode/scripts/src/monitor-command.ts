@@ -45,15 +45,18 @@ type Word = {
 /** Where a shell's `-c` script is, past long options, `o`/`O` operands and `--`/`-`; undefined without one. */
 const scriptAt = (words: readonly string[], at: number): number | undefined => {
   let script = false;
+  // Bash reads single-dash long names only before its first short option.
+  let longAliases = true;
   for (; at < words.length; at++) {
     const word = (words[at] ?? "").replace(
       /^-(debug|debugger|dump-po-strings|dump-strings|help|init-file|login|noediting|noprofile|norc|posix|pretty-print|rcfile|restricted|verbose|version)$/,
-      "--$1",
+      longAliases ? "--$1" : "$&",
     );
     if (word === "--" || word === "-") return script && at + 1 < words.length ? at + 1 : undefined;
     if (word === "--rcfile" || word === "--init-file") at++;
     else if (/^--[A-Za-z][A-Za-z-]*$/.test(word)) continue;
     else if (/^[-+][A-Za-z]+$/.test(word)) {
+      longAliases = false;
       if (word.startsWith("-")) script ||= word.includes("c");
       at += word.slice(1).replace(/[^oO]/g, "").length;
     } else return script ? at : undefined;
