@@ -155,8 +155,8 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
   // subshell or substitution, a new one starting where the one around it is. Only a `cd` that surely runs in this
   // shell replaces the directory: one starting a list, outside a condition or loop body, and not in a pipeline or the
   // background. One after `&&` or `||` or in a body adds its directory as possible; one in a pipeline changes nothing.
-  // The commands after a `cd` joined to it by `&&` run where it moved (`cd X && true && B`), one after `||` where it
-  // was, and an `&&` after that `||` in either.
+  // The commands after a `cd` joined to it by `&&` run where it moved (`cd X && true && B`), unless the `cd` itself
+  // follows an `||` (`true || cd X && B` may run where it was); one after `||` where it was, an `&&` after that in either.
   const run = (ws: readonly Word[], dirs: Dirs): void => {
     const scopes = new Map<string, Dirs>([["", dirs]]);
     const dirOf = (scope: readonly number[]): Dirs => {
@@ -189,7 +189,8 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
       for (const w of command) for (const substitution of w.substitutions?.() ?? []) run(substitution, here);
       const to = commandOf(command, here);
       const next = commands[index + 1]?.[0]?.after;
-      if (to !== undefined) chains.set(key, { to, from: here });
+      // An `&&` after this `cd` runs where it moved only if every way to that `&&` ran the `cd`: not after an `||`.
+      if (to !== undefined) chains.set(key, { to: after === "||" ? [...new Set([...here, ...to])] : to, from: here });
       if (to === undefined || after === "|" || next === "|" || next === "&") return;
       const sure = OPENS_LIST[after] === true && bodies === 0;
       scopes.set(key, sure ? to : [...new Set([...dirOf(scope), ...to])]);
