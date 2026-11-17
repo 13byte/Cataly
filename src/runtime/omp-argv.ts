@@ -1,5 +1,6 @@
 // What a configured argv runs: OMP's launch forms behind the prefixes Dori reads. Process lines are omp.ts's.
 import { OMP_EXECUTABLE, sourceOmpArgv } from "./omp.ts";
+import { scriptCommands } from "./shell-words.ts";
 
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 // GNU env's long options: those that take a separate operand when written without `=`, and those that take none.
@@ -118,12 +119,13 @@ function launcherCommandAt(argv: readonly string[], at: number, launcher: Launch
 // preload as a whole word: prose that mentions the path is not one.
 const OMP_WORD =
   /(?:^|[/\\])omp(?:\s|$)|pi-coding-agent[/\\]dist[/\\]cli\.js|^\S*\/packages\/coding-agent\/scripts\/omp\.ts$/;
-// The command string of a shell (`sh -c`), `env -S` or a package runner (`npx -c`, `--call=`) names OMP after a
-// separator as well: `cd /d && exec omp "$@"`. Only those programs' strings are read so; another agent's `-c` is not.
-// A quoted path (`"$HOME/bin/omp"`) counts; a quoted value (`instructions="omp"`) or comment word does not.
-const OMP_IN_SCRIPT = /(?:^|[\s;&|(])omp(?:[\s;&|)]|$)|\/omp(?:[\s;&|)"']|$)/;
+// The command string of a shell (`sh -c`), `env -S` or a package runner (`npx -c`, `--call=`) is read for the
+// programs it runs (`cd /d && exec 'omp' "$@"`); a quoted value or comment that only mentions omp runs nothing. Only
+// those programs' (or a launcher's) script options are read so; another agent's `-c` is its own setting.
 const SCRIPT_OPTION = /^(?:-[A-Za-z]*c[A-Za-z]*|-S|--split-string|--call)$/;
-const SCRIPT_PROGRAMS = new Set([...SHELLS, "env", "npx", "bunx", "bun"]);
+const SCRIPT_PROGRAMS = new Set([...SHELLS, ...Object.keys(LAUNCHERS), "env", "npx", "bunx", "bun"]);
+const runsOmp = (script: string): boolean =>
+  scriptCommands(script).some((command) => classifyOmpArgv(command).kind !== "other");
 // `words` start at a program (assignments aside): only that program's script option is read as a script.
 const names = (words: readonly string[]): boolean => {
   const program = words.find((word) => !ASSIGNMENT.test(word)) ?? "";
@@ -132,7 +134,7 @@ const names = (words: readonly string[]): boolean => {
     if (OMP_WORD.test(word)) return true;
     if (!scripted) return false;
     const attached = /^(?:--call|--split-string|-[cS])=(.*)$/s.exec(word)?.[1];
-    return OMP_IN_SCRIPT.test(attached ?? (SCRIPT_OPTION.test(words[at - 1] ?? "") ? word : ""));
+    return runsOmp(attached ?? (SCRIPT_OPTION.test(words[at - 1] ?? "") ? word : ""));
   });
 };
 
