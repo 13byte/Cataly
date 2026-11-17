@@ -68,7 +68,8 @@ const tokens = (value: unknown): string[] =>
 // A command's own words say what it runs, never which lane: the program, and for dori its command and, for a messenger
 // command, the platform. `dori inbound slack` is not lane "dori", "inbound" or "slack".
 // The dori program may run behind a wrapper (`bash -c "... exec dori inbound discord"`) or from source
-// (`bun .../scripts/src/cli.ts inbound slack`), so its words are found wherever it appears.
+// (`bun .../scripts/src/cli.ts inbound slack`), so its words are found wherever it appears. A legacy record's argv
+// may hold non-strings; they are never a program.
 const DORI_PROGRAMS: Record<string, true> = { dori: true, "omp-dori": true };
 const PLATFORM_COMMANDS: Record<string, true> = {
   send: true,
@@ -77,13 +78,15 @@ const PLATFORM_COMMANDS: Record<string, true> = {
   thread: true,
   react: true,
 };
-const argumentWords = (argv: readonly string[]): readonly string[] => {
+const nameOf = (word: unknown): string => (typeof word === "string" ? basename(word) : "");
+const argumentWords = (argv: readonly unknown[]): readonly unknown[] => {
   const own = new Set([0]);
   argv.forEach((word, at) => {
-    const name = basename(word);
-    if (DORI_PROGRAMS[name] !== true && !(name === "cli.ts" && basename(argv[at - 1] ?? "") === "bun")) return;
+    const name = nameOf(word);
+    if (DORI_PROGRAMS[name] !== true && !(name === "cli.ts" && nameOf(argv[at - 1]) === "bun")) return;
     own.add(at).add(at + 1);
-    if (PLATFORM_COMMANDS[argv[at + 1] ?? ""] === true) own.add(at + 2);
+    const command = argv[at + 1];
+    if (typeof command === "string" && PLATFORM_COMMANDS[command] === true) own.add(at + 2);
   });
   return argv.filter((_, at) => !own.has(at));
 };
