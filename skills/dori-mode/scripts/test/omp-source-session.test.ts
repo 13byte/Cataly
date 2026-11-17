@@ -110,7 +110,7 @@ const wrapped = [
   ["the side wrapper", ["/home/user/.omp-dori/bin/omp-dori", "omp"]],
   ["a shell exec", ["sh", "-c", 'exec /opt/bin/omp "$@"', "sh"]],
   ["an env -S string", ["env", "-S", "/opt/bin/omp --advisor"]],
-  ["a shell behind timeout", ["timeout", "600", "sh", "-c", 'exec omp "$@"', "sh"]],
+  ["a shell behind timeout", ["timeout", "600", "sh", "-c", 'exec /opt/bin/omp "$@"', "sh"]],
 ] as const;
 const ompProc = ["bun", "/opt/bin/omp", "--dori-role", "lane"];
 const wrappedLaunch = (deps: FlowDeps, prefix: readonly string[], key: string, brief: string) =>

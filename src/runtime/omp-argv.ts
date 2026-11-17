@@ -1,6 +1,5 @@
 // What a configured argv runs: OMP's launch forms behind the prefixes Dori reads. Process lines are omp.ts's.
 import { OMP_EXECUTABLE, sourceOmpArgv } from "./omp.ts";
-import { scriptCommands } from "./shell-words.ts";
 
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 // GNU env's long options: those that take a separate operand when written without `=`, and those that take none.
@@ -119,13 +118,13 @@ function launcherCommandAt(argv: readonly string[], at: number, launcher: Launch
 // preload as a whole word: prose that mentions the path is not one.
 const OMP_WORD =
   /(?:^|[/\\])omp(?:\s|$)|pi-coding-agent[/\\]dist[/\\]cli\.js|^\S*\/packages\/coding-agent\/scripts\/omp\.ts$/;
-// The command string of a shell (`sh -c`), `env -S` or a package runner (`npx -c`, `--call=`) is read for the
-// programs it runs (`cd /d && exec 'omp' "$@"`); a quoted value or comment that only mentions omp runs nothing. Only
-// those programs' (or a launcher's) script options are read so; another agent's `-c` is its own setting.
+// The command string of a shell (`sh -c`), `env -S` or a package runner (`npx -c`, `--call=`) is not parsed: shell
+// quoting, expansion and redirection can run OMP in too many ways. One that mentions an omp token anywhere is
+// unreadable, so an update agent must declare `engine` for it; a false match only asks for that declaration. Only those
+// programs' (or a launcher's) script options are read so; another agent's `-c` is its own setting.
+const OMP_TOKEN = /(?:^|[^\w.-])omp(?:[^\w.-]|$)|pi-coding-agent[/\\]dist[/\\]cli\.js|coding-agent\/scripts\/omp\.ts/;
 const SCRIPT_OPTION = /^(?:-[A-Za-z]*c[A-Za-z]*|-S|--split-string|--call)$/;
 const SCRIPT_PROGRAMS = new Set([...SHELLS, ...Object.keys(LAUNCHERS), "env", "npx", "bunx", "bun"]);
-const runsOmp = (script: string): boolean =>
-  scriptCommands(script).some((command) => classifyOmpArgv(command).kind !== "other");
 // `words` start at a program (assignments aside): only that program's script option is read as a script.
 const names = (words: readonly string[]): boolean => {
   const program = words.find((word) => !ASSIGNMENT.test(word)) ?? "";
@@ -134,7 +133,7 @@ const names = (words: readonly string[]): boolean => {
     if (OMP_WORD.test(word)) return true;
     if (!scripted) return false;
     const attached = /^(?:--call|--split-string|-[cS])=(.*)$/s.exec(word)?.[1];
-    return runsOmp(attached ?? (SCRIPT_OPTION.test(words[at - 1] ?? "") ? word : ""));
+    return OMP_TOKEN.test(attached ?? (SCRIPT_OPTION.test(words[at - 1] ?? "") ? word : ""));
   });
 };
 
@@ -209,12 +208,12 @@ function classifyCommand(command: readonly string[]): OmpArgv {
 export const isOmpArgv = (argv: readonly string[]): boolean => classifyOmpArgv(argv).kind === "omp";
 
 /**
- * Whether an argv may run OMP: it starts OMP, or a word names OMP (an external wrapper's argument, a shell or `env -S`
- * string); an unreadable prefix of another agent does not. Lane startup and pause use it: they prove an OMP goal
- * only from OMP's trusted session record, so a wrapped OMP is never vouched for by quoted screen text. Role flags and
- * update guards need the exact start instead (isOmpArgv, classifyOmpArgv).
+ * Whether an argv may run OMP: it starts OMP, or a word after its readable prefixes names OMP the way the detector
+ * before exact classification read it (`/x/omp`, `omp …`, the published CLI), as a wrapper's argument or script does.
+ * Lane startup and pause use it: they prove an OMP goal only from OMP's trusted session record, so a wrapped OMP is
+ * never vouched for by quoted screen text, while another agent's prose or `-c` value stays a custom agent. Role flags
+ * and update guards need the exact start (isOmpArgv, classifyOmpArgv); update refuses a script that mentions omp.
  */
 export const mayRunOmpArgv = (argv: readonly string[]): boolean =>
-  // Readable prefixes are removed first, so `env TERM=x codex -c '…omp…'` is codex's own option and
-  // `timeout 600 sh -c 'exec omp'` is the shell's script.
-  isOmpArgv(argv) || names(argv.slice(prefixEnd(argv).at));
+  // The change-before detector's words, after readable prefixes: `env TERM=x codex -c '…omp…'` stays codex.
+  isOmpArgv(argv) || argv.slice(prefixEnd(argv).at).some((word) => OMP_WORD.test(word));

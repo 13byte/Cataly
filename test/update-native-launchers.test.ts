@@ -112,6 +112,12 @@ test.each([
   ["npx -c naming OMP", ["npx", "-c", "omp --mode json"]],
   ["timeout with an unknown separate option value", ["timeout", "--frobnicate", "5", "600", "omp"]],
   ["an external wrapper behind a launcher", ["nohup", "/opt/wrapper", "/x/omp"]],
+  // A script is not parsed: one that mentions omp at all, even in a value or comment, must declare its engine.
+  ["a shell running omp after an assignment", ["sh", "-c", 'TERM=x exec omp "$@"', "audit"]],
+  ["a shell running omp after a redirection", ["sh", "-c", '2>/dev/null exec omp "$@"', "audit"]],
+  ["a shell running omp through a substitution", ["sh", "-c", 'exec "$(command -v omp)" "$@"', "audit"]],
+  ["a shell passing another agent a quoted omp value", ["sh", "-c", 'exec codex -c \'x="omp"\' "$@"', "sh"]],
+  ["a shell with an omp comment", ["sh", "-c", 'exec codex "$@" # was omp', "audit"]],
 ])("%s is refused as unreadable even when it declares engine omp", (_, prefix) => {
   for (const engine of [undefined, "omp"] as const) {
     expect(() => load([...prefix, MODEL, "{prompt}"], engine)).toThrow(PREFIX_REFUSED);
@@ -122,10 +128,8 @@ test.each([
 test.each([
   ["a launcher running another agent", ["timeout", "600", "codex"]],
   ["a shell running another agent", ["sh", "-c", "exec codex", "sh"]],
-  ["a shell passing another agent a quoted omp value", ["sh", "-c", 'exec codex -c \'x="omp"\' "$@"', "sh"]],
   ["npx -c running another agent", ["npx", "-c", "codex"]],
-  ["a shell passing another agent an OMP path", ["sh", "-c", 'exec codex -c \'note="Review /opt/bin/omp"\' "$@"', "a"]],
-  ["a shell with an omp comment", ["sh", "-c", 'exec codex "$@" # was omp', "audit"]],
+  ["a shell running a tool whose name contains omp", ["sh", "-c", "exec omp-tools --x", "sh"]],
   ["an external script", ["node", "/opt/not-omp.js", "/x/omp"]],
   ["echo", ["echo", "omp"]],
   ["the side wrapper's other commands", ["omp-dori", "hc", "run", "--", "omp"]],
