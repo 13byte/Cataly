@@ -265,8 +265,9 @@ if [ -z "$omp_bin" ]; then
   omp_bin="$native/bin/omp"
   check_omp_wrapper_collision
 else
-  # An explicit executable inside the native cache is leased by the installer too before a wrapper names it.
-  DORI_NATIVE_LEASE_PID=$$ bun "$src/scripts/source-dependencies.ts" lease-path "$src" "$HOME" "$omp_bin"
+  # An explicit executable inside the native cache is leased by the installer too before a wrapper names it. A
+  # subshell, like the command substitution above, keeps a relative PATH lookup of bun out of this shell's hash.
+  (DORI_NATIVE_LEASE_PID=$$ bun "$src/scripts/source-dependencies.ts" lease-path "$src" "$HOME" "$omp_bin")
 fi
 
 if [ "$mode" = primary ] && { [ -n "$other" ] ||

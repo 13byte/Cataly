@@ -151,7 +151,10 @@ test.each(["linux", "darwin"] as const)("a process's working directory is read t
   const holder = Bun.spawn(["/bin/sh", "-c", "echo ready; read line"], { cwd: c.root, stdin: "pipe", stdout: "pipe" });
   try {
     expect(new TextDecoder().decode((await holder.stdout.getReader().read()).value)).toBe("ready\n");
-    expect(processCwds([String(holder.pid)], platform)?.cwds.get(String(holder.pid))).toBe(realpathSync(c.root));
+    const read = processCwds([String(holder.pid)], platform);
+    // A Linux host without lsof (as macOS always has it) cannot read the macOS way: unavailable, never empty.
+    if (platform === "darwin" && !Bun.which("lsof")) return expect(read).toBeNull();
+    expect(read?.cwds.get(String(holder.pid))).toBe(realpathSync(c.root));
   } finally {
     holder.stdin.end();
     await holder.exited;
