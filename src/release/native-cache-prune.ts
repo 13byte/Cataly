@@ -93,7 +93,10 @@ export function pruneNativeCache(
     trusted,
     privileged,
     trustRootCwd: options.trustRootCwd === true,
-    files: () => (snapshot === undefined ? (snapshot = readFiles()) : snapshot),
+    files: () => {
+      if (snapshot === undefined) snapshot = readFiles();
+      return snapshot;
+    },
     ...(options.table ? { table: options.table } : {}),
   };
   const graceMs = options.graceMs ?? GRACE_MS;
