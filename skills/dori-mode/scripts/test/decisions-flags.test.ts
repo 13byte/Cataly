@@ -77,6 +77,8 @@ test("a value flag with no value, at the end or before another flag, is refused 
     [[...ask, "--message", "--thread", "t:1"], "--message"],
     [[...ask, "--thread"], "--thread"],
     [["decision", "ask", "Which?", "--source"], "--source"],
+    // Another command's value option takes `--` as its value, so the `--` ends nothing and --lane still has no value.
+    [[...ask, "--text", "--", "--lane"], "--lane"],
   ] as const) {
     const result = await invoke(...args);
     // Then it is one line of refusal and nothing was written.

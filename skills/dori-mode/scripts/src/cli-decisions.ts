@@ -3,6 +3,7 @@ import { type Command, die } from "./cli-context.ts";
 import { Decisions } from "./decisions.ts";
 import { type Decision, DecisionError, type DecisionRead, settled } from "./decisions-record.ts";
 import { decisionText } from "./decisions-render.ts";
+import { DORI_VALUE_OPTIONS } from "./monitor-dori.ts";
 import { realClock } from "./run.ts";
 import { Worklog } from "./worklog.ts";
 
@@ -44,15 +45,19 @@ const VALUE_FLAGS: Readonly<Record<string, true>> = {
 /**
  * The CLI parses loosely: a value flag at the end becomes `true`, and one followed by another flag takes that flag as
  * its value (`--option --recommend 1`). A decision record must hold what was meant, so both are refused here; a value
- * that really starts with `--` is given as `--option=--text`.
+ * that really starts with `--` is given as `--option=--text`. The walk follows the parser's own token boundaries: every
+ * value option of the CLI (DORI_VALUE_OPTIONS mirrors cli.ts) takes the next token, even `--`, and only a `--` that
+ * no option took ends the options.
  */
 const checkValues = (rest: readonly string[]): void => {
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i]!;
     if (arg === "--") return;
-    if (!arg.startsWith("--") || arg.includes("=") || !Object.hasOwn(VALUE_FLAGS, arg.slice(2))) continue;
+    const name = arg.startsWith("--") && !arg.includes("=") ? arg.slice(2) : undefined;
+    if (name === undefined || !Object.hasOwn(DORI_VALUE_OPTIONS, name)) continue;
     const value = rest[i + 1];
-    if (value === undefined || value.startsWith("--")) die(`${arg} needs a value`);
+    if (Object.hasOwn(VALUE_FLAGS, name) && (value === undefined || value.startsWith("--")))
+      die(`${arg} needs a value`);
     i++;
   }
 };
