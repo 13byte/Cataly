@@ -1,7 +1,8 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 
 import { formatRef } from "../../../../src/runtime/types.ts";
+import { laneWords } from "./monitor-command.ts";
 import { type Lane, sessionOf, statusOf } from "./registry.ts";
 import type { ProgressState } from "./reports.ts";
 
@@ -65,72 +66,19 @@ const tokens = (value: unknown): string[] =>
         .map((t) => t.replace(/^['"]+|['"]+$/g, ""))
         .filter(Boolean)
     : [];
-// A command's own words say what it runs, never which lane: the program, and for dori its command and, for a messenger
-// command, the platform. `dori inbound slack` is not lane "dori", "inbound" or "slack".
-// The dori program may run behind a wrapper (`bash -c "... exec dori inbound discord"`) or from source
-// (`bun .../scripts/src/cli.ts inbound slack`), so it is found wherever a command starts: first, or after a shell
-// separator, a launcher word or an environment assignment. The same name in an argument position is an argument
-// (`dori checkpoints dori`, `rg -n /src/omp-dori api-fix`) and may name the lane. A legacy record's argv may hold
-// non-strings; they are never a program.
-const DORI_PROGRAMS: Record<string, true> = { dori: true, "omp-dori": true };
-const DORI_SOURCE = /(?:^|\/)scripts\/src\/cli\.ts$/;
-const LAUNCHERS: Record<string, true> = {
-  "&&": true,
-  "||": true,
-  ";": true,
-  "|": true,
-  exec: true,
-  nohup: true,
-  env: true,
-  command: true,
-  "-c": true,
-  "-lc": true,
-};
-const PLATFORM_COMMANDS: Record<string, true> = {
-  send: true,
-  presence: true,
-  inbound: true,
-  thread: true,
-  react: true,
-};
-const startsCommand = (argv: readonly unknown[], at: number): boolean => {
-  if (at === 0) return true;
-  const before = argv[at - 1];
-  return (
-    typeof before === "string" &&
-    (LAUNCHERS[before] === true || before.endsWith(";") || /^[A-Za-z_][A-Za-z0-9_]*=/.test(before))
-  );
-};
-const doriAt = (argv: readonly unknown[], at: number): boolean => {
-  const word = argv[at];
-  if (typeof word !== "string") return false;
-  if (DORI_PROGRAMS[basename(word)] === true) return startsCommand(argv, at);
-  const before = argv[at - 1];
-  return (
-    DORI_SOURCE.test(word) && typeof before === "string" && basename(before) === "bun" && startsCommand(argv, at - 1)
-  );
-};
-const argumentWords = (argv: readonly unknown[]): readonly unknown[] => {
-  const own = new Set([0]);
-  argv.forEach((_, at) => {
-    if (!doriAt(argv, at)) return;
-    own.add(at).add(at + 1);
-    const command = argv[at + 1];
-    if (typeof command === "string" && PLATFORM_COMMANDS[command] === true) own.add(at + 2);
-  });
-  return argv.filter((_, at) => !own.has(at));
-};
+// A command's own words (monitor-command.ts) never name its lane: `dori inbound slack` is not lane "slack".
 const tiedBy = (monitor: Monitor, lane: Lane): string | null => {
   const ref = sessionOf(lane);
   const panes = [lane.pane, ref?.id, ref ? formatRef(ref) : undefined].filter((id): id is string => !!id);
   if (Array.isArray(monitor.argv)) {
     if (panes.some((id) => monitor.argv?.includes(id))) return `${lane.key}:argv:pane`;
-    if (argumentWords(monitor.argv).includes(lane.key)) return `${lane.key}:argv:key`;
+    if (laneWords(monitor.argv, monitor.cwd).includes(lane.key)) return `${lane.key}:argv:key`;
   }
   for (const field of TIED_FIELDS) {
     const words = tokens(monitor[field]);
     if (panes.some((id) => words.includes(id))) return `${lane.key}:${field}:pane`;
-    if ((field === "command" ? argumentWords(words) : words).includes(lane.key)) return `${lane.key}:${field}:key`;
+    if ((field === "command" ? laneWords(monitor.command, monitor.cwd) : words).includes(lane.key))
+      return `${lane.key}:${field}:key`;
   }
   return null;
 };

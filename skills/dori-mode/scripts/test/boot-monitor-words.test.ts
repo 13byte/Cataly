@@ -72,3 +72,53 @@ test("a closed lane named in an argument position is still claimed, even when it
     ["mon_HARNESS", ["harness-lane:argv:key"]],
   ]);
 });
+
+test("a shared dori watch behind a launcher with options is still not claimed by its own command words", () => {
+  const lanes = ["dori", "inbound", "slack"].map((key) => lane(key, "closed"));
+  const argv = [
+    ["env", "-u", "NODE_OPTIONS", "dori", "inbound", "slack"],
+    ["env", "-i", "/home/user/.dori/bin/dori", "inbound", "slack"],
+    ["timeout", "60", "dori", "inbound", "slack"],
+    ["timeout", "--signal", "TERM", "60", "dori", "inbound", "slack"],
+    ["nice", "-n", "10", "dori", "inbound", "slack"],
+    ["stdbuf", "-oL", "dori", "inbound", "slack"],
+    ["FOO=a b", "dori", "inbound", "slack"],
+  ];
+  const commands = [
+    'FOO="a b" dori inbound slack',
+    "env -u NODE_OPTIONS dori inbound slack",
+    "bash -lc 'exec -a intake dori inbound slack'",
+    'sh -c "nohup dori inbound slack"',
+  ];
+  const monitors = [...argv.map((words) => ({ argv: words })), ...commands.map((command) => ({ command }))];
+  expect(monitorCleanup(lanes, [manifest(monitors)])).toEqual([]);
+});
+
+test("a relative source entry is read from the watch's cwd: the skill CLI is dori, the harness CLI is not", () => {
+  const lanes = ["freshness", "api-fix"].map((key) => lane(key, "closed"));
+  const skill = "/w/skills/dori-mode/scripts";
+  const result = monitorCleanup(lanes, [
+    manifest([
+      { argv: ["bun", "src/cli.ts", "freshness"], cwd: skill, monitorId: "mon_SKILL" },
+      { command: "bun run src/cli.ts freshness", cwd: skill, monitorId: "mon_SKILL_COMMAND" },
+      { argv: ["bun", "src/cli.ts", "send", "api-fix", "hi"], cwd: "/w", monitorId: "mon_HARNESS" },
+    ]),
+  ]);
+  expect(result.map((m) => [m.monitorId, m.match])).toEqual([["mon_HARNESS", ["api-fix:argv:key"]]]);
+});
+
+test("-c starts a script only after a shell: rg -c dori api-fix still names lane api-fix", () => {
+  const result = monitorCleanup(
+    [lane("api-fix", "closed")],
+    [
+      manifest([
+        { argv: ["rg", "-c", "dori", "api-fix"], monitorId: "mon_ARGV" },
+        { command: "rg -c dori api-fix", monitorId: "mon_COMMAND" },
+      ]),
+    ],
+  );
+  expect(result.map((m) => [m.monitorId, m.match])).toEqual([
+    ["mon_ARGV", ["api-fix:argv:key"]],
+    ["mon_COMMAND", ["api-fix:command:key"]],
+  ]);
+});
