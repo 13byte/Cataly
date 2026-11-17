@@ -63,8 +63,12 @@ test("a brief that cannot be put in place after registration undoes the record, 
   writeFileSync(brief, "brief");
   const deps = withTab(depsFor(world, fakeClock(T0), state.dir));
   const original = fs.writeFileSync;
+  let refused = false;
   const spy = spyOn(fs, "writeFileSync").mockImplementation(((...args: Parameters<typeof fs.writeFileSync>) => {
-    if (String(args[0]) === brief) throw new Error("EACCES: permission changed");
+    if (String(args[0]) === brief && !refused) {
+      refused = true;
+      throw new Error("EACCES: permission changed");
+    }
     original(...args);
   }) as typeof fs.writeFileSync);
   try {
