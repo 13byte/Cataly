@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { acquireBundle } from "./bundle.ts";
+import { runAutomaticCommand } from "./automatic-cli.ts";
 import {
   acquireConsumerLock,
   consumerPaths,
@@ -21,17 +22,15 @@ import { hasConsumerState, loadInstalled, recoverInstalled, verifyRelease } from
 import type { ReleaseManifest } from "./types.ts";
 
 const USAGE = `dori update <check|install|status|rollback|cache> [--version vX.Y.Z] [--from DIST] [--home PATH] [--runtime hc|herdr]
+  auto <status|enable|disable>  manage daily stable-release checks at consumer OMP launch
   check       verify an available public release without activating it
   install     verify and install a fixed release; no messenger, watcher, model or service is started
   status      print verified installed and retained previous release identities
   rollback    verify and restore the retained previous release (--version may assert its tag)
-  cache       report native cache identities, what uses each and the bytes each holds; it removes nothing;
-              --reference DIR adds a root to scan (repeatable)
-              --prune quarantines unused identities and puts back used ones; it removes nothing itself (a writer
-              without a lease cannot be proven absent): --delete-quarantined removes copies unused --grace MINUTES
-              (default 10), checked once more, accepting a publication between that check and the removal;
-              --trust-process PID@START (repeatable) leaves out one process the report lists as unreadable;
-              --trust-root-cwd counts root processes whose working directory cannot be read as outside the cache
+  cache       report native identities, users and sizes (read-only); --reference DIR adds scan roots (repeatable)
+              --prune quarantines unused identities and restores used ones; --delete-quarantined deletes after --grace MINUTES (default 10)
+              Deletion rechecks usage but can race unleased writers or later publication.
+              --trust-process PID@START (repeatable) excludes listed unreadable PIDs; --trust-root-cwd treats unreadable root cwd as outside cache
 Default check/install selects the latest stable GitHub release. Explicit tags also allow previews.
 --from reads local release assets; first installation may still fetch the exact public omp-ulw pin.
 Activation holds while Dori is live. Stop Dori yourself before installing or rolling back.`;
@@ -44,6 +43,7 @@ const identity = (manifest: ReleaseManifest) => ({
 });
 
 export async function runConsumerUpdate(argv: string[]): Promise<number> {
+  if (argv[0] === "auto") return runAutomaticCommand(argv.slice(1));
   let releaseLock: (() => void) | undefined;
   try {
     const args = parseArgs({
