@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { isOmpAgentCommand } from "../src/harness.ts";
 import { loadUpdateConfig, nativeAgent } from "../src/update/load.ts";
 
 const directories: string[] = [];
@@ -72,6 +73,9 @@ test.each([
   ["node --require attached", ["node", "--require=/hook.js", "/x/omp"]],
   ["timeout", ["timeout", "-k", "5", "600", "/opt/bin/omp"]],
   ["timeout with an abbreviated option", ["timeout", "--kill", "5", "600", "/opt/bin/omp"]],
+  ["timeout with a short cluster", ["timeout", "-vk", "5", "600", "/opt/bin/omp"]],
+  ["caffeinate with an attached value", ["caffeinate", "-it600", "omp"]],
+  ["npx --call= naming OMP", ["npx", "--call=omp --mode json"]],
   ["nice and nohup", ["nice", "-n", "5", "nohup", "omp"]],
   ["caffeinate", ["caffeinate", "-i", "-t", "3600", "omp"]],
   ["setsid", ["setsid", "-w", "omp"]],
@@ -117,7 +121,11 @@ test.each([
   ["an external script", ["node", "/opt/not-omp.js", "/x/omp"]],
   ["echo", ["echo", "omp"]],
   ["the side wrapper's other commands", ["omp-dori", "hc", "run", "--", "omp"]],
+  ["bunx whose cwd value names omp", ["bunx", "--cwd", "/tmp/omp", "--no-install", "echo"]],
+  ["npx whose cache value names omp", ["npx", "--offline", "--cache", "/tmp/omp", "--", "/bin/echo"]],
 ])("%s stays external", (_, prefix) => {
   const argv = [...prefix, MODEL, "--resume", "s", "{prompt}"];
   expect(nativeAgent(load(argv).worker)).toBe(false);
+  // The harness gives the OMP role only to OMP: an option value that names omp does not make the command OMP.
+  expect(isOmpAgentCommand(prefix.join(" "))).toBe(false);
 });

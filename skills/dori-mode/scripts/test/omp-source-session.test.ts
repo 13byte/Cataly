@@ -146,6 +146,11 @@ test.each([
   ["an env -S string", ["env", "-S", "claude --verbose"]],
   ["an unknown env option", ["env", "--bogus", "claude"]],
   ["an argument mentioning omp", ["claude", "--system", "use omp style"]],
+  [
+    "prose naming the source launcher",
+    ["claude", "--append-system-prompt", "Read /x/packages/coding-agent/scripts/omp.ts"],
+  ],
+  ["its own -c option", ["mycli", "-c", "use omp here"]],
 ] as const)("a custom agent behind %s still starts on its goal marker", async (_, prefix) => {
   const { deps, brief } = setup(["claude"], "custom", false);
   world.screen = "Pursuing goal: the brief";

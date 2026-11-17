@@ -55,55 +55,83 @@ function envCommandAt(argv: readonly string[], at: number): number | undefined {
   return at < argv.length ? at : undefined;
 }
 
-// Launchers that run their command unchanged: the options that take a separate value and the operands before the
-// command (timeout's duration). Their other options are flags. Others (sudo, xargs, any script) are external commands.
-type Launcher = { readonly values: readonly string[]; readonly operands: number };
+// Launchers that run their command unchanged: the options that take a value, the flag options, and the operands
+// before the command (timeout's duration). Any other option makes the prefix unreadable: a value Dori misread could
+// otherwise be taken for the command. Other programs (sudo, xargs, any script) are external commands.
+type Launcher = { readonly values: readonly string[]; readonly flags: readonly string[]; readonly operands: number };
 const LAUNCHERS: Record<string, Launcher> = {
-  nohup: { values: [], operands: 0 },
-  nice: { values: ["-n", "--adjustment"], operands: 0 },
-  timeout: { values: ["-k", "--kill-after", "-s", "--signal"], operands: 1 },
-  setsid: { values: [], operands: 0 },
-  stdbuf: { values: ["-i", "-o", "-e", "--input", "--output", "--error"], operands: 0 },
-  caffeinate: { values: ["-t", "-w"], operands: 0 },
+  nohup: { values: [], flags: [], operands: 0 },
+  nice: { values: ["-n", "--adjustment"], flags: [], operands: 0 },
+  timeout: {
+    values: ["-k", "--kill-after", "-s", "--signal"],
+    flags: ["-v", "--verbose", "-p", "--preserve-status", "-f", "--foreground"],
+    operands: 1,
+  },
+  setsid: { values: [], flags: ["-c", "--ctty", "-f", "--fork", "-w", "--wait"], operands: 0 },
+  stdbuf: { values: ["-i", "-o", "-e", "--input", "--output", "--error"], flags: [], operands: 0 },
+  caffeinate: { values: ["-t", "-w"], flags: ["-d", "-i", "-m", "-s", "-u"], operands: 0 },
 };
-// Package runners: options with a separate value, and those whose value is a command string Dori does not decode.
-const RUNNER_VALUES = new Set(["-p", "--package"]);
-const RUNNER_STRINGS = new Set(["-c", "--call"]);
+// Package runners (`npx`, `bunx`, `bun x`), read the same way; `-c`/`--call` take a command string, which is unread.
+const RUNNER: Launcher = {
+  values: ["-p", "--package", "--cache", "--userconfig", "--registry", "--prefix", "-w", "--workspace", "--cwd"],
+  flags: [
+    ...["-y", "--yes", "--no", "--no-install", "-q", "--quiet", "--offline", "--prefer-offline", "--prefer-online"],
+    ...["--ignore-existing", "--bun", "--verbose", "--silent"],
+  ],
+  operands: 0,
+};
 const SHELLS = new Set(["sh", "bash", "dash", "zsh", "ksh", "fish"]);
 
-/** The index of a launcher's command after its options and operands, or undefined when there is none. */
+/** The long option `word` names, exactly or by an unambiguous getopt_long prefix. */
+const longOption = (word: string, options: readonly string[]): boolean =>
+  options.includes(word) || options.filter((name) => name.startsWith("--") && name.startsWith(word)).length === 1;
+
+/** The index of a launcher's command after its options and operands, or undefined when it cannot be read. */
 function launcherCommandAt(argv: readonly string[], at: number, launcher: Launcher): number | undefined {
+  const { flags } = launcher;
   while (argv[at]?.startsWith("-") && argv[at] !== "-") {
     const word = argv[at++]!;
     if (word === "--") break;
-    // getopt_long accepts an unambiguous prefix of a long option (`--kill` for `--kill-after`).
-    if (launcher.values.some((value) => value === word || (word.startsWith("--") && value.startsWith(word)))) at++;
+    if (word.startsWith("--")) {
+      const equals = word.indexOf("=");
+      if (equals >= 0 ? !longOption(word.slice(0, equals), launcher.values) : !longOption(word, flags)) {
+        if (equals >= 0 || !longOption(word, launcher.values)) return undefined;
+        at++;
+      }
+      continue;
+    }
+    if (launcher === LAUNCHERS["nice"] && /^-\d+$/.test(word)) continue;
+    // A short cluster (`-vk 5`, `-it600`): flags, then at most one option whose value is attached or the next word.
+    for (let i = 1; i < word.length; i++) {
+      const short = `-${word[i]}`;
+      if (flags.includes(short)) continue;
+      if (!launcher.values.includes(short)) return undefined;
+      if (i + 1 === word.length) at++;
+      break;
+    }
   }
   at += launcher.operands;
   return at < argv.length ? at : undefined;
 }
 
-/** The index of the bin a package runner (`npx`, `bunx`, `bun x`) executes, or undefined when it cannot be read. */
-function runnerCommandAt(argv: readonly string[], at: number): number | undefined {
-  while (argv[at]?.startsWith("-")) {
-    const word = argv[at++]!;
-    if (word === "--") break;
-    if (RUNNER_STRINGS.has(word.split("=")[0]!)) return undefined;
-    if (RUNNER_VALUES.has(word)) at++;
-  }
-  return at < argv.length ? at : undefined;
-}
-
-// A word naming OMP's executable, published entry or source launcher (the change-before detector's words).
+// A word naming OMP's executable or published entry (the change-before detector's words), or the source launcher's
+// preload as a whole word: prose that mentions the path is not one.
 const OMP_WORD =
-  /(?:^|[/\\])omp(?:\s|$)|pi-coding-agent[/\\]dist[/\\]cli\.js|\/packages\/coding-agent\/scripts\/omp\.ts(?:\s|$)/;
-// A command string (`sh -c`, `env -S`, `npx -c`) also names OMP after a separator: `cd /d && exec omp "$@"`.
+  /(?:^|[/\\])omp(?:\s|$)|pi-coding-agent[/\\]dist[/\\]cli\.js|^\S*\/packages\/coding-agent\/scripts\/omp\.ts$/;
+// The command string of a shell (`sh -c`), `env -S` or a package runner (`npx -c`, `--call=`) names OMP after a
+// separator as well: `cd /d && exec omp "$@"`. Only those programs' strings are read so; another agent's `-c` is not.
 const OMP_IN_SCRIPT = /(?:^|[\s;&|(])omp(?:[\s;&|)]|$)/;
 const SCRIPT_OPTION = /^(?:-[A-Za-z]*c|-S|--split-string|--call)$/;
-const names = (words: readonly string[]): boolean =>
-  words.some(
-    (word, at) => OMP_WORD.test(word) || (SCRIPT_OPTION.test(words[at - 1] ?? "") && OMP_IN_SCRIPT.test(word)),
-  );
+const SCRIPT_PROGRAMS = new Set([...SHELLS, "env", "npx", "bunx", "bun"]);
+const names = (words: readonly string[]): boolean => {
+  const scripted = words.some((word) => SCRIPT_PROGRAMS.has(word.split("/").at(-1)!));
+  return words.some((word, at) => {
+    if (OMP_WORD.test(word)) return true;
+    if (!scripted) return false;
+    const attached = /^(?:--call|--split-string|-[cS])=(.*)$/s.exec(word)?.[1];
+    return OMP_IN_SCRIPT.test(attached ?? (SCRIPT_OPTION.test(words[at - 1] ?? "") ? word : ""));
+  });
+};
 
 /**
  * What an exact argv runs, after leading `NAME=value` assignments and the `env` utility with its options: the command
@@ -124,8 +152,8 @@ export function classifyOmpArgv(argv: readonly string[]): OmpArgv {
     let next: number | undefined;
     if (word === "env") next = envCommandAt(argv, at + 1);
     else if (Object.hasOwn(LAUNCHERS, word)) next = launcherCommandAt(argv, at + 1, LAUNCHERS[word]!);
-    else if (word === "bunx" || word === "npx") next = runnerCommandAt(argv, at + 1);
-    else if (word === "bun" && argv[at + 1] === "x") next = runnerCommandAt(argv, at + 2);
+    else if (word === "bunx" || word === "npx") next = launcherCommandAt(argv, at + 1, RUNNER);
+    else if (word === "bun" && argv[at + 1] === "x") next = launcherCommandAt(argv, at + 2, RUNNER);
     // The side wrapper's `omp` subcommand runs this home's OMP with the arguments that follow.
     else if (word === "omp-dori" && argv[at + 1] === "omp") next = at + 1;
     else break;
@@ -152,7 +180,7 @@ function classifyCommand(command: readonly string[]): OmpArgv {
   const name = command[0]?.split("/").at(-1) ?? "";
   if (OMP_EXECUTABLE.test(command[0] ?? "")) return { kind: "omp", command };
   // A shell runs a script Dori cannot read: one that names OMP must declare its engine.
-  if (SHELLS.has(name)) return names(command.slice(1)) ? { kind: "unparsed" } : { kind: "other", command };
+  if (SHELLS.has(name)) return names(command) ? { kind: "unparsed" } : { kind: "other", command };
   if (name !== "bun" && name !== "node") return { kind: "other", command };
   let script = 1;
   while (command[script]?.startsWith("-")) script++;
