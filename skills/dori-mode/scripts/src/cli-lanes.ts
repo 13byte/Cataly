@@ -89,9 +89,11 @@ export const laneCommands: Readonly<Record<string, Command>> = {
   "claim-done": async (cli) => {
     const target = await cli.lane(cli.key);
     const evidence = cli.need("evidence");
-    const line = await claimDone(cli.deps, target, evidence);
-    if (line.startsWith("LANE_DONE_CLAIMED")) autoTrackLinks(cli, target, evidence, `claim-done ${target.key}`);
-    recorded(line);
+    recorded(
+      await claimDone(cli.deps, target, evidence, () =>
+        autoTrackLinks(cli, target, evidence, `claim-done ${target.key}`),
+      ),
+    );
   },
   "object-done": async ({ key, values, lane, deps }) => {
     const reasons = (values["reason"] as string[] | undefined)?.map((r) => r.trim()).filter(Boolean) ?? [];

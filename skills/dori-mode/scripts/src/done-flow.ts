@@ -38,12 +38,19 @@ export const movedOn = async (deps: FlowDeps, lane: Lane, what: string): Promise
   return `LANE_CHANGED ${lane.key} moved on while this ran (now ${current ? statusOf(current) : "not registered"}, was ${statusOf(lane)}); ${what} not recorded`;
 };
 
-export const claimDone = async (deps: FlowDeps, lane: Lane, evidence: string): Promise<string> => {
+/** `onRecorded` runs once the claim is recorded and before the lane is told, so a failed notification cannot skip it. */
+export const claimDone = async (
+  deps: FlowDeps,
+  lane: Lane,
+  evidence: string,
+  onRecorded?: () => void,
+): Promise<string> => {
   const at = iso(deps.clock);
   const claimed = await deps.registry.transition(lane, (current) =>
     withStatus(current, "done-claimed", evidence, at, { claim: { at, evidence, emitted: false } }),
   );
   if (!claimed) return movedOn(deps, lane, "done claim");
+  onRecorded?.();
   const ref = sessionOf(lane);
   if (ref) {
     const closesAt = new Date(deps.clock.now() + windowMs(deps)).toISOString().slice(11, 16);
