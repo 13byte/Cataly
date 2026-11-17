@@ -6,8 +6,9 @@ import { DORI_COMMANDS } from "../src/monitor-command.ts";
 import type { Lane, LaneStatus } from "../src/registry.ts";
 import { withState } from "./fakes.ts";
 
-// Which words of a watch's own command may name a lane: base matched every word; a dori program word, its dori command
-// and its platform are excluded wherever they stand, and a legacy record never crashes the match.
+// Which words of a watch's own command may name a lane: base matched every word; each command's program, and a dori
+// program's command and platform, are excluded (src/monitor-command.ts), and a legacy record never crashes the match.
+// test/boot-monitor-matrix.test.ts holds every reviewed counterexample.
 const lane = (key: string, status: LaneStatus): Lane => ({
   key,
   status,

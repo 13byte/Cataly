@@ -1,0 +1,102 @@
+import { expect, test } from "bun:test";
+import { type Monitor, monitorCleanup } from "../src/boot-monitors.ts";
+import type { Lane, LaneStatus } from "../src/registry.ts";
+
+// Every reviewed counterexample of a watch's own words against its lane: 0 is a watch the closed lane must not claim
+// (dori's own words), 1 is one it still claims as base did (an argument, a path, another program).
+const SKILL = "/w/skills/dori-mode/scripts";
+const lane = (key: string, status: LaneStatus = "closed"): Lane => ({
+  key,
+  status,
+  pane: `w1:${key}`,
+  title: key,
+  thread: "none",
+  brief: "/b.md",
+  done: "file /done.md",
+  openedAt: "2026-01-01T12:00:00.000Z",
+});
+type Row = readonly [string | readonly unknown[], string, 0 | 1, { cwd?: string; open?: boolean; also?: string }?];
+const ROWS: readonly Row[] = [
+  // Shared dori watches, however they are wrapped.
+  [["dori", "inbound", "slack"], "slack", 0],
+  ["dori inbound slack --loop 1", "inbound", 0],
+  [["env", "-i", "dori", "inbound", "slack"], "slack", 0],
+  [["env", "-u", "NODE_OPTIONS", "dori", "inbound", "slack"], "slack", 0],
+  [["env", "-i", "/home/u/.dori/bin/dori", "inbound", "slack"], "slack", 0],
+  [["timeout", "60", "dori", "inbound", "slack"], "slack", 0],
+  [["timeout", "-vk", "5", "60", "dori", "inbound", "slack"], "slack", 0],
+  [["nice", "-n", "10", "dori", "inbound", "slack"], "slack", 0],
+  [["stdbuf", "-oL", "dori", "inbound", "slack"], "slack", 0],
+  [["FOO=a b", "dori", "inbound", "slack"], "slack", 0],
+  ['FOO="a b" dori inbound slack', "slack", 0],
+  ["bash -lc 'exec -a intake dori inbound slack'", "slack", 0],
+  ["bash -O extglob -c 'exec dori inbound slack --loop 1'", "slack", 0],
+  ["while true; do dori inbound slack --loop 1; sleep 3; done", "slack", 0],
+  ["while true; do exec dori inbound slack --loop 1; done", "slack", 0],
+  ["if test -f /ready; then dori inbound slack --loop 1; fi", "slack", 0],
+  ["( dori inbound slack --loop 1 )", "slack", 0],
+  ["(dori inbound slack --loop 1)", "slack", 0],
+  ["bash -c '(dori inbound slack --loop 1)'", "slack", 0],
+  ["echo $(dori inbound slack --loop 1)", "slack", 0],
+  [["dori", "inbound", "--loop", "1", "slack"], "slack", 0],
+  [["bash", "-c", "dori checkpoints freshness"], "freshness", 0],
+  // The skill's source entry, by path or by the directory it runs in.
+  [["bun", `${SKILL}/src/cli.ts`, "freshness"], "freshness", 0],
+  [["bun", "src/cli.ts", "freshness"], "freshness", 0],
+  [`cd ${SKILL} && bun src/cli.ts freshness`, "freshness", 0, { cwd: "/repo" }],
+  [["env", "-C", SKILL, "bun", "src/cli.ts", "freshness"], "freshness", 0, { cwd: "/repo" }],
+  [["tail", "-F", "/logs/out"], "tail", 0],
+  // Arguments, paths and other programs' words still name a lane.
+  [["dori", "checkpoints", "--cwd", "/x", "dori"], "dori", 1],
+  [["rg", "-n", "/src/omp-dori", "api-fix"], "api-fix", 1],
+  [["rg", "-c", "dori", "api-fix"], "api-fix", 1],
+  ["rg -c dori api-fix", "api-fix", 1],
+  [["rg", "-c", "dori", "freshness"], "freshness", 1],
+  [["rg", "-c", "pattern", "dori"], "dori", 1],
+  [["ls", "/x/dori", "freshness"], "freshness", 1],
+  [["ls", "/x/dori", "api-fix"], "api-fix", 1],
+  [["ls", "/x/dori", "freshness", "w1:freshness"], "freshness", 1],
+  [["bun", "/repo/src/cli.ts", "send", "api-fix"], "api-fix", 1],
+  [["bun", "src/cli.ts", "send", "api-fix", "hi"], "api-fix", 1, { cwd: "/w" }],
+  [["bun", "/other-project/src/cli.ts", "watch", "freshness"], "watch", 1],
+  [["dori", "send", "slack", "slack"], "slack", 1],
+  [["dori", "send", "slack", "dori"], "dori", 1],
+  [["dori", "send", "slack", "--text", "dori"], "dori", 1],
+  [["dori", "report-watch", "slack"], "slack", 1],
+  // An open lane keeps a watch it is named in.
+  [["rg", "dori", "api-fix"], "api-fix", 0, { open: true }],
+  [["dori", "checkpoints", "api-fix"], "api-fix", 0, { also: "open-lane" }],
+  ...["api", "dori", "omp-dori", "inbound", "slack", "freshness", "watch", "send", "cli.ts", "constructor"].map(
+    (key): Row => [["dori", "checkpoints", key], key, 1],
+  ),
+  ...["inbound", "send", "presence", "react", "thread"].flatMap((name) =>
+    ["slack", "discord", "telegram"].map((platform): Row => [["dori", name, platform], platform, 0]),
+  ),
+];
+
+test.each(ROWS.map((row) => [JSON.stringify(row[0]), row[1], row[2], row]))("%s lane %s → %d", (_, __, ___, row) => {
+  const [command, key, want, { cwd = SKILL, open = false, also } = {}] = row as Row;
+  const monitor: Monitor = {
+    persistent: true,
+    monitorId: "mon_TEST",
+    sessionId: "owner",
+    cwd,
+    ...(typeof command === "string" ? { command } : { argv: command as string[] }),
+    ...(also ? { description: also } : {}),
+  };
+  const lanes = [lane(key, open ? "working" : "closed"), ...(also ? [lane(also, "working")] : [])];
+  const manifests = [{ path: "fixture", data: { version: 1, sessionId: "owner", monitors: [monitor] } }];
+  expect(monitorCleanup(lanes, manifests).length).toBe(want);
+});
+
+test("a legacy argv holding any non-string is matched by its command, never crashing the boot", () => {
+  const monitors = [7, null, {}, [], true].map((arg, index) => ({
+    sessionId: "owner",
+    persistent: true,
+    monitorId: `mon_BAD${index}`,
+    argv: [arg] as unknown as string[],
+    command: "dori checkpoints api",
+  }));
+  const manifests = [{ path: "fixture", data: { version: 1, sessionId: "owner", monitors } }];
+  expect(monitorCleanup([lane("api")], manifests).map((m) => m.match)).toEqual(monitors.map(() => ["api:command:key"]));
+});
