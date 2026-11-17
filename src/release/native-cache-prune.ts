@@ -1,9 +1,11 @@
-import { lstatSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { claimNativePrune, nativeCacheRoot, readLeases } from "./native-cache-lease.ts";
+import { realDirectory } from "./files.ts";
+import { claimNativePrune, nativeCacheRoot, nativeStage } from "./native-cache-lease.ts";
 import { exclusiveBytes, type NativeCacheEntry, receiptHolds, reportNativeCache } from "./native-cache.ts";
-import { pathStamp, protections } from "./native-cache-refs.ts";
-import { cacheWriters, nativeStage, type UseHoldOptions, useHolds } from "./native-cache-uses.ts";
+import { protections } from "./native-cache-refs.ts";
+import { stageHolds } from "./native-cache-stage.ts";
+import { type UseHoldOptions, useHolds } from "./native-cache-uses.ts";
 import { processCwds, processStart } from "./process-cwd.ts";
 
 type NativeCacheRemoval = {
@@ -12,10 +14,19 @@ type NativeCacheRemoval = {
   readonly bytes: number;
   readonly why: string;
 };
+type Quarantined = {
+  readonly directory: string;
+  readonly identity: string;
+  readonly bytes: number;
+  readonly since: string;
+  readonly removableAfter: string;
+};
 export type NativeCachePrune = {
   readonly removed: readonly NativeCacheRemoval[];
+  /** Unused identities moved aside (`.pruning`), removed by a later prune once still unused after the grace period. */
+  readonly quarantined: readonly Quarantined[];
   readonly kept: readonly NativeCacheEntry[];
-  /** Each `--trust-process PID@START` and whether it still named that process at the last look before removal. */
+  /** Each `--trust-process PID@START` and whether it still named that process at the last look. */
   readonly trusted: readonly { readonly process: string; readonly trusted: boolean }[];
   /** With `--trust-root-cwd`: how many privileged processes with an unreadable working directory were not held. */
   readonly rootCwdTrusted: number;
@@ -27,23 +38,32 @@ export type NativeCachePruneOptions = {
   readonly trust?: readonly string[];
   /** Count privileged processes whose working directory cannot be read as outside the cache (their arguments count). */
   readonly trustRootCwd?: boolean;
+  /** How long an identity stays quarantined, unused, before a prune may remove it (`--grace MINUTES`). */
+  readonly graceMs?: number;
+  readonly now?: number;
 };
 
+export const GRACE_MS = 10 * 60_000;
 const LEFTOVER = new RegExp(`^native-${process.platform}-${process.arch}-([a-f0-9]{64})\\.(pruning|deleting)$`);
-const AGAIN = "detached copy kept: its live name exists again; remove it by hand once nothing uses it";
+const AGAIN = "quarantined copy kept: its live name exists again; remove it by hand once nothing uses it";
+const QUARANTINE = "native-quarantine";
 
 /**
- * What an interrupted run left: a prune's `.pruning` (detached, not decided) and `.deleting` (removal decided under the
- * lock), and a preparation (`stage`) whose owner ended or that names no owner (`older stage`, remove it by hand once no
- * older checkout prepares anything).
+ * What waits in the cache: quarantined identities (`quarantined`, with the time they were moved aside), a removal an
+ * interrupted prune had decided (`deleting`), a preparation whose owner ended (`stage`) and one that names no owner
+ * (`older stage`, remove it by hand once no older checkout prepares anything).
  */
-export function interruptedPrune(home: string): { directory: string; identity: string; state: string }[] {
+export function cachePending(home: string): { directory: string; identity: string; state: string; since?: string }[] {
   const cache = nativeCacheRoot(home);
   if (!lstatSync(cache, { throwIfNoEntry: false })) return [];
   return readdirSync(cache).flatMap((name) => {
     const directory = join(cache, name);
     const match = LEFTOVER.exec(name);
-    if (match) return [{ directory, identity: match[1]!, state: match[2]! }];
+    if (match?.[2] === "deleting") return [{ directory, identity: match[1]!, state: "deleting" }];
+    if (match) {
+      const since = quarantinedSince(cache, match[1]!);
+      return [{ directory, identity: match[1]!, state: "quarantined", ...(since ? { since } : {}) }];
+    }
     if (!name.startsWith("native-stage-")) return [];
     const stage = nativeStage(name);
     if (!stage) return [{ directory, identity: "", state: "older stage" }];
@@ -51,71 +71,24 @@ export function interruptedPrune(home: string): { directory: string; identity: s
   });
 }
 
-/** Put a detached copy back under its live name; when that name exists again, the copy stays where it is. */
-function attach(entry: NativeCacheEntry): boolean {
-  const detached = `${entry.directory}.pruning`;
-  if (!lstatSync(detached, { throwIfNoEntry: false })) return true;
-  if (lstatSync(entry.directory, { throwIfNoEntry: false })) return false;
-  renameSync(detached, entry.directory);
-  return true;
-}
-
-/** After an error: every copy still detached goes back where it can; the error says which could not. */
-function restore(entries: readonly NativeCacheEntry[], error: unknown): never {
-  const left = entries.flatMap((entry) => {
-    try {
-      return attach(entry) ? [] : [`${entry.directory}.pruning`];
-    } catch {
-      return [`${entry.directory}.pruning`];
-    }
-  });
-  const message = error instanceof Error ? error.message : String(error);
-  throw new Error(left.length ? `${message}; kept detached: ${left.join(", ")}` : message);
-}
-
-/** How many times the last look reads again what changed while it looked before it gives up and keeps everything. */
-const SETTLE = 4;
-
-/**
- * The last look before removal. A writer that takes no lease may publish while it runs, so every path it read is
- * stamped first and compared after; what changed (a file, or a directory with a new entry) is read again the same way
- * until a pass finds nothing changed. Nothing settling within `SETTLE` passes keeps every key.
- */
-function lastLook(
-  cache: string,
-  keys: readonly string[],
-  sources: readonly string[],
-  roots: readonly string[],
-  readCwds: typeof processCwds,
-): Map<string, string[]> {
-  let stamps = new Map<string, string>();
-  const reasons = protections(cache, keys, sources, roots, readCwds, stamps);
-  const merge = (more: Map<string, string[]>) => {
-    for (const [key, found] of more) reasons.set(key, [...new Set([...(reasons.get(key) ?? []), ...found])]);
-  };
-  for (let pass = 1; ; pass++) {
-    const changed = [...stamps].filter(([path, stamp]) => pathStamp(path) !== stamp).map(([path]) => path);
-    if (!changed.length) break;
-    if (pass === SETTLE) {
-      for (const key of keys)
-        reasons.set(key, [...(reasons.get(key) ?? []), `kept changing while the prune looked: ${changed[0]}`]);
-      return reasons;
-    }
-    stamps = new Map();
-    merge(protections(cache, keys, [], changed, readCwds, stamps));
+/** When an identity was quarantined, as its record says; undefined without a readable record. */
+function quarantinedSince(cache: string, identity: string): string | undefined {
+  try {
+    const since = readFileSync(join(cache, QUARANTINE, identity), "utf8").trim();
+    return Number.isNaN(Date.parse(since)) ? undefined : since;
+  } catch {
+    return undefined;
   }
-  // Processes once more, last: one that started while the files were read (a shell entering a detached copy).
-  merge(protections(cache, keys, [], [], readCwds));
-  return reasons;
 }
 
 /**
- * Remove the native cache identities nothing uses, holding the prune lock from the first look to the last removal.
+ * Remove the native cache identities nothing uses, in two prunes, holding the prune lock throughout each.
  *
- * An interrupted prune is recovered first. Every identity the report finds unused is then detached (`.pruning`), so a
- * launcher never sees one half removed, and looked at again under both names; whatever is found then goes back. Only
- * then is a copy marked `.deleting` and removed. An error before that mark puts every detached identity back; an error
- * while removing leaves `.deleting`, which the next prune finishes.
+ * A prune first finishes what an interrupted one decided (`.deleting`) and removes preparations nothing can still
+ * finish. One look then judges every identity and every quarantined copy under both its names. An unused identity is
+ * quarantined: recorded, then moved aside (`.pruning`), so no launcher runs it half removed. A quarantined copy that is
+ * used by now goes back; one unused since at least `graceMs` is removed. A writer from an older checkout, which takes
+ * no lease, therefore has the whole grace period, not one scan, to make its use seen before anything is removed.
  */
 export function pruneNativeCache(
   home: string,
@@ -137,7 +110,6 @@ export function pruneNativeCache(
     const found = read(pids, platform);
     return found && { cwds: found.cwds, unreadable: found.unreadable.filter((pid) => !trusted(pid)) };
   };
-  // Privileged processes the user let `--trust-root-cwd` pass, across every look of this run.
   const privileged = new Set<string>();
   const uses: UseHoldOptions = {
     readCwds,
@@ -145,91 +117,98 @@ export function pruneNativeCache(
     trustRootCwd: options.trustRootCwd === true,
     ...(options.table ? { table: options.table } : {}),
   };
-  if (!lstatSync(cache, { throwIfNoEntry: false })) return { removed: [], kept: [], trusted: [], rootCwdTrusted: 0 };
+  const graceMs = options.graceMs ?? GRACE_MS;
+  const now = options.now ?? Date.now();
+  const result = {
+    removed: [] as NativeCacheRemoval[],
+    quarantined: [] as Quarantined[],
+    kept: [] as NativeCacheEntry[],
+  };
+  const report = () => ({
+    ...result,
+    trusted: [...tokens].map(([pid, start]) => ({ process: `${pid}@${start}`, trusted: trusted(pid) })),
+    rootCwdTrusted: options.trustRootCwd ? privileged.size : 0,
+  });
+  if (!lstatSync(cache, { throwIfNoEntry: false })) return report();
   const release = claimNativePrune(home);
   try {
-    const removed: NativeCacheRemoval[] = [];
-    const kept: NativeCacheEntry[] = [];
-    for (const { directory, identity, state } of interruptedPrune(home)) {
-      if (state === "older stage") continue;
-      // A killed preparation's stage goes once nothing may still finish it: no lease on its identity, no writer.
-      if (state === "stage") {
-        if (!readLeases(cache, false).byIdentity.has(identity) && !cacheWriters(cache, options.table).length) {
-          removed.push({
-            directory,
-            identity,
-            bytes: exclusiveBytes(directory),
-            why: "a preparation whose owner ended",
-          });
-          rmSync(directory, { recursive: true, force: true });
-        }
-        continue;
-      }
-      const live = directory.slice(0, -`.${state}`.length);
-      const bytes = exclusiveBytes(directory);
+    const records = join(cache, QUARANTINE);
+    realDirectory(records, true);
+    const waiting: { identity: string; directory: string; since: string }[] = [];
+    for (const { directory, identity, state, since } of cachePending(home)) {
       if (state === "deleting") {
+        const bytes = exclusiveBytes(directory);
         rmSync(directory, { recursive: true, force: true });
-        removed.push({ directory: live, identity, bytes, why: "an interrupted prune had decided to remove it" });
-      } else if (lstatSync(live, { throwIfNoEntry: false }))
-        kept.push({ directory, identity, bytes, protectedBy: [AGAIN] });
-      // Put back, it is judged below like any other identity.
-      else renameSync(directory, live);
-    }
-    const entries = reportNativeCache(home, sources, roots, readCwds, { ...uses, sweep: true });
-    kept.push(...entries.filter((entry) => entry.protectedBy.length));
-    const detached: NativeCacheEntry[] = [];
-    const confirmed: NativeCacheEntry[] = [];
-    try {
-      for (const entry of entries.filter((candidate) => !candidate.protectedBy.length)) {
-        // A copy left detached earlier is kept, so its name is taken and this identity stays too.
-        if (lstatSync(`${entry.directory}.pruning`, { throwIfNoEntry: false }))
-          kept.push({ ...entry, protectedBy: ["a detached copy of it is kept (see the .pruning entry)"] });
+        result.removed.push({
+          directory: directory.slice(0, -".deleting".length),
+          identity,
+          bytes,
+          why: "an interrupted prune had decided to remove it",
+        });
+      } else if (state === "stage") {
+        const held = stageHolds(directory, readCwds, uses);
+        const entry = { directory, identity, bytes: exclusiveBytes(directory) };
+        if (held.length) result.kept.push({ ...entry, protectedBy: held });
         else {
-          renameSync(entry.directory, `${entry.directory}.pruning`);
-          detached.push(entry);
+          rmSync(directory, { recursive: true, force: true });
+          result.removed.push({ ...entry, why: "a preparation whose owner ended and that nothing uses" });
         }
+      } else if (state === "quarantined") {
+        // A copy without a record (moved aside by an older run) starts its grace period now.
+        const start = since ?? new Date(now).toISOString();
+        if (!since) writeFileSync(join(records, identity), `${start}\n`, { mode: 0o600 });
+        waiting.push({ identity, directory: directory.slice(0, -".pruning".length), since: start });
       }
-      const keys = detached.flatMap(({ identity }) => [identity, `${identity}.pruning`]);
-      const refs = detached.length ? lastLook(cache, keys, sources, roots, readCwds) : new Map<string, string[]>();
-      const held = detached.length ? useHolds(cache, keys, uses) : new Map<string, string[]>();
-      for (const entry of detached) {
-        const reasons = new Set(
-          [entry.identity, `${entry.identity}.pruning`].flatMap((key) => [
-            ...(refs.get(key) ?? []),
-            ...(held.get(key) ?? []),
-          ]),
-        );
-        for (const reason of receiptHolds(`${entry.directory}.pruning`, entry.identity, entry.directory))
-          reasons.add(reason);
-        if (lstatSync(entry.directory, { throwIfNoEntry: false }))
-          reasons.add("its live name was made again meanwhile");
-        if (!reasons.size) confirmed.push(entry);
-        else if (attach(entry)) kept.push({ ...entry, protectedBy: [...reasons] });
-        else kept.push({ ...entry, directory: `${entry.directory}.pruning`, protectedBy: [...reasons, AGAIN] });
-      }
-    } catch (error) {
-      restore(detached, error);
     }
-    try {
-      for (const entry of confirmed) {
-        renameSync(`${entry.directory}.pruning`, `${entry.directory}.deleting`);
-        rmSync(`${entry.directory}.deleting`, { recursive: true, force: true });
-        removed.push({
+    // A record whose copy is gone (put back by hand, or a run that failed before moving it) records nothing.
+    for (const identity of readdirSync(records))
+      if (!waiting.some((entry) => entry.identity === identity)) rmSync(join(records, identity), { force: true });
+    const entries = reportNativeCache(home, sources, roots, readCwds, { ...uses, sweep: true });
+    const keys = waiting.flatMap(({ identity }) => [identity, `${identity}.pruning`]);
+    const refs = keys.length ? protections(cache, keys, sources, roots, readCwds) : new Map<string, string[]>();
+    const held = keys.length ? useHolds(cache, keys, uses) : new Map<string, string[]>();
+    for (const { identity, directory, since } of waiting) {
+      const copy = `${directory}.pruning`;
+      const bytes = exclusiveBytes(copy);
+      const reasons = new Set([
+        ...[identity, `${identity}.pruning`].flatMap((key) => [...(refs.get(key) ?? []), ...(held.get(key) ?? [])]),
+        ...receiptHolds(copy, identity, directory),
+      ]);
+      if (lstatSync(directory, { throwIfNoEntry: false }))
+        result.kept.push({ directory: copy, identity, bytes, protectedBy: [...reasons, AGAIN] });
+      else if (reasons.size) {
+        renameSync(copy, directory);
+        rmSync(join(records, identity), { force: true });
+        result.kept.push({ directory, identity, bytes, protectedBy: [...reasons, "put back from quarantine"] });
+      } else if (now - Date.parse(since) < graceMs) {
+        const removableAfter = new Date(Date.parse(since) + graceMs).toISOString();
+        result.quarantined.push({ directory, identity, bytes, since, removableAfter });
+      } else {
+        renameSync(copy, `${directory}.deleting`);
+        rmSync(join(records, identity), { force: true });
+        rmSync(`${directory}.deleting`, { recursive: true, force: true });
+        result.removed.push({ directory, identity, bytes, why: `unused through its quarantine since ${since}` });
+      }
+    }
+    for (const entry of entries) {
+      if (entry.protectedBy.length) result.kept.push(entry);
+      else if (waiting.some(({ identity }) => identity === entry.identity))
+        result.kept.push({ ...entry, protectedBy: ["a quarantined copy of it is kept (see its .pruning entry)"] });
+      else {
+        const since = new Date(now).toISOString();
+        writeFileSync(join(records, entry.identity), `${since}\n`, { mode: 0o600 });
+        renameSync(entry.directory, `${entry.directory}.pruning`);
+        const removableAfter = new Date(now + graceMs).toISOString();
+        result.quarantined.push({
           directory: entry.directory,
           identity: entry.identity,
           bytes: entry.bytes,
-          why: "nothing uses it",
+          since,
+          removableAfter,
         });
       }
-    } catch (error) {
-      restore(confirmed, error);
     }
-    return {
-      removed,
-      kept,
-      trusted: [...tokens].map(([pid, start]) => ({ process: `${pid}@${start}`, trusted: trusted(pid) })),
-      rootCwdTrusted: options.trustRootCwd ? privileged.size : 0,
-    };
+    return report();
   } finally {
     release();
   }

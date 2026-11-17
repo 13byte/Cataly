@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { claimNativePrune, scriptLeaseHolder } from "../src/release/native-cache-lease.ts";
+import { claimNativePrune, leaseNativeIdentity, scriptLeaseHolder } from "../src/release/native-cache-lease.ts";
 import { processCwds, processStart } from "../src/release/process-cwd.ts";
 import { bootId } from "../src/update/proc.ts";
 import { keptFor, pruneFixture, removePruneFixtures } from "./native-cache-prune-setup.ts";
@@ -63,7 +63,7 @@ test("the cache launcher's lease lasts as long as the shell that execs OMP, and 
     shell.kill();
     await shell.exited;
   }
-  expect(c.prune().removed.map((removal) => removal.directory)).toEqual([x.directory]);
+  expect(c.prune().quarantined.map((entry) => entry.directory)).toEqual([x.directory]);
 });
 
 test("a script's lease holder is the named shell, else its parent", () => {
@@ -72,22 +72,27 @@ test("a script's lease holder is the named shell, else its parent", () => {
   expect(scriptLeaseHolder({})).toBe(process.ppid > 1 ? process.ppid : process.pid);
 });
 
-test("a prune lock whose holder ended is taken over; a live or unreadable one refuses", () => {
+test("the prune lock is a kernel lock: held while its holder runs, free once it ends, refused if not a file", async () => {
   const c = pruneFixture();
   const x = c.native("x");
   const lock = join(c.home, ".cache/omp-dori/native-prune.lock");
-  const own = { pid: process.pid, startTicks: processStart(String(process.pid)), bootId: bootId() };
-  writeFileSync(lock, JSON.stringify(own));
-  expect(() => c.prune()).toThrow(`Another native cache prune holds ${lock} (pid ${process.pid})`);
-  writeFileSync(lock, "{");
+  const code = `const { claimNativePrune } = await import(${JSON.stringify(LEASE)}); claimNativePrune(process.argv[1]); console.log("held"); await Bun.stdin.text();`;
+  const holder = Bun.spawn([process.execPath, "-e", code, c.home], { stdin: "pipe", stdout: "pipe" });
+  try {
+    expect(await ready(holder)).toBe("held\n");
+    expect(() => c.prune()).toThrow(`Another native cache prune holds ${lock}`);
+    expect(() => leaseNativeIdentity(c.home, x.identity, process.pid, 0)).toThrow("A native cache prune holds");
+  } finally {
+    // Killed, not released: the kernel lets go of its lock all the same.
+    holder.kill("SIGKILL");
+    await holder.exited;
+  }
+  // The next prune runs, and sees the lease the waiting writer took.
+  expect(keptFor(c.prune(), x.directory)).toEqual([`lease of process ${process.pid}`]);
+  expect(existsSync(lock)).toBe(true);
+  rmSync(lock);
+  mkdirSync(lock);
   expect(() => c.prune()).toThrow(`Another native cache prune holds ${lock}`);
-  // A process that has exited cannot hold it any more.
-  const ended = Bun.spawnSync(["/bin/sh", "-c", "echo $$"]).stdout.toString().trim();
-  writeFileSync(lock, JSON.stringify({ ...own, pid: Number(ended), startTicks: "1" }));
-  expect(c.prune().removed.map((removal) => removal.directory)).toEqual([x.directory]);
-  expect(existsSync(lock)).toBe(false);
-  // Its tombstone kept a late recoverer off the new lock and went once that prune held it.
-  expect(existsSync(`${lock}.ended-${ended}-1-${bootId()}`)).toBe(false);
 });
 
 test("--trust-process lets one unreadable process pass only while it is still that process", async () => {
@@ -119,7 +124,7 @@ test("--trust-process lets one unreadable process pass only while it is still th
     expect(() => c.prune({ readCwds, trust: [pid] })).toThrow("--trust-process takes PID@START");
     const trusted = c.prune({ readCwds, trust: [token] });
     expect(trusted.trusted).toEqual([{ process: token, trusted: true }]);
-    expect(trusted.removed.map((removal) => removal.directory)).toEqual([x.directory]);
+    expect(trusted.quarantined.map((entry) => entry.directory)).toEqual([x.directory]);
   } finally {
     holder.stdin.end();
     await holder.exited;
@@ -143,5 +148,5 @@ test("a root process whose working directory cannot be read holds unless --trust
   ]);
   const trusted = c.prune({ table, readCwds, trustRootCwd: true });
   expect(trusted.rootCwdTrusted).toBe(1);
-  expect(trusted.removed.map((removal) => removal.directory)).toEqual([x.directory]);
+  expect(trusted.quarantined.map((entry) => entry.directory)).toEqual([x.directory]);
 });

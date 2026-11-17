@@ -27,7 +27,8 @@ export type PruneFixture = {
 
 /**
  * A home with one reference root. An identity's own source is removed unless kept, so only what a test adds uses it.
- * `prune` sees only the fixture's processes: the host's unreadable or privileged processes and its Dori writers (other
+ * `prune` has no grace period unless a test sets one, so a second prune removes what the first quarantined. It sees
+ * only the fixture's processes: the host's unreadable or privileged processes and its Dori writers (other
  * lanes' launches) stay out unless a test passes its own reader or process table.
  */
 export function pruneFixture(): PruneFixture {
@@ -44,7 +45,7 @@ export function pruneFixture(): PruneFixture {
   };
   const wrapper = (omp: string) => `#!/bin/sh\nexec ${JSON.stringify(omp)} "$@"\n`;
   const prune = (options: NativeCachePruneOptions = {}, more: readonly string[] = []): NativeCachePrune =>
-    pruneNativeCache(home, [], [refs, ...more], { readCwds: ownProcessCwds, table: () => "", ...options });
+    pruneNativeCache(home, [], [refs, ...more], { readCwds: ownProcessCwds, table: () => "", graceMs: 0, ...options });
   return { root, home, refs, native, wrapper, prune };
 }
 

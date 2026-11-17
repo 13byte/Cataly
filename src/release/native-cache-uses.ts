@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
-import { cacheHolder, holderEnded, leaseName, readLeases } from "./native-cache-lease.ts";
+import { nativeStage, readLeases } from "./native-cache-lease.ts";
 import { processCwds, processStart } from "./process-cwd.ts";
 
 /** Commands an update or deployment runs after its program (`<program> update install`, `<program> upstream watch`). */
@@ -95,27 +95,6 @@ function writerReasons(cache: string, rows: readonly ProcessRow[]): string[] {
   });
 }
 
-/** The running Dori writers for `cache`; a prune removes an ended preparation only while there are none. */
-export const cacheWriters = (cache: string, table: () => string = processTable): string[] =>
-  writerReasons(cache, processRows(table()));
-
-/** `native-stage-<identity>-<pid>-<start>-<boot>-XXXXXX`: a preparation of one identity by the process that owns it. */
-const STAGE = /^native-stage-([a-f0-9]{64})-([1-9]\d*)-(\d+)-([A-Za-z0-9-]+)-[A-Za-z0-9]{6}$/;
-
-/** The prefix `mkdtemp` completes for this process's preparation of `identity`. */
-export const nativeStagePrefix = (identity: string): string =>
-  `native-stage-${identity}-${leaseName(cacheHolder(process.pid))}-`;
-
-/** A preparation's identity and whether its owner has ended (killed before it could clean up); undefined if unnamed. */
-export function nativeStage(name: string): { readonly identity: string; readonly ended: boolean } | undefined {
-  const match = STAGE.exec(name);
-  if (!match) return undefined;
-  return {
-    identity: match[1]!,
-    ended: holderEnded({ pid: Number(match[2]), startTicks: match[3]!, bootId: match[4]! }),
-  };
-}
-
 export type UseHoldOptions = {
   /** Under the prune lock: remove leases whose holder ended. */
   readonly sweep?: boolean;
@@ -147,6 +126,7 @@ export function useHolds(cache: string, keys: readonly string[], options: UseHol
   for (const key of keys) for (const reason of leases.byIdentity.get(key.slice(0, 64)) ?? []) add(key, reason);
   for (const name of readdirSync(cache)) {
     if (!name.startsWith("native-stage-")) continue;
+    // A stage is judged by its own name (see native-cache-stage.ts), never as an identity.
     const stage = nativeStage(name);
     // An older writer's preparation names no identity or owner; an ended one holds nothing (a prune removes it).
     if (!stage) all(`native preparation of an older writer ${join(cache, name)}`);

@@ -161,7 +161,7 @@ test.each(["linux", "darwin"] as const)("a process's working directory is read t
   }
 });
 
-test("dori update cache reports by default; --prune removes, trusting only the processes it is told to", () => {
+test("dori update cache reports by default; --prune quarantines, trusting only the processes it is told to", () => {
   const c = cache();
   const superseded = c.native("superseded");
   renameSync(superseded.source, join(c.root, "moved-away"));
@@ -173,7 +173,7 @@ test("dori update cache reports by default; --prune removes, trusting only the p
   const listed = run();
   expect(listed.exitCode).toBe(0);
   const report = JSON.parse(listed.stdout.toString());
-  expect(report).toMatchObject({ removes: "nothing", interrupted: [] });
+  expect(report).toMatchObject({ removes: "nothing", pending: [] });
   expect(report.entries).toEqual([expect.objectContaining({ directory: superseded.receipt.directory })]);
   // On a real host only unreadable processes (this user's, listed to trust one by one; privileged ones) hold it.
   const host = /^unreadable working director(?:y of process |ies of \d+ root or privileged processes)/;
@@ -181,6 +181,7 @@ test("dori update cache reports by default; --prune removes, trusting only the p
   expect(existsSync(superseded.receipt.directory)).toBe(true);
   expect(run("--from", c.root).exitCode).toBe(2);
   expect(run("--trust-root-cwd").stderr.toString()).toContain("apply to cache --prune");
+  expect(run("--prune", "--grace", "soon").stderr.toString()).toContain("--grace takes whole minutes");
   const trust = report.trustable.flatMap((token: string) => ["--trust-process", token]);
   const pruned = run("--prune", "--trust-root-cwd", ...trust);
   expect(pruned.exitCode).toBe(0);
@@ -191,5 +192,11 @@ test("dori update cache reports by default; --prune removes, trusting only the p
   const late = /^(?:Dori cache writer process |unreadable working directory of process |lease of process )/;
   const kept = result.kept.flatMap((entry: { protectedBy: string[] }) => entry.protectedBy);
   expect(kept.filter((reason: string) => !late.test(reason))).toEqual([]);
-  expect(existsSync(superseded.receipt.directory)).toBe(kept.length > 0);
+  // Unused, it is only moved aside: removal waits for a prune after the grace period.
+  expect(result.removed).toEqual([]);
+  expect(result.quarantined.length).toBe(kept.length > 0 ? 0 : 1);
+  expect(existsSync(`${superseded.receipt.directory}.pruning`)).toBe(kept.length === 0);
+  expect(JSON.parse(run().stdout.toString()).pending.map((entry: { state: string }) => entry.state)).toEqual(
+    kept.length > 0 ? [] : ["quarantined"],
+  );
 });

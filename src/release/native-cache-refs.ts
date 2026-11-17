@@ -1,5 +1,5 @@
 import { closeSync, lstatSync, openSync, readdirSync, readlinkSync, readSync, realpathSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { type processCwds, processStart } from "./process-cwd.ts";
 import { readSourceBundle } from "./source-bundle.ts";
 
@@ -41,19 +41,12 @@ function readWindows(path: string, read: (text: string) => void): void {
   }
 }
 
-/** What a later look compares to tell whether a path changed: its inode, size, times and mode, or that it is absent. */
-export function pathStamp(path: string): string {
-  const stat = lstatSync(path, { bigint: true, throwIfNoEntry: false });
-  return stat ? `${stat.dev}:${stat.ino}:${stat.mode}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}` : "absent";
-}
-
 /**
  * What uses each identity: a source under `sources`/`roots` binds it, a file of any size under `roots` (wrappers,
  * consumer state, deployment records/toolchains) names it, or a running process names it. What this scan cannot
  * confirm is reported against every identity: a source lock that cannot be read, a link that cannot be read or leads to
  * an unscanned directory, and process working directories that cannot be read. An unreadable process table or reference
- * file throws instead of reporting nothing as used. `stamps` receives `pathStamp` of every path read, taken before
- * reading it, so a caller can tell afterwards whether anything changed while it looked.
+ * file throws instead of reporting nothing as used.
  */
 export function protections(
   cache: string,
@@ -61,11 +54,7 @@ export function protections(
   sources: readonly string[],
   roots: readonly string[],
   readCwds: typeof processCwds,
-  stamps?: Map<string, string>,
 ): Map<string, string[]> {
-  const seen = (path: string) => {
-    if (stamps && !stamps.has(path)) stamps.set(path, pathStamp(path));
-  };
   const reasons = new Map<string, string[]>();
   const add = (key: string, reason: string) => {
     const kept = reasons.get(key) ?? [];
@@ -78,7 +67,6 @@ export function protections(
     for (const key of keys) if (text.includes(key)) add(key, reason);
   };
   const bind = (source: string, where: string) => {
-    seen(join(source, "native-omp.lock"));
     // No lock binds nothing; a lock that cannot be read could bind any identity.
     if (!lstatSync(join(source, "native-omp.lock"), { throwIfNoEntry: false })) return;
     try {
@@ -108,7 +96,6 @@ export function protections(
   // A root given as a link (a `--reference` alias) is walked at its real path, so its contents are read.
   for (const root of rootsReal)
     walk(root, (path, kind) => {
-      seen(path);
       if (kind === "directory") return bind(path, path);
       if (kind === "file") return readWindows(path, (text) => names(text, `reference ${path}`));
       // A link into the cache (an `omp` on PATH, a release's toolchain link) keeps its target, through link chains too.
@@ -126,8 +113,6 @@ export function protections(
         // reached (no permission, a loop) may be anything.
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") all(`unresolved link ${path}`);
       }
-      // A dangling link's target may appear later: its first hop is watched too.
-      seen(resolved || resolve(dirname(path), target));
       names(`${target}\0${resolved}`, `link ${path}`);
       // A target inside the cache is identified by its path alone.
       if (!resolved || resolved === cacheReal || resolved.startsWith(`${cacheReal}/`)) return;

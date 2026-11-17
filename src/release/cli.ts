@@ -27,7 +27,8 @@ const USAGE = `dori update <check|install|status|rollback|cache> [--version vX.Y
   rollback    verify and restore the retained previous release (--version may assert its tag)
   cache       report native cache identities, what uses each and the bytes each holds; it removes nothing;
               --reference DIR adds a root to scan (repeatable)
-              --prune removes, under the prune lock, only identities nothing uses and says why each other is kept;
+              --prune quarantines identities nothing uses (moves them aside) and removes those still unused
+              --grace MINUTES (default 10) after; it puts back what is used again and says why each other is kept;
               --trust-process PID@START (repeatable) leaves out one process the report lists as unreadable;
               --trust-root-cwd counts root processes whose working directory cannot be read as outside the cache
 Default check/install selects the latest stable GitHub release. Explicit tags also allow previews.
@@ -57,6 +58,7 @@ export async function runConsumerUpdate(argv: string[]): Promise<number> {
         reference: { type: "string", multiple: true },
         "trust-process": { type: "string", multiple: true },
         "trust-root-cwd": { type: "boolean" },
+        grace: { type: "string" },
         help: { type: "boolean", short: "h" },
       },
     });
@@ -81,9 +83,13 @@ export async function runConsumerUpdate(argv: string[]): Promise<number> {
       (command === "cache" &&
         (args.values.from !== undefined || args.values.version !== undefined || args.values.runtime !== undefined)) ||
       (command !== "cache" &&
-        (args.values.reference || args.values.prune || args.values["trust-process"] || args.values["trust-root-cwd"]))
+        (args.values.reference ||
+          args.values.prune ||
+          args.values["trust-process"] ||
+          args.values["trust-root-cwd"] ||
+          args.values.grace !== undefined))
     )
-      throw new Error("cache takes only --home, --reference, --prune, --trust-process and --trust-root-cwd");
+      throw new Error("cache takes only --home, --reference, --prune, --trust-process, --trust-root-cwd and --grace");
     const installedHome = consumerReleaseHome(realpathSync(resolve(import.meta.dir, "../..")));
     const selected = args.values.home ?? installedHome ?? process.env["DORI_HOME"] ?? join(homedir(), ".dori");
     if (!isAbsolute(selected)) throw new Error("--home / DORI_HOME must be an absolute installation home");

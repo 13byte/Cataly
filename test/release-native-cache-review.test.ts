@@ -3,60 +3,18 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, 
 import { join, relative, resolve } from "node:path";
 import { leaseNativePath } from "../src/release/native.ts";
 import { leaseNativeIdentity } from "../src/release/native-cache-lease.ts";
-import { interruptedPrune } from "../src/release/native-cache-prune.ts";
+import { cachePending } from "../src/release/native-cache-prune.ts";
 import { useHolds } from "../src/release/native-cache-uses.ts";
 import { bootId } from "../src/update/proc.ts";
 import { processCwds } from "../src/release/process-cwd.ts";
 import { keptFor, pruneFixture, removePruneFixtures } from "./native-cache-prune-setup.ts";
 import { script, setup } from "./install-setup.ts";
-import { nativeCacheFixture, overlayFixture, ownProcessCwds } from "./source-bundle-setup.ts";
+import { nativeCacheFixture, overlayFixture } from "./source-bundle-setup.ts";
 
 // Astra's review of the first prune commit: original counterexamples run as written, writers that publish an explicit
 // cache executable, relative writer commands, a thread group outliving its leader and an empty lock directory.
 
 afterEach(removePruneFixtures);
-
-test.each([false, true])(
-  "original Astra B7 / Fable P6 (live name made again: %p): a late reference keeps it",
-  (again) => {
-    const c = pruneFixture();
-    const x = c.native(again ? "P6" : "B7");
-    let scans = 0;
-    // As the reviewers wrote it: no lease, the reference lands while the last look reads processes.
-    const result = c.prune({
-      readCwds: (pids) => {
-        if (++scans === 2) {
-          writeFileSync(join(c.refs, "omp"), c.wrapper(x.omp));
-          if (again) mkdirSync(x.directory);
-        }
-        return ownProcessCwds(pids);
-      },
-    });
-    expect(result.removed).toEqual([]);
-    expect(existsSync(again ? `${x.directory}.pruning/bin/omp` : x.omp)).toBe(true);
-  },
-);
-
-test("original prune-concurrency: a reference published beside a refused second prune keeps it", () => {
-  const c = pruneFixture();
-  const x = c.native("x");
-  const module = resolve(import.meta.dir, "../src/release/native-cache-prune.ts");
-  const code = `const { pruneNativeCache } = await import(${JSON.stringify(module)}); pruneNativeCache(process.argv[1], [], [process.argv[2]], { table: () => "" });`;
-  let scans = 0;
-  let child = -1;
-  const result = c.prune({
-    readCwds: (pids) => {
-      if (++scans === 2) {
-        writeFileSync(join(c.refs, "omp"), x.omp);
-        child = Bun.spawnSync([process.execPath, "-e", code, c.home, c.refs]).exitCode;
-      }
-      return ownProcessCwds(pids);
-    },
-  });
-  expect(child).not.toBe(0);
-  expect(result.removed).toEqual([]);
-  expect(existsSync(x.omp)).toBe(true);
-});
 
 test("an explicit executable in the cache is leased before anything publishes it; one elsewhere leases nothing", () => {
   const c = pruneFixture();
@@ -181,27 +139,6 @@ test("an empty prune lock directory is not replaced: the prune refuses and remov
   expect(existsSync(x.omp)).toBe(true);
 });
 
-test("original process-after-ps: a shell that enters a detached copy while processes are read keeps it", async () => {
-  const c = pruneFixture();
-  const x = c.native("x");
-  let scans = 0;
-  let holder: ReturnType<typeof Bun.spawn> | undefined;
-  try {
-    const result = c.prune({
-      readCwds: (pids) => {
-        if (++scans === 2)
-          holder = Bun.spawn(["/bin/sh", "-c", "read line"], { cwd: `${x.directory}.pruning`, stdin: "pipe" });
-        return ownProcessCwds(pids);
-      },
-    });
-    expect(result.removed).toEqual([]);
-    expect(existsSync(x.omp)).toBe(true);
-  } finally {
-    holder?.kill();
-    await holder?.exited;
-  }
-});
-
 test("a preparation killed before it cleaned up is removed under the lock, unless its identity is still leased", () => {
   const c = pruneFixture();
   const x = c.native("x");
@@ -210,7 +147,7 @@ test("a preparation killed before it cleaned up is removed under the lock, unles
   const ended = Bun.spawnSync(["/bin/sh", "-c", "echo $$"]).stdout.toString().trim();
   const stage = join(cache, `native-stage-${x.identity}-${ended}-1-${bootId()}-AbC123`);
   mkdirSync(stage);
-  expect(interruptedPrune(c.home)).toEqual([{ directory: stage, identity: x.identity, state: "stage" }]);
+  expect(cachePending(c.home)).toEqual([{ directory: stage, identity: x.identity, state: "stage" }]);
   // A live preparation of the identity: its lease keeps both.
   leaseNativeIdentity(c.home, x.identity, process.pid);
   const held = c.prune();
@@ -218,21 +155,12 @@ test("a preparation killed before it cleaned up is removed under the lock, unles
   expect(held.removed).toEqual([]);
   rmSync(join(cache, "native-leases"), { recursive: true });
   const freed = c.prune();
-  expect(freed.removed.map((removal) => removal.directory)).toEqual([stage, x.directory]);
+  expect(freed.removed.map((removal) => removal.directory)).toEqual([stage]);
+  expect(freed.quarantined.map((entry) => entry.directory)).toEqual([x.directory]);
   // One that names no owner (an older writer's) holds every identity and is only listed.
   const older = join(cache, "native-stage-XyZ987");
   mkdirSync(older);
   const y = c.native("y");
   expect(keptFor(c.prune(), y.directory)).toEqual([`native preparation of an older writer ${older}`]);
-  expect(interruptedPrune(c.home)).toEqual([{ directory: older, identity: "", state: "older stage" }]);
-});
-
-test("what an ended prune left beside the lock (tombstones, claims) goes under the next prune's lock", () => {
-  const c = pruneFixture();
-  c.native("x");
-  const cache = join(c.home, ".cache/omp-dori");
-  const left = [`native-prune.lock.ended-1-1-${bootId()}`, "native-prune.claim-0b1f"];
-  for (const name of left) writeFileSync(join(cache, name), "{}");
-  c.prune();
-  expect(readdirSync(cache).filter((name) => name.startsWith("native-prune"))).toEqual([]);
+  expect(cachePending(c.home)).toEqual([{ directory: older, identity: "", state: "older stage" }]);
 });

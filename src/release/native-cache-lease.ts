@@ -1,16 +1,5 @@
-import { randomUUID } from "node:crypto";
-import {
-  closeSync,
-  linkSync,
-  lstatSync,
-  openSync,
-  readdirSync,
-  readFileSync,
-  rmdirSync,
-  rmSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { dlopen, FFIType } from "bun:ffi";
+import { closeSync, constants as fsConstants, lstatSync, openSync, readdirSync, rmdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { bootId, processExists, procStat } from "../update/proc.ts";
 import { owned, realDirectory } from "./files.ts";
@@ -71,6 +60,23 @@ function parseLease(name: string): CacheHolder | undefined {
   return match ? { pid: Number(match[1]), startTicks: match[2]!, bootId: match[3]! } : undefined;
 }
 
+/** `native-stage-<identity>-<pid>-<start>-<boot>-XXXXXX`: a preparation of one identity by the process that owns it. */
+const STAGE = /^native-stage-([a-f0-9]{64})-([1-9]\d*)-(\d+)-([A-Za-z0-9-]+)-[A-Za-z0-9]{6}$/;
+
+/** The prefix `mkdtemp` completes for this process's preparation of `identity`. */
+export const nativeStagePrefix = (identity: string): string =>
+  `native-stage-${identity}-${leaseName(cacheHolder(process.pid))}-`;
+
+/** A preparation's identity and whether its owner has ended (killed before it could clean up); undefined if unnamed. */
+export function nativeStage(name: string): { readonly identity: string; readonly ended: boolean } | undefined {
+  const match = STAGE.exec(name);
+  if (!match) return undefined;
+  return {
+    identity: match[1]!,
+    ended: holderEnded({ pid: Number(match[2]), startTicks: match[3]!, bootId: match[4]! }),
+  };
+}
+
 /** The holder of a script's lease: the shell `DORI_NATIVE_LEASE_PID` names, else the parent that will exec OMP. */
 export function scriptLeaseHolder(env: Readonly<Record<string, string | undefined>> = process.env): number {
   const named = env["DORI_NATIVE_LEASE_PID"];
@@ -93,25 +99,36 @@ function directory(path: string): void {
   owned(path);
 }
 
-function readHolder(lock: string): CacheHolder | undefined {
-  try {
-    const value = JSON.parse(readFileSync(lock, "utf8")) as Partial<CacheHolder> | null;
-    const { pid, startTicks, bootId: boot } = value ?? {};
-    if (Number.isSafeInteger(pid) && pid! > 0 && typeof startTicks === "string" && /^\d+$/.test(startTicks))
-      if (typeof boot === "string" && boot !== "") return { pid: pid!, startTicks, bootId: boot };
-  } catch {
-    // Reported by the caller as a lock it cannot read.
-  }
-  return undefined;
+/** `flock(2)` from the C library: a kernel lock its holder's death releases, so no stale lock is ever left. */
+let flockSymbol: ((fd: number, operation: number) => number) | undefined;
+function flock(fd: number, operation: number): boolean {
+  flockSymbol ??= dlopen(process.platform === "darwin" ? "libSystem.B.dylib" : "libc.so.6", {
+    flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
+  }).symbols.flock as (fd: number, operation: number) => number;
+  return flockSymbol(fd, operation) === 0;
+}
+const [SHARED, EXCLUSIVE, NONBLOCKING, UNLOCK] = [1, 2, 4, 8];
+
+/** The prune lock file, opened without following a link; a directory or anything else there cannot be locked. */
+function openLock(cache: string): number {
+  return openSync(join(cache, LOCK), fsConstants.O_RDWR | fsConstants.O_CREAT | fsConstants.O_NOFOLLOW, 0o600);
 }
 
-/** Who holds the prune lock while that prune may still run; undefined without a lock or once its holder ended. */
-function pruneHolder(cache: string): string | undefined {
-  const lock = join(cache, LOCK);
-  if (!lstatSync(lock, { throwIfNoEntry: false })) return undefined;
-  const holder = readHolder(lock);
-  if (!holder) return `unreadable ${lock}`;
-  return holderEnded(holder) ? undefined : `pid ${holder.pid}`;
+/** Whether no prune holds the lock right now; one that cannot be checked counts as held. */
+function pruneIdle(cache: string): boolean {
+  let fd: number;
+  try {
+    fd = openLock(cache);
+  } catch {
+    return false;
+  }
+  try {
+    if (!flock(fd, SHARED | NONBLOCKING)) return false;
+    flock(fd, UNLOCK);
+    return true;
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /**
@@ -142,9 +159,9 @@ export function leaseNativeIdentity(home: string, identity: string, holder = pro
     if (ended && holderEnded(ended, boot)) rmSync(join(leases, other), { force: true });
   }
   const deadline = Date.now() + waitMs;
-  for (let running = pruneHolder(cache); running; running = pruneHolder(cache)) {
+  while (!pruneIdle(cache)) {
     if (Date.now() >= deadline)
-      throw new Error(`A native cache prune (${running}) holds ${cache}; retry once it has finished`);
+      throw new Error(`A native cache prune holds ${join(cache, LOCK)}; retry once it has finished`);
     Bun.sleepSync(100);
   }
 }
@@ -185,58 +202,29 @@ export function readLeases(cache: string, sweep: boolean): { byIdentity: Map<str
   return { byIdentity, unread };
 }
 
-/** Claim the prune lock for this process. Another prune that may still run, or a lock this cannot read, refuses. */
+/**
+ * Claim the prune lock for this process: an exclusive kernel lock on the lock file, which writers check for (shared)
+ * after leasing. Another prune holding it, or a lock file that cannot be opened (a directory there), refuses. The
+ * kernel releases it when its holder ends, however it ends; the file itself stays.
+ */
 export function claimNativePrune(home: string): () => void {
   const cache = nativeCacheRoot(home);
   realDirectory(cache);
   owned(cache);
   const lock = join(cache, LOCK);
-  const own = cacheHolder(process.pid);
-  const held = (holder?: CacheHolder) =>
-    new Error(`Another native cache prune holds ${lock}${holder ? ` (pid ${holder.pid})` : ""}; nothing was removed`);
-  // The lock is a file that appears whole: its owner is written first, then hard-linked into place, which never
-  // replaces anything already there (an empty directory included).
-  const claim = join(cache, `native-prune.claim-${randomUUID()}`);
-  writeFileSync(claim, JSON.stringify(own), { flag: "wx", mode: 0o600 });
+  const held = new Error(`Another native cache prune holds ${lock}, or it cannot be locked; nothing was removed`);
+  let fd: number;
   try {
-    try {
-      linkSync(claim, lock);
-    } catch (error) {
-      // A claim another prune swept away under its lock (see below) lost to that prune.
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") throw held();
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      const holder = readHolder(lock);
-      if (!holder || !holderEnded(holder)) throw held(holder);
-      // An ended holder's lock is first linked to a tombstone named after it, which only one recoverer can create; one
-      // that read the holder late may link a newer lock, which it then sees by its owner and leaves in place.
-      const tomb = `${lock}.ended-${leaseName(holder)}`;
-      try {
-        linkSync(lock, tomb);
-      } catch {
-        throw held();
-      }
-      const linked = readHolder(tomb);
-      if (linked?.pid !== holder.pid || linked.startTicks !== holder.startTicks) {
-        unlinkSync(tomb);
-        throw held(linked);
-      }
-      try {
-        unlinkSync(lock);
-        linkSync(claim, lock);
-      } catch {
-        throw held();
-      }
-    }
-  } finally {
-    rmSync(claim, { force: true });
+    fd = openLock(cache);
+  } catch {
+    throw held;
   }
-  // Under the lock, what ended prunes left goes: tombstones (see above) and claims never linked.
-  for (const name of readdirSync(cache))
-    if (/^native-prune\.(?:lock\.ended-|claim-)/.test(name)) rmSync(join(cache, name), { force: true });
+  if (!flock(fd, EXCLUSIVE | NONBLOCKING)) {
+    closeSync(fd);
+    throw held;
+  }
   return () => {
-    const holder = readHolder(lock);
-    if (holder?.pid !== own.pid || holder.startTicks !== own.startTicks)
-      throw new Error(`Native cache prune lock changed: ${lock}`);
-    unlinkSync(lock);
+    flock(fd, UNLOCK);
+    closeSync(fd);
   };
 }
