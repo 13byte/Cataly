@@ -140,6 +140,22 @@ test.each([0o600, 0o640])("staging preserves an existing brief's %s permissions 
   }
 });
 
+// A group the test may give a file without privileges: one of ours other than the one new files get.
+const otherGroup = process.getgroups().find((gid) => gid !== process.getegid());
+
+test.skipIf(otherGroup === undefined)("staging keeps an existing brief's group and its readers", async () => {
+  const brief = join(briefs, "shared.md");
+  writeFileSync(brief, "team instructions");
+  chmodSync(brief, 0o640);
+  fs.chownSync(brief, process.geteuid?.() ?? -1, otherGroup!);
+  const deps = withTab(depsFor(world, fakeClock(T0), state.dir));
+
+  await launchLane(deps, { key: "shared-lane", title: "t", brief, done: DONE });
+
+  expect(readFileSync(brief, "utf8")).toContain("team instructions");
+  expect([statSync(brief).gid, statSync(brief).mode & 0o777]).toEqual([otherGroup!, 0o640]);
+});
+
 test.each([false, true])("a read-only brief or linked template refuses replacement (%s)", async (linked) => {
   const target = join(briefs, linked ? "template.md" : "lane.md");
   const brief = join(briefs, "lane.md");

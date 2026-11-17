@@ -1,5 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { accessSync, chmodSync, constants, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  accessSync,
+  chmodSync,
+  chownSync,
+  constants,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 
 import { type CreateSpec, formatRef, type SessionRef } from "../../../../src/runtime/types.ts";
 import { type Lane, type Registry, sessionFields } from "./registry.ts";
@@ -50,7 +60,11 @@ export const openLaneSession = async (
   try {
     accessSync(target, constants.W_OK);
     writeFileSync(staged, preamble, { flag: "wx", mode: 0o600 });
-    chmodSync(staged, statSync(target).mode & 0o777);
+    // The replacement keeps the brief's owner, group and mode, so the same users can read it; one this user cannot
+    // give them is refused here, before anything exists.
+    const kept = statSync(target);
+    chownSync(staged, kept.uid, kept.gid);
+    chmodSync(staged, kept.mode & 0o777);
   } catch (error) {
     removeStaged(staged);
     return { kind: "failed", what: "brief not writable", error };
