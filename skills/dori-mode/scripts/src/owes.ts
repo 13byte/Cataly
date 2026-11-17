@@ -1,0 +1,193 @@
+/**
+ * Owes: one owner message on Discord creates an obligation to answer on Discord, and a turn may not settle while
+ * an obligation is open.
+ *
+ * The failure this exists for (2026-11-17): an owner message woke the lead, the lead answered in its terminal only,
+ * and the owner saw silence. A rule in memory did not prevent it, so the obligation is data with a gate on it:
+ *
+ * - The Dori extension appends an owe for every `INBOUND discord <ch> <msg> from=owner` line it is handed.
+ * - `dori send discord` appends a receipt after the API accepts the message.
+ * - The extension's `session_stop` handler refuses to settle while an owe has no receipt after it.
+ *
+ * Two files, two writers, no locking: `inbound.jsonl` is written only by the session process and `sent.jsonl` only
+ * by the CLI. Both are append-only, and a torn final line is dropped on read rather than repaired.
+ */
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+/** An obligation older than this is stale: a crash must not resurrect yesterday's unanswered message. */
+export const OWE_TTL_MS = 30 * 60_000;
+/** Continuations per owe before the gate gives up loudly rather than looping the session forever. */
+export const MAX_CONTINUATIONS = 3;
+const KEEP_LINES = 200;
+
+export type InboundOwe = {
+  /** `<channel>:<message>` — the Discord ids already identify the message uniquely. */
+  readonly id: string;
+  readonly channel: string;
+  readonly message: string;
+  readonly at: number;
+  readonly text: string;
+};
+
+type SentReceipt = { readonly channel: string; readonly at: number };
+
+const dir = (stateDir: string): string => join(stateDir, "owes");
+const inboundPath = (stateDir: string): string => join(dir(stateDir), "inbound.jsonl");
+const sentPath = (stateDir: string): string => join(dir(stateDir), "sent.jsonl");
+const attemptsPath = (stateDir: string): string => join(dir(stateDir), "attempts.json");
+
+const ensureDir = (stateDir: string): void => {
+  mkdirSync(dir(stateDir), { recursive: true, mode: 0o700 });
+};
+
+const readLines = (path: string): string[] => {
+  if (!existsSync(path)) return [];
+  return readFileSync(path, "utf8")
+    .split("\n")
+    .filter((line) => line.trim() !== "");
+};
+
+/** A torn or foreign line is skipped, never fatal: a broken ledger must not stop the session from settling. */
+const parse = <T>(line: string, valid: (v: unknown) => v is T): T | undefined => {
+  try {
+    const value: unknown = JSON.parse(line);
+    return valid(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const isOwe = (v: unknown): v is InboundOwe => {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Partial<InboundOwe>;
+  return (
+    typeof o.id === "string" &&
+    typeof o.channel === "string" &&
+    typeof o.message === "string" &&
+    typeof o.at === "number" &&
+    Number.isFinite(o.at) &&
+    typeof o.text === "string"
+  );
+};
+
+const isReceipt = (v: unknown): v is SentReceipt => {
+  if (typeof v !== "object" || v === null) return false;
+  const r = v as Partial<SentReceipt>;
+  return typeof r.channel === "string" && typeof r.at === "number" && Number.isFinite(r.at);
+};
+
+/**
+ * The obligation lines in one monitor delivery: `INBOUND discord <ch> <msg> from=owner ref=- "<text>"`, optionally
+ * behind the `[name] ` prefix every monitor line carries.
+ */
+export const owesInText = (text: string, at: number): InboundOwe[] => {
+  const out: InboundOwe[] = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.replace(/^(?:\[[^\]]*\] )?/, "").trimEnd();
+    const head = /^INBOUND discord (\d{1,20}) (\d{1,20}) from=owner\b/.exec(line);
+    if (!head) continue;
+    const channel = head[1]!;
+    const message = head[2]!;
+    const quoted = /^INBOUND discord \d{1,20} \d{1,20} from=owner ref=\S* (.*)$/.exec(line);
+    let body = quoted?.[1] ?? "";
+    try {
+      const decoded: unknown = JSON.parse(body);
+      if (typeof decoded === "string") body = decoded;
+    } catch {
+      // The raw remainder is still the owner's text; keep it rather than drop the obligation.
+    }
+    out.push({ id: `${channel}:${message}`, channel, message, at, text: body.slice(0, 500) });
+  }
+  return out;
+};
+
+/** Appends the obligations found in a monitor delivery; returns how many were new. */
+export const recordOwes = (stateDir: string, text: string, at: number): number => {
+  const found = owesInText(text, at);
+  if (found.length === 0) return 0;
+  ensureDir(stateDir);
+  const path = inboundPath(stateDir);
+  const known = new Set(readLines(path).map((line) => parse(line, isOwe)?.id));
+  const fresh = found.filter((owe) => !known.has(owe.id));
+  if (fresh.length === 0) return 0;
+  const previous = readLines(path);
+  if (previous.length + fresh.length > KEEP_LINES) {
+    const temporary = `${path}.${process.pid}.tmp`;
+    writeFileSync(
+      temporary,
+      `${[...previous.slice(-KEEP_LINES), ...fresh.map((o) => JSON.stringify(o))].join("\n")}\n`,
+      {
+        mode: 0o600,
+      },
+    );
+    renameSync(temporary, path);
+    return fresh.length;
+  }
+  appendFileSync(path, `${fresh.map((owe) => JSON.stringify(owe)).join("\n")}\n`, { mode: 0o600 });
+  return fresh.length;
+};
+
+/** Records that a message was accepted by Discord, which is what closes every earlier owe on that channel. */
+export const recordSent = (stateDir: string, channel: string, at: number): void => {
+  ensureDir(stateDir);
+  const path = sentPath(stateDir);
+  const kept = readLines(path).slice(-KEEP_LINES);
+  appendFileSync(path, `${[...kept, JSON.stringify({ channel, at })].join("\n")}\n`, { mode: 0o600 });
+};
+
+/** One send answers every owner message on that channel that arrived before it. */
+export const openOwes = (stateDir: string, now: number): InboundOwe[] => {
+  const receipts = readLines(sentPath(stateDir))
+    .map((line) => parse(line, isReceipt))
+    .filter((r): r is SentReceipt => r !== undefined);
+  const seen = new Set<string>();
+  const open: InboundOwe[] = [];
+  for (const line of readLines(inboundPath(stateDir))) {
+    const owe = parse(line, isOwe);
+    if (!owe || seen.has(owe.id)) continue;
+    seen.add(owe.id);
+    if (now - owe.at > OWE_TTL_MS) continue;
+    if (receipts.some((r) => r.channel === owe.channel && r.at >= owe.at)) continue;
+    open.push(owe);
+  }
+  return open.sort((a, b) => a.at - b.at);
+};
+
+/** Counts one blocked settle against each open obligation and returns the running totals. */
+export const bumpAttempts = (stateDir: string, ids: readonly string[]): Record<string, number> => {
+  ensureDir(stateDir);
+  const path = attemptsPath(stateDir);
+  // A damaged counter must not turn a settle into a crash: the worst case is one extra continuation.
+  const previous = ((): Record<string, number> => {
+    try {
+      const value: unknown = JSON.parse(readFileSync(path, "utf8"));
+      return typeof value === "object" && value !== null ? (value as Record<string, number>) : {};
+    } catch {
+      return {};
+    }
+  })();
+  const next: Record<string, number> = {};
+  for (const id of ids) next[id] = (previous[id] ?? 0) + 1;
+  const temporary = `${path}.${process.pid}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify(next)}\n`, { mode: 0o600 });
+  renameSync(temporary, path);
+  return next;
+};
+
+/** The text the session is continued with: the exact command, never a paraphrase of the rule. */
+export const reminder = (owes: readonly InboundOwe[]): string => {
+  // A burst must not become a wall of text: one command settles the channel, so five lines is already generous.
+  const shown = owes.slice(0, 5);
+  const lines = shown.map(
+    (owe) =>
+      `- channel ${owe.channel}, owner message ${owe.message} (${new Date(owe.at).toISOString()}): ${JSON.stringify(owe.text)}`,
+  );
+  if (owes.length > shown.length) lines.push(`- and ${owes.length - shown.length} more`);
+  return [
+    "BLOCKED: the owner wrote to you on Discord and no answer was sent to that channel.",
+    "A terminal-only reply is silence to the owner. Answer now with exactly this form:",
+    '  dori send discord --to <channel> --text "<the answer you just gave>"',
+    ...lines,
+  ].join("\n");
+};

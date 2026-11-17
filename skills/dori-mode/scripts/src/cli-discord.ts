@@ -6,6 +6,7 @@ import { discordInbound, formatDiscordInbound } from "./messenger/discord-inboun
 import { discordInboundLive } from "./messenger/discord-inbound-live.ts";
 import { discordInboundEnv, fileDiscordInboundStore } from "./messenger/discord-inbound-state.ts";
 import { fetchHttp } from "./messenger/http.ts";
+import { recordOwes } from "./owes.ts";
 import { realClock } from "./run.ts";
 
 export const openDiscordSocket = (url: string): GatewaySocket => {
@@ -64,7 +65,12 @@ export const discordInboundCommand = async (stateDir: string, gateway: boolean, 
     { ownerId, channelIds: [...new Set(channelIds)], all },
   );
   const watching = all ? "all" : intake.channels().join(",");
-  const emit = (message: Parameters<typeof formatDiscordInbound>[0]) => console.log(formatDiscordInbound(message));
+  const emit = (message: Parameters<typeof formatDiscordInbound>[0]) => {
+    const text = formatDiscordInbound(message);
+    // One owner message is one obligation to answer on Discord; the extension's settle gate reads this ledger.
+    recordOwes(stateDir, text, Date.now());
+    console.log(text);
+  };
   console.log(
     `INBOUND_READY discord owner=${ownerId} channel=${watching} bot=${intake.botId}${gateway ? " mode=gateway" : ""}`,
   );

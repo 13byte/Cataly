@@ -30,6 +30,7 @@ import { bootstrapMonitors, MONITOR_BOOTSTRAP_FLAG, recordedIntake } from "./boo
 import { RuntimeHealthWriter } from "./deployment-health.ts";
 import { type PromptModel, withLaneBookkeeping } from "./lane-bookkeeping.ts";
 import { MONITOR_DESCRIPTION, Monitors } from "./monitor";
+import { bumpAttempts, MAX_CONTINUATIONS, openOwes, recordOwes, reminder } from "../skills/dori-mode/scripts/src/owes";
 
 interface SessionEntry {
   type: string;
@@ -232,8 +233,12 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
   const approvals = new Set<string>();
   let managedRestorePending = process.env.DORI_MANAGED_STARTUP === "1";
   const monitors = new Monitors(
-    (content) =>
-      pi.sendMessage({ customType: "dori-monitor", content, display: true }, { triggerTurn: true, deliverAs: "aside" }),
+    (content) => {
+      // Also record here: a monitor line is the same evidence the CLI writes, and this path works even when the
+      // running `dori inbound` predates the ledger. Idempotent by message id.
+      if (role === "dori" && stateDir !== undefined) recordOwes(stateDir, content, Date.now());
+      pi.sendMessage({ customType: "dori-monitor", content, display: true }, { triggerTurn: true, deliverAs: "aside" });
+    },
     () => (role === "dori" ? session?.id : undefined),
   );
   const runtimeHealth = new RuntimeHealthWriter(monitors);
@@ -559,6 +564,25 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
     if (ctx.agent.kind !== "main" || !role) return;
     agentStatus = "idle";
     savePane(ctx);
+  });
+
+  /**
+   * The owner's message is answered on Discord or the turn does not settle (owner, 2026-11-17: "내가 말하면 너는
+   * 무조건 답을 해야해. 규칙을 코드로 박아버리자"). A terminal-only reply is silence to the owner, so an owe with no
+   * send receipt after it blocks the settle and hands back the exact command. Bounded: the obligation is abandoned
+   * after MAX_CONTINUATIONS so a wedged session cannot loop, and a subagent or a lane never sees the gate.
+   */
+  pi.on("session_stop", (_event, ctx) => {
+    if (role !== "dori" || ctx.agent.kind !== "main" || stateDir === undefined) return;
+    const owes = openOwes(stateDir, Date.now());
+    if (owes.length === 0) return;
+    const attempts = bumpAttempts(
+      stateDir,
+      owes.map((owe) => owe.id),
+    );
+    const live = owes.filter((owe) => (attempts[owe.id] ?? 0) <= MAX_CONTINUATIONS);
+    if (live.length === 0) return;
+    return { continue: true, additionalContext: reminder(live) };
   });
 
   // OMP chains prompt replacements in extension/handler order; append to the prompt this handler receives.

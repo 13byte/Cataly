@@ -7,6 +7,7 @@ import { type DcChannel, Discord, isForumType } from "./messenger/discord.ts";
 import { discordInboundEnv } from "./messenger/discord-inbound-state.ts";
 import { fetchHttp } from "./messenger/http.ts";
 import { TranscriptionError } from "./messenger/voice.ts";
+import { recordSent } from "./owes.ts";
 import { realClock } from "./run.ts";
 
 const client = () =>
@@ -59,7 +60,7 @@ const tagIds = (forum: DcChannel, names: readonly string[]): string[] =>
     );
   });
 
-export const sendDiscord: Command = async ({ need, opt, values }) => {
+export const sendDiscord: Command = async ({ need, opt, values, config }) => {
   const thread = opt("thread");
   const to = thread === undefined ? need("to") : undefined;
   const text = need("text");
@@ -75,7 +76,12 @@ export const sendDiscord: Command = async ({ need, opt, values }) => {
     target = channel.id;
   }
   if (edit !== undefined) await dc.edit(target, edit, text);
-  else console.log(`SENT ${await dc.send(target, text)}`);
+  else {
+    const id = await dc.send(target, text);
+    // The receipt is what settles the owner's obligation; it is written only after Discord accepted the message.
+    recordSent(config.stateDir, target, Date.now());
+    console.log(`SENT ${id}`);
+  }
 };
 
 export const threadDiscord: Command = async ({ positionals, need, strings, values }) => {
