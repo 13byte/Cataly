@@ -125,6 +125,13 @@ test.each([
   ["a shell given OMP's path by env", ["env", "OMP_BIN=/opt/bin/omp", "sh", "-c", 'exec "$OMP_BIN" "$@"', "a"]],
   ["a shell given OMP's path by an assignment", ["OMP_BIN=/opt/bin/omp", "sh", "-c", 'exec "$OMP_BIN" "$@"', "a"]],
   ["OMP's path given past an unreadable launcher", ["X=/x/omp", "timeout", "--unknown", "codex", "-c", "$X"]],
+  ["npx with an option value before OMP's package", ["npx", "--loglevel", "silent", "@oh-my-pi/pi-coding-agent"]],
+  ["npm with a global option", ["npm", "--silent", "exec", "--", "@oh-my-pi/pi-coding-agent"]],
+  ["an npm: package alias", ["npx", "npm:@oh-my-pi/pi-coding-agent@18.20.0"]],
+  ["a named package alias", ["bunx", "agent@npm:@oh-my-pi/pi-coding-agent"]],
+  ["pnpm dlx", ["pnpm", "dlx", "@oh-my-pi/pi-coding-agent"]],
+  ["yarn dlx", ["yarn", "dlx", "@oh-my-pi/pi-coding-agent"]],
+  ["npm exec -c naming OMP", ["npm", "exec", "--offline", "-c", 'exec omp "$@"']],
 ])("%s is refused as unreadable even when it declares engine omp", (_, prefix) => {
   for (const engine of [undefined, "omp"] as const) {
     expect(() => load([...prefix, MODEL, "{prompt}"], engine)).toThrow(PREFIX_REFUSED);

@@ -114,6 +114,13 @@ const wrapped = [
   ["a shell given OMP's path by env", ["env", "OMP_BIN=/opt/bin/omp", "sh", "-c", 'exec "$OMP_BIN" "$@"', "sh"]],
   ["a shell exec of a bare omp", ["sh", "-c", 'exec omp "$@"', "agent"]],
   ["a shell loop running omp", ["bash", "-c", 'cd /repo && while true; do omp "$@"; done', "agent"]],
+  ["a shell assignment before omp", ["sh", "-c", 'FOO=bar omp "$@"', "agent"]],
+  ["a shell env before omp", ["sh", "-c", 'exec env FOO=bar omp "$@"', "agent"]],
+  ["a shell running a spaced OMP path", ["sh", "-c", 'exec "/opt/agent tools/omp" "$@"', "agent"]],
+  ["npx running OMP's package", ["npx", "--yes", "@oh-my-pi/pi-coding-agent"]],
+  ["pnpm dlx running OMP's package", ["pnpm", "dlx", "@oh-my-pi/pi-coding-agent"]],
+  // A script that only mentions omp is read as OMP too: a wrong match only asks for the session record.
+  ["a shell commenting on omp", ["sh", "-c", 'exec codex "$@" # previously exec omp', "agent"]],
 ] as const;
 const ompProc = ["bun", "/opt/bin/omp", "--dori-role", "lane"];
 const wrappedLaunch = (deps: FlowDeps, prefix: readonly string[], key: string, brief: string) =>
@@ -156,8 +163,7 @@ test.each([
   ],
   ["its own -c option", ["mycli", "-c", "use omp here"]],
   ["its own -c option behind env", ["env", "TERM=xterm", "codex", "-c", 'instructions="Compare omp and codex"']],
-  ["a shell passing a quoted omp value", ["sh", "-c", 'exec codex -c \'instructions="omp"\' "$@"', "sh"]],
-  ["a shell commenting on omp", ["sh", "-c", 'exec codex "$@" # was omp', "sh"]],
+  ["a shell running another agent", ["sh", "-c", 'exec codex "$@"', "sh"]],
 ] as const)("a custom agent behind %s still starts on its goal marker", async (_, prefix) => {
   const { deps, brief } = setup(["claude"], "custom", false);
   world.screen = "Pursuing goal: the brief";
