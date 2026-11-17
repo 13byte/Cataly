@@ -141,7 +141,8 @@ test.each([0o600, 0o640])("staging preserves an existing brief's %s permissions 
 });
 
 // A group the test may give a file without privileges: one of ours other than the one new files get.
-const otherGroup = process.getgroups().find((gid) => gid !== process.getegid());
+const egid = process.getegid?.();
+const otherGroup = process.getgroups?.().find((gid) => gid !== egid);
 
 test.skipIf(otherGroup === undefined)("staging keeps an existing brief's group and its readers", async () => {
   const brief = join(briefs, "shared.md");
