@@ -93,6 +93,44 @@ test("past 250 commits, an old head GitHub no longer has is a rewrite with no co
   expect((await pass())[0]).toStartWith("PR_WATCH_WARN acme/app#7 gh api repos/acme/app/compare/");
 });
 
+test("a closed PR's one-read check that succeeds ends its warning, so the same failure later warns again", async () => {
+  await pass();
+  pr.state = "closed";
+  await pass();
+  const warn = "PR_WATCH_WARN acme/app#7 gh api repos/acme/app/pulls/7: exit 1: HTTP 502: Bad Gateway";
+  gh.failing.set("pulls/7", "HTTP 502: Bad Gateway");
+  expect(await pass()).toEqual([warn]);
+  gh.failing.clear();
+  expect(await pass()).toEqual([]);
+  gh.failing.set("pulls/7", "HTTP 502: Bad Gateway");
+  expect(await pass()).toEqual([warn]);
+});
+
+test("our push landing between the head read and the commit list is read again, never saved as a stranger's", async () => {
+  const push = () => {
+    pr.commits.push({ sha: sha("b"), author: "me" });
+    pr.head = sha("b");
+  };
+  gh.before.set("/pulls/7/commits", push);
+  expect(await pass()).toEqual(["PR_WATCH_BASELINE acme/app#7 lane=fix-7 thread=- head=bbbbbbb state=open known=0"]);
+  expect(await pass()).toEqual([]);
+  // A branch that keeps moving through the second read too is retried on the next pass, with a warning.
+  pr.commits.push({ sha: sha("c"), author: "me" });
+  pr.head = sha("c");
+  gh.before.set("/pulls/7/commits", () => {
+    pr.commits.push({ sha: sha("d"), author: "me" });
+    pr.head = sha("d");
+    gh.before.set("/pulls/7/commits", () => {
+      pr.commits.push({ sha: sha("e"), author: "me" });
+      pr.head = sha("e");
+    });
+  });
+  expect(await pass()).toEqual([
+    "PR_WATCH_WARN acme/app#7 the PR head moved while it was read; reading again next pass",
+  ]);
+  expect(await pass()).toEqual([]);
+});
+
 test("tracking a merged PR again with the same lane reads it once more; a merge is never polled after", async () => {
   await pass();
   pr.state = "closed";

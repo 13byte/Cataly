@@ -40,15 +40,28 @@ export const row = (id: number, login: string, body: string, state?: string): Ro
 
 const ok = (value: unknown) => ({ code: 0, out: JSON.stringify(value), err: "" });
 
-export type FakeGitHub = { readonly run: Runner; readonly calls: string[]; readonly failing: Map<string, string> };
+export type FakeGitHub = {
+  readonly run: Runner;
+  readonly calls: string[];
+  /** Endpoint part → error text: every matching read fails until removed. */
+  readonly failing: Map<string, string>;
+  /** Endpoint part → change made once, just before the first matching read (a push racing the watcher). */
+  readonly before: Map<string, () => void>;
+};
 
 export const fakeGitHub = (prs: Record<string, FakePr>, login: string | null = "me"): FakeGitHub => {
   const calls: string[] = [];
   const failing = new Map<string, string>();
+  const before = new Map<string, () => void>();
   const run: Runner = async (argv) => {
     if (argv.slice(0, 4).join(" ") !== "gh api --method GET" || argv.length !== 5) throw new Error(`argv ${argv}`);
     const endpoint = argv[4]!;
     calls.push(endpoint);
+    for (const [part, change] of [...before])
+      if (endpoint.includes(part)) {
+        before.delete(part);
+        change();
+      }
     for (const [part, err] of failing) if (endpoint.includes(part)) return { code: 1, out: "", err };
     if (endpoint === "user") return login ? ok({ login }) : { code: 1, out: "", err: "HTTP 401" };
     const [path, query = ""] = endpoint.split("?");
@@ -104,5 +117,5 @@ export const fakeGitHub = (prs: Record<string, FakePr>, login: string | null = "
     if (kind === "pulls" && rest === "commits") return ok(slice(pr.commits.slice(0, 250)).map(commitJson));
     throw new Error(`unexpected read ${endpoint}`);
   };
-  return { run, calls, failing };
+  return { run, calls, failing, before };
 };

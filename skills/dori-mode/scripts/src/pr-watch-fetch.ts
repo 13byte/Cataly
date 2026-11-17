@@ -207,7 +207,12 @@ export const prLeftClosed = async (api: Api, ref: PrRef): Promise<boolean> => {
 };
 
 /** Reads everything first, so a failure part-way changes nothing: the caller records a snapshot or nothing. */
-export const fetchPr = async (api: Api, ref: PrRef, knownHead: string | undefined): Promise<PrSnapshot> => {
+export const fetchPr = async (
+  api: Api,
+  ref: PrRef,
+  knownHead: string | undefined,
+  retry = true,
+): Promise<PrSnapshot> => {
   const root = `repos/${ref.repo}/pulls/${ref.number}`;
   const { pr, head } = await metadata(api, root);
   const mergeSha = pr["merged"] && typeof pr["merge_commit_sha"] === "string" ? pr["merge_commit_sha"] : undefined;
@@ -218,6 +223,12 @@ export const fetchPr = async (api: Api, ref: PrRef, knownHead: string | undefine
   ];
   const commits =
     head === knownHead ? undefined : (await pages(api, `${root}/commits`, list("commit list"))).map(commitRow);
+  // Below GitHub's 250-commit cap the list ends at the head; anything else is a push during the read, read once more so
+  // the head and commits saved together agree.
+  if (commits && commits.length < 250 && commits.at(-1)?.sha !== head) {
+    if (retry) return fetchPr(api, ref, knownHead, false);
+    throw new Error("the PR head moved while it was read; reading again next pass");
+  }
   // GitHub lists at most 250 commits of a PR; past that the head is missing from the list, and a compare names what is
   // new since the head we knew.
   const compared =
