@@ -57,17 +57,19 @@ export const openLaneSession = async (
 ): Promise<OpenedLane> => {
   const target = briefTarget(brief);
   const staged = `${target}.${process.pid}.${randomUUID()}.launch`;
+  let what = "brief not writable";
   try {
     accessSync(target, constants.W_OK);
     writeFileSync(staged, preamble, { flag: "wx", mode: 0o600 });
     // The replacement keeps the brief's owner, group and mode, so the same users can read it; one this user cannot
-    // give them is refused here, before anything exists.
+    // give them (another user's brief, a group this user left) is refused here, before anything exists.
     const kept = statSync(target);
+    what = "brief owner or group cannot be kept";
     chownSync(staged, kept.uid, kept.gid);
     chmodSync(staged, kept.mode & 0o777);
   } catch (error) {
     removeStaged(staged);
-    return { kind: "failed", what: "brief not writable", error };
+    return { kind: "failed", what, error };
   }
   let ref: SessionRef;
   try {
