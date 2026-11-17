@@ -33,7 +33,7 @@ const log = console.log;
 console.log = (...args: unknown[]) => {
   log(...args);
   // Stop on the observed delivery, not a guessed wall-clock delay. The next turn allows cursor/queue commit.
-  if (String(args[0]).startsWith("INBOUND discord 20 103 ")) {
+  if (process.env["DORI_INBOUND_HOLD"] !== "1" && String(args[0]).startsWith("INBOUND discord 20 103 ")) {
     setImmediate(() => process.kill(process.pid, "SIGTERM"));
   }
 };

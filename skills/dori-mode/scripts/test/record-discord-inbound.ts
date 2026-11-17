@@ -48,8 +48,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return new Response(JSON.stringify(body), { status: 200 });
 }) as typeof fetch;
 
+const realSleep = Bun.sleep;
 Object.defineProperty(Bun, "sleep", {
   value: async (ms: number) => {
+    if (process.env["DORI_INBOUND_HOLD"] === "1") return await realSleep(ms);
     delays.push(ms);
     if (delays.length === 2) {
       console.log(`DISCORD_INBOUND_QA ${JSON.stringify({ delays, polls, requests })}`);
