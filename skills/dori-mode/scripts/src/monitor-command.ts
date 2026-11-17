@@ -42,12 +42,15 @@ type Word = {
   readonly substitutions?: () => readonly (readonly Word[])[];
 };
 
-/** Where a shell's `-c` script is, past long options, `o`/`O` operands and `--`; undefined without one. */
+/** Where a shell's `-c` script is, past long options, `o`/`O` operands and `--`/`-`; undefined without one. */
 const scriptAt = (words: readonly string[], at: number): number | undefined => {
   let script = false;
   for (; at < words.length; at++) {
-    const word = words[at] ?? "";
-    if (word === "--") return script && at + 1 < words.length ? at + 1 : undefined;
+    const word = (words[at] ?? "").replace(
+      /^-(debug|debugger|dump-po-strings|dump-strings|help|init-file|login|noediting|noprofile|norc|posix|pretty-print|rcfile|restricted|verbose|version)$/,
+      "--$1",
+    );
+    if (word === "--" || word === "-") return script && at + 1 < words.length ? at + 1 : undefined;
     if (word === "--rcfile" || word === "--init-file") at++;
     else if (/^--[A-Za-z][A-Za-z-]*$/.test(word)) continue;
     else if (/^[-+][A-Za-z]+$/.test(word)) {
