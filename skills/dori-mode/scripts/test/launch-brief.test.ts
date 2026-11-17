@@ -24,8 +24,8 @@ let briefs: string;
 beforeEach(() => {
   state = withState();
   world = newWorld();
-  briefs = join(state.dir, "briefs");
-  mkdirSync(briefs);
+  mkdirSync(join(state.dir, "briefs"));
+  briefs = fs.realpathSync(join(state.dir, "briefs"));
 });
 afterEach(() => {
   chmodSync(briefs, 0o700);

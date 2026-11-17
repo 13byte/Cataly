@@ -1,5 +1,5 @@
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import type { SessionRef } from "../../../../src/runtime/types.ts";
 import { takeLock } from "./checkpoint-lock.ts";
@@ -211,9 +211,9 @@ export class Registry {
   }
 
   async list(): Promise<Lane[]> {
-    const lanes: Lane[] = [];
-    for (const f of this.files()) lanes.push(upgradeLane((await Bun.file(f).json()) as Lane));
-    return lanes;
+    return this.files()
+      .map((f) => this.readNow(basename(f, ".json")))
+      .filter((lane) => lane !== null);
   }
 
   /** Like list(), but a lane file that cannot be read, parsed, or holds no lane key is returned in `unreadable` instead of throwing. */
@@ -222,10 +222,11 @@ export class Registry {
     const unreadable: string[] = [];
     for (const f of this.files()) {
       try {
-        const lane: unknown = await Bun.file(f).json();
-        if (typeof lane !== "object" || lane === null || !("key" in lane) || typeof lane.key !== "string")
+        const lane: unknown = this.readNow(basename(f, ".json"));
+        if (lane === null) continue;
+        if (typeof lane !== "object" || !("key" in lane) || typeof lane.key !== "string")
           throw new Error("not a lane record");
-        lanes.push(upgradeLane(lane as Lane));
+        lanes.push(lane as Lane);
       } catch {
         unreadable.push(f);
       }
