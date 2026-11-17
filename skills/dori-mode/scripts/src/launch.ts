@@ -27,9 +27,9 @@ export type LaunchInput = {
 
 export class LaunchError extends Error {}
 
-// The full first check runs 20 s after start at the latest. Until then the status alone is polled every 2 s and only a
-// ready agent brings the check forward: a start that has not shown yet is no failure. Re-reads are 2 s apart before
-// 20 s and 10 s apart after it, up to the same `startupWaitSeconds` deadline.
+// The full first check runs 20 s after start at the latest. Until then the status is polled every 2 s and a ready agent
+// brings the check forward, only with a goal marker: without one a ready status is the only proof, so it waits 20 s for
+// a failure to show. Re-reads are 2 s apart before 20 s, 10 s after, up to the same `startupWaitSeconds` deadline.
 const FIRST_CHECK_MS = 20_000;
 const EARLY_CHECK_MS = 2_000;
 const RECHECK_MS = 10_000;
@@ -172,14 +172,15 @@ const startLane = async (
   }
   const started = deps.clock.now();
   const ompAgent = isOmpCommand(deps.config.agentCommand);
+  const marker = deps.config.goalMarker;
   let slept = 0;
   const pause = async (): Promise<void> => {
-    const ms = slept < FIRST_CHECK_MS ? EARLY_CHECK_MS : RECHECK_MS;
+    const ms = slept >= FIRST_CHECK_MS ? RECHECK_MS : marker ? EARLY_CHECK_MS : FIRST_CHECK_MS;
     slept += ms;
     await deps.clock.sleep(ms);
   };
   do await pause();
-  while (slept < FIRST_CHECK_MS && !ready((await launchStatus(rts, ref, ompAgent)).status));
+  while (slept < FIRST_CHECK_MS && !(marker && ready((await launchStatus(rts, ref, ompAgent)).status)));
   const screen = await launchScreen(deps, rts, ref, input.key);
   if (screen === null) return { lane, startup: `STARTUP_DONE ${input.key}` };
   const bad = startupFailure(screen, ompAgent);
@@ -190,7 +191,6 @@ const startLane = async (
   // No status and no lookup error is an agent still starting (a slow host can take minutes, #202): it is waited for in
   // the goal wait. A lookup error, a `shell` or any other status ends the launch below at once.
   if (ready(status) || (unreported(status) && !error)) {
-    const marker = deps.config.goalMarker;
     const omp = ompAgent ? { run: deps.run, rts, stateDir: deps.config.stateDir, ref } : undefined;
     const hasGoal = async (shown: string): Promise<boolean> =>
       (!omp && goalShown(shown, marker)) ||
@@ -227,9 +227,10 @@ const startLane = async (
           startup: `STARTUP_UNCONFIRMED ${input.key} ${pane}: ${lost} while waiting for its goal; last lines: ${lastLines(shown)}`,
         };
       }
-      // A late failure stops the agent. A working agent's own output may quote these phrases (a file or log it reads),
-      // so only a non-working agent with no goal is checked for one, including a still-unreported slow start.
-      const failed = current !== "working" && !(await hasGoal(shown)) ? startupFailure(shown, ompAgent) : null;
+      // A late failure stops the agent. A working agent's output may quote these phrases (a file or log it reads), so only
+      // a non-working agent with no goal is checked, a slow start included, and any agent at 20 s, as the first check was.
+      const check = slept === FIRST_CHECK_MS || (current !== "working" && !(await hasGoal(shown)));
+      const failed = check ? startupFailure(shown, ompAgent) : null;
       if (failed) return { lane, startup: `STARTUP_ERROR ${input.key} ${pane}: ${failed}` };
     }
     return { lane, startup: `STARTUP_OK ${input.key} ${pane}` };
