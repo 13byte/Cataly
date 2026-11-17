@@ -158,7 +158,7 @@ test.each(["linux", "darwin"] as const)("a process's working directory is read t
   }
 });
 
-test("dori update cache only reports; --prune is refused and nothing is ever removed", () => {
+test("dori update cache reports by default; --prune removes, trusting only the processes it is told to", () => {
   const c = cache();
   const superseded = c.native("superseded");
   renameSync(superseded.source, join(c.root, "moved-away"));
@@ -170,16 +170,23 @@ test("dori update cache only reports; --prune is refused and nothing is ever rem
   const listed = run();
   expect(listed.exitCode).toBe(0);
   const report = JSON.parse(listed.stdout.toString());
-  expect(report.removes).toBe("nothing");
+  expect(report).toMatchObject({ removes: "nothing", interrupted: [] });
   expect(report.entries).toEqual([expect.objectContaining({ directory: superseded.receipt.directory })]);
-  // Only this user's host processes whose working directory cannot be read (not dumpable) may be listed against it.
-  const unread = "unreadable working directory of process ";
-  expect(report.entries[0].protectedBy.filter((reason: string) => !reason.startsWith(unread))).toEqual([]);
+  // On a real host only unreadable processes (this user's, listed to trust one by one; privileged ones) hold it.
+  const host = /^unreadable working director(?:y of process |ies of \d+ root or privileged processes)/;
+  expect(report.entries[0].protectedBy.filter((reason: string) => !host.test(reason))).toEqual([]);
   expect(existsSync(superseded.receipt.directory)).toBe(true);
   expect(run("--from", c.root).exitCode).toBe(2);
-  // An unreferenced identity is only reported: a request to remove it fails loudly and leaves it in place.
-  const pruned = run("--prune");
-  expect(pruned.exitCode).toBe(2);
-  expect(pruned.stderr.toString()).toContain("cache only reports; --prune is not supported");
-  expect(existsSync(superseded.receipt.directory)).toBe(true);
+  expect(run("--trust-root-cwd").stderr.toString()).toContain("apply to cache --prune");
+  const trust = report.trustable.flatMap((token: string) => ["--trust-process", token]);
+  const pruned = run("--prune", "--trust-root-cwd", ...trust);
+  expect(pruned.exitCode).toBe(0);
+  const result = JSON.parse(pruned.stdout.toString());
+  // Root's processes come and go between the two runs, but there are some exactly when the report listed some.
+  expect(result.rootCwdTrusted > 0).toBe(report.privileged.length > 0);
+  // Another lane's launch or a process that started after the report may still hold it; nothing else may.
+  const late = /^(?:Dori cache writer process |unreadable working directory of process |lease of process )/;
+  const kept = result.kept.flatMap((entry: { protectedBy: string[] }) => entry.protectedBy);
+  expect(kept.filter((reason: string) => !late.test(reason))).toEqual([]);
+  expect(existsSync(superseded.receipt.directory)).toBe(kept.length > 0);
 });

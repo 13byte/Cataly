@@ -13,7 +13,7 @@ import {
   regularFile,
 } from "./files.ts";
 import { installBundle, preflightInstallation, rollbackRelease } from "./install.ts";
-import { reportNativeCache } from "./native-cache.ts";
+import { runCacheCommand } from "./native-cache-cli.ts";
 import { prerequisites } from "./provision.ts";
 import { supportsReleaseProfile } from "./manifest.ts";
 import { consumerReleaseHome } from "./runtime.ts";
@@ -27,6 +27,9 @@ const USAGE = `dori update <check|install|status|rollback|cache> [--version vX.Y
   rollback    verify and restore the retained previous release (--version may assert its tag)
   cache       report native cache identities, what uses each and the bytes each holds; it removes nothing;
               --reference DIR adds a root to scan (repeatable)
+              --prune removes, under the prune lock, only identities nothing uses and says why each other is kept;
+              --trust-process PID@START (repeatable) leaves out one process the report lists as unreadable;
+              --trust-root-cwd counts root processes whose working directory cannot be read as outside the cache
 Default check/install selects the latest stable GitHub release. Explicit tags also allow previews.
 --from reads local release assets; first installation may still fetch the exact public omp-ulw pin.
 Activation holds while Dori is live. Stop Dori yourself before installing or rolling back.`;
@@ -52,6 +55,8 @@ export async function runConsumerUpdate(argv: string[]): Promise<number> {
         runtime: { type: "string" },
         prune: { type: "boolean" },
         reference: { type: "string", multiple: true },
+        "trust-process": { type: "string", multiple: true },
+        "trust-root-cwd": { type: "boolean" },
         help: { type: "boolean", short: "h" },
       },
     });
@@ -72,33 +77,20 @@ export async function runConsumerUpdate(argv: string[]): Promise<number> {
       (command === "rollback" && args.values.from)
     )
       throw new Error("--from applies to check/install; status takes no selection");
-    // Nothing synchronizes this scan with launches and reference writers, so no command removes a cache directory.
-    if (args.values.prune)
-      throw new Error(
-        "cache only reports; --prune is not supported and nothing is removed (remove a directory yourself)",
-      );
     if (
       (command === "cache" &&
         (args.values.from !== undefined || args.values.version !== undefined || args.values.runtime !== undefined)) ||
-      (command !== "cache" && args.values.reference)
+      (command !== "cache" &&
+        (args.values.reference || args.values.prune || args.values["trust-process"] || args.values["trust-root-cwd"]))
     )
-      throw new Error("cache takes only --home and --reference");
+      throw new Error("cache takes only --home, --reference, --prune, --trust-process and --trust-root-cwd");
     const installedHome = consumerReleaseHome(realpathSync(resolve(import.meta.dir, "../..")));
     const selected = args.values.home ?? installedHome ?? process.env["DORI_HOME"] ?? join(homedir(), ".dori");
     if (!isAbsolute(selected)) throw new Error("--home / DORI_HOME must be an absolute installation home");
     const paths = consumerPaths(homedir(), selected);
     realDirectory(paths.dori);
     realDirectory(paths.root);
-    if (command === "cache") {
-      const roots = [paths.dori, process.env["OMP_DORI_HOME"] || join(homedir(), ".omp-dori")];
-      const entries = reportNativeCache(
-        paths.home,
-        [resolve(import.meta.dir, "../..")],
-        [...roots, ...(args.values.reference ?? []).map((path) => resolve(path))],
-      );
-      console.log(JSON.stringify({ removes: "nothing", entries }, null, 2));
-      return 0;
-    }
+    if (command === "cache") return runCacheCommand(paths, args.values);
     if (!hasConsumerState(paths) && lstatSync(join(paths.dori, ".omp-dori"), { throwIfNoEntry: false }))
       throw new Error("Unmanaged source installation; use a separate release home or the documented stopped migration");
     let runtime = args.values.runtime;

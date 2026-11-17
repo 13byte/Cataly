@@ -3,12 +3,13 @@ import { join } from "node:path";
 import { owned, readJson, realDirectory } from "./files.ts";
 import type { NativeReceipt } from "./native.ts";
 import { protections } from "./native-cache-refs.ts";
+import { type UseHoldOptions, useHolds } from "./native-cache-uses.ts";
 import { processCwds } from "./process-cwd.ts";
 import { readSourceBundle } from "./source-bundle.ts";
 
 /**
- * One native cache identity as the report sees it. Nothing here removes a directory: references, launches and other
- * Dori processes share no lock with this scan, so an identity it finds unused may be in use a moment later.
+ * One native cache identity as the report sees it. The report removes nothing and takes no lock, so an identity it finds
+ * unused may be in use a moment later; only a prune (`pruneNativeCache`) decides under the prune lock.
  */
 export type NativeCacheEntry = {
   readonly directory: string;
@@ -22,7 +23,7 @@ export type NativeCacheEntry = {
 const ENTRY = new RegExp(`^native-${process.platform}-${process.arch}-([a-f0-9]{64})$`);
 
 /** Freed bytes: inodes whose link count is fully accounted for inside the directory (shared Bun cache links are not). */
-function exclusiveBytes(directory: string): number {
+export function exclusiveBytes(directory: string): number {
   const inodes = new Map<string, { size: number; links: number; seen: number }>();
   const stack = [directory];
   while (stack.length) {
@@ -39,13 +40,18 @@ function exclusiveBytes(directory: string): number {
   return bytes;
 }
 
-/** An entry's receipt counts while it is unrecognized, or while the source that prepared it binds it or cannot be read. */
-function receiptHolds(directory: string, identity: string): string[] {
+/**
+ * An entry's receipt counts while it is unrecognized, or while the source that prepared it binds it or cannot be read.
+ * A detached copy (`directory`) is read against the name its receipt records (`live`).
+ */
+export function receiptHolds(directory: string, identity: string, live = directory): string[] {
   try {
     realDirectory(directory);
     owned(directory);
+    // Other users' working directories are not read, which holds only while they cannot enter the entry.
+    if ((lstatSync(directory).mode & 0o011) !== 0) return ["directory other users can enter"];
     const receipt = readJson(join(directory, "receipt.json"));
-    if (!recognized(receipt, identity, directory)) return ["unrecognized receipt"];
+    if (!recognized(receipt, identity, live)) return ["unrecognized receipt"];
     try {
       return readSourceBundle(receipt.source, true).identity === identity ? ["receipt source"] : [];
     } catch {
@@ -59,12 +65,16 @@ function receiptHolds(directory: string, identity: string): string[] {
   }
 }
 
-/** Report every native cache identity of this platform with what uses it (see `protections`). It removes nothing. */
+/**
+ * Report every native cache identity of this platform with what uses it (see `protections` and `useHolds`). It removes
+ * no identity; only a prune holding the lock asks `uses` to sweep leases whose holder ended.
+ */
 export function reportNativeCache(
   home: string,
   sources: readonly string[],
   roots: readonly string[],
   readCwds: typeof processCwds = processCwds,
+  uses: UseHoldOptions = {},
 ): NativeCacheEntry[] {
   const cache = join(home, ".cache/omp-dori");
   if (!lstatSync(cache, { throwIfNoEntry: false })) return [];
@@ -74,18 +84,20 @@ export function reportNativeCache(
     .map((name) => ({ name, match: ENTRY.exec(name) }))
     .filter((entry) => entry.match)
     .map(({ name, match }) => ({ directory: join(cache, name), identity: match![1]! }));
-  const reasons = protections(
-    cache,
-    found.map((entry) => entry.identity),
-    sources,
-    roots,
-    readCwds,
-  );
+  const keys = found.map((entry) => entry.identity);
+  const reasons = protections(cache, keys, sources, roots, readCwds);
+  const held = useHolds(cache, keys, { readCwds, ...uses });
   return found.map(({ directory, identity }) => ({
     directory,
     identity,
     bytes: exclusiveBytes(directory),
-    protectedBy: [...(reasons.get(identity) ?? []), ...receiptHolds(directory, identity)],
+    protectedBy: [
+      ...new Set([
+        ...(reasons.get(identity) ?? []),
+        ...(held.get(identity) ?? []),
+        ...receiptHolds(directory, identity),
+      ]),
+    ],
   }));
 }
 
