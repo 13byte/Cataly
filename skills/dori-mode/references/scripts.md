@@ -12,7 +12,7 @@ bun test             # behavior tests with fake herdr/hc/git/gh; nothing real is
 bunx tsc --noEmit    # typecheck
 ```
 
-Needs: Bun 1.4.4+, the installed default OMP source bundle (18.20.0), herdr or hc, git, and the GitHub CLI (`gh`) for `merged`/`closed` signals (npm for `published`). An explicit external OMP is an advanced override, not bundle proof; historical published `v0.1.2` keeps its 18.18.8 contract. The `command`, `file` and `url` signals need nothing extra. The host guard reads `sysctl`, `memory_pressure` and `df` on macOS; on Linux it reads `/proc/loadavg`, `/proc/meminfo` (`MemAvailable` over `MemTotal`) and `df`. Memory counts as 100% free when neither source works, and swap reads as unknown on Linux.
+Needs: Bun 1.4.4+, the installed default OMP source bundle (18.20.0), herdr or hc, git, and the GitHub CLI (`gh`) for `merged`/`closed` signals (npm for `published`). An explicit external OMP is an advanced override, not bundle proof; historical published `v0.1.2` keeps its 18.18.8 contract. The `command`, `file` and `url` signals need nothing extra. The host guard reads `sysctl`, `memory_pressure` and `df` on macOS; on Linux it reads `/proc/loadavg` and `/proc/meminfo` (`MemAvailable` over `MemTotal`) directly in-process, then runs `df` and the selected runtime's session list. Linux no longer spawns `cat` or attempts the macOS-only probes; non-Linux command probes and their fallback behavior are retained. Memory counts as 100% free when neither source works, and swap reads as unknown on Linux.
 
 ## Configuration
 
