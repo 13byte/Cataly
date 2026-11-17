@@ -142,6 +142,17 @@ A paused lane is skipped by `freshness`: no nudge, no post. Only `dori resume` e
 
 Both print `PAUSED` / `RESUMED` and exit 0 on success. A lane in any other state is refused (`NOT_PAUSED` / `NOT_RESUMED`, exit 2), and a second `pause` is a no-op. A lane claimed, objected to or closed while the goal command ran is left as that writer put it (`LANE_CHANGED`, exit 3); the goal command itself was confirmed, so check the lane before retrying. `claim-done` and `object-done` on a paused lane move it out of `paused` in the registry while its goal stays paused.
 
+### `dori tell <key> --text TEXT`
+Sends the lead's message to a registered lane's session once through `sendVerified`, the same path `claim-done`, `object-done`, `pause` and the freshness nudge use, and prints one line:
+
+| Line | Exit | Meaning |
+|---|---|---|
+| `TOLD <key> delivery=confirmed` | 0 | the agent's status moved to working after the send |
+| `TELL_UNCONFIRMED <key> delivery=unconfirmed: ...; do not resend` | 3 | the text may be in the session, but no move to working was seen. An agent that was already working gets it as queued input and always lands here. So does herdr's typed fallback when the text was typed but its Enter failed (stderr says `text typed but Enter failed`): read the pane, and if the text still sits in the input, press Enter only |
+| `TELL_FAILED <key> delivery=failed: <why>; nothing was sent` | 2 | no running agent (a shell, a suspended or stopped agent), an open approval, an unreadable status, on hc an agent that is `blocked` or in `error` or whose status changed just before the send, a paused lane, a lane with no session, or text containing a backtick or `$(`. When the runtime refused the delivery, `<why>` ends with `(status now: <status>)` read after the refusal (the paused, sessionless and unsafe-text refusals read nothing), so a blocked agent waiting on a question is told apart from a shell (`no agent`). `idle` or `working` there means a shell in front of a suspended agent, an open approval or a failed probe: read the pane before trying again |
+
+No `[LEAD]` prefix is added. Like every `--text`, leading and trailing whitespace is trimmed. The runtime's delivery shapes the rest: hc sends the text as it is, while herdr's typed fallback (used for agents herdr did not start) joins lines into one, replacing each line break and the indentation around it with ` / `, so a multi-line message arrives as one line there. A paused lane is refused because a message would start a turn the owner asked to hold; `dori resume` it first. An unknown or closed key and a missing `--text` exit 1. Nothing is written to the registry or the lane's journal.
+
 ### `dori watch`
 Runs forever. Every 30 seconds it prints each new claim once (`LANE_DONE_CLAIMED`). Claims older than `closeAfterMin` are settled: unpushed or uncommitted work and failing signals turn into objections (`LANE_NOT_DONE`); otherwise the lane is closed (`LANE_CLOSED`). A claim that is objected to, claimed again, paused or closed while these checks run is left as the other writer put it (`LANE_CHANGED`). The deadline lives in the registry, so a restart picks up where it left off.
 
