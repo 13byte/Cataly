@@ -15,7 +15,9 @@ import { quotedSubstitutions, shellWords, splitString, unquote } from "./monitor
 // are its own words (monitor-dori.ts), an option's value never (`dori send --text slack discord`). Every other word may
 // name a lane, as before: an argument (`dori checkpoints --cwd X dori`), a path (`ls /x/dori freshness`) or another
 // program's word (`env rg -c dori freshness`). A legacy record's non-string argv word holds a program's place.
-// Known limits: a `#` comment is read as words; a `cd` inside a subshell or a script is not undone after it.
+// A `cd` holds for the commands after it in its own subshell or command substitution only.
+// Known limits: a `#` comment is read as words; behind an `env` option this does not know, no program is read, so
+// every word after it may name a lane as before.
 const DORI_NAMES: Record<string, true> = { dori: true, "omp-dori": true };
 const SKILL_SOURCE = /(?:^|\/)dori-mode\/scripts\/src\/cli\.ts$/;
 // A Set: a `then` key on an object literal reads as a thenable.
@@ -26,12 +28,14 @@ const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 /**
  * A word as passed on and the whitespace-split word of the line each of its characters is in; in a command string,
- * whether a new command starts at it, its own words as a script, and its quoted command substitutions.
+ * whether a new command starts at it, the subshells and substitutions it is in, its own words as a script, and its
+ * quoted command substitutions.
  */
 type Word = {
   readonly word: string;
   readonly baseAt: (at: number) => number;
   readonly starts?: boolean;
+  readonly scope?: readonly number[];
   readonly script?: () => readonly Word[];
   readonly substitutions?: () => readonly (readonly Word[])[];
 };
@@ -67,12 +71,12 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
   }
   // A string's words, where `baseAt` maps its characters to the line's whitespace-split words.
   const read = (text: string, baseAt: (at: number) => number): Word[] =>
-    shellWords(text).map(({ text: word, from, starts }) => {
+    shellWords(text).map(({ text: word, from, starts, scope }) => {
       const passed = unquote(word);
       const at = (i: number) => baseAt(from + (passed.at[i] ?? 0));
       const substitutions = () =>
         quotedSubstitutions(word).map((s) => read(word.slice(s.from, s.to), (i) => baseAt(from + s.from + i)));
-      return { word: passed.text, baseAt: at, starts, script: () => read(passed.text, at), substitutions };
+      return { word: passed.text, baseAt: at, starts, scope, script: () => read(passed.text, at), substitutions };
     });
   const isDori = (word: string, dir: string | undefined): boolean =>
     DORI_NAMES[basename(word)] === true || SKILL_SOURCE.test(within(dir, word) ?? word);
@@ -109,12 +113,12 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
         if (env?.chdir !== undefined) here = within(here, env.chdir);
         if (env?.split === undefined) next = env?.at;
         else {
-          // `-S STRING`: STRING's words, then the words after it.
+          // `-S STRING`: env reads STRING's words, its own options included, then the words after it.
           const string = ws[env.at];
           const split = splitString(words[env.at]?.slice(env.split) ?? "").map(
             (w): Word => ({ word: w.text, baseAt: (i) => string?.baseAt((env.split ?? 0) + (w.at[i] ?? 0)) ?? -1 }),
           );
-          commandOf([...split, ...ws.slice(env.at + 1)], here);
+          commandOf([ws[at] ?? { word: "env", baseAt: () => -1 }, ...split, ...ws.slice(env.at + 1)], here);
         }
       } else if (launcher !== undefined && Object.hasOwn(LAUNCHERS, name)) {
         next = launcherCommandAt(words, at + 1, launcher);
@@ -139,14 +143,23 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
     return dir;
   };
 
-  // Each command of a run of words, cut where a new command starts, with each `cd` moving the ones after it.
+  // Each command of a run of words, cut where a new command starts. A `cd` moves the commands after it in its own
+  // subshell or substitution; a new one starts in the directory around it.
   const run = (ws: readonly Word[], dir: string | undefined): void => {
+    const dirs = new Map<string, string | undefined>([["", dir]]);
+    const dirOf = (scope: readonly number[]): string | undefined => {
+      const key = scope.join("/");
+      if (!dirs.has(key)) dirs.set(key, dirOf(scope.slice(0, -1)));
+      return dirs.get(key);
+    };
     let from = 0;
     for (let at = 1; at <= ws.length; at++) {
       if (at < ws.length && !ws[at]?.starts) continue;
       const command = ws.slice(from, at);
-      for (const w of command) for (const substitution of w.substitutions?.() ?? []) run(substitution, dir);
-      dir = commandOf(command, dir);
+      const scope = command[0]?.scope ?? [];
+      const here = dirOf(scope);
+      for (const w of command) for (const substitution of w.substitutions?.() ?? []) run(substitution, here);
+      dirs.set(scope.join("/"), commandOf(command, here));
       from = at;
     }
   };
