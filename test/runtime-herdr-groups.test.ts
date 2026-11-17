@@ -34,5 +34,6 @@ for (const bad of [
   test(`an invalid row cannot erase a watched snapshot: ${JSON.stringify(bad)}`, async () => {
     const h = new HerdrRuntime(recorder(() => ok({ panes: [bad] })).exec, "");
     await expect(h.list({ group: "w" })).rejects.toThrow("valid pane list");
+    await expect(h.list()).rejects.toThrow("valid pane list");
   });
 }

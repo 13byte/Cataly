@@ -4,6 +4,10 @@
 
 - `dori dead-panes` drops retained screen tails and unknown counters for vanished or no-longer-watched panes after a successful complete listing, and limits alert deduplication to current watched panes and the current hour. Failed or malformed runtime listings preserve prior state; two-screen dead detection, three-tick unknown alerts and live-agent protection remain unchanged. Valid herdr tabs without a workspace remain nonmatches for workspace-filtered scans and sync.
 
+- Full CI now checks native OMP and both ULW fixture prerequisites before the expensive suites, so an absent real-ULW fixture cannot produce a successful full gate with its native composition tests skipped. The contributor guide and PR template require explicit dependencies, preserved contracts, final-revision regression evidence and measured performance claims; the four required CI jobs and test discovery remain unchanged.
+
+- Isolated consumer install and rollback use the fully verified selected release's reference renderer under the existing launch gate, restoring the older release's exact wrapper bytes instead of retaining the updater's newer automatic-launch template. Missing or changed renderers hold activation. Older clients need the new bootstrap or an explicit same-release reinstall to publish the new launch hook.
+
 - Bound-source admission computes its Git tree through a private index copy, reusing the narrowly reviewed fix from PR #67 without changing its shared index or lock. Parallel consumer launches no longer contend on Git's implicit write-tree index lock; content, mode, postimage and exact-tree checks remain required.
 
 - The reviewed ULW bundle advances to upstream `33b375dc8d289d6fec944a8a5ee8f2db721a8c34`, retaining the managed overlay and its exact admission hashes. Latest upstream code-mode bridges remain intact; local runtime overlay files are unchanged. The port preserves default Claude exclusions and tests the updated task/todo eval-bridge contract. Native task/TUI smoke and full consumer rollout remain separate evidence, not inferred from unit or declaration checks.

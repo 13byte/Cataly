@@ -88,34 +88,36 @@ for (const runtime of ["herdr", "hc"] as const) {
 }
 
 for (const runtime of ["herdr", "hc"] as const) {
-  for (const body of ["not JSON", "{}", "null", "[]", "null-rows", "missing-id", "wrong-state-or-group"]) {
-    test(`${runtime}: malformed successful listing ${body} does not erase observations`, async () => {
-      const deps = depsFor(world, fakeClock(0), dir.dir, { runtime, workspaces: ["w"] });
-      const state = newDeadPaneState();
-      state.unknown.set("kept", 2);
-      state.lastTail.set("kept", "prior");
-      const seen = new Set(["kept prior-hour"]);
-      const rows =
-        body === "null-rows"
-          ? [null]
-          : body === "missing-id"
-            ? [{}]
-            : [{ pane_id: "w:p1", workspace_id: 1, address: "t1", state: 1 }];
-      const out = ["null-rows", "missing-id", "wrong-state-or-group"].includes(body)
-        ? JSON.stringify(runtime === "herdr" ? { result: { panes: rows } } : { terminals: rows })
-        : body;
-      const malformed: Runner = async (argv, options) => {
-        if ((argv[0] === "herdr" && argv[2] === "list") || (argv[0] === "hc" && argv[2] === "ls"))
-          return { code: 0, out, err: "" };
-        return deps.run(argv, options);
-      };
-      await expect(
-        deadPaneTick(malformed, deps.config, seen, "now", state, runtimesFor(deps.config, {}, malformed)),
-      ).rejects.toThrow();
-      expect([...state.unknown]).toEqual([["kept", 2]]);
-      expect([...state.lastTail]).toEqual([["kept", "prior"]]);
-      expect([...seen]).toEqual(["kept prior-hour"]);
-    });
+  for (const workspaces of [[], ["w"]]) {
+    for (const body of ["not JSON", "{}", "null", "[]", "null-rows", "missing-id", "wrong-state-or-group"]) {
+      test(`${runtime}/${workspaces.length ? "watched" : "all"}: malformed ${body} preserves state`, async () => {
+        const deps = depsFor(world, fakeClock(0), dir.dir, { runtime, workspaces });
+        const state = newDeadPaneState();
+        state.unknown.set("kept", 2);
+        state.lastTail.set("kept", "prior");
+        const seen = new Set(["kept prior-hour"]);
+        const rows =
+          body === "null-rows"
+            ? [null]
+            : body === "missing-id"
+              ? [{}]
+              : [{ pane_id: "w:p1", workspace_id: 1, address: "t1", state: 1 }];
+        const out = ["null-rows", "missing-id", "wrong-state-or-group"].includes(body)
+          ? JSON.stringify(runtime === "herdr" ? { result: { panes: rows } } : { terminals: rows })
+          : body;
+        const malformed: Runner = async (argv, options) => {
+          if ((argv[0] === "herdr" && argv[2] === "list") || (argv[0] === "hc" && argv[2] === "ls"))
+            return { code: 0, out, err: "" };
+          return deps.run(argv, options);
+        };
+        await expect(
+          deadPaneTick(malformed, deps.config, seen, "now", state, runtimesFor(deps.config, {}, malformed)),
+        ).rejects.toThrow();
+        expect([...state.unknown]).toEqual([["kept", 2]]);
+        expect([...state.lastTail]).toEqual([["kept", "prior"]]);
+        expect([...seen]).toEqual(["kept prior-hour"]);
+      });
+    }
   }
 }
 
