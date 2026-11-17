@@ -1,7 +1,19 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { leaseNativePath } from "../src/release/native.ts";
+import { reportNativeCache } from "../src/release/native-cache.ts";
 import { leaseNativeIdentity } from "../src/release/native-cache-lease.ts";
 import { cachePending } from "../src/release/native-cache-prune.ts";
 import { useHolds } from "../src/release/native-cache-uses.ts";
@@ -9,7 +21,7 @@ import { bootId } from "../src/update/proc.ts";
 import { processCwds } from "../src/release/process-cwd.ts";
 import { keptFor, pruneFixture, removePruneFixtures } from "./native-cache-prune-setup.ts";
 import { script, setup } from "./install-setup.ts";
-import { nativeCacheFixture, overlayFixture } from "./source-bundle-setup.ts";
+import { nativeCacheFixture, overlayFixture, ownProcessCwds } from "./source-bundle-setup.ts";
 
 // Astra's review of the first prune commit: original counterexamples run as written, writers that publish an explicit
 // cache executable, relative writer commands, a thread group outliving its leader and an empty lock directory.
@@ -164,3 +176,49 @@ test("a preparation killed before it cleaned up is removed under the lock, unles
   expect(keptFor(c.prune(), y.directory)).toEqual([`native preparation of an older writer ${older}`]);
   expect(cachePending(c.home)).toEqual([{ directory: older, identity: "", state: "older stage" }]);
 });
+
+test.each(["file", "directory", "executable"])(
+  "a process whose arguments and working directory show no entry but that holds an entry %s keeps the identity",
+  async (kind) => {
+    if (process.platform !== "linux") return;
+    const c = pruneFixture();
+    const x = c.native(kind);
+    let argv: string[];
+    if (kind === "executable") {
+      // The entry's own copy of a program, run through a link outside the cache: only /proc/<pid>/exe shows the entry.
+      copyFileSync(realpathSync("/bin/sleep"), join(x.directory, "bin/sleeper"));
+      symlinkSync(join(x.directory, "bin/sleeper"), join(c.root, "sleeper"));
+      argv = [join(c.root, "sleeper"), "60"];
+    } else {
+      // The path comes through the environment, so neither the arguments nor the working directory name it.
+      const open =
+        kind === "file"
+          ? "os.open(os.environ['TARGET'], os.O_RDONLY)"
+          : "os.open(os.environ['TARGET'], os.O_RDONLY | os.O_DIRECTORY)";
+      argv = ["python3", "-c", `import os,sys; fd=${open}; print('ready', flush=True); sys.stdin.readline()`];
+    }
+    const target = kind === "file" ? join(x.directory, "receipt.json") : x.directory;
+    const holder = Bun.spawn(argv, {
+      cwd: c.root,
+      env: { PATH: process.env["PATH"], TARGET: target },
+      stdin: "pipe",
+      stdout: "pipe",
+    });
+    try {
+      if (kind !== "executable") await holder.stdout.getReader().read();
+      // The program is running once /proc shows the entry's copy (a state, so polled for).
+      else while (!readlinkSync(`/proc/${holder.pid}/exe`).startsWith(x.directory)) await Bun.sleep(10);
+      const reason = `process ${holder.pid} has it open, mapped or running`;
+      expect(reportNativeCache(c.home, [], [c.refs], ownProcessCwds, { table: () => "" })[0]?.protectedBy).toContain(
+        reason,
+      );
+      const result = c.prune();
+      expect(result.quarantined).toEqual([]);
+      expect(keptFor(result, x.directory)).toContain(reason);
+      expect(existsSync(x.omp)).toBe(true);
+    } finally {
+      holder.kill();
+      await holder.exited;
+    }
+  },
+);

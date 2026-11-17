@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { nativeStage, readLeases } from "./native-cache-lease.ts";
 import { processCwds, processStart } from "./process-cwd.ts";
+import { processFiles, usesDirectory } from "./process-files.ts";
 
 /** Commands an update or deployment runs after its program (`<program> update install`, `<program> upstream watch`). */
 const SUBCOMMAND = /^(?:install|rollback|check|stage|watch|restart|recover)$/;
@@ -108,9 +109,10 @@ export type UseHoldOptions = {
 
 /**
  * What keeps identities besides what the report reads (see `protections`, which judges this user's processes): a live
- * lease keeps its identity; a lease that cannot be read, a preparation in progress or interrupted (`native-stage-*`), a
- * running Dori writer for this cache and a privileged process whose working directory cannot be read keep every
- * identity. Keys may also be detached names (`<identity>.pruning`), which a lease on that identity keeps too.
+ * lease keeps its identity, and so does a process of this user that runs, maps or holds open a file in it (the entry
+ * itself open as a directory included); a lease that cannot be read, a preparation of an older writer, a running Dori
+ * writer for this cache and a privileged process whose working directory cannot be read keep every identity. Keys may
+ * also be quarantined names (`<identity>.pruning`), which a lease on that identity keeps too.
  */
 export function useHolds(cache: string, keys: readonly string[], options: UseHoldOptions = {}): Map<string, string[]> {
   const reasons = new Map<string, string[]>();
@@ -135,6 +137,17 @@ export function useHolds(cache: string, keys: readonly string[], options: UseHol
   }
   const rows = processRows((options.table ?? processTable)());
   for (const reason of writerReasons(cache, rows)) all(reason);
+  // What this user's processes run, map or hold open inside an entry, whatever their arguments and working directory
+  // say. A process whose files cannot be read cannot have its working directory read either, which keeps every key.
+  const found = processFiles();
+  if (!found) all("open files of processes unavailable");
+  const caches = [...new Set([cache, realpathSync(cache)])];
+  for (const key of keys) {
+    const entries = caches.map((root) => join(root, `native-${process.platform}-${process.arch}-${key}`));
+    for (const [pid, paths] of found?.files ?? [])
+      if (paths.some((used) => entries.some((entry) => usesDirectory(used, entry))))
+        add(key, `process ${pid} has it open, mapped or running`);
+  }
   const uid = process.getuid?.();
   const privileged = rows.filter((row) => row.uid !== uid && entersAny(row.pid, row.uid));
   if (!privileged.length) return reasons;
