@@ -122,3 +122,38 @@ test("Astra R3: a lock a killed recoverer left mid-takeover (lock and tombstone 
   );
   expect(runs.at(-1)!.removed.map((removal) => removal.directory)).toEqual([x.directory]);
 });
+
+test.each(["file", "directory"])(
+  "Astra R2 (cfbfb77): a killed owner's stage stays while a process outside it holds a %s descriptor in it",
+  async (kind) => {
+    if (process.platform !== "linux") return;
+    const c = pruneFixture();
+    const x = c.native(kind);
+    const ended = Bun.spawnSync(["/bin/sh", "-c", "echo $$"]).stdout.toString().trim();
+    const stage = join(c.home, ".cache/omp-dori", `native-stage-${x.identity}-${ended}-1-${bootId()}-AbC123`);
+    mkdirSync(stage);
+    writeFileSync(join(stage, "still-needed"), "payload");
+    // As the reviewer ran it: the holder works outside the stage and only keeps a descriptor open.
+    const target = kind === "file" ? join(stage, "still-needed") : stage;
+    const code =
+      "import os,sys; fd=os.open(os.environ['TARGET'],os.O_RDONLY); print(fd,flush=True); sys.stdin.readline()";
+    const holder = Bun.spawn(["python3", "-c", code], {
+      cwd: c.root,
+      env: { PATH: process.env["PATH"], TARGET: target },
+      stdin: "pipe",
+      stdout: "pipe",
+    });
+    try {
+      const fd = new TextDecoder().decode((await holder.stdout.getReader().read()).value).trim();
+      expect(readlinkSync(`/proc/${holder.pid}/fd/${fd}`)).toBe(target);
+      const result = c.prune();
+      expect(existsSync(join(stage, "still-needed"))).toBe(true);
+      expect(result.kept.find((entry) => entry.directory === stage)?.protectedBy).toContain(
+        `process ${holder.pid} has a file open in it`,
+      );
+    } finally {
+      holder.stdin.end();
+      await holder.exited;
+    }
+  },
+);

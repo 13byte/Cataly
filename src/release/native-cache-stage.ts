@@ -27,8 +27,9 @@ function openUnder(path: string, readCwds: typeof processCwds): string[] {
     }
     for (const fd of fds) {
       try {
-        if (readlinkSync(`/proc/${pid}/fd/${fd}`).startsWith(`${path}/`))
-          reasons.push(`process ${pid} has a file open in it`);
+        // The stage itself open as a directory counts too (openat and readdir work through it).
+        const target = readlinkSync(`/proc/${pid}/fd/${fd}`);
+        if (target === path || target.startsWith(`${path}/`)) reasons.push(`process ${pid} has a file open in it`);
       } catch {
         // A descriptor closed meanwhile.
       }
