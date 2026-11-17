@@ -113,9 +113,9 @@ test("racing answers: the first wins, a later answer, withdraw or posted is a wa
   const open = ledger.ask({ question: "Still open?", source: "s:2" }, T0 + 1);
   ledger.answer(raced.id, "first", "s:3", T0 + 2);
   const late = [
-    { op: "answer", id: raced.id, at: at(3), answer: "second", source: "s:4" },
-    { op: "withdraw", id: raced.id, at: at(4), reason: "moot" },
-    { op: "posted", id: raced.id, at: at(5), message: "m:1" },
+    { op: "answer", id: raced.id, at: at(3), n: "0000000a", answer: "second", source: "s:4" },
+    { op: "withdraw", id: raced.id, at: at(4), n: "0000000b", reason: "moot" },
+    { op: "posted", id: raced.id, at: at(5), n: "0000000c", message: "m:1" },
   ];
   appendFileSync(ledger.path, late.map((event) => `${JSON.stringify(event)}\n`).join(""));
   // When a new instance reads the record.

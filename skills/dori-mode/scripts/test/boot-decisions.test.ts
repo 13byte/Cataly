@@ -76,7 +76,14 @@ test("a damaged decision line fails the boot, a late answer is only a warning, a
   const ledger = deps.decisions;
   const d = ledger.ask({ question: "Raced?", source: "s:1" }, T0);
   ledger.answer(d.id, "first", "s:2", T0 + 1);
-  const late = { op: "answer", id: d.id, at: new Date(T0 + 2).toISOString(), answer: "second", source: "s:3" };
+  const late = {
+    op: "answer",
+    id: d.id,
+    at: new Date(T0 + 2).toISOString(),
+    n: "0000000a",
+    answer: "second",
+    source: "s:3",
+  };
   appendFileSync(ledger.path, `${JSON.stringify(late)}\nnot a record\n`);
   // When boot runs; then the warning and the damage are both named, and the damage alone fails the boot.
   const result = await bootCheck(deps);

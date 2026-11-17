@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, writeSync } from "node:fs";
 import { join } from "node:path";
 
+import { type DecisionFold, foldDecisions } from "./decisions-fold.ts";
 import {
   type Decision,
   type DecisionAsk,
@@ -9,56 +10,37 @@ import {
   type DecisionRead,
   type Event,
   inRange,
-  isTorn,
   MAX_OPTIONS,
   parseEvent,
   settled,
 } from "./decisions-record.ts";
 import { Worklog } from "./worklog.ts";
 
-const asked = ({
-  id,
-  at,
-  question,
-  source,
-  lane,
-  thread,
-  options,
-  recommend,
-  worklog,
-  message,
-}: Event & { op: "ask" }) => ({
-  id,
-  question,
-  source,
-  askedAt: at,
-  ...(lane !== undefined ? { lane } : {}),
-  ...(thread !== undefined ? { thread } : {}),
-  options: options ?? [],
-  ...(recommend !== undefined ? { recommend } : {}),
-  ...(worklog !== undefined ? { worklog } : {}),
-  ...(message !== undefined ? { message } : {}),
-});
+const hex8 = () => randomBytes(4).toString("hex");
+
+/** The id, time and a fresh nonce every event carries; the nonce lets a writer find its own event in the readback. */
+const stamp = (id: string, now: number) => ({ id, at: new Date(now).toISOString(), n: hex8() });
+
+/** Where a test puts another writer's record: after this writer's checks, or after its append and before its readback. */
+type RaceSeam = { readonly beforeAppend?: () => void; readonly beforeReadback?: () => void };
 
 /**
  * The product choices the lead put to the owner and is waiting on. decisions.jsonl is the record: one O_APPEND write
  * per change, so concurrent writers never lose each other's lines, and the lead re-posts the open list from it, not
- * from memory. The first answer or withdrawal of a decision wins.
+ * from memory. The first answer or withdrawal of a decision wins, and so does the first binding of a message.
  */
 export class Decisions {
   readonly path: string;
 
-  constructor(readonly stateDir: string) {
+  constructor(
+    readonly stateDir: string,
+    private readonly race: RaceSeam = {},
+  ) {
     this.path = join(stateDir, "decisions.jsonl");
   }
 
   read(): DecisionRead {
-    return this.fold(existsSync(this.path) ? readFileSync(this.path, "utf8") : "");
-  }
-
-  /** Open decisions posted as exactly this message; more than one means the reply cannot be bound. */
-  match(message: string): Decision[] {
-    return this.read().items.filter((d) => settled(d) === undefined && d.message === message);
+    return this.fold().read;
   }
 
   ask(input: DecisionAsk, now: number): Decision {
@@ -69,14 +51,13 @@ export class Decisions {
     const message = input.message?.trim();
     if (message !== undefined) this.unbound(message);
     const known = new Set(this.read().items.map((d) => d.id));
-    let id = randomBytes(4).toString("hex");
-    while (known.has(id)) id = randomBytes(4).toString("hex");
+    let id = hex8();
+    while (known.has(id)) id = hex8();
     const lane = input.lane?.trim();
     const thread = input.thread?.trim();
     return this.write({
       op: "ask",
-      id,
-      at: new Date(now).toISOString(),
+      ...stamp(id, now),
       question: input.question.trim(),
       source: input.source.trim(),
       ...(lane !== undefined ? { lane } : {}),
@@ -91,7 +72,7 @@ export class Decisions {
   posted(id: string, message: string, now: number): Decision {
     this.openDecision(id);
     this.unbound(message.trim(), id);
-    return this.write({ op: "posted", id, at: new Date(now).toISOString(), message: message.trim() });
+    return this.write({ op: "posted", ...stamp(id, now), message: message.trim() });
   }
 
   /** A bare number names an option; any other text is free text. A number outside the options is refused, never guessed. */
@@ -104,8 +85,7 @@ export class Decisions {
       throw new DecisionError(`decision ${id} has options 1 to ${count}; ${answer} is not one`);
     return this.write({
       op: "answer",
-      id,
-      at: new Date(now).toISOString(),
+      ...stamp(id, now),
       answer,
       source: source.trim(),
       ...(option !== undefined ? { option } : {}),
@@ -114,12 +94,16 @@ export class Decisions {
 
   withdraw(id: string, reason: string, now: number): Decision {
     this.openDecision(id);
-    return this.write({ op: "withdraw", id, at: new Date(now).toISOString(), reason: reason.trim() });
+    return this.write({ op: "withdraw", ...stamp(id, now), reason: reason.trim() });
   }
 
-  // One open decision per posted message, so a reply to it binds to exactly one question.
+  private fold(): DecisionFold {
+    return foldDecisions(this.path, existsSync(this.path) ? readFileSync(this.path, "utf8") : "");
+  }
+
+  // A check for a friendly refusal; the fold settles writers that both pass it.
   private unbound(message: string, except?: string): void {
-    const other = this.match(message).find((d) => d.id !== except);
+    const other = this.read().items.find((d) => d.id !== except && settled(d) === undefined && d.message === message);
     if (other) throw new DecisionError(`message ${message} is already bound to open decision ${other.id}`);
   }
 
@@ -132,62 +116,10 @@ export class Decisions {
     return decision;
   }
 
-  private fold(text: string): DecisionRead {
-    const items = new Map<string, Decision>();
-    const problems: string[] = [];
-    const warnings: string[] = [];
-    for (const [index, line] of text.split("\n").entries()) {
-      if (!line.trim()) continue;
-      const where = `${this.path}:${index + 1}`;
-      let value: unknown;
-      try {
-        value = JSON.parse(line);
-      } catch (error) {
-        if (!(error instanceof SyntaxError)) throw error;
-        if (!isTorn(line)) problems.push(`${where}: ${error.message}`);
-        continue;
-      }
-      try {
-        const event = parseEvent(value);
-        const item = items.get(event.id);
-        if (event.op === "ask") {
-          if (item) throw new DecisionError(`decision ${event.id} was already asked`);
-          items.set(event.id, asked(event));
-          continue;
-        }
-        if (!item) throw new DecisionError(`decision ${event.id} was never asked`);
-        // Two writers can both see the decision open and append. The first answer or withdrawal wins; anything after
-        // it is the same race's normal result, ignored and named.
-        const state = settled(item);
-        if (state !== undefined) {
-          warnings.push(`${where}: decision ${event.id} was already ${state}; ${event.op} ignored`);
-          continue;
-        }
-        if (event.op === "posted") items.set(event.id, { ...item, message: event.message });
-        else if (event.op === "withdraw") items.set(event.id, { ...item, withdrawnAt: event.at, reason: event.reason });
-        else {
-          if (event.option !== undefined && event.option > item.options.length)
-            throw new DecisionError(`decision ${event.id} has no option ${event.option}`);
-          const { at, answer, source, option } = event;
-          items.set(event.id, {
-            ...item,
-            answeredAt: at,
-            answer,
-            ...(option !== undefined ? { option } : {}),
-            answerSource: source,
-          });
-        }
-      } catch (error) {
-        if (!(error instanceof DecisionError)) throw error;
-        problems.push(`${where}: ${error.message}`);
-      }
-    }
-    return { items: [...items.values()], problems, warnings };
-  }
-
   private write(event: Event): Decision {
     parseEvent(event);
     mkdirSync(this.stateDir, { recursive: true });
+    this.race.beforeAppend?.();
     const fd = openSync(this.path, "a+", 0o600);
     try {
       // A writer that stopped mid-record left no newline: start on a fresh line so only the torn line is damaged.
@@ -198,17 +130,17 @@ export class Decisions {
     } finally {
       closeSync(fd);
     }
-    const item = this.read().items.find((d) => d.id === event.id);
+    this.race.beforeReadback?.();
+    // Another writer's event can match ours field for field (same millisecond, same text); only the nonce is ours.
+    const { read, ignored, resolvedBy, boundBy } = this.fold();
+    const item = read.items.find((d) => d.id === event.id);
     if (!item) throw new DecisionError(`decision ${event.id} did not read back`);
-    // A writer that raced us to resolve the decision got there first, and our record was ignored.
-    const ours =
-      event.op === "answer"
-        ? item.answeredAt === event.at && item.answer === event.answer
-        : event.op === "withdraw"
-          ? item.withdrawnAt === event.at && item.reason === event.reason
-          : event.op !== "posted" || item.message === event.message;
-    if (!ours)
-      throw new DecisionError(`decision ${event.id} was resolved by another writer first; ${event.op} ignored`);
+    const reason = ignored.get(event.n);
+    if (reason !== undefined) throw new DecisionError(reason);
+    if ((event.op === "answer" || event.op === "withdraw") && resolvedBy.get(event.id) !== event.n)
+      throw new DecisionError(`decision ${event.id} did not read back as resolved by this ${event.op}`);
+    if (event.op === "posted" && boundBy.get(event.id) !== event.n)
+      throw new DecisionError(`decision ${event.id} posted ${event.message} was replaced by a later posted`);
     return item;
   }
 }

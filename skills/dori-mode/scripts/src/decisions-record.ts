@@ -29,7 +29,8 @@ export type DecisionAsk = {
   readonly worklog?: string;
   readonly message?: string;
 };
-type Stamp = { readonly id: string; readonly at: string };
+/** `n` is the writing event's own random nonce: a writer finds its own event in the readback by it, never by content. */
+type Stamp = { readonly id: string; readonly at: string; readonly n: string };
 export type Event =
   | (Stamp & { readonly op: "ask" } & DecisionAsk)
   | (Stamp & { readonly op: "posted"; readonly message: string })
@@ -69,11 +70,13 @@ export const parseEvent = (value: unknown): Event => {
     throw new DecisionError('decision field "id" must be 8 lowercase hex digits');
   if (!isoTime(record["at"]))
     throw new DecisionError('decision field "at" must be an ISO time as toISOString writes it');
+  if (typeof record["n"] !== "string" || !ID.test(record["n"]))
+    throw new DecisionError('decision field "n" must be 8 lowercase hex digits');
   const op = record["op"];
   if (typeof op !== "string" || !Object.hasOwn(SHAPES, op))
     throw new DecisionError('decision field "op" must be ask, posted, answer or withdraw');
   const shape: { need: Record<string, number>; may: Record<string, number> } = SHAPES[op as Event["op"]];
-  const known = ["op", "id", "at", ...Object.keys(shape.need), ...Object.keys(shape.may), ...(NUMBERS[op] ?? [])];
+  const known = ["op", "id", "at", "n", ...Object.keys(shape.need), ...Object.keys(shape.may), ...(NUMBERS[op] ?? [])];
   const unknown = Object.keys(record).find((name) => !known.includes(name));
   if (unknown !== undefined) throw new DecisionError(`unknown decision field "${unknown}"`);
   for (const [name, max] of Object.entries({ ...shape.need, ...shape.may })) {
