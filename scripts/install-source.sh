@@ -260,7 +260,8 @@ elif ! (umask 077; git -C "$src" merge --ff-only --quiet '@{u}'); then
   exit 1
 fi
 if [ -z "$omp_bin" ]; then
-  native="$(bun "$src/scripts/source-dependencies.ts" native "$src" "$HOME")"
+  # The installer holds the native cache lease until it has written the wrapper below that names the identity.
+  native="$(DORI_NATIVE_LEASE_PID=$$ bun "$src/scripts/source-dependencies.ts" native "$src" "$HOME")"
   omp_bin="$native/bin/omp"
   check_omp_wrapper_collision
 fi

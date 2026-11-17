@@ -17,6 +17,7 @@ import { shq } from "../delivery.ts";
 import { command } from "../update/deployment-process.ts";
 import { digest } from "../update/source.ts";
 import { owned, readJson, realDirectory, regularFile, saveJson } from "./files.ts";
+import { leaseNativeIdentity } from "./native-cache-lease.ts";
 import { assertNativeExport } from "./native-export.ts";
 import { assertSourceBundle, bundleEnv, readSourceBundle } from "./source-bundle.ts";
 import { checkoutSourceBundle } from "./source-checkout.ts";
@@ -49,9 +50,18 @@ export function nativeLauncher(source: string, home: string, directory: string, 
   return `#!/bin/sh\nset -eu\nunset PI_COMPILED __PI_NATIVE_VARIANT_CACHE\nexport PATH=${shq(join(directory, "bin"))}:"$PATH"\nexport PI_NATIVES_DIR=${shq(join(directory, "natives"))}\nexport OMP_DEV_LAUNCH_DIR=${shq(join(directory, "launch-cwd"))}\nlaunch_cwd=$PWD\ncd "$OMP_DEV_LAUNCH_DIR"\n${shq(bun)} ${shq(join(source, "scripts/source-dependencies.ts"))} assert-native ${shq(source)} ${shq(home)} >/dev/null\ncd "$launch_cwd"\nexec ${shq(join(directory, "source", LAUNCHER))} --config ${shq(join(directory, "native-config.json"))} "$@"\n`;
 }
 
-/** Recompute source identity and every tracked postimage independently of the native release stamp. */
-export function assertNativeSource(source: string, home: string, bun = process.execPath): NativeReceipt {
+/**
+ * Recompute source identity and every tracked postimage independently of the native release stamp. `holder` leases the
+ * identity first (see `leaseNativeIdentity`): the process that goes on to use it, or the shell that will exec it.
+ */
+export function assertNativeSource(
+  source: string,
+  home: string,
+  bun = process.execPath,
+  holder = process.pid,
+): NativeReceipt {
   const bundle = readSourceBundle(source, true);
+  leaseNativeIdentity(home, bundle.identity, holder);
   const directory = nativeDirectory(source, home);
   const receipt = readJson(join(directory, "receipt.json")) as NativeReceipt;
   const checkout = join(directory, "source");
@@ -102,14 +112,17 @@ export async function provisionNativeSource(
   source: string,
   home: string,
   bun = process.execPath,
+  holder = process.pid,
 ): Promise<NativeReceipt> {
   source = realpathSync(source);
   bun = realpathSync(bun);
   const bundle = readSourceBundle(source, true);
   if (bundle.lock.launcher !== LAUNCHER)
     throw new Error("Native bundle must use the protected upstream omp source launcher");
+  // Leased before the existence check, so a prune either keeps this identity or has finished before it is looked at.
+  leaseNativeIdentity(home, bundle.identity, holder);
   const directory = nativeDirectory(source, home);
-  if (lstatSync(directory, { throwIfNoEntry: false })) return assertNativeSource(source, home, bun);
+  if (lstatSync(directory, { throwIfNoEntry: false })) return assertNativeSource(source, home, bun, holder);
   const cache = join(home, ".cache/omp-dori");
   realDirectory(cache, true);
   owned(cache);
@@ -202,7 +215,7 @@ export async function provisionNativeSource(
     saveJson(join(stage, "native-config.json"), { update: { auto: false } });
     saveJson(join(stage, "receipt.json"), receipt);
     renameSync(stage, directory);
-    return assertNativeSource(source, home, bun);
+    return assertNativeSource(source, home, bun, holder);
   } finally {
     if (lstatSync(stage, { throwIfNoEntry: false })) rmSync(stage, { recursive: true, force: true });
   }
