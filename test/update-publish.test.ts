@@ -64,7 +64,25 @@ test("public export uses only the checked manifest, preserves modes and independ
     deployed: false,
     activationRequiresNewOwnerApproval: false,
   });
-  expect((await new DoriUpdater(f.config, () => {}).once()).outcome).toBe("duplicate");
+  try {
+    expect((await new DoriUpdater(f.config, () => {}).once()).outcome).toBe("duplicate");
+  } catch (error) {
+    try {
+      const receipt = JSON.parse(readFileSync(join(f.config.root, "detector/last-detection.json"), "utf8"));
+      // This fixture uses only local Git data; retain its failed detector output before afterEach removes it.
+      console.error(
+        "PUBLICATION_REPEAT_CHECK_FAILURE",
+        JSON.stringify({
+          receipt,
+          stdout: readFileSync(receipt.stdout, "utf8"),
+          stderr: readFileSync(receipt.stderr, "utf8"),
+        }),
+      );
+    } catch (diagnosticError) {
+      console.error("PUBLICATION_REPEAT_CHECK_DIAGNOSTIC_FAILED", String(diagnosticError));
+    }
+    throw error;
+  }
   expect(git(f.target, "rev-list", "--count", "main")).toBe("3");
   const config = join(f.directory, "updater.json");
   saveJson(config, f.config);
