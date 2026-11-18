@@ -19,7 +19,7 @@ import { DeploymentHeld } from "./deployment-process.ts";
 import type { DeploymentConfig, PointerRecord } from "./deployment-types.ts";
 import { digest } from "./source.ts";
 
-function syncDirectory(path: string): void {
+export function syncDirectory(path: string): void {
   if (process.platform === "win32") return;
   const fd = openSync(path, "r");
   try {

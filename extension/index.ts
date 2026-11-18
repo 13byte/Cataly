@@ -112,6 +112,12 @@ const ROLE_FLAG = "dori-role";
 const ROLE_ENTRY = "omp-dori:role";
 const MONITOR_ENTRY = "omp-dori:monitor";
 const ONLY_IN_ROLE = "works only in Dori sessions (omp --dori-role dori|lane)";
+// A path the managed overlay owns. A POSIX path is cut at `/` only; a backslash is an ordinary name character there,
+// so only Windows reads it as a separator.
+const MANAGED_OVERLAY =
+  process.platform === "win32"
+    ? /[\\/](?:consumer-dependencies[\\/]omp-ulw-[a-f0-9]{40}-[a-f0-9]{64}|\.cache[\\/]omp-dori[\\/]omp-ulw-[a-f0-9]{64})(?:[\\/]index\.ts)?$/
+    : /\/(?:consumer-dependencies\/omp-ulw-[a-f0-9]{40}-[a-f0-9]{64}|\.cache\/omp-dori\/omp-ulw-[a-f0-9]{64})(?:\/index\.ts)?$/;
 // budget-limited halts the goal until a person raises the budget; unknown statuses must never read as "none",
 // which `dori pause` treats as nothing-to-pause.
 const GOAL_STATUS: Record<string, GoalStatus> = {
@@ -680,12 +686,7 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
         await ulw(gated);
       } catch (error) {
         loadError = `omp-ulw not loaded from ${config.ompUlwPath} (${errorText(error)})`;
-        if (
-          /[\\/](?:consumer-dependencies[\\/]omp-ulw-[a-f0-9]{40}-[a-f0-9]{64}|\.cache[\\/]omp-dori[\\/]omp-ulw-[a-f0-9]{64})(?:[\\/]index\.ts)?$/.test(
-            config.ompUlwPath,
-          )
-        )
-          requiredLoadError = new SourceBundleError(loadError);
+        if (MANAGED_OVERLAY.test(config.ompUlwPath)) requiredLoadError = new SourceBundleError(loadError);
       }
     }
   } catch (error) {
