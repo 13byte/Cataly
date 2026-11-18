@@ -51,9 +51,10 @@ export interface PlatformAdapter {
   /**
    * SIGTERM one pid through this OS's binding primitive. Linux opens a pidfd and signals through it, refusing with
    * `native pidfd identity binding failed` when the supplied `expected` incarnation no longer matches; macOS has no
-   * pidfd and sends kill(2), where ESRCH means the process is already gone and is not an error. Failures carry the
-   * messages src/update/deployment-signal.ts printed; process-identity comparison stays with the caller, which
-   * re-checks it after a failure.
+   * pidfd and sends kill(2), rethrowing its ESRCH error so src/update/deployment-signal.ts maps `code === "ESRCH"` to
+   * false instead of treating a vanished pid as one it signalled. Every other failure carries the messages
+   * src/update/deployment-signal.ts printed; process-identity comparison stays with the caller, which re-checks it
+   * after a failure.
    */
   terminate(pid: number, expected?: TerminateIdentity): void;
 
@@ -65,6 +66,13 @@ export interface PlatformAdapter {
 
   /** True when a directory can be opened and fsynced, as src/update/deployment-files.ts does (Windows: false). */
   readonly directoryFsync: boolean;
+
+  /**
+   * True when herdr's native UI path — reading a pane's screen and sending it keys — is open on this host. It is
+   * Linux-only today: herdr serves `pane read` and `pane send-keys` there, and src/update/deployment-cli.ts attaches
+   * `nativeUi` only where this is true.
+   */
+  readonly supportsHerdrNativeUi: boolean;
 
   /** Flush a directory's own entries after a rename or link; a no-op where directoryFsync is false. */
   syncDirectory(path: string): void;

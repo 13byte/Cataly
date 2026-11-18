@@ -173,6 +173,7 @@ export const darwin: PlatformAdapter = {
   supportsProcessReaders: true,
   posixOwnership: true,
   directoryFsync: true,
+  supportsHerdrNativeUi: false,
   syncDirectory,
 
   defaultRuntime: () => "hc",

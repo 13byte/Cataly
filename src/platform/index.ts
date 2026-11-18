@@ -39,6 +39,7 @@ function unsupported(os: string): PlatformAdapter {
     supportsProcessReaders: false,
     posixOwnership: process.getuid !== undefined,
     directoryFsync: true,
+    supportsHerdrNativeUi: false,
     syncDirectory,
     defaultRuntime: () => "herdr",
     supportsReleaseProfile: () => false,

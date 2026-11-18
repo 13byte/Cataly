@@ -50,6 +50,7 @@ export const windows: PlatformAdapter = {
   supportsProcessReaders: false,
   posixOwnership: false,
   directoryFsync: false,
+  supportsHerdrNativeUi: false,
 
   syncDirectory(_path: string): void {
     // Windows cannot open a directory for fsync; src/update/deployment-files.ts skipped the flush here.

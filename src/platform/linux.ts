@@ -97,6 +97,7 @@ export function linuxAdapter(root = PROC): PlatformAdapter {
     supportsProcessReaders: true,
     posixOwnership: true,
     directoryFsync: true,
+    supportsHerdrNativeUi: true,
     syncDirectory,
 
     defaultRuntime: () => "herdr",

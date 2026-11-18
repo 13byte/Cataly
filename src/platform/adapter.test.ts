@@ -4,6 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { herdrDeploymentCli } from "../update/deployment-cli.ts";
 import type { HostOs, PlatformAdapter } from "./adapter.ts";
 import { adapterFor, platform } from "./index.ts";
 import { linuxAdapter } from "./linux.ts";
@@ -44,6 +45,7 @@ const fake: PlatformAdapter = {
   supportsProcessReaders: true,
   posixOwnership: true,
   directoryFsync: true,
+  supportsHerdrNativeUi: true,
   syncDirectory: () => {},
   defaultRuntime: () => "herdr",
   supportsReleaseProfile: () => false,
@@ -118,6 +120,17 @@ describe("capability matrix", () => {
   test("the native cache label keeps the native-<platform>-<arch> shape", () => {
     for (const os of ["darwin", "linux", "win32"] as const)
       expect(adapterFor(os).nativeCacheLabel()).toBe(`native-${os}-${process.arch}`);
+  });
+
+  test("only Linux opens the herdr native UI", () => {
+    expect(adapterFor("linux").supportsHerdrNativeUi).toBe(true);
+    expect(adapterFor("darwin").supportsHerdrNativeUi).toBe(false);
+    expect(adapterFor("win32").supportsHerdrNativeUi).toBe(false);
+  });
+
+  test("the herdr deployment CLI carries nativeUi exactly where this host's adapter does", () => {
+    const cli = herdrDeploymentCli(async () => ({ code: 0, stdout: "", stderr: "" }));
+    expect("nativeUi" in cli).toBe(platform.supportsHerdrNativeUi);
   });
 
   test("the every-thread flag reaches the Linux task walk", () => {
