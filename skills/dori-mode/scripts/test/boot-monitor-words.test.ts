@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Manifest, type Monitor, monitorCleanup, readMonitorManifests } from "../src/boot-monitors.ts";
 import { decisionCommands } from "../src/cli-decisions.ts";
@@ -228,5 +228,10 @@ plugin({ name: "dispatch-guard", setup(build) {
       invoke(["checkpoints", `--${option}`, "zzz"]).code === 0 || invoke(["checkpoints", `--${option}`]).code === 0,
   );
   expect(broken).toEqual([]);
+  // cli.ts exposes no option list, so its parseArgs declaration text is the only source of truth here: every option
+  // declared to take a value must be listed, and no flag may be listed as one.
+  const cli = readFileSync(join(import.meta.dir, "../src/cli.ts"), "utf8");
+  const declared = [...cli.matchAll(/^\s+"?([\w-]+)"?: \{ type: "string"/gm)].map((match) => match[1] ?? "");
+  expect(declared.sort()).toEqual(Object.keys(DORI_VALUE_OPTIONS).sort());
   expect(invoke(["checkpoints", "--dry-run", "zzz"])).toMatchObject({ code: 0, out: "[]\n" });
 }, 120_000);

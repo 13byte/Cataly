@@ -15,6 +15,11 @@ test("release validation follows exactly the three automatic Linux CI jobs", asy
   expect(names).toEqual(["check", "e2e-herdr", "e2e-hc"]);
   const f = githubFixture(names);
   await expect(releaseGate(f.manifest, f.reads)).resolves.toBeUndefined();
+  // Each workflow job is required on its own: a CI attempt that reports the others but not this one is held.
+  for (const name of names) {
+    const g = githubFixture(names.filter((other) => other !== name));
+    await expect(releaseGate(g.manifest, g.reads)).rejects.toThrow("missing or ambiguous");
+  }
 });
 
 test.each(["application", "suite", "head"])("holds a successful-looking check with a different %s", async (kind) => {
