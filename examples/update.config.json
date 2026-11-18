@@ -23,16 +23,20 @@
     "timeoutMs": 3600000
   },
   "provision": [
-    { "name": "install-root", "argv": ["bun", "install", "--frozen-lockfile"], "timeoutMs": 300000 },
+    {
+      "name": "install-root",
+      "argv": ["bun", "install", "--frozen-lockfile", "--ignore-scripts"],
+      "timeoutMs": 300000
+    },
     {
       "name": "install-skill",
-      "argv": ["bun", "install", "--frozen-lockfile"],
+      "argv": ["bun", "install", "--frozen-lockfile", "--ignore-scripts"],
       "cwd": "skills/dori-mode/scripts",
       "timeoutMs": 300000
     },
     {
       "name": "install-extension",
-      "argv": ["bun", "install", "--frozen-lockfile"],
+      "argv": ["bun", "install", "--frozen-lockfile", "--ignore-scripts"],
       "cwd": "extension",
       "timeoutMs": 300000
     },

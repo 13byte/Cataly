@@ -11,13 +11,14 @@
     "es2024": true
   },
   "rules": {
-    // Project rules carried over from the Biome configuration.
+    // Project rules kept from the previous linter configuration.
     "typescript/no-explicit-any": "error",
     "typescript/consistent-type-imports": ["error", { "disallowTypeAnnotations": false }],
     "eqeqeq": ["error", "always", { "null": "ignore" }],
     "no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_", "ignoreRestSiblings": true }],
     "no-unused-expressions": ["error", { "allowTernary": true }],
-    "import/no-cycle": ["error", { "maxDepth": 3 }],
+    // Defaults match the deleted module-graph test: any cycle length, `import type` erased as it is at run time.
+    "import/no-cycle": "error",
     "import/no-duplicates": "error",
 
     // Deliberately off: tsc noFallthroughCasesInSwitch covers fallthrough with type knowledge (process.exit returns never).
@@ -27,7 +28,7 @@
     // Deliberately off: the code base uses forEach for side-effect loops in a few places; for-of rewrites add churn and no safety.
     "unicorn/no-array-for-each": "off",
 
-    // Biome never enforced these either (no sign was set), so keeping them on would add only churn.
+    // The previous configuration never enforced these either (no sign was set), so keeping them on would add only churn.
     "no-await-in-loop": "off",
     "no-shadow": "off",
     "no-unmodified-loop-condition": "off",
