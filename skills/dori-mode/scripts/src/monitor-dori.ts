@@ -28,6 +28,7 @@ export const DORI_COMMANDS: Record<string, true> = {
   resume: true,
   send: true,
   sync: true,
+  tell: true,
   thread: true,
   transcribe: true,
   update: true,
