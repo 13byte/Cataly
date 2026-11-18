@@ -1,5 +1,6 @@
 /** dori launch, adopt, claim-done, object-done, close, pause, resume and tell. */
 import { type Command, die } from "./cli-context.ts";
+import { autoTrackLinks } from "./cli-pr.ts";
 import { claimDone, closeLane, objectDone } from "./done-flow.ts";
 import { adoptLane, type LaunchInput, launchLane, prepareLaunch } from "./launch.ts";
 import { pauseLane, resumeLane } from "./pause.ts";
@@ -93,8 +94,14 @@ const tell: Command = async ({ key, need, lane, deps }) => {
 export const laneCommands: Readonly<Record<string, Command>> = {
   launch,
   adopt,
-  "claim-done": async ({ key, need, lane, deps }) => {
-    recorded(await claimDone(deps, await lane(key), need("evidence")));
+  "claim-done": async (cli) => {
+    const target = await cli.lane(cli.key);
+    const evidence = cli.need("evidence");
+    recorded(
+      await claimDone(cli.deps, target, evidence, () =>
+        autoTrackLinks(cli, target, evidence, `claim-done ${target.key}`),
+      ),
+    );
   },
   "object-done": async ({ key, values, lane, deps }) => {
     const reasons = (values["reason"] as string[] | undefined)?.map((r) => r.trim()).filter(Boolean) ?? [];

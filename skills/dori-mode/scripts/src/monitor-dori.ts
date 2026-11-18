@@ -23,6 +23,7 @@ export const DORI_COMMANDS: Record<string, true> = {
   lesson: true,
   "object-done": true,
   pause: true,
+  pr: true,
   presence: true,
   react: true,
   report: true,
@@ -73,6 +74,9 @@ export const DORI_VALUE_OPTIONS: Record<string, true> = {
   lesson: true,
   source: true,
   limit: true,
+  lane: true,
+  "ignore-author": true,
+  self: true,
 };
 const MESSENGER_COMMANDS: Record<string, true> = {
   send: true,
