@@ -9,6 +9,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  rmdirSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -35,7 +36,7 @@ function partialRemoval() {
     mkdirSync(directory);
     const order = readdirSync(x.directory);
     if (order.indexOf(name) > Math.max(order.indexOf("receipt.json"), order.indexOf("00-removal-payload"))) return true;
-    rmSync(directory);
+    rmdirSync(directory);
     return false;
   });
   if (!blocker) throw new Error("Native removal fixture could not place its blocking subtree after both marker files");
