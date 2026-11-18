@@ -1,5 +1,5 @@
-// The prefixes Dori reads before a configured command: `env` and the launchers and package runners that run their
-// command unchanged. omp-argv.ts classifies what remains.
+// The prefixes Dori reads before a configured command. Parsing a launcher or package runner does not establish
+// PID preservation; automated native updates separately refuse prefixes that may fork.
 export const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 // GNU env's long options: those that take a separate operand when written without `=`, and those that take none.
 const ENV_LONG: Record<string, "flag" | "operand"> = {
@@ -54,10 +54,15 @@ export function envCommandAt(argv: readonly string[], at: number): number | unde
   return at < argv.length ? at : undefined;
 }
 
-// Launchers that run their command unchanged: the options that take a value, the flag options, and the operands
-// before the command (timeout's duration). Any other option makes the prefix unreadable: a value Dori misread could
-// otherwise be taken for the command. Other programs (sudo, xargs, any script) are external commands.
-type Launcher = { readonly values: readonly string[]; readonly flags: readonly string[]; readonly operands: number };
+// Launcher options and operands before the command (timeout's duration). Unknown options make a prefix unreadable:
+// a misread value could otherwise be taken for the command. `forks` includes conditional forks, not only forced ones.
+// Other programs (sudo, xargs, any script) are external commands.
+type Launcher = {
+  readonly values: readonly string[];
+  readonly flags: readonly string[];
+  readonly operands: number;
+  readonly forks?: true;
+};
 export const LAUNCHERS: Record<string, Launcher> = {
   nohup: { values: [], flags: [], operands: 0 },
   nice: { values: ["-n", "--adjustment"], flags: [], operands: 0 },
@@ -65,10 +70,11 @@ export const LAUNCHERS: Record<string, Launcher> = {
     values: ["-k", "--kill-after", "-s", "--signal"],
     flags: ["-v", "--verbose", "-p", "--preserve-status", "-f", "--foreground"],
     operands: 1,
+    forks: true,
   },
-  setsid: { values: [], flags: ["-c", "--ctty", "-f", "--fork", "-w", "--wait"], operands: 0 },
+  setsid: { values: [], flags: ["-c", "--ctty", "-f", "--fork", "-w", "--wait"], operands: 0, forks: true },
   stdbuf: { values: ["-i", "-o", "-e", "--input", "--output", "--error"], flags: [], operands: 0 },
-  caffeinate: { values: ["-t", "-w"], flags: ["-d", "-i", "-m", "-s", "-u"], operands: 0 },
+  caffeinate: { values: ["-t", "-w"], flags: ["-d", "-i", "-m", "-s", "-u"], operands: 0, forks: true },
 };
 // Package managers that run a package's bin (any of their arguments may name OMP's package). `npx`, `bunx`, `bun x`
 // and `npm exec`/`x` are read with RUNNER's options; `-c`/`--call` take a command string, which is not parsed.

@@ -47,13 +47,23 @@ export type OmpArgv =
  * Where the command starts once each readable prefix is removed in turn (`env -i env -u X nice timeout 600 omp` reads
  * like `omp`): `stuck` names the prefix word whose options could not be read, which then starts the command.
  */
-function prefixEnd(argv: readonly string[]): { at: number; launched: boolean; runner?: true; stuck?: string } {
+function prefixEnd(argv: readonly string[]): {
+  at: number;
+  launched: boolean;
+  runner?: true;
+  stuck?: string;
+  forking: string | undefined;
+} {
   let at = 0;
   let launched = false;
+  let forking: string | undefined;
   for (;;) {
     while (ASSIGNMENT.test(argv[at] ?? "")) at++;
     const word = argv[at]?.split("/").at(-1) ?? "";
     const subcommand = argv[at + 1];
+    // Bun's command word can be `x`; an `x` after a script is that script's data, not a package runner.
+    const bunCommand = word === "bun" ? argv.slice(at + 1).find((arg) => !arg.startsWith("-")) : undefined;
+    if (LAUNCHERS[word]?.forks || RUNNERS.includes(word) || bunCommand === "x") forking ??= word;
     let next: number | undefined;
     let runner = false;
     if (word === "env") next = envCommandAt(argv, at + 1);
@@ -62,17 +72,20 @@ function prefixEnd(argv: readonly string[]): { at: number; launched: boolean; ru
     else if (
       (word === "bun" && subcommand === "x") ||
       (word === "npm" && (subcommand === "exec" || subcommand === "x"))
-    )
+    ) {
       [next, runner] = [launcherCommandAt(argv, at + 2, RUNNER), true];
-    // The side wrapper's `omp` subcommand runs this home's OMP with the arguments that follow.
-    else if (word === "omp-dori" && subcommand === "omp") next = at + 1;
-    else return { at, launched };
-    if (next === undefined) return { at, launched, stuck: word };
+      // npm parses even trailing options unless its command immediately follows `--`; inserted OMP guards would vanish.
+      if (word === "npm" && next !== undefined && argv[next - 1] !== "--") next = undefined;
+    } else if (word === "omp-dori" && subcommand === "omp") {
+      // The side wrapper's `omp` subcommand runs this home's OMP with the arguments that follow.
+      next = at + 1;
+    } else return { at, launched, forking };
+    if (next === undefined) return { at, launched, stuck: word, forking };
     at = next;
     launched ||= word !== "env";
-    if (word === "omp-dori") return { at, launched };
+    if (word === "omp-dori") return { at, launched, forking };
     // A runner's package spec names the package whose bin it runs: OMP's package runs OMP (its only bin).
-    if (runner && OMP_PACKAGE.test(argv[at] ?? "")) return { at, launched, runner: true };
+    if (runner && OMP_PACKAGE.test(argv[at] ?? "")) return { at, launched, runner: true, forking };
   }
 }
 const OMP_PACKAGE = /^@oh-my-pi\/pi-coding-agent(?:@\S+)?$/;
@@ -97,6 +110,9 @@ export function classifyOmpArgv(argv: readonly string[]): OmpArgv {
     ? { kind: "unparsed" }
     : classified;
 }
+
+/** First known potentially forking prefix, including unreadable runner variants; classification is independent. */
+export const nonPidPreservingPrefix = (argv: readonly string[]): string | undefined => prefixEnd(argv).forking;
 
 /** Whether a `NAME=VALUE` word before `at` (a shell or `env` assignment) gives OMP's path, as the old detector read it. */
 const assignsOmp = (argv: readonly string[], at: number): boolean =>

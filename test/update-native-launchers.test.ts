@@ -11,7 +11,7 @@ afterEach(() => {
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
-const load = (argv: readonly string[], engine?: "omp" | "external") => {
+const load = (argv: readonly string[], engine?: "omp" | "external", role: "worker" | "reviewer" = "worker") => {
   const directory = mkdtempSync(join(tmpdir(), "dori-native-launchers-"));
   directories.push(directory);
   for (const name of ["candidate", "remote"]) mkdirSync(join(directory, name), { mode: 0o700 });
@@ -28,8 +28,14 @@ const load = (argv: readonly string[], engine?: "omp" | "external") => {
       ref: "refs/heads/main",
       baseUpstream: "a".repeat(40),
       localSource: join(directory, "candidate"),
-      worker: { ...agent, name: "port", argv, ...(engine === undefined ? {} : { engine }) },
+      worker: { ...agent, name: "port" },
       reviewer: { ...agent, name: "review" },
+      [role]: {
+        ...agent,
+        name: role === "worker" ? "port" : "review",
+        argv,
+        ...(engine === undefined ? {} : { engine }),
+      },
       checks: [{ name: "check", argv: ["true"], timeoutMs: 1000 }],
     }),
   );
@@ -93,23 +99,77 @@ test.each([
 ])("%s keeps OMP from resuming a session", (_, prefix) => {
   const argv = [...prefix, MODEL, "--resume", "s", "{prompt}"];
   for (const engine of [undefined, "omp"] as const) {
-    expect(() => load(argv, engine)).toThrow(/without session resume|cannot read/);
+    expect(() => load(argv, engine)).toThrow(/without session resume|cannot read|PID-preserving/);
   }
   const external = load(argv, "external").worker;
   expect(nativeAgent(external)).toBe(false);
 });
 
 test.each([
+  ["direct", ["omp"]],
+  ["env -u", ["env", "-u", "FOO", "omp"]],
+  ["nohup", ["nohup", "omp"]],
+  ["nice", ["nice", "-n", "5", "omp"]],
+  ["stdbuf", ["stdbuf", "-e", "L", "omp"]],
   ["nested env", ["env", "X=1", "env", "Y=2", "omp"]],
+  ["the side wrapper", ["omp-dori", "omp"]],
+])("%s is native OMP: it keeps the capability guard and its own arguments", (_, prefix) => {
+  for (const engine of [undefined, "omp"] as const) {
+    for (const flag of ["-e", "--profile", "--dori-role"]) {
+      expect(() => load([...prefix, MODEL, flag, "untrusted", "{prompt}"], engine)).toThrow("controller-owned");
+    }
+    const argv = [...prefix, MODEL, "{prompt}"];
+    const command = load(argv, engine).worker;
+    expect(nativeAgent(command)).toBe(true);
+    expect(command.argv).toEqual(argv);
+  }
+});
+
+test.each([
+  ["timeout", ["timeout", "600", "omp"]],
+  ["timeout foreground", ["timeout", "--foreground", "600", "omp"]],
+  ["timeout with unreadable options", ["timeout", "--unknown", "600", "omp"]],
+  ["caffeinate", ["caffeinate", "-i", "-t", "3600", "omp"]],
+  ["caffeinate attached options", ["caffeinate", "-it600", "omp"]],
+  ["setsid conditional fork", ["setsid", "omp"]],
+  ["setsid waiting", ["setsid", "-w", "omp"]],
+  ["setsid forced fork", ["setsid", "--fork", "omp"]],
+  ["setsid with unreadable options", ["setsid", "--unknown", "omp"]],
   ["bunx", ["bunx", "--package", "@oh-my-pi/pi-coding-agent", "omp"]],
   ["npx", ["npx", "--yes", "omp"]],
-  ["the side wrapper", ["omp-dori", "omp"]],
-  ["timeout", ["timeout", "600", "omp"]],
-])("%s is native OMP: it keeps the capability guard and its own arguments", (_, prefix) => {
-  for (const flag of ["-e", "--profile", "--dori-role"]) {
-    expect(() => load([...prefix, MODEL, flag, "untrusted", "{prompt}"])).toThrow("controller-owned");
+  ["bun x", ["bun", "x", "omp"]],
+  ["npm exec", ["npm", "exec", "--", "omp"]],
+  ["npm x", ["npm", "x", "--", "@oh-my-pi/pi-coding-agent"]],
+  ["npm exec without a separator", ["npm", "exec", "@oh-my-pi/pi-coding-agent"]],
+  ["npm x without a separator", ["npm", "x", "omp"]],
+  ["npx script", ["npx", "-c", 'exec omp "$@"']],
+  ["npx unreadable options", ["npx", "--loglevel", "silent", "@oh-my-pi/pi-coding-agent"]],
+  ["npm global options", ["npm", "--silent", "exec", "--", "@oh-my-pi/pi-coding-agent"]],
+  ["package alias", ["bunx", "agent@npm:@oh-my-pi/pi-coding-agent"]],
+  ["pnpm", ["pnpm", "dlx", "@oh-my-pi/pi-coding-agent"]],
+  ["pnpx", ["pnpx", "@oh-my-pi/pi-coding-agent"]],
+  ["yarn", ["yarn", "dlx", "@oh-my-pi/pi-coding-agent"]],
+  ["bun global options", ["bun", "--no-env-file", "x", "@oh-my-pi/pi-coding-agent"]],
+  ["nested prefixes", ["nice", "-n", "5", "env", "A=1", "setsid", "omp"]],
+])("%s requires a PID-preserving native launch for either role, including explicit engine omp", (_, prefix) => {
+  for (const role of ["worker", "reviewer"] as const) {
+    for (const flags of [
+      [],
+      ["--resume", "s"],
+      ["-e", "untrusted"],
+      ["--profile", "untrusted"],
+      ["--dori-role", "lane"],
+    ]) {
+      const argv = [...prefix, MODEL, ...flags, "{prompt}"];
+      expect(mayRunOmpArgv(argv)).toBe(true);
+      for (const engine of [undefined, "omp"] as const) {
+        expect(() => load(argv, engine, role)).toThrow("PID-preserving");
+      }
+      const external = load(argv, "external", role)[role];
+      expect(external.argv).toEqual(argv);
+      expect(nativeAgent(external)).toBe(false);
+    }
   }
-  expect(nativeAgent(load([...prefix, MODEL, "{prompt}"]).worker)).toBe(true);
 });
 
 test.each([
@@ -137,7 +197,7 @@ test.each([
   ["yarn exec running an OMP path", ["yarn", "exec", "/x/omp"]],
   ["a bun x package alias", ["bun", "x", "omp-alias@npm:@oh-my-pi/pi-coding-agent@18.20.0"]],
   ["bun x past an option", ["bun", "--no-env-file", "x", "@oh-my-pi/pi-coding-agent"]],
-])("%s is refused as unreadable even when it declares engine omp", (_, prefix) => {
+])("%s is refused before launch even when it declares engine omp", (_, prefix) => {
   for (const engine of [undefined, "omp"] as const) {
     expect(() => load([...prefix, MODEL, "{prompt}"], engine)).toThrow(PREFIX_REFUSED);
   }
