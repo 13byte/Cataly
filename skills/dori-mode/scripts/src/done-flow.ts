@@ -2,10 +2,9 @@ import { existsSync } from "node:fs";
 
 import { type DoriConfig, fill } from "./config.ts";
 import { withDeliveryLock } from "./delivery-lock.ts";
-import type { SessionRef } from "../../../../src/runtime/types.ts";
 import { type Lane, type Registry, sessionOf, statusOf, withStatus } from "./registry.ts";
 import { type ChosenRuntimes, type Clock, iso, type Runner, runtimesOf } from "./run.ts";
-import { sendVerified } from "./sessions.ts";
+import { closeSession, sendVerified } from "./sessions.ts";
 import { checkDone, type SignalIo } from "./signals.ts";
 import { Supervision } from "./supervision.ts";
 import { Lessons, type LessonInput } from "./lessons.ts";
@@ -39,12 +38,22 @@ export const movedOn = async (deps: FlowDeps, lane: Lane, what: string): Promise
   return `LANE_CHANGED ${lane.key} moved on while this ran (now ${current ? statusOf(current) : "not registered"}, was ${statusOf(lane)}); ${what} not recorded`;
 };
 
-export const claimDone = async (deps: FlowDeps, lane: Lane, evidence: string): Promise<string> => {
+/**
+ * `onRecorded` runs once the claim is recorded and before the lane is told, so a failed notification cannot skip it.
+ * It must not throw: a throw would skip telling the lane.
+ */
+export const claimDone = async (
+  deps: FlowDeps,
+  lane: Lane,
+  evidence: string,
+  onRecorded?: () => void,
+): Promise<string> => {
   const at = iso(deps.clock);
   const claimed = await deps.registry.transition(lane, (current) =>
     withStatus(current, "done-claimed", evidence, at, { claim: { at, evidence, emitted: false } }),
   );
   if (!claimed) return movedOn(deps, lane, "done claim");
+  onRecorded?.();
   const ref = sessionOf(lane);
   if (ref) {
     const closesAt = new Date(deps.clock.now() + windowMs(deps)).toISOString().slice(11, 16);
@@ -181,19 +190,6 @@ export const closeLane = async (
     }
   }
   return { closed: true, lines: [...lines, `CLOSED ${lane.key} ${JSON.stringify(receipt)}`] };
-};
-
-/** Closes the lane's tab when it has one, else its session; a failed close is named in the receipt, never thrown. */
-const closeSession = async (deps: FlowDeps, ref: SessionRef): Promise<string> => {
-  const what = ref.container ? `tab ${ref.container}` : `pane ${ref.id}`;
-  try {
-    await runtimesOf(deps)
-      .for(ref)
-      .close(ref, ref.container ? "container" : "session");
-    return `${what} closed`;
-  } catch {
-    return `${what} not closed`;
-  }
 };
 
 const settle = async (deps: FlowDeps, lane: Lane, evidence: string): Promise<string> => {

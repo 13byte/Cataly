@@ -11,6 +11,7 @@ import { journalCommands, journalErrors } from "./cli-journal.ts";
 import { laneCommands } from "./cli-lanes.ts";
 import { messengerCommands, messengerErrors } from "./cli-messenger.ts";
 import { opsCommands } from "./cli-ops.ts";
+import { prCommands, prErrors } from "./cli-pr.ts";
 import { ConfigError, loadConfig } from "./config.ts";
 import type { FlowDeps } from "./done-flow.ts";
 import { LaunchError } from "./launch.ts";
@@ -34,6 +35,9 @@ const USAGE = `dori <command> [options]
   checkpoints <key>                    read completed steps before resuming remote work
   verify-pr <owner/repo> <num> [--loop N] [--cwd DIR]
                                        check every commit's author/committer email and PR-level tests; print the UI test loop (not run)
+  pr track <owner/repo#N|pull-url> [--lane K] [--thread REF] / pr untrack <ref> / pr list
+  pr watch [--loop MIN] [--ignore-author LOGIN]... [--self LOGIN]
+                                       follow tracked PRs after their lane: PR_FEEDBACK, PR_CI_FAIL, PR_HEAD_MOVED, PR_MERGED
   claim-done [<key>] --evidence TEXT  key defaults to the lane registered for your own session (HC_TERMINAL_ID or HERDR_PANE_ID)
   object-done <key> --reason TEXT [--reason TEXT ...]
   lesson add <key> --rule TEXT --evidence PATH [--cwd DIR]
@@ -155,6 +159,8 @@ const flags = parseArgs({
     recommend: { type: "string" },
     lane: { type: "string" },
     worklog: { type: "string" },
+    "ignore-author": { type: "string", multiple: true },
+    self: { type: "string" },
   },
 });
 
@@ -164,6 +170,7 @@ const commands: Readonly<Record<string, Command>> = {
   ...opsCommands,
   ...messengerCommands,
   ...decisionCommands,
+  ...prCommands,
 };
 const handler = Object.hasOwn(commands, command) ? commands[command] : undefined;
 
@@ -176,7 +183,7 @@ try {
 } catch (e) {
   if (
     e instanceof LaunchError ||
-    [...messengerErrors, ...journalErrors, ...decisionErrors].some((type) => e instanceof type)
+    [...messengerErrors, ...journalErrors, ...decisionErrors, ...prErrors].some((type) => e instanceof type)
   )
     die((e as Error).message);
   throw e;
