@@ -8,6 +8,7 @@ import { publicSource } from "../src/update/publish-export.ts";
 import { candidateReport } from "../src/update/report.ts";
 import { gitIdentity } from "../src/update/source.ts";
 import { readState, saveJson } from "../src/update/state.ts";
+import { detectionReceipt } from "./update-detection-setup.ts";
 import { fixture, git, publicationFixture } from "./update-setup.ts";
 
 // Real Git setup and multiple publication passes include fixture subprocesses with 10-second deadlines.
@@ -68,7 +69,7 @@ test("public export uses only the checked manifest, preserves modes and independ
     expect((await new DoriUpdater(f.config, () => {}).once()).outcome).toBe("duplicate");
   } catch (error) {
     try {
-      const receipt = JSON.parse(readFileSync(join(f.config.root, "detector/last-detection.json"), "utf8"));
+      const receipt = detectionReceipt(f.config.root);
       // This fixture uses only local Git data; retain its failed detector output before afterEach removes it.
       console.error(
         "PUBLICATION_REPEAT_CHECK_FAILURE",
