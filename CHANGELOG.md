@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Discord owner intake now follows active threads whose parent is a watched channel, so an owner reply posted in a thread of the intake channel is received without listing the thread ID. Threads are listed at startup and refreshed every tenth REST poll and on every Gateway READY/RESUMED, live dispatches are matched through a cached `parent_id` lookup, threads of unwatched channels stay outside intake, an unreadable thread is skipped like scope-all discovery, and an archived thread keeps its cursor for a later reactivation. A thread first seen after startup starts at its own creation, never before the parent's startup position. `DORI_DISCORD_THREADS=off` restores channel-only intake.
+
 - `dori dead-panes` drops retained screen tails and unknown counters for vanished or no-longer-watched panes after a successful complete listing, and limits alert deduplication to current watched panes and the current hour. Failed or malformed runtime listings preserve prior state; two-screen dead detection, three-tick unknown alerts and live-agent protection remain unchanged. Valid herdr tabs without a workspace remain nonmatches for workspace-filtered scans and sync.
 
 - Native Bun and addon SHA-256 verification now uses one 1 MiB read buffer instead of allocating each entire binary. Receipt creation and every reuse/launch still hash all bytes synchronously, preserve short reads and close the descriptor on errors.
