@@ -24,8 +24,9 @@ const noteWorklog = (stateDir: string, decision: Decision, now: number): void =>
   if (id === undefined) return;
   try {
     const worklog = new Worklog(stateDir);
+    const note = `decision ${decision.id} answered: ${decision.answer ?? ""}`;
     if (worklog.open().some((item) => item.id === id))
-      worklog.note(id, `decision ${decision.id} answered: ${decision.answer ?? ""}`, now);
+      worklog.note(id, note.length <= 1000 ? note : `decision ${decision.id} answered (see decisions.jsonl)`, now);
   } catch (e) {
     console.error(`DECISION_WARNING worklog ${id} note not written: ${e instanceof Error ? e.message : String(e)}`);
   }

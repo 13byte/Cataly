@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Decisions } from "../src/decisions.ts";
 import { Registry } from "../src/registry.ts";
 import { run } from "../src/run.ts";
+import { Worklog } from "../src/worklog.ts";
 import { type TestState, withState } from "./fakes.ts";
 
 const cli = join(import.meta.dir, "../src/cli.ts");
@@ -91,4 +92,37 @@ test("a value flag with no value, at the end or before another flag, is refused 
   const withdraw = await invoke("decision", "withdraw", asked.id, "--reason", "moot", "--reason");
   expect([withdraw.code, withdraw.err.trim()]).toEqual([1, "--reason needs a value"]);
   expect(new Decisions(state.dir).read().items[0]?.withdrawnAt).toBeUndefined();
+});
+
+test.each([972, 973, 1000])("a linked worklog preserves a %i-character decision answer", async (length) => {
+  const now = Date.now();
+  const worklog = new Worklog(state.dir);
+  const work = worklog.add("A pending choice", "s:work", now);
+  const ledger = new Decisions(state.dir);
+  const asked = ledger.ask({ question: "Which?", source: "s:question", worklog: work.id }, now);
+  const answer = "a".repeat(length);
+  const result = await cliIn(state.dir)("decision", "answer", asked.id, answer, "--source", "s:owner");
+  expect([result.code, result.err]).toEqual([0, ""]);
+  expect(JSON.parse(result.out).answer).toBe(answer);
+  expect(ledger.read().items[0]?.answer).toBe(answer);
+  const note = `decision ${asked.id} answered: ${answer}`;
+  expect(worklog.read().items[0]?.notes.map((item) => item.text)).toEqual([
+    note.length <= 1000 ? note : `decision ${asked.id} answered (see decisions.jsonl)`,
+  ]);
+});
+
+test("a worklog read failure warns without undoing a decision answer", async () => {
+  const now = Date.now();
+  const worklog = new Worklog(state.dir);
+  const work = worklog.add("A pending choice", "s:work", now);
+  const ledger = new Decisions(state.dir);
+  const asked = ledger.ask({ question: "Which?", source: "s:question", worklog: work.id }, now);
+  renameSync(worklog.path, `${worklog.path}.retained`);
+  mkdirSync(worklog.path);
+  const result = await cliIn(state.dir)("decision", "answer", asked.id, "yes", "--source", "s:owner");
+  expect(result.code).toBe(0);
+  expect(result.err).toStartWith(`DECISION_WARNING worklog ${work.id} note not written: `);
+  expect(result.err.trim().split("\n")).toHaveLength(1);
+  expect(JSON.parse(result.out).answer).toBe("yes");
+  expect(ledger.read().items[0]?.answer).toBe("yes");
 });
