@@ -1,9 +1,10 @@
-/** dori launch, adopt, claim-done, object-done, close, pause and resume. */
+/** dori launch, adopt, claim-done, object-done, close, pause, resume and tell. */
 import { type Command, die } from "./cli-context.ts";
 import { autoTrackLinks } from "./cli-pr.ts";
 import { claimDone, closeLane, objectDone } from "./done-flow.ts";
 import { adoptLane, type LaunchInput, launchLane, prepareLaunch } from "./launch.ts";
 import { pauseLane, resumeLane } from "./pause.ts";
+import { tellLane } from "./tell.ts";
 
 const launch: Command = async ({ key, opt, need, ceiling, strings, values, deps }) => {
   const wallMinutes = ceiling("wall-minutes"),
@@ -83,6 +84,13 @@ const pauseOrResume: Command = async ({ command, key, opt, lane, deps }) => {
   process.exit(r.code);
 };
 
+const tell: Command = async ({ key, need, lane, deps }) => {
+  const target = await lane(key ?? die("tell needs a lane key"));
+  const r = await tellLane(deps, target, need("text"));
+  console.log(r.line);
+  process.exit(r.code);
+};
+
 export const laneCommands: Readonly<Record<string, Command>> = {
   launch,
   adopt,
@@ -103,4 +111,5 @@ export const laneCommands: Readonly<Record<string, Command>> = {
   close,
   pause: pauseOrResume,
   resume: pauseOrResume,
+  tell,
 };

@@ -86,7 +86,7 @@ Real work runs in its own session, called a lane: a herdr tab, or a labelled ter
 - **Launch** with `dori launch`, which writes a footer into the brief (key, thread, `Done =` line, how to report) and opens the tab. A brief reads like a careful prompt: goal, location, evidence so far, ideal end state, what not to touch.
 - **Registry** is the source of truth: platform:thread → its session (a herdr pane or an hc terminal) → the agent's session id → status (`working`, `done-claimed`, `verified-done`, `not-done`, `closed`) with history. `dori sync` rebuilds it from live state and reports drift; it never deletes anything.
 - **Done** is a claim, not a fact. A lane claims with `dori claim-done <key> --evidence "..."`. You check the evidence against live state. If it holds, close; if not, `dori object-done <key> --reason "..."` within 5 minutes. An unanswered claim closes the lane automatically, unless its worktree has unpushed or uncommitted work or a `Done =` signal fails, which turns the claim into not-done with that reason. Full protocol for lanes: `references/done-protocol.md`; tell every lane this rule when you hand it work.
-- **Before messaging a session**, confirm it runs a live agent (`herdr pane process-info --pane <id>` / `hc get <t>`) with an empty input line, send once, and verify the text left the input. Never send to a shell, a stopped agent or an approval prompt.
+- **Before messaging a session**, confirm it runs a live agent (`herdr pane process-info --pane <id>` / `hc get <t>`) with an empty input line, send once, and verify the text left the input. Never send to a shell, a stopped agent or an approval prompt. For a registered lane, `dori tell <key> --text TEXT` does the live-agent check, the single send and the status readback (it does not read the input line) and reports `TOLD`, `TELL_UNCONFIRMED` (exit 3, never resend) or `TELL_FAILED` (exit 2, nothing sent).
 - Watch for sessions that turn blocked or ask a question; answer them or bring them to the owner.
 - After a restart or a compaction, run `dori boot` before acting on what you remember. A `VANISHED` lane keeps its registry record and worktree; find out what happened before relaunching it.
 
@@ -124,11 +124,12 @@ Real work runs in its own session, called a lane: a herdr tab, or a labelled ter
 | `dori lesson add` / `list` / `mark` | keep what a lane learned about a repo, or with `--global` a standing rule for every lane; `launch` puts the current ones above the next brief |
 | `dori worklog add` / `next` / `note` / `close` / `list` | the lead's record of owner requests, each with its source, next step, notes and result; survives compaction |
 | `dori pause` / `dori resume` | the owner said wait: no nudges, goal paused, running turn stopped; and back |
+| `dori tell <key> --text TEXT` | one verified message to a lane's agent, never sent twice; the outcome is in the line and the exit code |
 | `dori watch` | the 5-minute auto-close watcher (run it as a persistent monitor) |
 | `dori freshness` | nudge silent lanes, post their last report to their thread; block lanes at their wall, token or cost ceiling; flag hung calls |
 | `dori dead-panes` | report agent panes that stopped |
 | `dori guard` | host load, memory, disk and pane-count alerts |
 | `dori heavy <label> -- <cmd>` | run a heavy command only when a slot is free and load is low |
 | `dori can-launch` | is there room for a new lane? exit 4 with the reasons if not |
-| `dori send` / `dori presence` / `dori transcribe` | messenger utilities: post or edit on Slack, Telegram or Discord; stay shown online; voice note to text |
+| `dori send` / `dori presence` / `dori transcribe` | messenger utilities: post or edit on Slack, Telegram or Discord (body from `--text` or `--text-file`; Discord splits long text and takes `--reply`); stay shown online; voice note to text |
 | `dori inbound discord` | owner-only REST or opt-in Gateway intake across configured/discovered channels; per-channel cursors; separate presence session |
