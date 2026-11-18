@@ -58,28 +58,36 @@ const USAGE = `dori <command> [options]
                                        close now (Done signals must read back live); an optional lesson never blocks it
   pause  <key> [--note TEXT]           the owner said wait: goal paused (read back), running turn stopped, no nudges; exit 3 if unconfirmed
   resume <key> [--note TEXT]           undo pause: goal resumed (read back), lane back to its earlier status
+  tell   <key> --text TEXT             one verified message to the lane's agent: TOLD (exit 0), TELL_UNCONFIRMED (exit 3,
+                                       never resend), TELL_FAILED (exit 2, nothing sent: shell, approval, hc blocked
+                                       agent, paused lane; a runtime refusal names the status read after it)
   watch                                long-running: emits LANE_* lines every 30 s
   freshness [--loop MIN]               nudge silent lanes, post their last report via hooks.threadReply
   dead-panes [--loop MIN]              print DEAD_PANE <id> for stopped agent panes
   guard [--loop MIN]                   host load, memory, disk and pane-count alerts
   heavy <label> -- <command ...>       run a heavy command when a slot is free and load is low
   can-launch                           exit 0 if the host has room for a new lane, else print why and exit 4
-  send <slack|telegram|discord> --to TARGET --text TEXT [--thread ID] [--edit ID]
+  send <slack|telegram|discord> --to TARGET (--text TEXT | --text-file PATH|-) [--thread ID] [--edit ID] [--reply ID]
                                        Discord accepts channel names with DORI_DISCORD_GUILD_ID; --thread needs no --to and also targets edits
-  thread discord create --to CHANNEL --title T [--text T] [--tag NAME]...
+                                       Discord splits text past 2000 characters (SENT lists every id); --reply is Discord only
+  thread discord create --to CHANNEL --title T [--text T] [--tag NAME]... [--message ID]
+                                       --message opens the thread on that message of a text channel
   thread discord set <thread> [--title T] [--tag NAME]... [--archive|--unarchive]
                                        open a forum post or text-channel thread; rename, replace tags, archive or reopen
   react discord --to CHANNEL [--thread ID] --message ID [--emoji E] [--remove]
                                        add or remove the bot's own reaction (eyes by default); --thread needs no --to
+  channel discord set <channel> --purpose T | clear <channel> | list
+                                       the operator's purpose note per channel or thread, shown by inbound --context
   presence <slack|discord>             keep the account shown as online until stopped
   transcribe <audio-file|url>           run hooks.transcribe and print the text; HTTP(S) downloads are private and temporary
-  inbound slack|telegram|discord [--loop MIN] [--gateway]
+  inbound slack|telegram|discord [--loop MIN] [--gateway] [--context]
                                        print INBOUND lines: Slack unread thread replies / Telegram owner DMs, edits and media + configured topic
                                        the Dori posted in (any helper), DMs and channels with unread mentions
                                        Discord requires DORI_DISCORD_TOKEN, DORI_DISCORD_OWNER_ID and configured channel IDs
                                        (more channels or threads: DORI_DISCORD_CHANNEL_IDS=a,b; every readable one: DORI_DISCORD_SCOPE=all)
                                        Discord polls every 3 seconds by default; --loop MIN overrides the interval;
                                        --gateway delivers owner messages live with REST backfill and ignores --loop, including 0
+                                       --context (Discord) adds INBOUND_CONTEXT: channel, thread, topic and recorded purposes
   inbound-lag [--limit N]              receive-lag percentiles from state/telegram-lag.jsonl (the meter behind the INBOUND lines)`;
 
 const [command = "", ...rest] = process.argv.slice(2);
@@ -114,9 +122,13 @@ const flags = parseArgs({
     write: { type: "boolean" },
     loop: { type: "string" },
     gateway: { type: "boolean" },
+    context: { type: "boolean" },
+    purpose: { type: "string" },
     to: { type: "string" },
     text: { type: "string" },
     edit: { type: "string" },
+    "text-file": { type: "string" },
+    reply: { type: "string" },
     tag: { type: "string", multiple: true },
     archive: { type: "boolean" },
     unarchive: { type: "boolean" },
