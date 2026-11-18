@@ -176,7 +176,7 @@ export const queuedWorld = ({
     received,
     saves,
     queue: () => queue,
-    cursor: (channel = "20") => queue.storeFor(channel).load(),
+    cursor: (channel = "20") => queue.storeFor(channel, false).load(),
     start,
     async restart(emit?: Emit, storeFor?: (channel: string, seed?: boolean) => DiscordInboundStore) {
       live?.close();

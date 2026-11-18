@@ -75,7 +75,7 @@ test("a new queued channel seeds its lowest known ID, not its first arrival or o
     cursors: {},
     options: { ownerId: "10", channelIds: [], all: true },
   });
-  expect(world.cursor("50")).toBe("104");
+  expect(world.cursor("50")).toBeUndefined();
   await world.start();
   await settle();
   expect(world.received).toEqual(["50:105", "50:107", "50:109"]);
