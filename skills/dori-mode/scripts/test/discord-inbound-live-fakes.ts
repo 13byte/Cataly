@@ -1,10 +1,10 @@
 import { afterEach } from "bun:test";
-import { discordInboundQueue } from "../src/messenger/discord-inbound-queue.ts";
-import { withState } from "./fakes.ts";
 import { discordInbound, type DiscordInboundOptions, formatDiscordInbound } from "../src/messenger/discord-inbound.ts";
 import { discordInboundLive } from "../src/messenger/discord-inbound-live.ts";
+import { discordInboundQueue } from "../src/messenger/discord-inbound-queue.ts";
 import { discordRestWorld, memoryDiscordCursor, type TestDiscordMessage } from "./discord-inbound-fakes.ts";
 import { FakeGateway, gatewayTimers } from "./discord-presence-fakes.ts";
+import { withState } from "./fakes.ts";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -18,7 +18,7 @@ export const liveWorld = async (
   history: TestDiscordMessage[],
   options: DiscordInboundOptions,
   cursors: Record<string, string> = {},
-  onEmit?: () => void,
+  onEmit?: () => unknown,
 ) => {
   const rest = discordRestWorld(history);
   const stores = new Map<string, ReturnType<typeof memoryDiscordCursor>>();
@@ -45,9 +45,14 @@ export const liveWorld = async (
     "unit-private-token",
     timers.clock,
     (message) => {
-      onEmit?.();
-      received.push(`${message.channel}:${message.message}`);
-      lines.push(formatDiscordInbound(message));
+      const record = () => {
+        received.push(`${message.channel}:${message.message}`);
+        lines.push(formatDiscordInbound(message));
+      };
+      // An emitter that returns a promise (the --context path) records only once it resolves.
+      const pending = onEmit?.();
+      if (pending instanceof Promise) return pending.then(record);
+      record();
     },
     (line) => logs.push(line),
     queue,
