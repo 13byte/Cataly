@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Automatic CI now runs only the Linux `check`, `e2e-herdr` and `e2e-hc` jobs; the automatic macOS job is removed. Exact-commit release validation and contributor requirements use the same three required jobs. Existing macOS tests and consumer verification scripts remain available for manual QA.
+
 - Monitor stdout/stderr use bounded incremental line framing and 64 KiB delivery batches. Oversized lines or rendered messages are preserved in private temporary files with explicit path/size notices instead of being truncated or accumulated in memory; storage/read failures stop the child and report potentially incomplete output. Normal filters, UTF-8, EOF, stop and session ownership behavior remain intact.
 
 - Slack inbound saves all own-thread cursors from a successful poll in one locked ledger transaction instead of rewriting the file for every thread. Read/emit failures still advance no cursor; concurrent records and newer seen positions are preserved. Thread watch coverage and Slack request counts are unchanged.
