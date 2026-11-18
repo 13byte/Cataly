@@ -21,6 +21,7 @@
 | `supportsProcessReaders` | Whether `procStat`, `cmdline`, `exePath`, `cwdPath`, `children` and `bootId` read real kernel facts | `true` | `true` | `false` |
 | `posixOwnership` | Whether file ownership is compared by uid, as `src/release/files.ts` `owned()` does | `true` | `true` | `false` |
 | `directoryFsync` | Whether a directory can be opened and fsynced, as `src/update/deployment-files.ts` does | `true` | `true` | `false` |
+| `supportsHerdrNativeUi` | Whether herdr's native UI path, reading a pane's screen and sending it keys, is open on this host | `false` | `true` | `false` |
 | `syncDirectory(path)` | Flush a directory's own entries after a rename or link; a no-op where `directoryFsync` is false | Opens and fsyncs | Opens and fsyncs | No-op |
 | `defaultRuntime()` | The runtime a fresh installation selects with none configured | `"hc"` | `"herdr"` | `"herdr"` |
 | `supportsReleaseProfile(platform, arch, runtime)` | Whether a release built for that profile is admitted, as `src/release/provision.ts` prerequisites do | `darwin`/`arm64`/`hc` only | `linux`/`x64`/`herdr` only | Never |
@@ -41,11 +42,11 @@ Tests never run on another OS. `adapterFor(os)` returns the implementation for a
 
 - **POSIX ownership is a darwin and linux assumption.** Comparing ownership by uid (`posixOwnership`) and the permission-bit checks built on it run only where the property is true; Windows code must not assume a uid or POSIX modes.
 - **Directory fsync is conditional.** Open and fsync a directory only where `directoryFsync` is true, and call `syncDirectory` rather than the syscall; on Windows the flush is a no-op.
-- **The herdr native UI is Linux-only.** `herdrDeploymentCli` in `src/update/deployment-cli.ts` adds its `nativeUi` read and exit operations only on Linux; darwin and win32 deployments have no `nativeUi` key.
+- **The herdr native UI is Linux-only.** `herdrDeploymentCli` in `src/update/deployment-cli.ts` attaches its `nativeUi` read and exit operations only where `supportsHerdrNativeUi` is true, so darwin and win32 deployments have no `nativeUi` key.
 - **The default runtime differs.** A fresh installation on darwin selects `hc`; linux and win32 select `herdr`.
 - **Only two release profiles are admitted.** `supportsReleaseProfile` accepts `linux`/`x64`/`herdr` and `darwin`/`arm64`/`hc`, and nothing on Windows. A host never admits another host's release.
 - **Program names and paths follow the host.** `programName` strips a Windows `.exe` and splits on either separator, `isAbsolutePath` uses the host's `node:path` rules, and `pathSeparators` differs, so callers must take these from the adapter instead of assuming `/`.
 
 ## Not yet behind the adapter
 
-`skills/dori-mode/scripts/src/**` is a separate package with its own `process.platform` checks, and `extension/index.ts` (the native OMP extension) still tests the host directly. Moving both behind this contract is a follow-up. The herdr native UI decision above is also still read from the host in `src/update/deployment-cli.ts`; it is expected to become a contract member in the same follow-up.
+`skills/dori-mode/scripts/src/**` is a separate package with its own `process.platform` checks, and `extension/index.ts` (the native OMP extension) still tests the host directly. Moving both behind this contract is a follow-up.
