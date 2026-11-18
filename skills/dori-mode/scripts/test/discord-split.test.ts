@@ -77,6 +77,12 @@ test("a cut just before a block's own closing marker ends the part with it inste
   expect(splitForDiscord(text)).toEqual([`\`\`\`\n${body}\n\`\`\``, `${"z".repeat(50)}\nafter the block`]);
 });
 
+test("a space before a block's closing marker does not reopen an empty block", () => {
+  const block = `\`\`\`\n${"y ".repeat(990)}`;
+  const tail = "z".repeat(200);
+  expect(splitForDiscord(`${block}\`\`\`${tail}`)).toEqual([`${block}\n\`\`\``, tail]);
+});
+
 test("a part never ends on a block's opening line, and a hard cut never splits a run of backticks", () => {
   const code = "code line\n".repeat(100);
   const opening = `${"a".repeat(1990)}\n\`\`\`ts\n${code}\`\`\``;

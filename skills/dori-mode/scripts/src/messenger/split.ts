@@ -80,7 +80,7 @@ export const splitForDiscord = (text: string): string[] => {
       if (block !== undefined) {
         // The block's own closing marker right after the cut is the one just added: drop it rather than reopen.
         const closer = /^`{3,}/.exec(rest);
-        if (closer && part.endsWith("\n")) rest = rest.slice(closer[0].length);
+        if (closer) rest = rest.slice(closer[0].length);
         else reopen = `\`\`\`${block.language}\n`;
       }
       break;
