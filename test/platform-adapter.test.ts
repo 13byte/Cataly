@@ -4,10 +4,10 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { herdrDeploymentCli } from "../update/deployment-cli.ts";
-import type { HostOs, PlatformAdapter } from "./adapter.ts";
-import { adapterFor, platform } from "./index.ts";
-import { linuxAdapter } from "./linux.ts";
+import { herdrDeploymentCli } from "../src/update/deployment-cli.ts";
+import type { HostOs, PlatformAdapter } from "../src/platform/adapter.ts";
+import { adapterFor, platform } from "../src/platform/index.ts";
+import { linuxAdapter } from "../src/platform/linux.ts";
 
 /** A /proc fixture: one pid with its stat and two task child lists, plus the boot id a signal identity names. */
 function fixtureProc(startTicks: string): { root: string; done: () => void } {
