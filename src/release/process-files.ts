@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
-import { liveTasks } from "./process-cwd.ts";
+import { liveTasks, processIsKernelThread } from "./process-cwd.ts";
 
 /** What `processFiles` reads: paths by pid, and live pids whose files could not be read (they may use anything). */
 export type ProcessFiles = { readonly files: Map<string, string[]>; readonly unread: readonly string[] };
@@ -64,6 +64,7 @@ export function processFiles(platform = process.platform): ProcessFiles | null {
     } catch {
       continue;
     }
+    if (processIsKernelThread(pid) === true) continue;
     const tasks = liveTasks(pid);
     if (!tasks) continue;
     try {

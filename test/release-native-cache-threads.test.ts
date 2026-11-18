@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { shq } from "../src/delivery.ts";
 import { processStart } from "../src/release/process-cwd.ts";
@@ -160,4 +160,53 @@ console.log(JSON.stringify(read && { files: [...read.files], unread: read.unread
     status === 0 ? `process ${process.pid} has it open, mapped or running` : "open files of processes unavailable",
   );
   expect(existsSync(x.omp)).toBe(true);
+});
+
+const kernel =
+  process.platform === "linux"
+    ? readdirSync("/proc").find((pid) => {
+        if (!/^\d+$/.test(pid)) return false;
+        try {
+          const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+          const flags = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[6];
+          return flags !== undefined && (BigInt(flags) & 0x0020_0000n) !== 0n;
+        } catch {
+          return false;
+        }
+      })
+    : undefined;
+
+test.skipIf(!kernel)("confirmed kernel threads do not become unreadable user file or cwd holds", () => {
+  const code = `const { processFiles } = await import(${JSON.stringify(resolve(import.meta.dir, "../src/release/process-files.ts"))});
+const { processCwds, processIsKernelThread } = await import(${JSON.stringify(resolve(import.meta.dir, "../src/release/process-cwd.ts"))});
+const kernel = ${JSON.stringify(kernel)};
+// Child-only UID selection admits both the actual kernel thread and this user process; credentials stay unchanged.
+process.getuid = undefined;
+const files = processFiles("linux");
+const cwd = processCwds([String(process.pid), kernel], "linux");
+console.log(JSON.stringify({
+  ownFiles: files?.files.has(String(process.pid)) === true,
+  ownCwd: cwd?.cwds.has(String(process.pid)) === true,
+  kernelFiles: files?.files.has(kernel) === true,
+  kernelFilesUnread: files?.unread.includes(kernel) === true,
+  kernelCwd: cwd?.cwds.has(kernel) === true,
+  kernelCwdUnread: cwd?.unreadable.includes(kernel) === true,
+  kernelFlag: processIsKernelThread(kernel),
+  userFlag: processIsKernelThread(String(process.pid)),
+  unknownFlags: processIsKernelThread("0") === undefined
+}));`;
+  const child = Bun.spawnSync([process.execPath, "-e", code], { stdout: "pipe", stderr: "pipe" });
+  expect(child.exitCode).toBe(0);
+  expect(child.stderr.toString()).toBe("");
+  expect(JSON.parse(child.stdout.toString())).toEqual({
+    ownFiles: true,
+    ownCwd: true,
+    kernelFiles: false,
+    kernelFilesUnread: false,
+    kernelCwd: false,
+    kernelCwdUnread: false,
+    kernelFlag: true,
+    userFlag: false,
+    unknownFlags: true,
+  });
 });

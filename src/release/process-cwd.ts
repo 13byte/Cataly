@@ -16,6 +16,17 @@ export function processStart(pid: string): string | undefined {
   }
 }
 
+/** Linux PF_KTHREAD; unknown flags leave the normal conservative process readers in charge. */
+export function processIsKernelThread(pid: string): boolean | undefined {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const flags = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[6];
+    return flags === undefined ? undefined : (BigInt(flags) & 0x0020_0000n) !== 0n;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Thread ids of a Linux thread group that still run (not zombies), or undefined once none does. A group whose threads
  * cannot be listed counts as running, with its leader as the only known thread.
@@ -63,6 +74,7 @@ export function processCwds(pids: readonly string[], platform = process.platform
   const unreadable: string[] = [];
   if (platform === "linux") {
     for (const pid of pids) {
+      if (processIsKernelThread(pid) === true) continue;
       try {
         cwds.set(pid, readlinkSync(`/proc/${pid}/cwd`));
       } catch (error) {

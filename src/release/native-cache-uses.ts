@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { nativeStage, readLeases } from "./native-cache-lease.ts";
-import { processCwds, processStart } from "./process-cwd.ts";
+import { processCwds, processIsKernelThread, processStart } from "./process-cwd.ts";
 import { type ProcessFiles, processFiles, usesDirectory } from "./process-files.ts";
 
 /** Commands an update or deployment runs after its program (`<program> update install`, `<program> upstream watch`). */
@@ -30,8 +30,6 @@ function writerHome(args: string): string | undefined {
   return undefined;
 }
 
-/** Linux `PF_KTHREAD`: a kernel thread has no working directory in a user's files. */
-const KERNEL_THREAD = 0x0020_0000n;
 /** `CAP_DAC_OVERRIDE` and `CAP_DAC_READ_SEARCH`: a process holding either can enter an owner-only directory. */
 const ENTERS_ANY = 0b110n;
 
@@ -50,8 +48,9 @@ function processTable(): string {
 function entersAny(pid: string, uid: number): boolean {
   if (process.platform !== "linux") return uid === 0;
   try {
-    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-    if (BigInt(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[6] ?? "0") & KERNEL_THREAD) return false;
+    const kernel = processIsKernelThread(pid);
+    if (kernel === undefined) return true;
+    if (kernel) return false;
     if (uid === 0) return true;
     const caps = /^CapEff:\s*([0-9a-f]+)$/m.exec(readFileSync(`/proc/${pid}/status`, "utf8"))?.[1];
     return caps === undefined || (BigInt(`0x${caps}`) & ENTERS_ANY) !== 0n;
