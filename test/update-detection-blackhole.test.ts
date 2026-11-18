@@ -103,7 +103,7 @@ writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify({
       const row = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.+)$/.exec(line);
       return row && Number(row[2]) === started.pid && !row[3]?.startsWith("Z") ? [row] : [];
     });
-    expect(members.some((row) => Number(row[1]) === started.pid && /git$/.test(row[4] ?? ""))).toBe(true);
+    expect(members.some((row) => Number(row[1]) === started.pid && (row[4] ?? "").endsWith("git"))).toBe(true);
     expect(members.some((row) => Number(row[1]) !== started.pid && /git-remote-http/.test(row[4] ?? ""))).toBe(true);
     expect(await runner.exited).toBe(0);
     const result = JSON.parse(readFileSync(resultPath, "utf8")) as {

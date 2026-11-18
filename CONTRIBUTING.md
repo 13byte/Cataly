@@ -71,7 +71,9 @@ bun run ci
 
 - `check:fixtures` — fail fast when the real ULW, compatibility entry or exact native host is missing.
   This checks prerequisites; it does not replace the unchanged native behavior tests.
-- `check` — Biome lint and format.
+- `check` — the full static gate: `lint` (oxlint) then `format:check` (Prettier).
+- `lint` — `oxlint --deny-warnings`; `format` rewrites the repository with Prettier and `format:check` only reports.
+  A husky `pre-commit` hook runs `lint` and `format:check`.
 - `typecheck` — `tsc --noEmit` for the harness, skill scripts and extension, run concurrently.
 - `knip` — no unused files, exports or dependencies.
 - `lint:loc` — the TypeScript file-length gate, with a 250-line limit per capped file.

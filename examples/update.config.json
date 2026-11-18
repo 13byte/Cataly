@@ -36,10 +36,10 @@
       "cwd": "extension",
       "timeoutMs": 300000
     },
-    { "name": "normalize-source", "argv": ["bun", "run", "fmt"], "timeoutMs": 300000 }
+    { "name": "normalize-source", "argv": ["bun", "run", "format"], "timeoutMs": 300000 }
   ],
   "checks": [
-    { "name": "biome", "argv": ["bun", "run", "check"], "timeoutMs": 300000 },
+    { "name": "lint", "argv": ["bun", "run", "check"], "timeoutMs": 300000 },
     { "name": "types", "argv": ["bun", "run", "typecheck"], "timeoutMs": 300000 },
     { "name": "unused", "argv": ["bun", "run", "knip"], "timeoutMs": 300000 },
     { "name": "source-size", "argv": ["bun", "run", "lint:loc"], "timeoutMs": 300000 },

@@ -42,7 +42,7 @@ const singleLine = (value: unknown, max: number): value is string =>
   typeof value === "string" &&
   value.trim().length > 0 &&
   value.length <= max &&
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern deliberately matches control characters to reject or strip them
+  // oxlint-disable-next-line no-control-regex -- the pattern deliberately matches control characters to reject or strip them
   !/[\x00-\x1f\x7f-\x9f\u2028\u2029]/.test(value);
 const isoTime = (value: unknown): value is string =>
   typeof value === "string" && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;

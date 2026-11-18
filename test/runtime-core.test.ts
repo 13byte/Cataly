@@ -143,7 +143,7 @@ describe("Runtimes.kinds and selfAny", () => {
     const runtimes = make();
     expect(runtimes.kinds()).toEqual([]);
     runtimes.for({ runtime: "hc", id: "t1" });
-    runtimes.default;
+    void runtimes.default;
     runtimes.for({ runtime: "hc", id: "t2" });
     expect(runtimes.kinds()).toEqual(["hc", "herdr"]);
   });
