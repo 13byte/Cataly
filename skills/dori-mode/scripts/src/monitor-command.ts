@@ -118,7 +118,7 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
     }
     let here = dir;
     let program: number | undefined;
-    for (let next: number | undefined = at; next !== undefined; ) {
+    for (let next: number | undefined = at; next !== undefined;) {
       at = next;
       next = undefined;
       while (ASSIGNMENT.test(words[at] ?? "")) at++;
@@ -137,9 +137,10 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
         else {
           // `-S STRING`: env reads STRING's words, its own options included, then the words after it.
           const string = ws[env.at];
-          const split = splitString(words[env.at]?.slice(env.split) ?? "").map(
-            (w): Word => ({ word: w.text, baseAt: (i) => string?.baseAt((env.split ?? 0) + (w.at[i] ?? 0)) ?? -1 }),
-          );
+          const split = splitString(words[env.at]?.slice(env.split) ?? "").map((w): Word => ({
+            word: w.text,
+            baseAt: (i) => string?.baseAt((env.split ?? 0) + (w.at[i] ?? 0)) ?? -1,
+          }));
           commandOf([ws[at] ?? { word: "env", baseAt: () => -1 }, ...split, ...ws.slice(env.at + 1)], here);
         }
       } else if (launcher !== undefined && Object.hasOwn(LAUNCHERS, name)) {

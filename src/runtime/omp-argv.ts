@@ -50,8 +50,7 @@ const isRunner = (argv: readonly string[], at: number): boolean => {
  * cannot be read unambiguously, which must not be taken for either.
  */
 export type OmpArgv =
-  | { readonly kind: "omp" | "other"; readonly command: readonly string[] }
-  | { readonly kind: "unparsed" };
+  { readonly kind: "omp" | "other"; readonly command: readonly string[] } | { readonly kind: "unparsed" };
 
 /**
  * Where the command starts once each readable prefix is removed in turn (`env -i env -u X nice timeout 600 omp` reads
