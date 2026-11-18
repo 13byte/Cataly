@@ -4,6 +4,8 @@
 
 - Linux host sampling now reads load and memory directly from `/proc`, avoiding two `cat` children and three failed macOS command attempts per sample. Disk and session sampling, unknown-value behavior, and non-Linux probes are unchanged.
 
+- Monitor stdout/stderr use bounded incremental line framing and 64 KiB delivery batches. Oversized lines or rendered messages are preserved in private temporary files with explicit path/size notices instead of being truncated or accumulated in memory; storage/read failures stop the child and report potentially incomplete output. Normal filters, UTF-8, EOF, stop and session ownership behavior remain intact.
+
 - Slack inbound saves all own-thread cursors from a successful poll in one locked ledger transaction instead of rewriting the file for every thread. Read/emit failures still advance no cursor; concurrent records and newer seen positions are preserved. Thread watch coverage and Slack request counts are unchanged.
 
 - Linux host admission now checks visible ancestor cgroup memory budgets as well as host memory. `guard` and `can-launch` distinguish hard-limit headroom from v2 `memory.high` throttling headroom, support hierarchical v1 limits, discount clean unmapped file cache while retaining raw charged counters, and preserve readable budgets when another reading is unavailable. macOS sampling and existing disk/session protections are unchanged.
