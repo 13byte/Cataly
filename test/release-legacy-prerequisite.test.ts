@@ -45,15 +45,17 @@ function fixture(version = "18.20.0") {
   const run = (directories: readonly string[], command?: string, platform = "linux", arch = "x64") => {
     if (command)
       writeFileSync(join(home, ".dori/config.json"), JSON.stringify({ agentCommand: [command] }), { mode: 0o600 });
+    // The host adapter is chosen when provision.ts loads, so the child loads it after claiming its platform: a static
+    // import would bind the real host before the override below runs.
     return Bun.spawnSync(
       [
         process.execPath,
         "--eval",
-        `import { prerequisites } from ${JSON.stringify(resolve(import.meta.dir, "../src/release/provision.ts"))};
-Object.defineProperties(process, {
+        `Object.defineProperties(process, {
   platform: { value: ${JSON.stringify(platform)} },
   arch: { value: ${JSON.stringify(arch)} },
 });
+const { prerequisites } = await import(${JSON.stringify(resolve(import.meta.dir, "../src/release/provision.ts"))});
 prerequisites("herdr", true, true);`,
       ],
       { env: { HOME: home, PATH: [...directories, tools].join(":") }, stdout: "pipe", stderr: "pipe" },

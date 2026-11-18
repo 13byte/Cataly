@@ -13,6 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import { platform } from "../platform/index.ts";
 import { shq } from "../delivery.ts";
 import { command } from "../update/deployment-process.ts";
 import { digest } from "../update/source.ts";
@@ -37,11 +38,7 @@ export type NativeReceipt = {
 };
 const LAUNCHER = "packages/coding-agent/scripts/omp";
 export function nativeDirectory(source: string, home: string): string {
-  return join(
-    home,
-    ".cache/omp-dori",
-    `native-${process.platform}-${process.arch}-${readSourceBundle(source, true).identity}`,
-  );
+  return join(home, ".cache/omp-dori", `${platform.nativeCacheLabel()}-${readSourceBundle(source, true).identity}`);
 }
 
 /** The cache launcher always validates source then execs the protected upstream launcher through the recorded Bun. */

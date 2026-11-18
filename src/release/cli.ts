@@ -2,6 +2,7 @@ import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { platform } from "../platform/index.ts";
 import { acquireBundle } from "./bundle.ts";
 import { runAutomaticCommand } from "./automatic-cli.ts";
 import {
@@ -79,7 +80,7 @@ export async function runConsumerUpdate(argv: string[]): Promise<number> {
     if (!hasConsumerState(paths) && lstatSync(join(paths.dori, ".omp-dori"), { throwIfNoEntry: false }))
       throw new Error("Unmanaged source installation; use a separate release home or the documented stopped migration");
     let runtime = args.values.runtime;
-    if (command === "status") prerequisites(runtime ?? (process.platform === "darwin" ? "hc" : "herdr"), false);
+    if (command === "status") prerequisites(runtime ?? platform.defaultRuntime(), false);
     if (command !== "status") {
       if (regularFile(paths.config)) {
         const config = readJson(paths.config);
@@ -94,7 +95,7 @@ export async function runConsumerUpdate(argv: string[]): Promise<number> {
           throw new Error(`Selected runtime ${runtime} conflicts with preserved config runtime ${config.runtime}`);
         runtime ??= config.runtime;
       }
-      runtime ??= process.platform === "darwin" ? "hc" : "herdr";
+      runtime ??= platform.defaultRuntime();
       prerequisites(runtime, command === "install" || command === "rollback");
     }
     const compatible = (manifest: ReleaseManifest, metadata?: Uint8Array): void => {
@@ -106,11 +107,11 @@ export async function runConsumerUpdate(argv: string[]): Promise<number> {
       if (
         !supportsReleaseProfile(
           manifest,
-          { platform: process.platform, arch: process.arch, runtime: runtime ?? "" },
+          { platform: platform.os, arch: process.arch, runtime: runtime ?? "" },
           metadata,
         )
       )
-        throw new Error(`Release ${manifest.tag} does not support ${process.platform}/${process.arch}/${runtime}`);
+        throw new Error(`Release ${manifest.tag} does not support ${platform.os}/${process.arch}/${runtime}`);
     };
     if (command === "check") {
       const bundle = await acquireBundle({
