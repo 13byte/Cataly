@@ -1,22 +1,22 @@
 import { randomBytes } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { owned, realDirectory, syncDirectory } from "./files.ts";
 import { nativeCacheRoot, nativeStage } from "./native-cache-lease.ts";
-import { type NativeCacheEntry, receiptHolds } from "./native-cache.ts";
+import { exclusiveBytes, type NativeCacheEntry, receiptHolds } from "./native-cache.ts";
 import type { NativeCacheRemoval } from "./native-cache-prune.ts";
 import { protections } from "./native-cache-refs.ts";
 import { type UseHoldOptions, useHolds } from "./native-cache-uses.ts";
 import type { processCwds } from "./process-cwd.ts";
 
 const LEFTOVER = new RegExp(
-  `^native-${process.platform}-${process.arch}-([a-f0-9]{64})\\.(pruning|deleting-[a-f0-9]{16})$`,
+  `^native-${process.platform}-${process.arch}-([a-f0-9]{64})\\.(pruning|deleting-[a-f0-9]{16}|removing-[a-f0-9]{16})$`,
 );
 export const QUARANTINE = "native-quarantine";
 
 /**
- * What waits in the cache: quarantined identities (`quarantined`, with the time they were moved aside; a copy an
- * interrupted `--delete-quarantined` left as `.deleting-<nonce>` counts as one), a preparation whose owner ended
- * (`stage`) and one that names no owner (`older stage`, remove it by hand once no older checkout prepares anything).
+ * What waits in the cache: restorable quarantine/pre-check copies (`quarantined`), committed removals (`removing`,
+ * never restored), preparations whose owner ended (`stage`) and ones naming no owner (`older stage`).
  */
 export function cachePending(home: string): { directory: string; identity: string; state: string; since?: string }[] {
   const cache = nativeCacheRoot(home);
@@ -26,7 +26,8 @@ export function cachePending(home: string): { directory: string; identity: strin
     const match = LEFTOVER.exec(name);
     if (match) {
       const since = quarantinedSince(cache, match[1]!);
-      return [{ directory, identity: match[1]!, state: "quarantined", ...(since ? { since } : {}) }];
+      const state = match[2]!.startsWith("removing-") ? "removing" : "quarantined";
+      return [{ directory, identity: match[1]!, state, ...(since ? { since } : {}) }];
     }
     if (!name.startsWith("native-stage-")) return [];
     const stage = nativeStage(name);
@@ -53,9 +54,9 @@ export type Doomed = {
 };
 
 /**
- * `--delete-quarantined`: each copy unused through its grace period is renamed `.deleting-<nonce>`, then looked at once
- * more under all three names; one used by now goes back to its live name, the rest are removed. What remains possible,
- * and what the user accepts by asking, is an older writer that publishes a use between that last look and the removal.
+ * `--delete-quarantined`: check unused copies under their live, quarantine and pre-check names, then commit removal by
+ * renaming to `.removing-<nonce>` before touching contents. Committed remainders are never restored; an explicit
+ * request checks all names afresh before continuing. An older writer can still publish after the last check.
  */
 export function deleteQuarantined(
   cache: string,
@@ -65,41 +66,84 @@ export function deleteQuarantined(
   readCwds: typeof processCwds,
   uses: UseHoldOptions,
   result: { removed: NativeCacheRemoval[]; kept: NativeCacheEntry[] },
+  committed: readonly { readonly directory: string; readonly identity: string }[] = [],
 ): void {
   const nonce = randomBytes(8).toString("hex");
-  for (const { directory } of doomed) renameSync(`${directory}.pruning`, `${directory}.deleting-${nonce}`);
-  const keys = doomed.flatMap(({ identity }) => [identity, `${identity}.pruning`, `${identity}.deleting-${nonce}`]);
+  const copies = [
+    ...doomed.map((entry) => {
+      if (entry.directory !== join(cache, `native-${process.platform}-${process.arch}-${entry.identity}`))
+        throw new Error("Native removal must name a direct cache child");
+      realDirectory(`${entry.directory}.pruning`);
+      owned(`${entry.directory}.pruning`);
+      return { ...entry, copy: `${entry.directory}.deleting-${nonce}`, committed: false };
+    }),
+    ...committed.map(({ directory, identity }) => {
+      const match = LEFTOVER.exec(basename(directory));
+      if (dirname(directory) !== cache || !match || match[1] !== identity || !match[2]!.startsWith("removing-"))
+        throw new Error("Committed native removal must name a direct cache child");
+      realDirectory(directory);
+      owned(directory);
+      return {
+        identity,
+        directory: directory.slice(0, directory.lastIndexOf(".")),
+        copy: directory,
+        bytes: exclusiveBytes(directory),
+        since: undefined,
+        committed: true,
+      };
+    }),
+  ].map((entry) => {
+    const suffix = entry.copy.slice(-16);
+    return {
+      ...entry,
+      names: [
+        entry.identity,
+        `${entry.identity}.pruning`,
+        `${entry.identity}.deleting-${suffix}`,
+        `${entry.identity}.removing-${suffix}`,
+      ],
+    };
+  });
+  for (const entry of copies) if (!entry.committed) renameSync(`${entry.directory}.pruning`, entry.copy);
+  const keys = copies.flatMap((entry) => entry.names);
   const refs = protections(cache, keys, sources, roots, readCwds);
   const held = useHolds(cache, keys, uses);
-  for (const { identity, directory, bytes, since } of doomed) {
-    const doomedCopy = `${directory}.deleting-${nonce}`;
-    const reasons = new Set([
-      ...[identity, `${identity}.pruning`, `${identity}.deleting-${nonce}`].flatMap((key) => [
-        ...(refs.get(key) ?? []),
-        ...(held.get(key) ?? []),
-      ]),
-      ...receiptHolds(doomedCopy, identity, directory),
-    ]);
-    if (reasons.size || lstatSync(directory, { throwIfNoEntry: false })) {
-      // Used after all: back to its live name when that is free, else back into quarantine.
-      const back = lstatSync(directory, { throwIfNoEntry: false }) ? `${directory}.pruning` : directory;
-      renameSync(doomedCopy, back);
-      if (back === directory) rmSync(join(cache, QUARANTINE, identity), { force: true });
+  for (const { identity, directory, copy, bytes, since, committed, names } of copies) {
+    const reasons = new Set(names.flatMap((key) => [...(refs.get(key) ?? []), ...(held.get(key) ?? [])]));
+    // A committed copy may already lack its receipt. Ownership and entry permissions still apply.
+    if (committed) {
+      if ((lstatSync(copy).mode & 0o011) !== 0) reasons.add("directory other users can enter");
+    } else for (const reason of receiptHolds(copy, identity, directory)) reasons.add(reason);
+    if (reasons.size || (!committed && lstatSync(directory, { throwIfNoEntry: false }))) {
+      // Only a pre-check copy may go back; a partially removed committed copy must stay terminal.
+      let back = copy;
+      if (!committed) {
+        back = lstatSync(directory, { throwIfNoEntry: false }) ? `${directory}.pruning` : directory;
+        renameSync(copy, back);
+        if (back === directory) rmSync(join(cache, QUARANTINE, identity), { force: true });
+      }
       result.kept.push({
         directory: back,
         identity,
         bytes,
-        protectedBy: [...reasons, "kept at the check before removal"],
+        protectedBy: [...reasons, committed ? "committed removal kept in place" : "kept at the check before removal"],
       });
       continue;
     }
-    rmSync(join(cache, QUARANTINE, identity), { force: true });
-    rmSync(doomedCopy, { recursive: true, force: true });
+    const terminal = committed ? copy : `${directory}.removing-${copy.slice(-16)}`;
+    if (!committed) renameSync(copy, terminal);
+    // Persist the irreversible state before recursive removal can fail or be interrupted partway through.
+    syncDirectory(cache);
+    rmSync(terminal, { recursive: true, force: true });
+    if (!lstatSync(`${directory}.pruning`, { throwIfNoEntry: false }))
+      rmSync(join(cache, QUARANTINE, identity), { force: true });
     result.removed.push({
-      directory,
+      directory: committed ? copy : directory,
       identity,
       bytes,
-      why: `unused through its quarantine since ${since}; removal asked`,
+      why: committed
+        ? "finishing a committed removal; removal asked"
+        : `unused through its quarantine since ${since}; removal asked`,
     });
   }
 }

@@ -58,10 +58,10 @@ const AGAIN = "quarantined copy kept: its live name exists again; remove it by h
  * Quarantine native cache identities nothing uses, holding the prune lock throughout. No identity is removed unless
  * the user asks (`deleteQuarantined`): an older writer's absence cannot be proven. Dead unused stages may be removed.
  *
- * A prune first removes preparations nothing can still finish and puts a copy an interrupted removal left back into
- * quarantine. One look then judges every identity and every quarantined copy under both its names. An unused identity
- * is quarantined: recorded, then moved aside (`.pruning`), so no launcher runs it half removed. A quarantined copy that
- * is used by now goes back. Asked to, a prune removes copies still unused after `graceMs` (see `deleteQuarantined`).
+ * A prune removes preparations nothing can still finish and puts intact pre-check interruptions back into quarantine.
+ * Committed removal remainders stay terminal. One look judges live identities and quarantined copies under both names.
+ * An unused live identity is recorded, then moved aside (`.pruning`), so no launcher runs it half removed.
+ * A quarantined copy that is used goes back. Explicit removal checks all names afresh (see `deleteQuarantined`).
  */
 export function pruneNativeCache(
   home: string,
@@ -117,6 +117,7 @@ export function pruneNativeCache(
     const records = join(cache, QUARANTINE);
     realDirectory(records, true);
     const waiting: { identity: string; directory: string; since: string }[] = [];
+    const committed: { identity: string; directory: string }[] = [];
     for (const { directory, identity, state, since } of cachePending(home)) {
       if (state === "stage") {
         // A stage is removed at once, so its check reads processes' files afresh rather than the look's snapshot.
@@ -135,11 +136,24 @@ export function pruneNativeCache(
         const start = since ?? new Date(now).toISOString();
         if (!since) writeFileSync(join(records, identity), `${start}\n`, { mode: 0o600 });
         waiting.push({ identity, directory: live, since: start });
+      } else if (state === "removing") {
+        committed.push({ identity, directory });
+        if (!options.deleteQuarantined)
+          result.kept.push({
+            directory,
+            identity,
+            bytes: exclusiveBytes(directory),
+            protectedBy: ["committed removal; --delete-quarantined is required to continue"],
+          });
       }
     }
     // A record whose copy is gone (put back by hand, or a run that failed before moving it) records nothing.
     for (const identity of readdirSync(records))
-      if (!waiting.some((entry) => entry.identity === identity)) rmSync(join(records, identity), { force: true });
+      if (
+        !waiting.some((entry) => entry.identity === identity) &&
+        !committed.some((entry) => entry.identity === identity)
+      )
+        rmSync(join(records, identity), { force: true });
     const entries = reportNativeCache(home, sources, roots, readCwds, { ...uses, sweep: true });
     const keys = waiting.flatMap(({ identity }) => [identity, `${identity}.pruning`]);
     const refs = keys.length ? protections(cache, keys, sources, roots, readCwds) : new Map<string, string[]>();
@@ -163,12 +177,14 @@ export function pruneNativeCache(
         result.quarantined.push({ directory, identity, bytes, since, removableAfter });
       } else doomed.push({ identity, directory, bytes, since });
     }
-    if (doomed.length)
-      deleteQuarantined(cache, doomed, sources, roots, readCwds, { ...uses, files: readFiles }, result);
+    if (options.deleteQuarantined && (doomed.length || committed.length))
+      deleteQuarantined(cache, doomed, sources, roots, readCwds, { ...uses, files: readFiles }, result, committed);
     for (const entry of entries) {
       if (entry.protectedBy.length) result.kept.push(entry);
       else if (waiting.some(({ identity }) => identity === entry.identity))
         result.kept.push({ ...entry, protectedBy: ["a quarantined copy of it is kept (see its .pruning entry)"] });
+      else if (committed.some(({ identity }) => identity === entry.identity))
+        result.kept.push({ ...entry, protectedBy: ["live identity kept apart from a committed removal remainder"] });
       else {
         const since = new Date(now).toISOString();
         writeFileSync(join(records, entry.identity), `${since}\n`, { mode: 0o600 });
