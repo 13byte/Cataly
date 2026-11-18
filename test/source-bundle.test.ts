@@ -245,5 +245,5 @@ test("batched content hashes preserve path order and reject hidden drift in a la
   fixtureGit(f.checkout, "update-index", "--assume-unchanged", "bulk/0000.cmd");
   fixtureGit(f.checkout, "config", "filter.slow.required", "true");
   fixtureGit(f.checkout, "config", "filter.slow.clean", "exit 1");
-  expect(() => assertSourceBundle(f.checkout, bundle, f.root)).toThrow(/hash-object --stdin-paths exited 1: error:/);
+  expect(() => assertSourceBundle(f.checkout, bundle, f.root)).toThrow(/hash-object --stdin-paths exited 128: error:/);
 });

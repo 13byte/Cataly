@@ -114,7 +114,7 @@ const { argv, inputs } = await Bun.stdin.json();
 const outputs = await Promise.all(inputs.map(async (input) => {
   const child = Bun.spawn(argv, { stdin: Buffer.from(input), stdout: "pipe", stderr: "inherit" });
   const [output, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
-  if (code !== 0) process.exitCode = 1;
+  if (code !== 0) process.exitCode ||= code;
   return output;
 }));
 if (!process.exitCode) process.stdout.write(outputs.join(""));
