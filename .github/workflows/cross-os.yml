@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      os:
+        description: Operating system to test; all runs both jobs.
+        type: choice
+        options: [all, macos, windows]
+        default: all
 
 permissions:
   contents: read
@@ -15,6 +21,7 @@ concurrency:
 
 jobs:
   test-macos:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.os == 'all' || inputs.os == 'macos' }}
     runs-on: macos-15
     timeout-minutes: 40
     steps:
@@ -62,6 +69,7 @@ jobs:
             --out "/private/tmp/odcr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
   test-windows:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.os == 'all' || inputs.os == 'windows' }}
     runs-on: windows-2025
     timeout-minutes: 40
     defaults:
