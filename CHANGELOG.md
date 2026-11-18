@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Discord REST intake batches filtered-message cursor writes into the next successful owner checkpoint or one trailing checkpoint. Owner emits still checkpoint individually, live Gateway delivery is unchanged, and failures never commit past an undelivered owner message.
+
 - Linux host sampling now reads load and memory directly from `/proc`, avoiding two `cat` children and three failed macOS command attempts per sample. Disk and session sampling, unknown-value behavior, and non-Linux probes are unchanged.
 
 - The skill CLI loads command implementations on demand, avoiding updater, messenger and lane graphs for successful journal commands and all configuration/command graphs for `--version`. Ordinary commands retain configuration and consumer-native admission before execution; usage, exit codes and original error classes remain unchanged.
