@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   closeSync,
@@ -14,6 +13,7 @@ import {
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { alive } from "../../skills/dori-mode/scripts/src/checkpoint-lock.ts";
+import { platform } from "../platform/index.ts";
 import { object, UpdateError, UpdateLockBusy } from "./config.ts";
 import { syncDirectory } from "./deployment-files.ts";
 import { claimPromotionRecovery } from "./publish-lock.ts";
@@ -179,14 +179,10 @@ function recoverPromotionLock(ctx: UpdateContext, owner: UpdateLock | undefined,
 /** A same-host live owner whose second-resolution start is not later than its lock; same-second PID reuse is unresolved. */
 function liveOwner(owner: UpdateLock | undefined): boolean {
   if (!owner || owner.host !== hostname() || !alive(owner.pid)) return false;
-  // lstart has no offset; its ps producer and Date.parse observer must use the same zone.
-  const ps = spawnSync("ps", ["-o", "lstart=", "-p", String(owner.pid)], {
-    encoding: "utf8",
-    env: { ...process.env, LC_ALL: "C", TZ: Intl.DateTimeFormat().resolvedOptions().timeZone },
-    timeout: 1_000,
-  });
-  const started = Date.parse(ps.stdout?.trim() ?? "");
-  return ps.status === 0 && Number.isFinite(started) && started <= Date.parse(owner.at);
+  // lstart has no offset; its ps producer and Date.parse observer must use the same zone, which the adapter keeps.
+  const ps = platform.liveOwnerStart(owner.pid);
+  const started = Date.parse(ps);
+  return ps !== "" && Number.isFinite(started) && started <= Date.parse(owner.at);
 }
 
 /** Dead controllers resume only proven ready promotion work; ambiguous model/verification ownership stays held. */
