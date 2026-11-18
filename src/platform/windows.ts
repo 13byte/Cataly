@@ -2,7 +2,7 @@
 // reader threw on this host before, so callers fail closed instead of reading another OS's facts.
 import { isAbsolute } from "node:path";
 import type { ProcStat } from "../update/proc.ts";
-import type { PlatformAdapter } from "./adapter.ts";
+import type { PlatformAdapter, TerminateIdentity } from "./adapter.ts";
 import { liveOwnerStart, memoryFreePct } from "./shared.ts";
 
 const noReader = (): never => {
@@ -31,7 +31,7 @@ export const windows: PlatformAdapter = {
     return noReader();
   },
 
-  children(_pid: number): number[] {
+  children(_pid: number, _everyThread?: boolean): number[] {
     return noReader();
   },
 
@@ -42,7 +42,7 @@ export const windows: PlatformAdapter = {
   // ps cannot report a start time here, so this is "" and the lock owner never counts as live; today's answer.
   liveOwnerStart,
 
-  terminate(_pid: number): void {
+  terminate(_pid: number, _expected?: TerminateIdentity): void {
     // The non-macOS branch reached libc pidfd on this host too and failed with exactly this message.
     throw new Error("Linux libc pidfd_open and pidfd_send_signal are required for native replacement");
   },

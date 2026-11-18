@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { constants } from "node:os";
 import { isAbsolute } from "node:path";
 import type { ProcStat } from "../update/proc.ts";
-import type { PlatformAdapter } from "./adapter.ts";
+import type { PlatformAdapter, TerminateIdentity } from "./adapter.ts";
 import { liveOwnerStart, memoryFreePct, syncDirectory } from "./shared.ts";
 
 type Darwin = {
@@ -146,7 +146,8 @@ export const darwin: PlatformAdapter = {
     return new TextDecoder().decode(path.subarray(0, end));
   },
 
-  children(pid: number): number[] {
+  // One list per process: there is no per-thread split to widen.
+  children(pid: number, _everyThread?: boolean): number[] {
     return libproc().children(pid);
   },
 
@@ -158,7 +159,8 @@ export const darwin: PlatformAdapter = {
 
   liveOwnerStart,
 
-  terminate(pid: number): void {
+  // No pidfd here: the caller's identity re-read immediately before kill(2) is today's whole binding.
+  terminate(pid: number, _expected?: TerminateIdentity): void {
     try {
       process.kill(pid, constants.signals.SIGTERM);
     } catch (error) {

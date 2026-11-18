@@ -4,6 +4,12 @@ import type { ProcStat } from "../update/proc.ts";
 
 export type HostOs = "darwin" | "linux" | "win32";
 
+/**
+ * The incarnation a bound signal may still belong to: the start time and boot id the caller checked. A pidfd binds a
+ * process, and only these two facts say whether that process is still the one this caller meant.
+ */
+export type TerminateIdentity = { readonly startTicks: string; readonly bootId: string };
+
 export interface PlatformAdapter {
   /** The host this implementation speaks for; it never answers for another OS. */
   readonly os: HostOs;
@@ -27,8 +33,11 @@ export interface PlatformAdapter {
   /** A path that resolves to the process's working directory; throws when the process is gone. */
   cwdPath(pid: number): string;
 
-  /** Direct children of the process: Linux reads one task's list (the main thread by default), macOS one per process. */
-  children(pid: number): number[];
+  /**
+   * Direct children of the process. Linux reads /proc/<pid>/task: with everyThread it concatenates every task's child
+   * list (threads can spawn), without it only the main task's. macOS has one list per process and ignores the flag.
+   */
+  children(pid: number, everyThread?: boolean): number[];
 
   /** One identifier per boot: a PID and start time are only comparable within it; throws when unavailable. */
   bootId(): string;
@@ -40,11 +49,13 @@ export interface PlatformAdapter {
   liveOwnerStart(pid: number): string;
 
   /**
-   * SIGTERM one pid through this OS's binding primitive. Linux opens a pidfd and signals through it; macOS has no
+   * SIGTERM one pid through this OS's binding primitive. Linux opens a pidfd and signals through it, refusing with
+   * `native pidfd identity binding failed` when the supplied `expected` incarnation no longer matches; macOS has no
    * pidfd and sends kill(2), where ESRCH means the process is already gone and is not an error. Failures carry the
-   * messages src/update/deployment-signal.ts printed; process-identity comparison stays with the caller.
+   * messages src/update/deployment-signal.ts printed; process-identity comparison stays with the caller, which
+   * re-checks it after a failure.
    */
-  terminate(pid: number): void;
+  terminate(pid: number, expected?: TerminateIdentity): void;
 
   /** True when procStat, cmdline, exePath, cwdPath, children and bootId read real kernel facts (Windows: false). */
   readonly supportsProcessReaders: boolean;

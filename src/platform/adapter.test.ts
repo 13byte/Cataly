@@ -1,8 +1,34 @@
 // The contract's proof: every host's capability matrix as the product reads it, with the host injected instead of
 // run. The running host's own readers get one smoke test, so moving them into src/platform/ cannot go silent.
 import { describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { HostOs, PlatformAdapter } from "./adapter.ts";
 import { adapterFor, platform } from "./index.ts";
+import { linuxAdapter } from "./linux.ts";
+
+/** A /proc fixture: one pid with its stat and two task child lists, plus the boot id a signal identity names. */
+function fixtureProc(startTicks: string): { root: string; done: () => void } {
+  const root = mkdtempSync(join(tmpdir(), "platform-proc-"));
+  mkdirSync(join(root, "4242", "task", "4242"), { recursive: true });
+  mkdirSync(join(root, "4242", "task", "4243"), { recursive: true });
+  mkdirSync(join(root, "sys/kernel/random"), { recursive: true });
+  // state, ppid, pgid, then padding up to the start time at index 19; further fields trail it as a real stat does.
+  const fields = [
+    "S",
+    "1",
+    "4242",
+    ...Array.from({ length: 16 }, () => "0"),
+    startTicks,
+    ...Array.from({ length: 32 }, () => "0"),
+  ];
+  writeFileSync(join(root, "4242", "stat"), `4242 (bun) ${fields.join(" ")}\n`);
+  writeFileSync(join(root, "4242", "task", "4242", "children"), "7 8\n");
+  writeFileSync(join(root, "4242", "task", "4243", "children"), "9\n");
+  writeFileSync(join(root, "sys/kernel/random/boot_id"), "boot-1\n");
+  return { root, done: () => rmSync(root, { recursive: true, force: true }) };
+}
 
 const fake: PlatformAdapter = {
   os: "linux",
@@ -92,6 +118,32 @@ describe("capability matrix", () => {
   test("the native cache label keeps the native-<platform>-<arch> shape", () => {
     for (const os of ["darwin", "linux", "win32"] as const)
       expect(adapterFor(os).nativeCacheLabel()).toBe(`native-${os}-${process.arch}`);
+  });
+
+  test("the every-thread flag reaches the Linux task walk", () => {
+    const proc = fixtureProc("777");
+    try {
+      const adapter = linuxAdapter(proc.root);
+      expect(adapter.children(4242).sort()).toEqual([7, 8]);
+      expect(adapter.children(4242, true).sort()).toEqual([7, 8, 9]);
+    } finally {
+      proc.done();
+    }
+  });
+
+  test("a Linux signal refuses an incarnation that no longer matches", () => {
+    const proc = fixtureProc("777");
+    try {
+      const adapter = linuxAdapter(proc.root);
+      expect(() => adapter.terminate(4242, { startTicks: "111", bootId: "boot-1" })).toThrow(
+        "native pidfd identity binding failed",
+      );
+      expect(() => adapter.terminate(4242, { startTicks: "777", bootId: "other-boot" })).toThrow(
+        "native pidfd identity binding failed",
+      );
+    } finally {
+      proc.done();
+    }
   });
 
   test("path separators follow the host", () => {
