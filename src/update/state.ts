@@ -28,11 +28,13 @@ export function saveJson(path: string, value: unknown): void {
     closeSync(fd);
   }
   renameSync(tmp, path);
-  const directory = openSync(dirname(path), "r");
-  try {
-    fsyncSync(directory);
-  } finally {
-    closeSync(directory);
+  if (process.platform !== "win32") {
+    const directory = openSync(dirname(path), "r");
+    try {
+      fsyncSync(directory);
+    } finally {
+      closeSync(directory);
+    }
   }
 }
 

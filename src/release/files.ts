@@ -15,7 +15,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { contains } from "../update/config.ts";
 import { processIdentity, sameProcess } from "../update/deployment-process.ts";
 import type { ProcessIdentity } from "../update/deployment-types.ts";
 import { saveDeploymentJson } from "../update/deployment-files.ts";
@@ -39,7 +40,7 @@ export const consumerPaths = (home = homedir(), doriHome = join(home, ".dori")):
   home = resolve(home);
   const dori = resolve(doriHome);
   const primary = join(home, ".dori");
-  if (dori !== primary && (!relative(primary, dori).startsWith("../") || !relative(dori, primary).startsWith("../")))
+  if (dori !== primary && (contains(primary, dori) || contains(dori, primary)))
     throw new Error("An isolated consumer home must not contain or be inside the primary ~/.dori home");
   const root = join(dori, "releases");
   return {
@@ -69,7 +70,7 @@ export const consumerPaths = (home = homedir(), doriHome = join(home, ".dori")):
 /** Check every existing ancestor, including dangling links, before following or creating anything. */
 export function realDirectory(path: string, create = false): void {
   path = resolve(path);
-  if (path !== "/") realDirectory(dirname(path), create);
+  if (dirname(path) !== path) realDirectory(dirname(path), create);
   const stat = lstatSync(path, { throwIfNoEntry: false });
   if (!stat) {
     if (create) mkdirSync(path, { mode: 0o700 });

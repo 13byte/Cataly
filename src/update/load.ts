@@ -133,7 +133,7 @@ const checkAgent = (agent: UpdateCommand, label: string): void => {
 
 const remoteOf = (value: unknown, base: string): string => {
   const remote = text(value, "remote");
-  if (!/^[A-Za-z][A-Za-z0-9+.-]*:/.test(remote)) {
+  if (isAbsolute(remote) || !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(remote)) {
     const path = canonical(resolve(base, remote));
     if (!existsSync(path)) throw new UpdateError("local remote path does not exist");
     return path;

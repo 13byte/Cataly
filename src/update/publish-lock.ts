@@ -40,11 +40,13 @@ export function claimPromotionRecovery(root: string, previous: UpdateLock, claim
       const path = join(directory, `${digest(predecessor)}.json`);
       try {
         linkSync(request, path);
-        const parent = openSync(directory, "r");
-        try {
-          fsyncSync(parent);
-        } finally {
-          closeSync(parent);
+        if (process.platform !== "win32") {
+          const parent = openSync(directory, "r");
+          try {
+            fsyncSync(parent);
+          } finally {
+            closeSync(parent);
+          }
         }
         return true;
       } catch (error) {
