@@ -13,6 +13,7 @@ export const DORI_COMMANDS: Record<string, true> = {
   "claim-done": true,
   close: true,
   "dead-panes": true,
+  decision: true,
   freshness: true,
   guard: true,
   harness: true,
@@ -74,7 +75,10 @@ export const DORI_VALUE_OPTIONS: Record<string, true> = {
   lesson: true,
   source: true,
   limit: true,
+  option: true,
+  recommend: true,
   lane: true,
+  worklog: true,
   "ignore-author": true,
   self: true,
 };

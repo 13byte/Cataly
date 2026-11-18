@@ -5,6 +5,7 @@ import { releaseVersion } from "../../../../src/release/version.ts";
 import { runUpdate } from "../../../../src/update/cli.ts";
 
 import { type Command, die, makeCli } from "./cli-context.ts";
+import { decisionCommands, decisionErrors } from "./cli-decisions.ts";
 import { runHarness } from "./cli-harness.ts";
 import { journalCommands, journalErrors } from "./cli-journal.ts";
 import { laneCommands } from "./cli-lanes.ts";
@@ -26,7 +27,7 @@ const USAGE = `dori <command> [options]
          [--wall-minutes N|none] [--token-limit N|none] [--cost-limit N|none] [--activity-path FILE ...] [--dry-run]
   adopt  <key> --pane ID --title T --brief FILE --done "..." [--thread REF]
   sync   [--write]                     registry vs live panes; read-only unless --write
-  boot                                 read-only check after a restart: Slack auth, vanished panes, journals, open worklog items, stale watches
+  boot                                 read-only check after a restart: Slack auth, vanished panes, journals, open worklog items and decisions, stale watches
   report <key> --kind milestone|blocker|question|halted|done --text TEXT
                                        append a durable progress report and print its [REPORT] line
   checkpoint <key> --step ID --result TEXT --evidence PATH [--remote-effect RECEIPT]...
@@ -48,6 +49,15 @@ const USAGE = `dori <command> [options]
   worklog next|note <id> <text>        set the item's next step, or add a note (a decision, an owner)
   worklog close <id> --result TEXT     close the item with what came of it
   worklog list [--open]                items as JSON; <stateDir>/worklog.md holds the same for reading
+  decision ask <question> --source REF [--lane K] [--thread REF] [--option TEXT]... [--recommend N] [--worklog ID] [--message REF]
+                                       record a choice put to the owner (up to 9 numbered options)
+  decision posted <id> --message REF   record where the question was posted; a reply to that message answers it
+  decision answer <id> <answer> --source REF
+                                       record the owner's answer: a bare number picks that option, other text stays free text
+  decision withdraw <id> --reason TEXT no longer needed
+  decision match <message-ref>         print the open decision posted as that message; exit 1 when there is none
+  decision list [--open]               decisions as JSON, oldest first
+  decision digest                      one line per open decision, to paste into a status message
   close  <key> [--note TEXT] [--lesson TEXT] [--evidence PATH]
                                        close now (Done signals must read back live); an optional lesson never blocks it
   pause  <key> [--note TEXT]           the owner said wait: goal paused (read back), running turn stopped, no nudges; exit 3 if unconfirmed
@@ -145,7 +155,10 @@ const flags = parseArgs({
     source: { type: "string" },
     open: { type: "boolean" },
     limit: { type: "string" },
+    option: { type: "string", multiple: true },
+    recommend: { type: "string" },
     lane: { type: "string" },
+    worklog: { type: "string" },
     "ignore-author": { type: "string", multiple: true },
     self: { type: "string" },
   },
@@ -156,6 +169,7 @@ const commands: Readonly<Record<string, Command>> = {
   ...laneCommands,
   ...opsCommands,
   ...messengerCommands,
+  ...decisionCommands,
   ...prCommands,
 };
 const handler = Object.hasOwn(commands, command) ? commands[command] : undefined;
@@ -167,7 +181,10 @@ try {
     process.exit(command ? 1 : 0);
   }
 } catch (e) {
-  if (e instanceof LaunchError || [...messengerErrors, ...journalErrors, ...prErrors].some((type) => e instanceof type))
+  if (
+    e instanceof LaunchError ||
+    [...messengerErrors, ...journalErrors, ...decisionErrors, ...prErrors].some((type) => e instanceof type)
+  )
     die((e as Error).message);
   throw e;
 }
