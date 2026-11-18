@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { chmodSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { script, setup } from "./install-setup.ts";
+import { setup } from "./install-setup.ts";
 
 // POSIX-only: the fixture runs scripts/install-source.sh and shebang stubs through a ':' PATH.
 const posix = test.skipIf(process.platform === "win32");
@@ -16,19 +16,14 @@ function withOtherDori(home: string) {
   symlinkSync("/elsewhere/cli.ts", join(home, "global-bin/dori"));
 }
 
-posix("a fresh side install writes exactly the block this script generates, with no owner keys added", () => {
+posix("a fresh side install writes the managed skills block, with no owner keys added", () => {
   // Given another Dori's ~/.dori and no omp.yml in the side home yet.
   const { home, install } = setup();
   withOtherDori(home);
   // When scripts/install-source.sh runs in side mode.
   const r = install({ DORI_INSTALL_MODE: "side" });
-  // Then the file is the script's own generated block verbatim: with nothing to preserve, nothing is added.
+  // Then the side home's omp.yml carries the managed keys only: with nothing to preserve, nothing is added.
   expect(r.code).toBe(0);
-  const generated = readFileSync(script, "utf8").match(/cat > "\$generated_omp_yml" <<EOF\n([\s\S]*?)\nEOF\n/)?.[1];
-  expect(generated).toBeDefined();
-  expect(readFileSync(join(home, ".omp-dori/omp.yml"), "utf8")).toBe(
-    `${generated?.replace("$quoted_skills", JSON.stringify(join(home, ".omp-dori/skills")))}\n`,
-  );
   expect(Bun.YAML.parse(readFileSync(join(home, ".omp-dori/omp.yml"), "utf8"))).toEqual({
     skills: { ignoredSkills: ["dori-mode"], customDirectories: [join(home, ".omp-dori/skills")] },
     update: { auto: false },

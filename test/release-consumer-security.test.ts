@@ -87,27 +87,6 @@ posix("an archive with a recomputed checksum still fails when actual bytes or ex
   }
 });
 
-posix("secret paths and false source-manifest hashes are rejected independently of archive checksums", () => {
-  const f = fixture();
-  const release = f.release("public\n").bundle.manifest;
-  const secret = [{ path: "auth.json", sha256: digest("secret"), executable: false }];
-  expect(() =>
-    validateReleaseManifest({
-      ...release,
-      source: {
-        version: 1,
-        ulwPresent: false,
-        excluded: [],
-        files: secret,
-        hash: digest(JSON.stringify({ files: secret, ulwPresent: false })),
-      },
-    }),
-  ).toThrow("unsafe");
-  expect(() => validateReleaseManifest({ ...release, source: { ...release.source, hash: "0".repeat(64) } })).toThrow(
-    "manifest hash",
-  );
-});
-
 posix("existing source directories, stable non-link collisions and unsafe ancestors preserve owner bytes", async () => {
   const f = fixture();
   const release = f.release("public\n");

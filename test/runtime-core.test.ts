@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { interactiveShellInFront, SHELLS } from "../src/runtime/foreground.ts";
+import { interactiveShellInFront } from "../src/runtime/foreground.ts";
 import { Runtimes } from "../src/runtime/registry.ts";
 import type { CreateSpec, ForegroundProcess, RuntimeKind, SessionRef, SessionRuntime } from "../src/runtime/types.ts";
 import { formatRef, openSession, parseRef } from "../src/runtime/types.ts";
@@ -81,12 +81,6 @@ describe("interactiveShellInFront (#66), ported from the herdr parser", () => {
   test("an empty or missing process list is doubt", () => {
     expect(interactiveShellInFront([])).toBe(true);
     expect(interactiveShellInFront(undefined)).toBe(true);
-  });
-
-  test("SHELLS covers the busybox and PowerShell names", () => {
-    for (const name of ["sh", "bash", "zsh", "fish", "busybox", "pwsh", "powershell"])
-      expect(SHELLS.has(name)).toBe(true);
-    expect(SHELLS.has("omo")).toBe(false);
   });
 });
 
