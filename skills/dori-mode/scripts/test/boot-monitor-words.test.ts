@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Manifest, type Monitor, monitorCleanup, readMonitorManifests } from "../src/boot-monitors.ts";
+import { decisionCommands } from "../src/cli-decisions.ts";
+import { journalCommands } from "../src/cli-journal.ts";
+import { laneCommands } from "../src/cli-lanes.ts";
+import { messengerCommands } from "../src/cli-messenger.ts";
+import { opsCommands } from "../src/cli-ops.ts";
+import { prCommands } from "../src/cli-pr.ts";
 import { DORI_COMMANDS, DORI_VALUE_OPTIONS } from "../src/monitor-dori.ts";
 import type { Lane, LaneStatus } from "../src/registry.ts";
 import { withState } from "./fakes.ts";
@@ -145,21 +151,82 @@ test("a shared dori watch inside a loop, a condition, a subshell, a cd or an env
   expect(monitorCleanup(open, [manifest([{ command: "while true; do dori inbound slack; done # api" }])])).toEqual([]);
 });
 
-test("the dori command vocabulary is every command the CLI dispatches", async () => {
+test("the dori command vocabulary is every command the CLI dispatches", () => {
   const tables = [
-    (await import("../src/cli-journal.ts")).journalCommands,
-    (await import("../src/cli-lanes.ts")).laneCommands,
-    (await import("../src/cli-ops.ts")).opsCommands,
-    (await import("../src/cli-messenger.ts")).messengerCommands,
-    (await import("../src/cli-decisions.ts")).decisionCommands,
-    (await import("../src/cli-pr.ts")).prCommands,
-  ];
-  // cli.ts dispatches these three before its command tables.
-  const dispatched = ["harness", "update", "upstream", ...tables.flatMap((table) => Object.keys(table))];
-  expect(Object.keys(DORI_COMMANDS).sort()).toEqual([...new Set(dispatched)].sort());
-  const cli = readFileSync(join(import.meta.dir, "../src/cli.ts"), "utf8");
-  for (const name of ["harness", "update", "upstream"]) expect(cli).toContain(`command === "${name}"`);
-  // The options cli.ts parses with a value: the words a dori command line never takes for its platform.
-  const values = [...cli.matchAll(/^\s+"?([\w-]+)"?: \{ type: "string"/gm)].map((m) => m[1] ?? "");
-  expect(Object.keys(DORI_VALUE_OPTIONS).sort()).toEqual(values.sort());
-});
+    ["cli-journal.ts", journalCommands],
+    ["cli-lanes.ts", laneCommands],
+    ["cli-ops.ts", opsCommands],
+    ["cli-messenger.ts", messengerCommands],
+    ["cli-decisions.ts", decisionCommands],
+    ["cli-pr.ts", prCommands],
+  ] as const;
+  // Every word the CLI dispatches, and the module the command lives in: cli.ts's own three come before its tables.
+  const groupOf = new Map<string, string>([
+    ["harness", "cli-harness.ts"],
+    ["update", "/src/release/cli.ts"],
+    ["upstream", "/src/update/cli.ts"],
+  ]);
+  for (const [module, table] of tables) for (const name of Object.keys(table)) groupOf.set(name, module);
+  expect(Object.keys(DORI_COMMANDS).sort()).toEqual([...groupOf.keys()].sort());
+
+  const config = join(state.dir, "config.json");
+  mkdirSync(join(state.dir, "state/lanes"), { recursive: true });
+  writeFileSync(config, JSON.stringify({ runtime: "herdr", stateDir: join(state.dir, "state"), ompUlwPath: "" }));
+  writeFileSync(join(state.dir, "state/lanes/zzz.json"), JSON.stringify(lane("zzz", "working")));
+  // The real CLI; the preload fails the load of a blocked module, so a dispatched command stops at its own command
+  // module before doing anything and a word no table holds only reaches the usage.
+  const invoke = (args: readonly string[], blocked: readonly string[] = []) => {
+    const preload = join(state.dir, "load-guard.ts");
+    writeFileSync(
+      preload,
+      `import { plugin } from "bun";
+import { readFileSync } from "node:fs";
+const blocked = ${JSON.stringify(blocked)};
+plugin({ name: "dispatch-guard", setup(build) {
+  build.onLoad({ filter: /[.]ts$/ }, ({ path }) => {
+    const hit = blocked.find((suffix) => path.split("\\\\").join("/").endsWith(suffix));
+    if (hit) throw new Error("BLOCKED_IMPORT:" + hit);
+    return { contents: readFileSync(path, "utf8"), loader: "ts" };
+  });
+} });
+`,
+    );
+    const run = Bun.spawnSync(
+      [process.execPath, "--preload", preload, join(import.meta.dir, "../src/cli.ts"), ...args],
+      {
+        cwd: state.dir,
+        env: {
+          HOME: state.dir,
+          PATH: process.env["PATH"] ?? "",
+          DORI_CONFIG: config,
+          DORI_RUNTIME: "herdr",
+          DORI_TELEMETRY: "0",
+          DO_NOT_TRACK: "1",
+        },
+        timeout: 20_000,
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    return { code: run.exitCode, out: run.stdout.toString(), err: run.stderr.toString() };
+  };
+  const missed = [...groupOf].filter(([word, module]) => {
+    const run = invoke([word], [module]);
+    return run.code === 0 || !run.err.includes(`BLOCKED_IMPORT:${module}`) || run.out.includes("dori <command>");
+  });
+  expect(missed).toEqual([]);
+  // A word no table holds reaches no command module: the CLI prints its usage instead.
+  const stray = invoke(["not-a-command"], [...new Set(groupOf.values())]);
+  expect({ dispatched: stray.err.includes("BLOCKED_IMPORT"), usage: stray.out.includes("dori <command>") }).toEqual({
+    dispatched: false,
+    usage: true,
+  });
+  // A value option consumes the word after it, so the registered lane "zzz" becomes its value and the command finds no
+  // lane key: the bare and the followed run both fail. A flag leaves "zzz" the key and reads its journal instead.
+  const broken = Object.keys(DORI_VALUE_OPTIONS).filter(
+    (option) =>
+      invoke(["checkpoints", `--${option}`, "zzz"]).code === 0 || invoke(["checkpoints", `--${option}`]).code === 0,
+  );
+  expect(broken).toEqual([]);
+  expect(invoke(["checkpoints", "--dry-run", "zzz"])).toMatchObject({ code: 0, out: "[]\n" });
+}, 120_000);
