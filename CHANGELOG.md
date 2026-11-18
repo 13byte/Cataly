@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `dori dead-panes` drops retained screen tails and unknown counters for vanished or no-longer-watched panes after a successful complete listing, and limits alert deduplication to current watched panes and the current hour. Failed or malformed runtime listings preserve prior state; two-screen dead detection, three-tick unknown alerts and live-agent protection remain unchanged. Valid herdr tabs without a workspace remain nonmatches for workspace-filtered scans and sync.
+
 - Native Bun and addon SHA-256 verification now uses one 1 MiB read buffer instead of allocating each entire binary. Receipt creation and every reuse/launch still hash all bytes synchronously, preserve short reads and close the descriptor on errors.
 
 - Full CI now checks native OMP and both ULW fixture prerequisites before the expensive suites, so an absent real-ULW fixture cannot produce a successful full gate with its native composition tests skipped. The contributor guide and PR template require explicit dependencies, preserved contracts, final-revision regression evidence and measured performance claims; the four required CI jobs and test discovery remain unchanged.
