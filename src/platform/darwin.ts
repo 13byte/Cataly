@@ -164,8 +164,8 @@ export const darwin: PlatformAdapter = {
     try {
       process.kill(pid, constants.signals.SIGTERM);
     } catch (error) {
-      // A pid that is already gone needs no signal; the caller's identity check has settled everything else.
-      if ((error as NodeJS.ErrnoException).code === "ESRCH") return;
+      // A pid that vanished before kill(2) is not ours to signal: its ESRCH reaches the caller, which answers false.
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") throw error;
       throw new Error("checked native termination failed");
     }
   },
