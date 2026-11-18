@@ -1,7 +1,7 @@
 /** dori send, presence, inbound, thread, react and transcribe: the messengers. */
 import { existsSync } from "node:fs";
 
-import { type Command, die, envSlackToken, every, slackAuth } from "./cli-context.ts";
+import { type Command, die, envSlackToken, every, messageText, slackAuth } from "./cli-context.ts";
 import { channelDiscord, reactDiscord, sendDiscord, threadDiscord, withLocalAudio } from "./cli-discord-ops.ts";
 import { discordClock, discordInboundCommand, openDiscordSocket, untilStopped } from "./cli-discord.ts";
 import { ChannelPurposeError } from "./messenger/discord-channels.ts";
@@ -27,8 +27,10 @@ const send: Command = async (cli) => {
   const { key, need, opt, values, config } = cli;
   const platform = key ?? die("send needs slack, telegram or discord");
   if (platform === "discord") return await sendDiscord(cli);
+  // A reply that silently became a plain post would land out of context.
+  if (values["reply"] !== undefined) die("--reply is supported for discord only");
   const to = need("to");
-  const text = need("text");
+  const text = await messageText(cli);
   const thread = opt("thread");
   const edit = opt("edit");
   const token = (name: string) => process.env[name] ?? die(`${name} is not set`);

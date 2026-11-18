@@ -55,6 +55,8 @@ export const DORI_VALUE_OPTIONS: Record<string, true> = {
   to: true,
   text: true,
   edit: true,
+  "text-file": true,
+  reply: true,
   tag: true,
   message: true,
   emoji: true,
