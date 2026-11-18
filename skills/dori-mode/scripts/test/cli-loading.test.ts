@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { decisionCommands } from "../src/cli-decisions.ts";
 import { journalCommands } from "../src/cli-journal.ts";
 import { laneCommands } from "../src/cli-lanes.ts";
 import { messengerCommands } from "../src/cli-messenger.ts";
 import { opsCommands } from "../src/cli-ops.ts";
+import { prCommands } from "../src/cli-pr.ts";
 import { type TestState, withState } from "./fakes.ts";
 
 const cli = resolve(import.meta.dir, "../src/cli.ts");
@@ -13,6 +15,8 @@ const groups = {
   "cli-lanes.ts": laneCommands,
   "cli-ops.ts": opsCommands,
   "cli-messenger.ts": messengerCommands,
+  "cli-decisions.ts": decisionCommands,
+  "cli-pr.ts": prCommands,
 };
 const blocked = [...Object.keys(groups), "/src/update/cli.ts", "/src/release/cli.ts", "cli-harness.ts"];
 let state: TestState;
@@ -75,14 +79,18 @@ plugin({ name: "cli-load-guard", setup(build) {
 
 test("version loads no command or configuration graph, even with invalid config", () => {
   writeFileSync(join(state.dir, "config.json"), "invalid config");
-  const result = invoke(["--version"], [...blocked, "/scripts/src/config.ts", "cli-context.ts"]);
+  const result = invoke(
+    ["--version"],
+    [...blocked, "/scripts/src/config.ts", "cli-context.ts", "registry.ts", "run.ts"],
+  );
   expect(result.code).toBe(0);
   expect(result.err).toBe("");
   expect(result.out.trim()).toMatch(/^[0-9]+[.][0-9]+[.][0-9]+/);
 });
 
 test("successful journal commands do not import lane, messenger, ops or updater graphs", () => {
-  const forbidden = blocked.filter((name) => name !== "cli-journal.ts");
+  // Journal auto-tracking already depends on the accepted PR graph.
+  const forbidden = blocked.filter((name) => name !== "cli-journal.ts" && name !== "cli-pr.ts");
   expect(invoke(["checkpoints", "fixture"], forbidden)).toEqual({ code: 0, out: "[]\n", err: "" });
   const report = invoke(["report", "fixture", "--kind", "milestone", "--text", "offline"], forbidden);
   expect(report.code).toBe(0);
@@ -110,7 +118,7 @@ test.each([
   expect(result.err).toContain(`BLOCKED_IMPORT:${selected}`);
 });
 
-test.each(["", "not-a-command", "__proto__", "constructor"])(
+test.each(["", "not-a-command", "__proto__", "constructor", "--help"])(
   "usage preserves exit code for %s without loading handlers",
   (command) => {
     const result = invoke(command ? [command] : [], blocked);
@@ -134,5 +142,50 @@ test("a real journal error retains one-line formatting after lazy imports", () =
   const result = invoke(["checkpoints", "fixture"]);
   expect(result.code).toBe(1);
   expect(result.err).toContain(`${path}:1:`);
+  expect(result.err.trim().split("\n")).toHaveLength(1);
+});
+
+test("accepted decision flags reach the lazy handler with repeated options intact", () => {
+  const result = invoke([
+    "decision",
+    "ask",
+    "choose one",
+    "--source",
+    "fixture",
+    "--lane",
+    "fixture",
+    "--option",
+    "first",
+    "--option",
+    "second",
+    "--recommend",
+    "2",
+  ]);
+  expect(result.code).toBe(0);
+  expect(result.err).toBe("");
+  expect(JSON.parse(result.out)).toMatchObject({
+    question: "choose one",
+    source: "fixture",
+    lane: "fixture",
+    options: ["first", "second"],
+    recommend: 2,
+  });
+});
+
+test("an accepted decision error retains its original class and one-line formatting", () => {
+  const result = invoke(["decision", "answer", "missing", "yes", "--source", "fixture"]);
+  expect(result.code).toBe(1);
+  expect(result.out).toBe("");
+  expect(result.err).toContain("decision not found: missing");
+  expect(result.err.trim().split("\n")).toHaveLength(1);
+});
+
+test("accepted PR listing still handles its own cursor error after lazy loading", () => {
+  const path = join(state.dir, "state/pr-watch-state.json");
+  writeFileSync(path, "not json\n");
+  const result = invoke(["pr", "list"]);
+  expect(result.code).toBe(0);
+  expect(result.out).toBe("[]\n");
+  expect(result.err).toContain(`PR_WATCH_WARNING ${path}:`);
   expect(result.err.trim().split("\n")).toHaveLength(1);
 });
