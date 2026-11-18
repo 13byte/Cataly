@@ -107,14 +107,7 @@ export type PointerRecord = {
   };
 };
 export type DeploymentStatus =
-  | "prepared"
-  | "stopping"
-  | "switching"
-  | "starting"
-  | "healthy"
-  | "rolled-back"
-  | "held"
-  | "failed";
+  "prepared" | "stopping" | "switching" | "starting" | "healthy" | "rolled-back" | "held" | "failed";
 export type DeploymentRecord = {
   readonly version: 1;
   readonly id: string;

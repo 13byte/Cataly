@@ -101,11 +101,13 @@ export const fileDiscordInboundStore = (stateDir: string, channelId: string): Di
         fd = undefined;
         renameSync(temporary, path);
         created = false;
-        const parent = openSync(dir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-        try {
-          fsyncSync(parent);
-        } finally {
-          closeSync(parent);
+        if (process.platform !== "win32") {
+          const parent = openSync(dir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+          try {
+            fsyncSync(parent);
+          } finally {
+            closeSync(parent);
+          }
         }
       } catch {
         throw new MessengerError(

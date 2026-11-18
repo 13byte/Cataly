@@ -41,12 +41,10 @@ export function nativeOmp(): string | undefined {
 }
 
 export function prerequisites(runtime: string, tools = true, legacyNative = false, paths = consumerPaths()): void {
-  if (
-    !(
-      (process.platform === "linux" && process.arch === "x64" && runtime === "herdr") ||
-      (process.platform === "darwin" && process.arch === "arm64" && runtime === "hc")
-    )
-  )
+  if (!(
+    (process.platform === "linux" && process.arch === "x64" && runtime === "herdr") ||
+    (process.platform === "darwin" && process.arch === "arm64" && runtime === "hc")
+  ))
     throw new Error(`Unsupported release host/runtime: ${process.platform}/${process.arch}/${runtime}`);
   if (!tools) return;
   if (!atLeast(Bun.version, [1, 4, 4])) throw new Error("Bun 1.4.4+ is required; install it before OMP-Dori");

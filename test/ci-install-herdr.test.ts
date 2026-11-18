@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -89,9 +89,39 @@ test("checksum rejection preserves existing binary and cleans download", () => {
   }
 });
 
-test("hc gate requires its E2E file instead of reporting skipped success", () => {
-  const workflow = readFileSync(join(import.meta.dir, "../.github/workflows/ci.yml"), "utf8");
-  expect(workflow).toContain("test -f test/e2e-hc.test.ts\n          bun test test/e2e-hc.test.ts");
-  expect(workflow).toContain("test -f test/e2e-hc-deploy.test.ts\n          bun test test/e2e-hc-deploy.test.ts");
-  expect(workflow).not.toContain("SKIP e2e-hc");
+// POSIX-only: the gate step is a bash script and the fake bun is a shell script on a ':' PATH.
+const posix = test.skipIf(process.platform === "win32");
+
+posix("the hc gate requires both E2E files and runs each through bun", () => {
+  const workflow = Bun.YAML.parse(readFileSync(join(import.meta.dir, "../.github/workflows/ci.yml"), "utf8")) as {
+    jobs?: Record<string, { steps?: readonly { name?: string; run?: string }[] }>;
+  };
+  const step = workflow.jobs?.["e2e-hc"]?.steps?.find((candidate) => candidate.name === "hc e2e");
+  const script = step?.run;
+  if (!script) throw new Error("ci.yml must keep the named hc e2e step");
+  const gate = (present: readonly string[]) => {
+    const dir = mkdtempSync(join(tmpdir(), "dori-ci-hc-"));
+    try {
+      const bin = join(dir, "bin");
+      mkdirSync(bin);
+      const calls = join(dir, "bun-calls");
+      writeFileSync(join(bin, "bun"), `#!/bin/sh\nprintf '%s\\n' "$*" >> ${JSON.stringify(calls)}\n`, { mode: 0o755 });
+      mkdirSync(join(dir, "test"));
+      for (const file of present) writeFileSync(join(dir, file), "");
+      const result = Bun.spawnSync(["bash", "-eo", "pipefail", "-c", script], {
+        cwd: dir,
+        env: { ...process.env, PATH: `${bin}:${process.env["PATH"]}` },
+      });
+      const invoked = existsSync(calls) ? readFileSync(calls, "utf8").trim().split("\n") : [];
+      return { code: result.exitCode, invoked };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  expect(gate([]).code).not.toBe(0);
+  expect(gate(["test/e2e-hc.test.ts"]).code).not.toBe(0);
+  expect(gate(["test/e2e-hc.test.ts", "test/e2e-hc-deploy.test.ts"])).toEqual({
+    code: 0,
+    invoked: ["test test/e2e-hc.test.ts", "test test/e2e-hc-deploy.test.ts"],
+  });
 });

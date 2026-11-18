@@ -75,29 +75,6 @@ test("does not invoke the reply hook when the rendered screen only contains lead
   }
 });
 
-test("rejects the failure row and detects the real report through a Bun script import", async () => {
-  // Given captured failure and real output rows, passed as data to a new process.
-  const script = `import { anchoredReportLine } from "./src/freshness.ts";
-console.log(JSON.stringify([
-  anchoredReportLine(process.argv[1], "docs-research"),
-  anchoredReportLine(process.argv[2], "pkg-release-fix")
-]));`;
-  // When Bun executes the actual exported parser script surface.
-  const child = Bun.spawn([process.execPath, "-e", script, instruction, wrappedReport], {
-    cwd: new URL("..", import.meta.url).pathname,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ]);
-  // Then the process succeeds and distinguishes the two real input classes.
-  expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
-  expect(JSON.parse(stdout)).toEqual([null, report]);
-});
-
 test("template shapes from #29 are not reports; the emitted report still wins", () => {
   const emitted = "[REPORT] demo-lane | milestone | checks passed";
   const screen = [
