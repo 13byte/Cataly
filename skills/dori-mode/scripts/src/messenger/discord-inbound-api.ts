@@ -35,6 +35,11 @@ export type DiscordInbound = {
   replyTo: InboundReply | null;
   attachments: InboundAttachment[];
 };
+/**
+ * Delivers one owner message; the cursor moves past it only after this returns or, when it returns a promise, after
+ * that resolves. Any other returned value is ignored.
+ */
+export type Emit = (message: DiscordInbound) => unknown;
 export type Request = <T>(path: string, body?: Record<string, unknown>) => Promise<T>;
 
 const REQUEST_FAILED = "Discord inbound request failed; check the connection and Discord API availability";

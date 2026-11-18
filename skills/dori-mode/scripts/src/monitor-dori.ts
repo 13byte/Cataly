@@ -7,6 +7,7 @@ export const DORI_COMMANDS: Record<string, true> = {
   adopt: true,
   boot: true,
   "can-launch": true,
+  channel: true,
   checkpoint: true,
   checkpoints: true,
   "claim-done": true,
@@ -51,6 +52,7 @@ export const DORI_VALUE_OPTIONS: Record<string, true> = {
   reason: true,
   note: true,
   loop: true,
+  purpose: true,
   to: true,
   text: true,
   edit: true,
@@ -82,6 +84,7 @@ const MESSENGER_COMMANDS: Record<string, true> = {
   inbound: true,
   thread: true,
   react: true,
+  channel: true,
 };
 const PLATFORMS: Record<string, true> = { slack: true, telegram: true, discord: true };
 

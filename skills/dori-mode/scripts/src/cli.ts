@@ -70,15 +70,18 @@ const USAGE = `dori <command> [options]
                                        open a forum post or text-channel thread; rename, replace tags, archive or reopen
   react discord --to CHANNEL [--thread ID] --message ID [--emoji E] [--remove]
                                        add or remove the bot's own reaction (eyes by default); --thread needs no --to
+  channel discord set <channel> --purpose T | clear <channel> | list
+                                       the operator's purpose note per channel or thread, shown by inbound --context
   presence <slack|discord>             keep the account shown as online until stopped
   transcribe <audio-file|url>           run hooks.transcribe and print the text; HTTP(S) downloads are private and temporary
-  inbound slack|telegram|discord [--loop MIN] [--gateway]
+  inbound slack|telegram|discord [--loop MIN] [--gateway] [--context]
                                        print INBOUND lines: Slack unread thread replies / Telegram owner DMs, edits and media + configured topic
                                        the Dori posted in (any helper), DMs and channels with unread mentions
                                        Discord requires DORI_DISCORD_TOKEN, DORI_DISCORD_OWNER_ID and configured channel IDs
                                        (more channels or threads: DORI_DISCORD_CHANNEL_IDS=a,b; every readable one: DORI_DISCORD_SCOPE=all)
                                        Discord polls every 3 seconds by default; --loop MIN overrides the interval;
                                        --gateway delivers owner messages live with REST backfill and ignores --loop, including 0
+                                       --context (Discord) adds INBOUND_CONTEXT: channel, thread, topic and recorded purposes
   inbound-lag [--limit N]              receive-lag percentiles from state/telegram-lag.jsonl (the meter behind the INBOUND lines)`;
 
 const [command = "", ...rest] = process.argv.slice(2);
@@ -113,6 +116,8 @@ const flags = parseArgs({
     write: { type: "boolean" },
     loop: { type: "string" },
     gateway: { type: "boolean" },
+    context: { type: "boolean" },
+    purpose: { type: "string" },
     to: { type: "string" },
     text: { type: "string" },
     edit: { type: "string" },
