@@ -56,7 +56,7 @@ async function fixture() {
     }
     if (path.includes("/pulls?")) return state.pull ? [state.pull] : [];
     if (path.endsWith("/pulls")) {
-      state.pull = { state: "open", html_url: "https://github.com/vntrevx/omp-dori/pull/999", head: { sha: commit } };
+      state.pull = { state: "open", html_url: "https://github.com/vntrevx/Cataly/pull/999", head: { sha: commit } };
       return state.pull;
     }
     if (path.includes("/runs?")) return { workflow_runs: state.runs };
