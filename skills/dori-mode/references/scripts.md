@@ -71,6 +71,8 @@ The CLI is a thin layer over typed modules you can import in your own scripts:
 
 Every module takes its HTTP, clock and timers as arguments. That is how the tests run without the network.
 
+Slack commits a successful poll's own-thread cursors in one ledger transaction, only after all reads and emits finish. `ThreadLedger.markSeen` takes an array of `{ channel, rootTs, ts }` updates and merges them under the existing writer lock; concurrent thread records survive and seen positions never decrease. Empty batches do not take a lock, and batches with no newer known cursor do not rewrite the ledger. This does not reduce Slack requests or stop watching older threads.
+
 ## Commands
 
 ### `dori launch <key> --title T --brief FILE --done "..." [--thread REF] [--model M] [--cwd DIR] [--dry-run]`
