@@ -37,7 +37,7 @@ flowchart TD
 
 **`v0.1.2` は Linux x64 + herdr + Discord 向けの GitHub プレリリースです。** Bun **1.4.4** とネイティブ OMP **18.18.8** が、検証済みの基準かつ最低バージョンです。新しいバージョンやほかの Linux ディストリビューションが自動的に検証済みとなるわけではありません。
 
-hc は Linux の CI 対象ですが、macOS の検証は手動です。どちらもソースの `main` にアダプターがありますが、サポート対象の実運用向け利用者プレビューには含まれません。Slack と Telegram はソース版の機能です。この範囲は、独立した外部ユーザーによるベータテストの実施や、すべてのプロバイダーと利用環境の検証を意味しません。
+hc は Linux の CI 対象で、macOS と Windows は別のクロス OS CI ワークフローで実行されます。どちらもソースの `main` にアダプターがありますが、サポート対象の実運用向け利用者プレビューには含まれません。Slack と Telegram はソース版の機能です。この範囲は、独立した外部ユーザーによるベータテストの実施や、すべてのプロバイダーと利用環境の検証を意味しません。
 
 **現在のソース `main`:** 既定では検証済みのソースから修正版 OMP 18.20.0 と固定された 33b375dc ULW オーバーレイを構築・配置します。PATH 上の stock OMP は前提条件でも代替品でもありません。同じバージョンの公式ネイティブ addon を利用し、Cargo は不要です。生成された `omp` ラッパーを使い、独自 toolchain は明示的な上書きとして扱います。[ソース bundle の契約](docs/releases.md#current-source-bundle)。以下の不変な `v0.1.2` 配布物と従来の前提条件は変更されません。
 
@@ -60,12 +60,12 @@ omp --version
 
 ### 2. v0.1.2 をダウンロード・検証・インストール
 
-ダウンロード前に、[正規の v0.1.2 リリース](https://github.com/vntrevx/omp-dori/releases/tag/v0.1.2)でリポジトリの所有者、タグ、リリースのコミットを確認してください。[検証済みの正確なリリースの導入手順](docs/releases.md#install-the-exact-preview)に従って四つのアセットをそろえ、フォーク、`main` のインストーラー、ミラーで代用しないでください。初回インストールは自分のホームを使い、Dori が稼働していない状態で行います。既存のインストールがある場合は、ソースや状態を変更する前に確認してください。
+ダウンロード前に、[正規の v0.1.2 リリース](https://github.com/vntrevx/Cataly/releases/tag/v0.1.2)でリポジトリの所有者、タグ、リリースのコミットを確認してください。[検証済みの正確なリリースの導入手順](docs/releases.md#install-the-exact-preview)に従って四つのアセットをそろえ、フォーク、`main` のインストーラー、ミラーで代用しないでください。初回インストールは自分のホームを使い、Dori が稼働していない状態で行います。既存のインストールがある場合は、ソースや状態を変更する前に確認してください。
 
 ```bash
 download_dir="$(mktemp -d)" || exit 1
 cd "$download_dir" || exit 1
-release_url="https://github.com/vntrevx/omp-dori/releases/download/v0.1.2"
+release_url="https://github.com/vntrevx/Cataly/releases/download/v0.1.2"
 for asset in install.sh release-manifest.json SHA256SUMS omp-dori-v0.1.2.tar.gz; do
   curl --proto '=https' --tlsv1.2 -fL "$release_url/$asset" -o "$asset" || exit 1
 done
@@ -125,7 +125,7 @@ omp --dori-role dori
 これは利用者向けプレビューと分かれた、任意のソース `main` の導入経路です。以下のチェックアウト先が未使用の場合に実行してください。
 
 ```bash
-git clone https://github.com/vntrevx/omp-dori.git "$HOME/src/omp-dori" || exit 1
+git clone https://github.com/vntrevx/Cataly.git "$HOME/src/omp-dori" || exit 1
 cd "$HOME/src/omp-dori" || exit 1
 DORI_INSTALL_MODE=side DORI_NO_PULL=1 DORI_SRC="$PWD" bash scripts/install-source.sh
 ```
@@ -148,7 +148,7 @@ DORI_INSTALL_MODE=side DORI_NO_PULL=1 DORI_SRC="$PWD" bash scripts/install-sourc
 
 ## 貢献するには
 
-このフォークのメンテナーは [vntrevx](https://github.com/vntrevx) です。omp-dori の [Issue](https://github.com/vntrevx/omp-dori/issues) と [プルリクエスト](https://github.com/vntrevx/omp-dori/pulls) は、このリポジトリに送ってください。[貢献ガイド](CONTRIBUTING.md)に、提案、ソース開発、検証、出典と貢献条件をまとめています。このフォークへの PR に上流 CLA の署名は必要ありません。
+このフォークのメンテナーは [vntrevx](https://github.com/vntrevx) です。omp-dori の [Issue](https://github.com/vntrevx/Cataly/issues) と [プルリクエスト](https://github.com/vntrevx/Cataly/pulls) は、このリポジトリに送ってください。[貢献ガイド](CONTRIBUTING.md)に、提案、ソース開発、検証、出典と貢献条件をまとめています。このフォークへの PR に上流 CLA の署名は必要ありません。
 
 ## 制約とプライバシー
 

@@ -1,4 +1,4 @@
-Follow the [ready-for-review requirements](https://github.com/vntrevx/omp-dori/blob/main/CONTRIBUTING.md#ready-for-review).
+Follow the [ready-for-review requirements](https://github.com/vntrevx/Cataly/blob/main/CONTRIBUTING.md#ready-for-review).
 Keep this PR draft/not ready while applicable local evidence is missing. Explain any N/A.
 Required remote CI may be pending for review; all three jobs must pass before merge.
 
@@ -15,8 +15,8 @@ Required remote CI may be pending for review; all three jobs must pass before me
 
 ## Evidence
 
-Use the existing [setup/gates](https://github.com/vntrevx/omp-dori/blob/main/CONTRIBUTING.md#run-the-gates)
-and [CI workflow](https://github.com/vntrevx/omp-dori/blob/main/.github/workflows/ci.yml).
+Use the existing [setup/gates](https://github.com/vntrevx/Cataly/blob/main/CONTRIBUTING.md#run-the-gates)
+and [CI workflow](https://github.com/vntrevx/Cataly/blob/main/.github/workflows/ci.yml).
 Give actual commands/results and revisions, or links to those runs. Do not relabel carried-forward
 or combined partial counts as a full rerun.
 

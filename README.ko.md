@@ -61,12 +61,12 @@ omp --version
 
 ### 2. v0.1.2 다운로드·검증·설치
 
-다운로드 전에 [canonical v0.1.2 릴리스](https://github.com/vntrevx/omp-dori/releases/tag/v0.1.2)의 저장소 소유자·태그·릴리스 commit을 확인하세요. [정확한 릴리스 설치·검증 절차](docs/releases.md#install-the-exact-preview)에 따라 네 asset을 모두 받으며 fork, `main` 설치기나 mirror로 대체하지 않습니다. 처음 설치할 때는 본인 home을 사용하고 실행 중인 Dori가 없어야 합니다. 기존 설치가 있으면 소스나 상태를 변경하기 전에 먼저 점검하세요.
+다운로드 전에 [canonical v0.1.2 릴리스](https://github.com/vntrevx/Cataly/releases/tag/v0.1.2)의 저장소 소유자·태그·릴리스 commit을 확인하세요. [정확한 릴리스 설치·검증 절차](docs/releases.md#install-the-exact-preview)에 따라 네 asset을 모두 받으며 fork, `main` 설치기나 mirror로 대체하지 않습니다. 처음 설치할 때는 본인 home을 사용하고 실행 중인 Dori가 없어야 합니다. 기존 설치가 있으면 소스나 상태를 변경하기 전에 먼저 점검하세요.
 
 ```bash
 download_dir="$(mktemp -d)" || exit 1
 cd "$download_dir" || exit 1
-release_url="https://github.com/vntrevx/omp-dori/releases/download/v0.1.2"
+release_url="https://github.com/vntrevx/Cataly/releases/download/v0.1.2"
 for asset in install.sh release-manifest.json SHA256SUMS omp-dori-v0.1.2.tar.gz; do
   curl --proto '=https' --tlsv1.2 -fL "$release_url/$asset" -o "$asset" || exit 1
 done
@@ -130,7 +130,7 @@ Maintainer는 별도의 일반 checkout과 `scripts/install-source.sh`를 사용
 소비자 preview와 별개인 소스 `main`의 선택적 설치 경로입니다. 아래 checkout 경로가 아직 사용되지 않을 때 실행하세요.
 
 ```bash
-git clone https://github.com/vntrevx/omp-dori.git "$HOME/src/omp-dori" || exit 1
+git clone https://github.com/vntrevx/Cataly.git "$HOME/src/omp-dori" || exit 1
 cd "$HOME/src/omp-dori" || exit 1
 DORI_INSTALL_MODE=side DORI_NO_PULL=1 DORI_SRC="$PWD" bash scripts/install-source.sh
 ```
@@ -153,7 +153,7 @@ Lead·duty는 `omp --dori-role dori`, 작업 레인과 기본 reviewer는 `--dor
 
 ## 기여하기
 
-이 fork의 maintainer는 [vntrevx](https://github.com/vntrevx)입니다. omp-dori의 [issue](https://github.com/vntrevx/omp-dori/issues)와 [PR](https://github.com/vntrevx/omp-dori/pulls)은 이 저장소에 제출하세요. [기여 안내](CONTRIBUTING.md)에 제안 방법, 소스 개발, 검증, 프로젝트 출처와 기여 조건을 정리했습니다. 이 fork의 PR에는 upstream CLA 서명이 필요하지 않습니다.
+이 fork의 maintainer는 [vntrevx](https://github.com/vntrevx)입니다. omp-dori의 [issue](https://github.com/vntrevx/Cataly/issues)와 [PR](https://github.com/vntrevx/Cataly/pulls)은 이 저장소에 제출하세요. [기여 안내](CONTRIBUTING.md)에 제안 방법, 소스 개발, 검증, 프로젝트 출처와 기여 조건을 정리했습니다. 이 fork의 PR에는 upstream CLA 서명이 필요하지 않습니다.
 
 ## 한계·개인정보
 

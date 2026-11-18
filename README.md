@@ -61,12 +61,12 @@ omp --version
 
 ### 2. Download, verify and install v0.1.2
 
-Check the repository owner, tag and release commit on the [canonical v0.1.2 release](https://github.com/vntrevx/omp-dori/releases/tag/v0.1.2) before downloading its four assets. Follow the [verified exact-release walkthrough](docs/releases.md#install-the-exact-preview); do not substitute a fork, a `main` installer or a mirror. For a first install, use your own home with no running Dori. Inspect any existing installation before changing its source or state.
+Check the repository owner, tag and release commit on the [canonical v0.1.2 release](https://github.com/vntrevx/Cataly/releases/tag/v0.1.2) before downloading its four assets. Follow the [verified exact-release walkthrough](docs/releases.md#install-the-exact-preview); do not substitute a fork, a `main` installer or a mirror. For a first install, use your own home with no running Dori. Inspect any existing installation before changing its source or state.
 
 ```bash
 download_dir="$(mktemp -d)" || exit 1
 cd "$download_dir" || exit 1
-release_url="https://github.com/vntrevx/omp-dori/releases/download/v0.1.2"
+release_url="https://github.com/vntrevx/Cataly/releases/download/v0.1.2"
 for asset in install.sh release-manifest.json SHA256SUMS omp-dori-v0.1.2.tar.gz; do
   curl --proto '=https' --tlsv1.2 -fL "$release_url/$asset" -o "$asset" || exit 1
 done
@@ -130,7 +130,7 @@ Maintainers use a separate ordinary checkout and `scripts/install-source.sh`, fo
 This is an optional source `main` path, separate from the consumer preview. With the documented destination unused, run:
 
 ```bash
-git clone https://github.com/vntrevx/omp-dori.git "$HOME/src/omp-dori" || exit 1
+git clone https://github.com/vntrevx/Cataly.git "$HOME/src/omp-dori" || exit 1
 cd "$HOME/src/omp-dori" || exit 1
 DORI_INSTALL_MODE=side DORI_NO_PULL=1 DORI_SRC="$PWD" bash scripts/install-source.sh
 ```
@@ -154,7 +154,7 @@ Lead/duty sessions use `omp --dori-role dori`; work lanes and the built-in revie
 
 ## Contributing
 
-This fork is maintained by [vntrevx](https://github.com/vntrevx). Open omp-dori [issues](https://github.com/vntrevx/omp-dori/issues) and [pull requests](https://github.com/vntrevx/omp-dori/pulls) here. The [contribution guide](CONTRIBUTING.md) covers proposals, source setup, verification, project credit and contribution terms. This fork does not require an upstream CLA signature.
+This fork is maintained by [vntrevx](https://github.com/vntrevx). Open omp-dori [issues](https://github.com/vntrevx/Cataly/issues) and [pull requests](https://github.com/vntrevx/Cataly/pulls) here. The [contribution guide](CONTRIBUTING.md) covers proposals, source setup, verification, project credit and contribution terms. This fork does not require an upstream CLA signature.
 
 ## Limits and privacy
 

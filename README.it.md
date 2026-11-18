@@ -37,7 +37,7 @@ flowchart TD
 
 **`v0.1.2` è una prerelease GitHub per Linux x64 + herdr + Discord.** Bun **1.4.4** e OMP nativo **18.18.8** sono la base testata e le versioni minime. Versioni più recenti e altre distribuzioni Linux non sono automaticamente verificate.
 
-hc è coperto dalla CI su Linux; le verifiche macOS restano manuali. Entrambi hanno adattatori nel `main` del sorgente, ma non rientrano nell'anteprima supportata per l'uso reale da parte degli utenti. Slack e Telegram restano funzionalità del sorgente. Questo ambito non implica una beta indipendente con utenti esterni né che ogni provider e interfaccia sia stato testato.
+hc è coperto dalla CI su Linux; macOS e Windows vengono eseguiti in un workflow CI cross-OS separato. Entrambi hanno adattatori nel `main` del sorgente, ma non rientrano nell'anteprima supportata per l'uso reale da parte degli utenti. Slack e Telegram restano funzionalità del sorgente. Questo ambito non implica una beta indipendente con utenti esterni né che ogni provider e interfaccia sia stato testato.
 
 **Sorgente `main` attuale:** il percorso predefinito prepara OMP 18.20.0 modificato e l'overlay ULW 33b375dc vincolato a sorgenti verificate; OMP stock nel PATH non è un prerequisito né un sostituto. L'addon nativo ufficiale della stessa versione non richiede Cargo. Usa il wrapper `omp` generato; le toolchain personalizzate restano scelte esplicite. [Contratto del bundle](docs/releases.md#current-source-bundle). Gli asset immutabili `v0.1.2` e i relativi requisiti storici qui sotto non cambiano.
 
@@ -60,12 +60,12 @@ omp --version
 
 ### 2. Scaricare, verificare e installare v0.1.2
 
-Prima del download verifica proprietario del repository, tag e commit della [release canonica v0.1.2](https://github.com/vntrevx/omp-dori/releases/tag/v0.1.2). Segui la [guida verificata alla release esatta](docs/releases.md#install-the-exact-preview) e scarica tutti e quattro gli asset; non sostituirli con un fork, un installer di `main` o un mirror. Per la prima installazione usa la tua home senza Dori in esecuzione. Esamina un'installazione esistente prima di modificarne sorgente o stato.
+Prima del download verifica proprietario del repository, tag e commit della [release canonica v0.1.2](https://github.com/vntrevx/Cataly/releases/tag/v0.1.2). Segui la [guida verificata alla release esatta](docs/releases.md#install-the-exact-preview) e scarica tutti e quattro gli asset; non sostituirli con un fork, un installer di `main` o un mirror. Per la prima installazione usa la tua home senza Dori in esecuzione. Esamina un'installazione esistente prima di modificarne sorgente o stato.
 
 ```bash
 download_dir="$(mktemp -d)" || exit 1
 cd "$download_dir" || exit 1
-release_url="https://github.com/vntrevx/omp-dori/releases/download/v0.1.2"
+release_url="https://github.com/vntrevx/Cataly/releases/download/v0.1.2"
 for asset in install.sh release-manifest.json SHA256SUMS omp-dori-v0.1.2.tar.gz; do
   curl --proto '=https' --tlsv1.2 -fL "$release_url/$asset" -o "$asset" || exit 1
 done
@@ -125,7 +125,7 @@ I maintainer usano un checkout ordinario separato e `scripts/install-source.sh`,
 Questo è un percorso facoltativo dal `main` del sorgente, separato dall'anteprima per gli utenti. Eseguilo se la destinazione documentata del checkout è ancora inutilizzata:
 
 ```bash
-git clone https://github.com/vntrevx/omp-dori.git "$HOME/src/omp-dori" || exit 1
+git clone https://github.com/vntrevx/Cataly.git "$HOME/src/omp-dori" || exit 1
 cd "$HOME/src/omp-dori" || exit 1
 DORI_INSTALL_MODE=side DORI_NO_PULL=1 DORI_SRC="$PWD" bash scripts/install-source.sh
 ```
@@ -148,7 +148,7 @@ Le sessioni lead/duty usano `omp --dori-role dori`; le lane di lavoro e il revis
 
 ## Contribuire
 
-Questo fork è mantenuto da [vntrevx](https://github.com/vntrevx). Apri qui le [issue](https://github.com/vntrevx/omp-dori/issues) e le [pull request](https://github.com/vntrevx/omp-dori/pulls) di omp-dori. La [guida ai contributi](CONTRIBUTING.md) descrive proposte, sviluppo da sorgente, verifiche, attribuzioni e condizioni dei contributi. Le PR di questo fork non richiedono la firma del CLA upstream.
+Questo fork è mantenuto da [vntrevx](https://github.com/vntrevx). Apri qui le [issue](https://github.com/vntrevx/Cataly/issues) e le [pull request](https://github.com/vntrevx/Cataly/pulls) di omp-dori. La [guida ai contributi](CONTRIBUTING.md) descrive proposte, sviluppo da sorgente, verifiche, attribuzioni e condizioni dei contributi. Le PR di questo fork non richiedono la firma del CLA upstream.
 
 ## Limiti e privacy
 

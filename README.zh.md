@@ -37,7 +37,7 @@ flowchart TD
 
 **`v0.1.2` 是面向 Linux x64 + herdr + Discord 的 GitHub 预发行版。** Bun **1.4.4** 和原生 OMP **18.18.8** 是经过测试的基准，也是最低版本要求。更新的版本和其他 Linux 发行版并不自动视为已验证。
 
-hc 由 Linux CI 覆盖，macOS 验证仍需手动进行。两者在源码 `main` 中都保留了适配器，但不属于受支持的用户预览版实际运行环境。Slack 和 Telegram 仍是源码版功能。这一范围并不表示已开展独立的外部用户 beta 测试，也不表示所有提供商和使用界面都已完成验证。
+hc 由 Linux CI 覆盖，macOS 和 Windows 在单独的跨操作系统 CI 工作流中运行。两者在源码 `main` 中都保留了适配器，但不属于受支持的用户预览版实际运行环境。Slack 和 Telegram 仍是源码版功能。这一范围并不表示已开展独立的外部用户 beta 测试，也不表示所有提供商和使用界面都已完成验证。
 
 **当前源码 `main`：** 默认安装会从已验证的源码准备修改版 OMP 18.20.0 和绑定的 33b375dc ULW overlay；PATH 中的 stock OMP 既不是前提条件，也不能替代它。使用同版本官方 native addon，无需 Cargo。请使用生成的 `omp` wrapper；自定义工具链属于明确覆盖。[源码 bundle 契约](docs/releases.md#current-source-bundle)。下文不可变的 `v0.1.2` 发布资产及其历史要求保持不变。
 
@@ -60,12 +60,12 @@ omp --version
 
 ### 2. 下载、验证并安装 v0.1.2
 
-下载前，请在[正式 v0.1.2 发布页](https://github.com/vntrevx/omp-dori/releases/tag/v0.1.2)核验仓库所有者、标签和发布 commit。按照[已验证的精确版本安装步骤](docs/releases.md#install-the-exact-preview)下载全部四个资源文件，请勿用 fork、`main` 安装器或镜像替换。首次安装使用自己的 home，且没有正在运行的 Dori。若已有安装，请先检查，再更改其源码或状态。
+下载前，请在[正式 v0.1.2 发布页](https://github.com/vntrevx/Cataly/releases/tag/v0.1.2)核验仓库所有者、标签和发布 commit。按照[已验证的精确版本安装步骤](docs/releases.md#install-the-exact-preview)下载全部四个资源文件，请勿用 fork、`main` 安装器或镜像替换。首次安装使用自己的 home，且没有正在运行的 Dori。若已有安装，请先检查，再更改其源码或状态。
 
 ```bash
 download_dir="$(mktemp -d)" || exit 1
 cd "$download_dir" || exit 1
-release_url="https://github.com/vntrevx/omp-dori/releases/download/v0.1.2"
+release_url="https://github.com/vntrevx/Cataly/releases/download/v0.1.2"
 for asset in install.sh release-manifest.json SHA256SUMS omp-dori-v0.1.2.tar.gz; do
   curl --proto '=https' --tlsv1.2 -fL "$release_url/$asset" -o "$asset" || exit 1
 done
@@ -125,7 +125,7 @@ omp --dori-role dori
 这是与用户预览版分开的可选源码 `main` 安装路径。以下文档指定的 checkout 目标路径尚未使用时，可执行：
 
 ```bash
-git clone https://github.com/vntrevx/omp-dori.git "$HOME/src/omp-dori" || exit 1
+git clone https://github.com/vntrevx/Cataly.git "$HOME/src/omp-dori" || exit 1
 cd "$HOME/src/omp-dori" || exit 1
 DORI_INSTALL_MODE=side DORI_NO_PULL=1 DORI_SRC="$PWD" bash scripts/install-source.sh
 ```
@@ -148,7 +148,7 @@ DORI_INSTALL_MODE=side DORI_NO_PULL=1 DORI_SRC="$PWD" bash scripts/install-sourc
 
 ## 参与贡献
 
-此 fork 由 [vntrevx](https://github.com/vntrevx) 维护。请在本仓库提交 omp-dori 的 [issue](https://github.com/vntrevx/omp-dori/issues) 和 [PR](https://github.com/vntrevx/omp-dori/pulls)。[贡献指南](CONTRIBUTING.md)说明提案、源码开发、验证、项目署名和贡献条件。向此 fork 提交 PR 无需签署上游 CLA。
+此 fork 由 [vntrevx](https://github.com/vntrevx) 维护。请在本仓库提交 omp-dori 的 [issue](https://github.com/vntrevx/Cataly/issues) 和 [PR](https://github.com/vntrevx/Cataly/pulls)。[贡献指南](CONTRIBUTING.md)说明提案、源码开发、验证、项目署名和贡献条件。向此 fork 提交 PR 无需签署上游 CLA。
 
 ## 限制与隐私
 
