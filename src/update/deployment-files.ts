@@ -15,23 +15,18 @@ import {
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { dlopen } from "bun:ffi";
+import { platform } from "../platform/index.ts";
 import { DeploymentHeld } from "./deployment-process.ts";
 import type { DeploymentConfig, PointerRecord } from "./deployment-types.ts";
 import { digest } from "./source.ts";
 
 export function syncDirectory(path: string): void {
-  if (process.platform === "win32") return;
-  const fd = openSync(path, "r");
-  try {
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
+  platform.syncDirectory(path);
 }
 
 /** Darwin link(2) follows symlinks; rollback must preserve the link inode itself. */
 function preserveLink(path: string, backup: string): void {
-  if (process.platform !== "darwin") {
+  if (platform.os !== "darwin") {
     linkSync(path, backup);
     return;
   }
@@ -81,7 +76,7 @@ export function capturePointer(path: string, target: string, id: string): Pointe
   const stat = lstatSync(path, { throwIfNoEntry: false });
   if (stat && !stat.isDirectory() && !stat.isFile() && !stat.isSymbolicLink())
     throw new DeploymentHeld("installation pointer is a special file");
-  if (stat && process.getuid !== undefined && stat.uid !== process.getuid())
+  if (stat && platform.posixOwnership && stat.uid !== process.getuid?.())
     throw new DeploymentHeld("installation pointer belongs to another owner");
   const original = stat
     ? {

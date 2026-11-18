@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
-  fsyncSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -16,6 +15,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { platform } from "../platform/index.ts";
 import { contains } from "../update/config.ts";
 import { processIdentity, sameProcess } from "../update/deployment-process.ts";
 import type { ProcessIdentity } from "../update/deployment-types.ts";
@@ -81,8 +81,7 @@ export function realDirectory(path: string, create = false): void {
 
 export function owned(path: string): void {
   const stat = lstatSync(path, { throwIfNoEntry: false });
-  if (stat && process.getuid !== undefined && stat.uid !== process.getuid())
-    throw new Error(`Different owner: ${path}`);
+  if (stat && platform.posixOwnership && stat.uid !== process.getuid?.()) throw new Error(`Different owner: ${path}`);
   if (stat && (stat.mode & 0o022) !== 0 && !stat.isSymbolicLink())
     throw new Error(`Group/world-writable installation path: ${path}`);
 }
@@ -125,12 +124,7 @@ export function saveJson(path: string, value: unknown): void {
 }
 
 export function syncDirectory(path: string): void {
-  const fd = openSync(path, "r");
-  try {
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
+  platform.syncDirectory(path);
 }
 
 export function pointer(path: string): string | undefined {
