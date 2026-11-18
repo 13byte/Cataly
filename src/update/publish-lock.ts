@@ -13,6 +13,7 @@ import { hostname } from "node:os";
 import { join } from "node:path";
 import { alive } from "../../skills/dori-mode/scripts/src/checkpoint-lock.ts";
 import { object, UpdateError } from "./config.ts";
+import { syncDirectory } from "./deployment-files.ts";
 import { digest } from "./source.ts";
 import type { UpdateLock } from "./types.ts";
 
@@ -40,14 +41,7 @@ export function claimPromotionRecovery(root: string, previous: UpdateLock, claim
       const path = join(directory, `${digest(predecessor)}.json`);
       try {
         linkSync(request, path);
-        if (process.platform !== "win32") {
-          const parent = openSync(directory, "r");
-          try {
-            fsyncSync(parent);
-          } finally {
-            closeSync(parent);
-          }
-        }
+        syncDirectory(directory);
         return true;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;

@@ -15,6 +15,7 @@ import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { alive } from "../../skills/dori-mode/scripts/src/checkpoint-lock.ts";
 import { object, UpdateError, UpdateLockBusy } from "./config.ts";
+import { syncDirectory } from "./deployment-files.ts";
 import { claimPromotionRecovery } from "./publish-lock.ts";
 import type { UpdateContext, UpdateJob, UpdateLock, UpdatePhase, UpdateState } from "./types.ts";
 
@@ -28,14 +29,7 @@ export function saveJson(path: string, value: unknown): void {
     closeSync(fd);
   }
   renameSync(tmp, path);
-  if (process.platform !== "win32") {
-    const directory = openSync(dirname(path), "r");
-    try {
-      fsyncSync(directory);
-    } finally {
-      closeSync(directory);
-    }
-  }
+  syncDirectory(dirname(path));
 }
 
 export function readState(ctx: UpdateContext): UpdateState {
