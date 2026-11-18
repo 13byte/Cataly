@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { discordInbound } from "../src/messenger/discord-inbound.ts";
+import { DiscordChannels, inboundContext } from "../src/messenger/discord-channels.ts";
+import { discordInbound, formatDiscordInbound, formatInboundContext } from "../src/messenger/discord-inbound.ts";
 import { fileDiscordInboundStore } from "../src/messenger/discord-inbound-state.ts";
 import { discordRestWorld, memoryDiscordCursor, ownerMessage } from "./discord-inbound-fakes.ts";
 import { withState } from "./fakes.ts";
@@ -59,7 +60,7 @@ test("each owner is checkpointed before the next emit and a trailing filtered ru
   });
   expect(emitted).toEqual(["102", "105"]);
   expect(cursor.saved).toEqual(["102", "105", "107"]);
-  intake.accept(ignored("108"), () => {
+  await intake.accept(ignored("108"), () => {
     throw new Error("filtered live emit");
   });
   expect(cursor.saved).toEqual(["102", "105", "107", "108"]);
@@ -136,3 +137,68 @@ test("filtered batches remain per-channel and a later-page error saves nothing",
   expect(second.saved).toEqual(["201"]);
   expect(emitted).toEqual(["21:201"]);
 });
+
+for (const failed of [false, true]) {
+  test(`async context ${failed ? "failure stops before trailing saves" : "emits in owner checkpoint order"}`, async () => {
+    const state = withState();
+    const lookup = Promise.withResolvers<void>();
+    try {
+      const world = discordRestWorld([
+        ignored("101"),
+        ownerMessage("102"),
+        ignored("103"),
+        ignored("104"),
+        ownerMessage("105"),
+        ignored("106"),
+        ignored("107"),
+      ]);
+      world.state.blocked.set("/channels/20", lookup.promise);
+      world.state.responses.set("/channels/20", JSON.stringify({ id: "20", type: 11, name: "task", parent_id: "30" }));
+      world.state.responses.set(
+        "/channels/30",
+        JSON.stringify({ id: "30", type: 0, name: "dev", topic: "Project work" }),
+      );
+      const purposes = new DiscordChannels(state.dir);
+      await purposes.set("20", "one task", "task", 0);
+      await purposes.set("30", "development", "dev", 0);
+      const where = inboundContext(world.discord, purposes, () => 0);
+      const cursor = memoryDiscordCursor("100");
+      const intake = await discordInbound(world.discord, () => cursor.store, options);
+      const entered = Promise.withResolvers<void>();
+      const attempts: string[] = [];
+      const groups: string[] = [];
+      const poll = intake.poll(async (message) => {
+        attempts.push(`${message.message}:${cursor.store.load()}`);
+        entered.resolve();
+        const context = await where(message.channel);
+        if (failed && message.message === "105") throw new Error("context emit failed");
+        groups.push(`${formatDiscordInbound(message)}\n${formatInboundContext(message, context)}`);
+      });
+      let emissionFailure: unknown;
+      const outcome = poll.catch((error: unknown) => {
+        emissionFailure = error;
+      });
+      await entered.promise;
+      const pending = [attempts.slice(), groups.slice(), cursor.saved.slice()];
+      lookup.resolve();
+      await outcome;
+      expect(emissionFailure).toEqual(failed ? new Error("context emit failed") : undefined);
+      expect(pending).toEqual([["102:100"], [], []]);
+      expect(attempts).toEqual(["102:100", "105:102"]);
+      expect(cursor.saved).toEqual(failed ? ["102"] : ["102", "105", "107"]);
+      const context = JSON.stringify({
+        channel: { id: "30", name: "dev", topic: "Project work", purpose: "development" },
+        thread: { id: "20", name: "task", purpose: "one task" },
+      });
+      expect(groups).toEqual(
+        (failed ? ["102"] : ["102", "105"]).map(
+          (id) =>
+            `INBOUND discord 20 ${id} from=owner ref=- "owner ${id}"\nINBOUND_CONTEXT discord 20 ${id} ${context}`,
+        ),
+      );
+    } finally {
+      lookup.resolve();
+      state.done();
+    }
+  });
+}
