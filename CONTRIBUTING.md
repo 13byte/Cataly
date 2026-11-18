@@ -159,6 +159,11 @@ They are outside the release gate and outside the product support scope: release
 are admitted only for linux/x64/herdr and darwin/arm64/hc, so Windows coverage
 finds portability regressions rather than promising a Windows product.
 
+OS-dependent behaviour belongs in the platform adapter, `src/platform/adapter.ts`
+with its per-OS implementations beside it in `src/platform/`, never in a caller
+that tests `process.platform`; [docs/platform-adapter.md](docs/platform-adapter.md)
+describes the contract.
+
 Tests that exercise POSIX-only behaviour are gated per test, or per `describe`
 suite when every case in it needs the POSIX runtime (`posix`, `it` and `posixSuite`
 in `test/update-setup.ts`, `test/install-setup.ts` and

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Platform behaviour now sits behind one `PlatformAdapter` in `src/platform/`, with a single implementation per host (darwin, linux, win32) in place of scattered `process.platform` checks. Answers, messages and failure modes are unchanged.
+
 - Biome is replaced by oxlint for linting, Prettier for formatting and a husky `pre-commit` hook that runs both. `bun run check` now runs `lint` (`oxlint --deny-warnings`) then `format:check`, `bun run format` replaces `bun run fmt`, and the formatter options, rule severities and ignore patterns carry over unchanged. Biome's optional-chain correction (the default fix behind `useOptionalChain`) has no oxlint equivalent, so code it had already fixed stays as it is.
 
 - Linux host sampling now reads load and memory directly from `/proc`, avoiding two `cat` children and three failed macOS command attempts per sample. Disk and session sampling, unknown-value behavior, and non-Linux probes are unchanged.
