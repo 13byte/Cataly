@@ -96,6 +96,20 @@ test.each([
   expect(canLaunch(s, thresholds).ok).toBe(free >= 20);
 });
 
+test.each(["hard", "high"] as const)("near-threshold %s reasons stay below the admission threshold", async (kind) => {
+  const s = await sample(
+    files({
+      "/sys/fs/cgroup/account/memory.max": kind === "hard" ? "10000" : "max",
+      "/sys/fs/cgroup/account/memory.high": kind === "high" ? "10000" : "max",
+      "/sys/fs/cgroup/account/memory.current": "8001",
+    }),
+  );
+  expect(s.cgroup?.[kind]?.freePct).toBeCloseTo(19.99);
+  const reason = `cgroup v2 ${kind} headroom 19.9% < 20%`;
+  expect(canLaunch(s, thresholds)).toEqual({ ok: false, reasons: [reason] });
+  expect(guardTick(s, thresholds, { alerting: false, computeReady: true })).toEqual([`HOST_GUARD ALERT ${reason}`]);
+});
+
 test("cgroup headroom never overrides a low host-memory alert", async () => {
   const s = await sample(files({ "/sys/fs/cgroup/account/memory.current": "0" }));
   expect(canLaunch({ ...s, memFreePct: 10 }, thresholds).reasons).toEqual(["memory free 10% < 20%"]);

@@ -19,6 +19,15 @@ const v2 = {
   "/cg/group/memory.stat": noCache,
 };
 
+test("a visible v2 hierarchy without non-root memory interfaces retains its version and marks incomplete", () => {
+  expect(
+    sample({
+      "/proc/self/cgroup": v2["/proc/self/cgroup"],
+      "/proc/self/mountinfo": v2["/proc/self/mountinfo"],
+    }),
+  ).toEqual({ version: 2, hard: null, high: null, incomplete: true });
+});
+
 test("v1 uses the memory mount and ancestor usage, not the soft-limit hint", () => {
   const s = sample({
     "/proc/self/cgroup": "0::/unified\n5:cpu,cpuacct:/jobs\n7:memory:/account/leaf",

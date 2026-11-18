@@ -62,7 +62,9 @@ export const memoryReasons = (s: HostSample, t: GuardThresholds): string[] => {
   for (const kind of ["hard", "high"] as const) {
     const budget = s.cgroup?.[kind];
     if (budget && budget.freePct < t.memFreeMinPct)
-      reasons.push(`cgroup v${s.cgroup?.version} ${kind} headroom ${budget.freePct.toFixed(1)}% < ${t.memFreeMinPct}%`);
+      reasons.push(
+        `cgroup v${s.cgroup?.version} ${kind} headroom ${(Math.floor(budget.freePct * 10) / 10).toFixed(1)}% < ${t.memFreeMinPct}%`,
+      );
   }
   return reasons;
 };
