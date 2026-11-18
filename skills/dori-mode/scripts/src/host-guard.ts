@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { type CgroupMemory, sampleCgroupMemory } from "./cgroup-memory.ts";
 import type { GuardThresholds } from "./config.ts";
 import { type ChosenRuntimes, type Runner, runtimesFor } from "./run.ts";
 import { listSessions } from "./sessions.ts";
@@ -6,6 +7,7 @@ import { listSessions } from "./sessions.ts";
 export type HostSample = {
   readonly load1: number;
   readonly memFreePct: number;
+  readonly cgroup?: CgroupMemory;
   readonly diskFreeGb: number;
   readonly swapFreeGb: number;
   readonly panes: number;
@@ -61,13 +63,27 @@ export const sampleHost = async (
     (sessions) => sessions.length,
     () => -1,
   );
-  return { load1, memFreePct, diskFreeGb, swapFreeGb, panes };
+  const cgroup = linux ? sampleCgroupMemory(system.readFile) : undefined;
+  return { load1, memFreePct, diskFreeGb, swapFreeGb, panes, ...(cgroup ? { cgroup } : {}) };
+};
+
+export const memoryReasons = (s: HostSample, t: GuardThresholds): string[] => {
+  const reasons: string[] = [];
+  if (s.memFreePct < t.memFreeMinPct) reasons.push(`memory free ${s.memFreePct}% < ${t.memFreeMinPct}%`);
+  for (const kind of ["hard", "high"] as const) {
+    const budget = s.cgroup?.[kind];
+    if (budget && budget.freePct < t.memFreeMinPct)
+      reasons.push(
+        `cgroup v${s.cgroup?.version} ${kind} headroom ${(Math.floor(budget.freePct * 10) / 10).toFixed(1)}% < ${t.memFreeMinPct}%`,
+      );
+  }
+  return reasons;
 };
 
 export const alertReasons = (s: HostSample, t: GuardThresholds): string[] => {
   const r: string[] = [];
   if (s.load1 > t.loadAlert) r.push(`load ${s.load1.toFixed(0)} > ${t.loadAlert}`);
-  if (s.memFreePct < t.memFreeMinPct) r.push(`memory free ${s.memFreePct}% < ${t.memFreeMinPct}%`);
+  r.push(...memoryReasons(s, t));
   if (s.diskFreeGb < t.diskFreeMinGb) r.push(`disk free ${s.diskFreeGb.toFixed(0)} GB < ${t.diskFreeMinGb} GB`);
   if (t.panesMax > 0 && s.panes < 0) r.push("session count unknown");
   if (t.panesMax > 0 && s.panes > t.panesMax) r.push(`panes ${s.panes} > ${t.panesMax}`);

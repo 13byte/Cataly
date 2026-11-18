@@ -48,8 +48,15 @@ const fixture = (
 
 test("Linux reads proc directly and only spawns df and the selected session list", async () => {
   const f = fixture("linux");
-  expect(await f.result).toEqual({ load1: 0.5, memFreePct: 25, diskFreeGb: 0.5, swapFreeGb: 0, panes: 0 });
-  expect(f.reads).toEqual(["/proc/loadavg", "/proc/meminfo"]);
+  expect(await f.result).toEqual({
+    load1: 0.5,
+    memFreePct: 25,
+    diskFreeGb: 0.5,
+    swapFreeGb: 0,
+    panes: 0,
+    cgroup: { version: null, hard: null, high: null, incomplete: true },
+  });
+  expect(f.reads).toEqual(["/proc/loadavg", "/proc/meminfo", "/proc/self/cgroup", "/proc/self/mountinfo"]);
   expect(f.calls).toHaveLength(2);
   expect(f.calls[0]).toEqual(["df", "-k", "/data path"]);
   expect(f.calls[1]?.[0]).toBe("herdr");
