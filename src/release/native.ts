@@ -16,7 +16,7 @@ import { basename, join, resolve } from "node:path";
 import { shq } from "../delivery.ts";
 import { command } from "../update/deployment-process.ts";
 import { digest } from "../update/source.ts";
-import { owned, readJson, realDirectory, regularFile, saveJson } from "./files.ts";
+import { fileDigest, owned, readJson, realDirectory, regularFile, saveJson } from "./files.ts";
 import { leaseNativeIdentity, nativeStagePrefix } from "./native-cache-lease.ts";
 import { assertNativeExport } from "./native-export.ts";
 import { assertSourceBundle, bundleEnv, readSourceBundle } from "./source-bundle.ts";
@@ -105,11 +105,11 @@ export function assertNativeSource(
     receipt.ompHash !== digest(nativeLauncher(receipt.source, home, directory, receipt.bun)) ||
     receipt.entry !== join(checkout, "packages/coding-agent/src/cli.ts") ||
     receipt.bun !== realpathSync(bun) ||
-    receipt.bunHash !== digest(readFileSync(bun)) ||
+    receipt.bunHash !== fileDigest(bun) ||
     receipt.ompHash !== digest(readFileSync(receipt.omp)) ||
     receipt.addonLockHash !== digest(readFileSync(join(source, "native-addon/bun.lock"))) ||
     !regularFile(receipt.addon) ||
-    receipt.addonHash !== digest(readFileSync(receipt.addon)) ||
+    receipt.addonHash !== fileDigest(receipt.addon) ||
     receipt.addon !== join(checkout, "packages/natives/native", basename(receipt.addon)) ||
     realpathSync(join(directory, "bin/bun")) !== receipt.bun ||
     !regularFile(join(checkout, LAUNCHER)) ||
@@ -232,10 +232,10 @@ export async function provisionNativeSource(
       ompHash: digest(launcher),
       entry: join(directory, "source/packages/coding-agent/src/cli.ts"),
       bun,
-      bunHash: digest(readFileSync(bun)),
+      bunHash: fileDigest(bun),
       addonLockHash: digest(readFileSync(join(source, "native-addon/bun.lock"))),
       addon: join(directory, "source/packages/natives/native", basename(official)),
-      addonHash: digest(readFileSync(target)),
+      addonHash: fileDigest(target),
     };
     assertSourceBundle(checkout, bundle, home);
     saveJson(join(stage, "native-config.json"), { update: { auto: false } });

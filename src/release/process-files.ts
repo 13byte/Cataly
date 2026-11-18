@@ -48,8 +48,8 @@ export function processFiles(platform = process.platform): ProcessFiles | null {
     } catch {
       return null;
     }
-    // A run cut short printed only part of the table.
-    if (lsof.exitedDueToTimeout || lsof.signalCode || !lsof.stdout?.length) return null;
+    // A failed or cut-short run may have printed only part of the table.
+    if (lsof.exitCode !== 0 || lsof.exitedDueToTimeout || lsof.signalCode || !lsof.stdout?.length) return null;
     let pid = "";
     for (const line of lsof.stdout.toString().split("\n")) {
       if (line.startsWith("p")) pid = line.slice(1);

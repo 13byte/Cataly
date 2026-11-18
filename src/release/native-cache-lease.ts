@@ -1,5 +1,14 @@
 import { dlopen, FFIType } from "bun:ffi";
-import { closeSync, constants as fsConstants, lstatSync, openSync, readdirSync, rmdirSync, rmSync } from "node:fs";
+import {
+  closeSync,
+  constants as fsConstants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readdirSync,
+  rmdirSync,
+  rmSync,
+} from "node:fs";
 import { join } from "node:path";
 import { bootId, processExists, procStat } from "../update/proc.ts";
 import { owned, realDirectory } from "./files.ts";
@@ -111,7 +120,18 @@ const [SHARED, EXCLUSIVE, NONBLOCKING, UNLOCK] = [1, 2, 4, 8];
 
 /** The prune lock file, opened without following a link; a directory or anything else there cannot be locked. */
 function openLock(cache: string): number {
-  return openSync(join(cache, LOCK), fsConstants.O_RDWR | fsConstants.O_CREAT | fsConstants.O_NOFOLLOW, 0o600);
+  const fd = openSync(
+    join(cache, LOCK),
+    fsConstants.O_RDWR | fsConstants.O_CREAT | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK,
+    0o600,
+  );
+  try {
+    if (!fstatSync(fd).isFile()) throw new Error("Native cache prune lock must be a regular file");
+    return fd;
+  } catch (error) {
+    closeSync(fd);
+    throw error;
+  }
 }
 
 /** Whether no prune holds the lock right now; one that cannot be checked counts as held. */

@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { shq } from "../src/delivery.ts";
 import { processStart } from "../src/release/process-cwd.ts";
 import { processFiles } from "../src/release/process-files.ts";
 import { bootId } from "../src/update/proc.ts";
@@ -125,4 +126,38 @@ test("process files are read the macOS way through lsof, and are unavailable whe
     holder.stdin.end();
     await holder.exited;
   }
+});
+
+test.each([0, 1])("a lsof listing with exit %i keeps uncertainty conservative", (status) => {
+  const c = pruneFixture();
+  const x = c.native("lsof");
+  const bin = join(c.root, "bin");
+  mkdirSync(bin);
+  const listed = status === 0 ? x.omp : join(c.root, "unrelated-file");
+  writeFileSync(
+    join(bin, "lsof"),
+    `#!/bin/sh\nprintf '%s\\n' ${shq(`p${process.pid}`)} ${shq(`n${listed}`)}\nexit ${status}\n`,
+    { mode: 0o700 },
+  );
+  const code = `const { processFiles } = await import(${JSON.stringify(resolve(import.meta.dir, "../src/release/process-files.ts"))});
+const read = processFiles("darwin");
+console.log(JSON.stringify(read && { files: [...read.files], unread: read.unread }));`;
+  const child = Bun.spawnSync([process.execPath, "-e", code], {
+    env: { ...process.env, PATH: `${bin}:${process.env["PATH"] ?? ""}` },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  expect(child.exitCode).toBe(0);
+  expect(child.stderr.toString()).toBe("");
+  const snapshot = JSON.parse(child.stdout.toString()) as { files: [string, string[]][]; unread: string[] } | null;
+  const read = snapshot && { files: new Map(snapshot.files), unread: snapshot.unread };
+  if (status === 0) expect(read?.files.get(String(process.pid))).toEqual([x.omp]);
+  else expect(read).toBeNull();
+  const pruned = c.prune({ files: () => read });
+  expect(pruned.removed).toEqual([]);
+  expect(pruned.quarantined).toEqual([]);
+  expect(keptFor(pruned, x.directory)).toContain(
+    status === 0 ? `process ${process.pid} has it open, mapped or running` : "open files of processes unavailable",
+  );
+  expect(existsSync(x.omp)).toBe(true);
 });

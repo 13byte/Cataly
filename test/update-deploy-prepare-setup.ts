@@ -25,13 +25,11 @@ export function preparationFixture() {
   const tracked: string[] = [];
   for (const relative of ["", "skills/dori-mode/scripts", "extension"]) {
     const prefix = relative ? `${relative}/` : "";
-    for (const name of ["fixture-dep", "fixture-dev"]) {
-      put(
-        `${prefix}${name}/package.json`,
-        JSON.stringify({ name, version: "1.0.0", type: "module", exports: "./index.ts" }),
-      );
-      put(`${prefix}${name}/index.ts`, "export const localDependency = 1;\n");
-    }
+    put(
+      `${prefix}fixture-dep/package.json`,
+      '{"name":"fixture-dep","version":"1.0.0","type":"module","exports":"./index.ts"}',
+    );
+    put(`${prefix}fixture-dep/index.ts`, "export const localDependency = 1;\n");
     put(
       `${prefix}package.json`,
       JSON.stringify({
@@ -39,7 +37,6 @@ export function preparationFixture() {
         version: "1.0.0",
         type: "module",
         dependencies: { "fixture-dep": "file:./fixture-dep" },
-        devDependencies: { "fixture-dev": "file:./fixture-dev" },
       }),
     );
     const installed = Bun.spawnSync([process.execPath, "install", "--ignore-scripts", "--silent"], {
@@ -54,8 +51,6 @@ export function preparationFixture() {
       `${prefix}bun.lock`,
       `${prefix}fixture-dep/package.json`,
       `${prefix}fixture-dep/index.ts`,
-      `${prefix}fixture-dev/package.json`,
-      `${prefix}fixture-dev/index.ts`,
     );
   }
   put("src/app.ts", "export const release = 'published';\n");

@@ -177,3 +177,28 @@ test("B6 a live process of this user whose working directory cannot be read keep
     await holder.exited;
   }
 });
+
+test.each(["node_modules", ".git"])("a skipped %s subtree holds a prune until explicitly scanned", (name) => {
+  const c = pruneFixture();
+  const used = c.native("used");
+  const free = c.native("free");
+  const skipped = join(c.refs, name);
+  mkdirSync(join(skipped, ".bin"), { recursive: true });
+  symlinkSync(used.omp, join(skipped, ".bin/omp"));
+  const hidden = c.prune({ deleteQuarantined: true });
+  for (const entry of [used, free]) {
+    expect(keptFor(hidden, entry.directory)).toEqual([`unscanned directory ${skipped}`]);
+    expect(existsSync(entry.omp)).toBe(true);
+  }
+  expect(hidden.quarantined).toEqual([]);
+  expect(hidden.removed).toEqual([]);
+  const scanned = c.prune({}, [skipped]);
+  expect(keptFor(scanned, used.directory)).toEqual([`link ${join(skipped, ".bin/omp")}`]);
+  expect(scanned.quarantined.map((entry) => entry.directory)).toEqual([free.directory]);
+  expect(scanned.removed).toEqual([]);
+  expect(existsSync(`${free.directory}.pruning`)).toBe(true);
+  const removed = c.prune({ deleteQuarantined: true }, [skipped]);
+  expect(removed.removed.map((entry) => entry.directory)).toEqual([free.directory]);
+  expect(existsSync(used.omp)).toBe(true);
+  expect(existsSync(`${free.directory}.pruning`)).toBe(false);
+});

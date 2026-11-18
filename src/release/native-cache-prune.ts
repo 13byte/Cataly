@@ -25,7 +25,7 @@ type Quarantined = {
 };
 export type NativeCachePrune = {
   readonly removed: readonly NativeCacheRemoval[];
-  /** Unused identities moved aside (`.pruning`), removed by a later prune once still unused after the grace period. */
+  /** Unused identities moved aside (`.pruning`); only an explicit `--delete-quarantined` may remove them after grace. */
   readonly quarantined: readonly Quarantined[];
   readonly kept: readonly NativeCacheEntry[];
   /** Each `--trust-process PID@START` and whether it still named that process at the last look. */
@@ -44,7 +44,7 @@ export type NativeCachePruneOptions = {
   /** How long an identity stays quarantined, unused, before a prune may remove it (`--grace MINUTES`). */
   readonly graceMs?: number;
   /**
-   * `--delete-quarantined`: remove quarantined copies unused through the grace period. Without it nothing is ever
+   * `--delete-quarantined`: remove quarantined copies unused through the grace period. Without it no identity is
    * removed: an older writer that takes no lease cannot be proven absent, so removal is the user's decision.
    */
   readonly deleteQuarantined?: boolean;
@@ -55,8 +55,8 @@ export const GRACE_MS = 10 * 60_000;
 const AGAIN = "quarantined copy kept: its live name exists again; remove it by hand once nothing uses it";
 
 /**
- * Quarantine the native cache identities nothing uses, holding the prune lock throughout. Nothing is removed unless
- * the user asks (`deleteQuarantined`): a writer from an older checkout takes no lease, and its absence cannot be proven.
+ * Quarantine native cache identities nothing uses, holding the prune lock throughout. No identity is removed unless
+ * the user asks (`deleteQuarantined`): an older writer's absence cannot be proven. Dead unused stages may be removed.
  *
  * A prune first removes preparations nothing can still finish and puts a copy an interrupted removal left back into
  * quarantine. One look then judges every identity and every quarantined copy under both its names. An unused identity

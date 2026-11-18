@@ -1,5 +1,4 @@
-import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
-import * as fs from "node:fs";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import { appendFileSync, chmodSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { freshnessTick } from "../src/freshness.ts";
@@ -138,45 +137,4 @@ test("a lane directory created earlier with wider permissions is made 0700 on th
   chmodSync(dir, 0o755);
   reports.report(lane.key, "milestone", "first", T0);
   expect(statSync(dir).mode & 0o777).toBe(0o700);
-});
-
-test("a memoizing reader re-reads a journal only after it grew, from any writer, and corruption still throws", () => {
-  const tick = new Reports(state.dir, { memo: true });
-  reports.report(lane.key, "milestone", "one", T0);
-  const reads = spyOn(fs, "readFileSync");
-  const journalReads = () => reads.mock.calls.filter((call) => call[0] === reports.path(lane.key)).length;
-  try {
-    expect(tick.read(lane.key)?.lastReport?.text).toBe("one");
-    expect(tick.read(lane.key)?.lastReport?.text).toBe("one");
-    expect(journalReads()).toBe(1);
-    // Another writer's append is read on the next call.
-    new Reports(state.dir).report(lane.key, "question", "two", T0 + 1);
-    expect(tick.read(lane.key)?.state).toBe("blocked");
-    expect(journalReads()).toBe(2);
-    appendFileSync(reports.path(lane.key), "{partial\n");
-    expect(() => tick.read(lane.key)).toThrow("reports.jsonl:3:");
-    expect(() => tick.read(lane.key)).toThrow("reports.jsonl:3:");
-  } finally {
-    reads.mockRestore();
-  }
-});
-
-test("a quiet freshness tick reads the lane journal once and runs git status once", async () => {
-  // Given a reporting lane with a cwd, already observed by one tick.
-  const world = newWorld();
-  world.screen = "Working (1m)\n❯ ";
-  const deps = depsFor(world, fakeClock(T0 + MIN), state.dir);
-  await deps.registry.write({ ...lane, cwd: "/repo", lastReplyAt: T0 + MIN });
-  reports.report(lane.key, "milestone", "started", T0);
-  await freshnessTick(deps, "/home/test");
-  const reads = spyOn(fs, "readFileSync");
-  try {
-    world.calls = [];
-    // When nothing changed; then the tick shares its journal read and activity observation.
-    expect(await freshnessTick(deps, "/home/test")).toEqual([]);
-    expect(reads.mock.calls.filter((call) => call[0] === reports.path(lane.key))).toHaveLength(1);
-    expect(world.calls.filter((call) => call[0] === "git" && call.includes("status"))).toHaveLength(1);
-  } finally {
-    reads.mockRestore();
-  }
 });

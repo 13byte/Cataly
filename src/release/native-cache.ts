@@ -26,16 +26,21 @@ const ENTRY = new RegExp(`^native-${process.platform}-${process.arch}-([a-f0-9]{
 export function exclusiveBytes(directory: string): number {
   const inodes = new Map<string, { size: number; links: number; seen: number }>();
   const stack = [directory];
+  let bytes = 0;
   while (stack.length) {
     const path = stack.pop()!;
     const stat = lstatSync(path);
-    if (stat.isDirectory()) for (const name of readdirSync(path)) stack.push(join(path, name));
+    // Directory nlink includes . and child .. entries, not external hardlinks to retain.
+    if (stat.isDirectory()) {
+      bytes += stat.size;
+      for (const name of readdirSync(path)) stack.push(join(path, name));
+      continue;
+    }
     const key = `${stat.dev}:${stat.ino}`;
     const inode = inodes.get(key) ?? { size: stat.size, links: stat.nlink, seen: 0 };
     inode.seen++;
     inodes.set(key, inode);
   }
-  let bytes = 0;
   for (const inode of inodes.values()) if (inode.seen >= inode.links) bytes += inode.size;
   return bytes;
 }

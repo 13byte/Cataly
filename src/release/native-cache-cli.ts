@@ -1,4 +1,3 @@
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ConsumerPaths } from "./files.ts";
 import { reportNativeCache } from "./native-cache.ts";
@@ -20,10 +19,11 @@ const UNREADABLE = /^unreadable (?:working directory|open files) of process (\d+
 /**
  * `dori update cache`: the report by default, which removes nothing and lists the processes `--trust-process` could
  * name (`trustable`), the privileged ones `--trust-root-cwd` lets pass as a whole (`privileged`) and what waits
- * (`pending`: quarantined copies, interrupted work); `--prune` quarantines and later removes under the prune lock. Both scan the running release, the Dori home, the side home and every `--reference`
- * root.
+ * (`pending`: quarantined copies, interrupted work). `--prune` quarantines or restores; only an explicit
+ * `--delete-quarantined` also removes eligible copies. Both scan default, selected, loaded and configured homes and
+ * every `--reference` root.
  */
-export function runCacheCommand(paths: ConsumerPaths, options: CacheOptions): number {
+export function runCacheCommand(paths: ConsumerPaths, options: CacheOptions, installedHome?: string): number {
   const trust = options["trust-process"];
   const trustRootCwd = options["trust-root-cwd"] === true;
   const deleteQuarantined = options["delete-quarantined"] === true;
@@ -34,9 +34,19 @@ export function runCacheCommand(paths: ConsumerPaths, options: CacheOptions): nu
   if (options.grace !== undefined && !/^\d+$/.test(options.grace)) throw new Error("--grace takes whole minutes");
   const sources = [resolve(import.meta.dir, "../..")];
   const roots = [
-    paths.dori,
-    process.env["OMP_DORI_HOME"] || join(homedir(), ".omp-dori"),
-    ...(options.reference ?? []).map((path) => resolve(path)),
+    ...new Set(
+      [
+        join(paths.home, ".dori"),
+        join(paths.home, ".omp-dori"),
+        paths.dori,
+        installedHome,
+        process.env["DORI_HOME"],
+        process.env["OMP_DORI_HOME"],
+        ...(options.reference ?? []),
+      ]
+        .filter((path): path is string => Boolean(path))
+        .map((path) => resolve(path)),
+    ),
   ];
   if (options.prune) {
     const pruned = pruneNativeCache(paths.home, sources, roots, {

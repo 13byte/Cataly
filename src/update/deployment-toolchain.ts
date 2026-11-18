@@ -46,6 +46,8 @@ export async function inspectRuntimeToolchain(
   legacy = false,
   nativeSource?: NativeReceipt,
 ): Promise<ToolchainReceipt> {
+  // Direct prior-image inspection also verifies and records an explicit executable inside the cache.
+  leaseNativePath(config.home, omp);
   const nativeConfig = join(config.releaseRoot, "native-config.json");
   const existing = lstatSync(nativeConfig, { throwIfNoEntry: false });
   if (existing) {
@@ -116,8 +118,6 @@ export async function prepareRuntimeToolchain(config: DeploymentConfig, record: 
     locked && !config.omp ? await provisionNativeSource(record.releasePath, config.home, config.bun) : undefined;
   const omp = native?.omp ?? config.omp;
   if (!omp) throw new DeploymentHeld("older source protocol needs its explicit native executable");
-  // An explicit executable in the native cache is held like a prepared one while this record comes to name it.
-  if (!native) leaseNativePath(config.home, omp);
   record.toolchain = await inspectRuntimeToolchain(config, record, omp, false, native);
   if (locked) {
     const entry = await provisionSourceOverlay(record.releasePath, config.home);

@@ -24,13 +24,6 @@ test("published clone provisions frozen dependencies privately and carries only 
   expect(readFileSync(join(f.home, ".dori/config.json"), "utf8")).toBe('{"owner":"unchanged"}\n');
   expect(readFileSync(join(f.home, ".dori/state/owner.json"), "utf8")).toBe('{"cursor":17}\n');
   expect(lstatSync(f.config.liveSource, { throwIfNoEntry: false })).toBeUndefined();
-  // Root and skill runtimes import no development tool; the extension keeps its complete frozen host install.
-  const installed = (relative: string, name: string) =>
-    lstatSync(join(f.record.releasePath, relative, "node_modules", name), { throwIfNoEntry: false }) !== undefined;
-  for (const relative of ["", "skills/dori-mode/scripts", "extension"]) {
-    expect(installed(relative, "fixture-dep")).toBe(true);
-    expect(installed(relative, "fixture-dev")).toBe(relative === "extension");
-  }
   f.record.preparedAt = new Date().toISOString();
   await prepareRelease(f.config, f.input, f.record);
   expect(sourceManifest(f.record.releasePath).hash).toBe(candidateBefore.hash);

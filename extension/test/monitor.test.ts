@@ -91,61 +91,6 @@ describe("Monitors", () => {
     expect(monitors.stop("dup")).toBe(false);
   });
 
-  test("a batch of notices is delivered without waking; any other line or an exit wakes", async () => {
-    const batches: Array<{ content: string; wake: boolean }> = [];
-    const monitors = new Monitors(
-      (content, wake) => batches.push({ content, wake }),
-      () => "s1",
-      100,
-    );
-    const notices = ["LANE_WATCH_READY", "NUDGED a-lane 16 min silent, delivery delivered", "PENDING-REPORT a-lane x"];
-    const { pid } = monitors.start(
-      "notes",
-      ["sh", "-c", `${notices.map((line) => `echo '${line}'`).join("; ")}; exec sleep 30`],
-      ".",
-      "/",
-      "s1",
-    );
-    await until(() => batches.flatMap((b) => b.content.split("\n")).length === notices.length);
-    expect(batches.every((b) => !b.wake)).toBe(true);
-    monitors.stop("notes");
-    await until(() => !alive(pid));
-    batches.length = 0;
-    // INBOUND_READY, a stall, HOST_GUARD COMPUTE_READY and a nudge that did not land wake even beside a notice, while
-    // the monitor is still running.
-    for (const line of [
-      "INBOUND_READY discord owner=1",
-      "STALLED a-lane idle",
-      "HOST_GUARD COMPUTE_READY load 1 < 2",
-      "NUDGED a-lane 16 min silent, delivery failed",
-      "NUDGED a-lane 16 min silent, delivery unconfirmed",
-      // Freshness prints POSTED whatever the thread hook's exit status was.
-      "POSTED a-lane Progress (from the lane's last report): x",
-      // A silent lane with nothing to post leaves its thread without an update: the lead is told, as before.
-      "NO-REPORT a-lane report journal has no report",
-      // So does one whose last report was already posted: the thread still has nothing new.
-      "STALE-REPORT a-lane the last [REPORT] line was already posted",
-    ]) {
-      const running = monitors.start(
-        "mixed",
-        ["sh", "-c", `echo 'PENDING-REPORT a-lane x'; echo "${line}"; exec sleep 30`],
-        ".",
-        "/",
-        "s1",
-      );
-      await until(() => batches.flatMap((b) => b.content.split("\n")).length === 2);
-      expect(batches.map((b) => b.wake)).toEqual([true]);
-      expect(batches[0]?.content).toContain(line);
-      monitors.stop("mixed");
-      await until(() => !alive(running.pid));
-      batches.length = 0;
-    }
-    // A monitor's own exit wakes even after only notices.
-    monitors.start("ends", ["sh", "-c", "echo 'PENDING-REPORT a-lane x'"], ".", "/", "s1");
-    await until(() => batches.some((b) => b.content.includes("exited")));
-    expect(batches.find((b) => b.content.includes("exited"))?.wake).toBe(true);
-  });
-
   test("rejects an invalid filter before spawning", () => {
     const { monitors } = collect();
     expect(() => monitors.start("bad", ["sleep", "30"], "(", "/", "s1")).toThrow();
@@ -175,23 +120,6 @@ describe("monitor tool", () => {
     await dori.emit("session_shutdown");
     await until(() => !alive(pid));
     expect((await run(dori, { op: "list" }))?.content[0]?.text).toBe("no monitors running");
-  });
-
-  test("a notice is recorded for the next turn without starting one", async () => {
-    await run(dori, {
-      op: "start",
-      name: "fresh",
-      argv: ["sh", "-c", "echo 'NUDGED a-lane 16 min silent, delivery delivered'; exec sleep 30"],
-      filter: ".",
-    });
-    await until(() => dori.messages.length > 0);
-    expect(dori.messages).toEqual([
-      {
-        content: "[fresh] NUDGED a-lane 16 min silent, delivery delivered",
-        options: { triggerTurn: false, deliverAs: "nextTurn" },
-      },
-    ]);
-    await dori.emit("session_shutdown");
   });
 
   test("monitors stop when the Dori session switches away", async () => {

@@ -1,24 +1,16 @@
 /**
  * Persistent monitors for the Dori session: a command runs in the background (argv, never a shell) and every
- * stdout/stderr line matching its filter is delivered to the session. A line that needs the lead wakes it; a
- * notice of something already done or held is recorded for the next turn without starting one. This is the
- * "your monitor tool" the Dori setup expects; omp has no built-in equivalent.
+ * stdout/stderr line matching its filter wakes the session. This is the "your monitor tool" the Dori setup
+ * expects; omp has no built-in equivalent.
  */
 import type { Subprocess } from "bun";
+import { MonitorOutputFile, readMonitorOutput } from "./monitor-output";
 
 /** Lines arriving within this window after the first one are delivered together. */
 export const BATCH_MS = 300;
 /** A burst longer than this is split so one message never grows unbounded. */
 const BATCH_MAX_LINES = 100;
-/**
- * Notices that need no turn of their own: a loop that started (INBOUND_READY still wakes, for onboarding), a presence
- * heartbeat, a NUDGED whose delivery was confirmed, and PENDING-REPORT (posted on the next tick). Every other line
- * wakes, including a nudge whose delivery failed or is unconfirmed (it is not retried), POSTED (freshness prints it
- * without checking the thread hook's exit status), NO-REPORT and STALE-REPORT (a silent lane's thread gets no new
- * update), STALLED, JOURNAL-ERROR, WORKING-WHILE-PAUSED, BLOCKED, warnings, errors and an exited monitor.
- */
-const NOTICE =
-  /^(?:(?:LANE_WATCH_READY|HOST_GUARD_READY|PRESENCE_READY|PRESENCE_ACK|PENDING-REPORT)(?:\s|$)|NUDGED\s.*, delivery delivered\s*$)/;
+const BATCH_MAX_BYTES = 64 * 1024;
 
 type Running = {
   readonly name: string;
@@ -41,18 +33,14 @@ export type MonitorInfo = {
 
 export class Monitors {
   readonly #running = new Map<string, Running>();
-  #pending: Array<{ readonly session: string; readonly text: string; readonly wake: boolean }> = [];
+  #pending: Array<{ readonly session: string; readonly text: string }> = [];
   #timer: Timer | undefined;
-  readonly #deliver: (content: string, wake: boolean) => void;
+  #pendingBytes = 0;
+  readonly #deliver: (content: string) => void;
   readonly #currentSession: () => string | undefined;
   readonly #batchMs: number;
 
-  /** `deliver` gets each batch and whether any line in it wakes the session. */
-  constructor(
-    deliver: (content: string, wake: boolean) => void,
-    currentSession: () => string | undefined,
-    batchMs = BATCH_MS,
-  ) {
+  constructor(deliver: (content: string) => void, currentSession: () => string | undefined, batchMs = BATCH_MS) {
     this.#deliver = deliver;
     this.#currentSession = currentSession;
     this.#batchMs = batchMs;
@@ -66,17 +54,25 @@ export class Monitors {
     const proc = Bun.spawn([...argv], { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     const entry: Running = { name, argv: [...argv], filter: pattern, cwd, proc, session, stopped: false };
     this.#running.set(name, entry);
-    void Promise.all([this.#pump(entry, proc.stdout), this.#pump(entry, proc.stderr), proc.exited]).then(
-      ([, , code]) => {
+    void Promise.all([this.#pump(entry, proc.stdout, "stdout"), this.#pump(entry, proc.stderr, "stderr"), proc.exited])
+      .then(([, , code]) => {
         if (this.#running.get(name) === entry) this.#running.delete(name);
         if (entry.stopped) return;
         this.#queue(
           entry,
           `[${name}] monitor exited (${proc.signalCode ? `signal ${proc.signalCode}` : `code ${code}`}): ${argv.join(" ")}`,
-          true,
         );
-      },
-    );
+      })
+      .catch((error: unknown) => {
+        if (entry.stopped) return;
+        entry.stopped = true;
+        entry.proc.kill();
+        if (this.#running.get(name) === entry) this.#running.delete(name);
+        this.#queue(
+          entry,
+          `[monitor] output failed for name=${JSON.stringify(name.slice(0, 256))}${name.length > 256 ? "..." : ""} pid=${proc.pid}; stopped; raw output may be incomplete: ${String(error).slice(0, 2048)}`,
+        );
+      });
     return { name, argv: entry.argv, filter, cwd, pid: proc.pid };
   }
 
@@ -105,28 +101,40 @@ export class Monitors {
     clearTimeout(this.#timer);
     this.#timer = undefined;
     this.#pending = [];
+    this.#pendingBytes = 0;
   }
 
-  async #pump(entry: Running, stream: ReadableStream<Uint8Array>): Promise<void> {
-    const decoder = new TextDecoder();
-    let rest = "";
-    for await (const chunk of stream) {
-      rest += decoder.decode(chunk, { stream: true });
-      const lines = rest.split("\n");
-      rest = lines.pop() ?? "";
-      for (const line of lines) this.#line(entry, line.replace(/\r$/, ""));
-    }
-    rest += decoder.decode();
-    if (rest) this.#line(entry, rest);
+  async #pump(entry: Running, stream: ReadableStream<Uint8Array>, source: string): Promise<void> {
+    await readMonitorOutput(
+      stream,
+      (line) => this.#line(entry, line),
+      (notice) => {
+        if (!entry.stopped) this.#queue(entry, `[${entry.name}] monitor ${source} ${notice}`);
+      },
+      () => entry.stopped,
+    );
   }
 
   #line(entry: Running, line: string): void {
-    if (!entry.stopped && entry.filter.test(line)) this.#queue(entry, `[${entry.name}] ${line}`, !NOTICE.test(line));
+    if (!entry.stopped && entry.filter.test(line)) this.#queue(entry, `[${entry.name}] ${line}`);
   }
 
-  #queue(entry: Running, text: string, wake: boolean): void {
-    this.#pending.push({ session: entry.session, text, wake });
-    if (this.#pending.length >= BATCH_MAX_LINES) this.#flush();
+  #queue(entry: Running, text: string): void {
+    let bytes = Buffer.byteLength(text);
+    if (bytes > BATCH_MAX_BYTES) {
+      const output = new MonitorOutputFile();
+      try {
+        output.write(Buffer.from(text));
+      } finally {
+        output.close();
+      }
+      text = `[monitor] message saved for name=${JSON.stringify(entry.name.slice(0, 256))}${entry.name.length > 256 ? "..." : ""} pid=${entry.proc.pid}: ${bytes} bytes; file=${JSON.stringify(output.path)}`;
+      bytes = Buffer.byteLength(text);
+    }
+    if (this.#pendingBytes + bytes + (this.#pending.length ? 1 : 0) > BATCH_MAX_BYTES) this.#flush();
+    this.#pendingBytes += bytes + (this.#pending.length ? 1 : 0);
+    this.#pending.push({ session: entry.session, text });
+    if (this.#pending.length >= BATCH_MAX_LINES || this.#pendingBytes >= BATCH_MAX_BYTES) this.#flush();
     else this.#timer ??= setTimeout(() => this.#flush(), this.#batchMs);
   }
 
@@ -134,19 +142,17 @@ export class Monitors {
     clearTimeout(this.#timer);
     this.#timer = undefined;
     const current = this.#currentSession();
-    const lines = this.#pending.filter((line) => line.session === current);
+    const lines = this.#pending.filter((line) => line.session === current).map((line) => line.text);
     this.#pending = [];
-    if (lines.length > 0)
-      this.#deliver(
-        lines.map((line) => line.text).join("\n"),
-        lines.some((line) => line.wake),
-      );
+    this.#pendingBytes = 0;
+    if (lines.length > 0) this.#deliver(lines.join("\n"));
   }
 }
 
 export const MONITOR_DESCRIPTION = [
   "Persistent background monitors for this Dori session.",
-  'op "start" runs `argv` (an argument array, never a shell string) in the session cwd and reads its stdout and stderr line by line. Every line matching the `filter` regular expression reaches this session as a message `[name] line`; lines arriving together are delivered in one message. Such a message wakes the session unless all its lines are notices that need no action (LANE_WATCH_READY, HOST_GUARD_READY, PRESENCE_READY, PRESENCE_ACK, a NUDGED line ending "delivery delivered", PENDING-REPORT): those are recorded for the next turn without starting one. When a monitor process exits on its own, that is reported the same way; restarting it is your decision.',
+  'op "start" runs `argv` (an argument array, never a shell string) in the session cwd and reads its stdout and stderr line by line. Every line matching the `filter` regular expression wakes this session as a message `[name] line`; lines arriving together are delivered in one message. When a monitor process exits on its own, that is reported the same way; restarting it is your decision.',
+  "Lines over 64 KiB are streamed to a private temporary file instead of filtered or truncated. An immediate warning gives its path; completion gives its raw byte count. Batches are limited to 64 KiB including prefixes and separators; an oversized rendered message is preserved in a file too. Read those files for the complete output. They survive monitor stop; remove them only when no longer needed. Storage/read failure stops the monitor and reports potentially incomplete output.",
   'op "stop" kills the monitor `name` and forgets it. op "list" shows running monitors. Names are unique: starting a running name fails.',
   "Started monitors are recorded in this session. Their processes stop when omp exits, and when the session is resumed (herdr restoring it after a restart, or `omp --resume`) every monitor that was not stopped is started again and announced as `[monitor] restored ...`; you do not need to start them again.",
 ].join("\n");

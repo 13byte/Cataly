@@ -101,7 +101,7 @@ export async function runConsumerUpdate(argv: string[]): Promise<number> {
     const paths = consumerPaths(homedir(), selected);
     realDirectory(paths.dori);
     realDirectory(paths.root);
-    if (command === "cache") return runCacheCommand(paths, args.values);
+    if (command === "cache") return runCacheCommand(paths, args.values, installedHome);
     if (!hasConsumerState(paths) && lstatSync(join(paths.dori, ".omp-dori"), { throwIfNoEntry: false }))
       throw new Error("Unmanaged source installation; use a separate release home or the documented stopped migration");
     let runtime = args.values.runtime;

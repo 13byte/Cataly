@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import type { SessionRef } from "../../../../src/runtime/types.ts";
@@ -10,7 +10,9 @@ const LOCK_WAIT_MS = 5_000;
 const LOCK_RETRY_MS = 10;
 
 export const LANE_KEY = /^[a-z0-9][a-z0-9._-]{1,60}$/;
-// Reserve the exact lowercase lead key for launch/adopt; legacy lead records and lead-only checks remain valid.
+// `lead` names the lead, never a lane: records the lead writes (lessons with `lane: "lead"`) and lead-only checks tell
+// the two apart by this key, so launch and adopt refuse it. LANE_KEY stays as it is because those records still carry
+// it, and keys are lowercase-only, so the exact match is the whole check.
 export const RESERVED_LANE_KEY = "lead";
 
 export type LaneStatus = "working" | "paused" | "done-claimed" | "verified-done" | "not-done" | "closed";
@@ -84,7 +86,11 @@ const sameSession = (a: SessionRef | undefined, b: SessionRef): boolean =>
 
 export const statusOf = (lane: Lane): LaneStatus => (lane.closedAt ? "closed" : (lane.status ?? "working"));
 
-/** History counts even same-status transitions; freshness notes, receipts and emitted claims leave it unchanged. */
+/**
+ * The lane's status generation: every status change (a claim, objection, verification, pause, resume or close) goes
+ * through `withStatus` and appends one history entry, even when the status stays the same, as a second objection does.
+ * Bookkeeping fields (freshness notes, `claim.emitted`, a receipt) leave it as it is.
+ */
 const generation = (lane: Lane): string => `${lane.openedAt} ${lane.history?.length ?? 0} ${statusOf(lane)}`;
 
 export const withStatus = (
@@ -102,8 +108,6 @@ export const withStatus = (
 
 export class Registry {
   readonly dir: string;
-  /** Parsed closed records by file, each with the stat stamp it was read under; list() keeps only files it saw. */
-  private parsed = new Map<string, { readonly stamp: string; readonly lane: Lane }>();
   constructor(stateDir: string) {
     this.dir = join(stateDir, "lanes");
   }
@@ -116,7 +120,10 @@ export class Registry {
     return this.readNow(key);
   }
 
-  /** Lock synchronous read/write only; wait for live holders, reclaim dead/stale ones, never await external I/O. */
+  /**
+   * Runs `fn` under the lane's writer lock. `fn` is synchronous, so the lock is held for one read and one write and
+   * never across pane, git or network I/O. Another writer's lock is waited out; a dead or stale one is taken over.
+   */
   private async locked<T>(key: string, fn: () => T): Promise<T> {
     mkdirSync(this.dir, { recursive: true });
     const lock = `${this.path(key)}.lock`;
@@ -169,7 +176,10 @@ export class Registry {
     });
   }
 
-  /** Locked read-modify-write: null keeps current state; never overwrite a record held across external I/O. */
+  /**
+   * Read-modify-write of one lane under its lock: `fn` gets the stored lane (or null) and returns the lane to store, or
+   * null to leave it. A lane held across I/O is changed here, never written back whole, so a change meanwhile is kept.
+   */
   update(key: string, fn: (current: Lane | null) => Lane | null): Promise<Lane | null> {
     return this.locked(key, () => {
       const next = fn(this.readNow(key));
@@ -178,7 +188,10 @@ export class Registry {
     });
   }
 
-  // Apply only to the same status generation, preserving later claims, pauses and repeated objections.
+  /**
+   * A change decided from `seen`, applied only while the stored lane has `seen`'s status generation (else null): a later
+   * claim, objection, pause or close, even a second objection to a not-done lane, is never overwritten.
+   */
   transition(seen: Lane, next: (current: Lane) => Lane): Promise<Lane | null> {
     return this.update(seen.key, (current) =>
       current && generation(current) === generation(seen) ? next(current) : null,
@@ -197,24 +210,10 @@ export class Registry {
     }
   }
 
-  // Cache closed records only while inode/size/mtime/ctime match; always read open records.
-  // Stamp before reading so racing writes cause a fresh read next tick; retain only files seen this tick.
   async list(): Promise<Lane[]> {
-    const lanes: Lane[] = [];
-    const parsed = new Map<string, { readonly stamp: string; readonly lane: Lane }>();
-    for (const f of this.files()) {
-      // A record removed since the directory was listed (a failed launch's rollback) is skipped, as readNow does.
-      const st = statSync(f, { bigint: true, throwIfNoEntry: false });
-      if (!st) continue;
-      const stamp = `${st.ino}:${st.size}:${st.mtimeNs}:${st.ctimeNs}`;
-      const cached = this.parsed.get(f);
-      const lane = cached?.stamp === stamp ? cached.lane : this.readNow(basename(f, ".json"));
-      if (lane === null) continue;
-      if (statusOf(lane) === "closed") parsed.set(f, { stamp, lane });
-      lanes.push(lane);
-    }
-    this.parsed = parsed;
-    return lanes;
+    return this.files()
+      .map((f) => this.readNow(basename(f, ".json")))
+      .filter((lane) => lane !== null);
   }
 
   /** Like list(), but a lane file that cannot be read, parsed, or holds no lane key is returned in `unreadable` instead of throwing. */
@@ -239,7 +238,10 @@ export class Registry {
     return (await this.list()).filter((l) => statusOf(l) !== "closed");
   }
 
-  // Never identify a legacy lead record as a lane; it remains readable by key, listed and closable by hand.
+  /**
+   * The open lane in session `ref`. A record keyed `lead` (registered before the key was reserved) is never returned, so a
+   * session lookup cannot mistake the lead for a lane; that record is still read by its key, listed, and closed by hand.
+   */
   async bySession(ref: SessionRef | undefined): Promise<Lane | null> {
     if (!ref) return null;
     return (await this.open()).find((l) => sameSession(l.sessionRef, ref) && l.key !== RESERVED_LANE_KEY) ?? null;

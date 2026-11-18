@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { snapshot } from "../scripts/consumer-smoke-inspect.ts";
 import { reportNativeCache } from "../src/release/native-cache.ts";
 import { processCwds } from "../src/release/process-cwd.ts";
 import { nativeCacheFixture, overlayFixture, ownProcessCwds, ownProcessFiles } from "./source-bundle-setup.ts";
@@ -173,6 +174,8 @@ test("dori update cache reports by default; --prune quarantines, trusting only t
     Bun.spawnSync([process.execPath, cli, "cache", ...argv], {
       env: { HOME: c.home, PATH: process.env["PATH"], OMP_DORI_HOME: join(c.root, "side") },
     });
+  const cacheRoot = join(c.home, ".cache/omp-dori");
+  const before = snapshot(cacheRoot);
   const listed = run();
   expect(listed.exitCode).toBe(0);
   const report = JSON.parse(listed.stdout.toString());
@@ -182,8 +185,10 @@ test("dori update cache reports by default; --prune quarantines, trusting only t
   const host = /^unreadable (?:working directory of process |open files of process |working directories of \d+ root)/;
   expect(report.entries[0].protectedBy.filter((reason: string) => !host.test(reason))).toEqual([]);
   expect(existsSync(superseded.receipt.directory)).toBe(true);
+  expect(snapshot(cacheRoot)).toBe(before);
   expect(run("--from", c.root).exitCode).toBe(2);
   expect(run("--trust-root-cwd").stderr.toString()).toContain("apply to cache --prune");
+  expect(run("--delete-quarantined").stderr.toString()).toContain("apply to cache --prune");
   expect(run("--prune", "--grace", "soon").stderr.toString()).toContain("--grace takes whole minutes");
   const trust = report.trustable.flatMap((token: string) => ["--trust-process", token]);
   const pruned = run("--prune", "--trust-root-cwd", ...trust);
@@ -196,7 +201,7 @@ test("dori update cache reports by default; --prune quarantines, trusting only t
     /^(?:Dori cache writer process |unreadable (?:working directory|open files) of process |lease of process )/;
   const kept = result.kept.flatMap((entry: { protectedBy: string[] }) => entry.protectedBy);
   expect(kept.filter((reason: string) => !late.test(reason))).toEqual([]);
-  // Unused, it is only moved aside: removal waits for a prune after the grace period.
+  // Unused, it is only moved aside: removal requires an explicitly asked later prune after the grace period.
   expect(result.removed).toEqual([]);
   expect(result.quarantined.length).toBe(kept.length > 0 ? 0 : 1);
   expect(existsSync(`${superseded.receipt.directory}.pruning`)).toBe(kept.length === 0);

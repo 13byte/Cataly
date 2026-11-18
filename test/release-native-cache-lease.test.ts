@@ -4,7 +4,9 @@ import { join, resolve } from "node:path";
 import { claimNativePrune, leaseNativeIdentity, scriptLeaseHolder } from "../src/release/native-cache-lease.ts";
 import { processCwds, processStart } from "../src/release/process-cwd.ts";
 import { bootId } from "../src/update/proc.ts";
+import { inspectRuntimeToolchain } from "../src/update/deployment-toolchain.ts";
 import { keptFor, pruneFixture, removePruneFixtures } from "./native-cache-prune-setup.ts";
+import { preparationFixture } from "./update-deploy-prepare-setup.ts";
 
 // The shared lease every writer takes and the prune lock: who waits for whom, and how long a lease lasts.
 
@@ -149,4 +151,28 @@ test("a root process whose working directory cannot be read holds unless --trust
   const trusted = c.prune({ table, readCwds, trustRootCwd: true });
   expect(trusted.rootCwdTrusted).toBe(1);
   expect(trusted.quarantined.map((entry) => entry.directory)).toEqual([x.directory]);
+});
+
+test("direct legacy inspection leases its identity before executable or fence verification", async () => {
+  const c = pruneFixture();
+  const x = c.native("legacy");
+  const f = preparationFixture();
+  await expect(
+    inspectRuntimeToolchain({ ...f.config, home: c.home }, f.record, join(x.directory, "bin/missing"), true),
+  ).rejects.toThrow("is gone from the native cache");
+  const leases = join(c.home, ".cache/omp-dori/native-leases", x.identity);
+  expect(readdirSync(leases).some((name) => name.startsWith(`${process.pid}-`))).toBe(true);
+  expect(existsSync(join(f.config.releaseRoot, "native-config.json"))).toBe(false);
+  expect(keptFor(c.prune(), x.directory)).toEqual([`lease of process ${process.pid}`]);
+});
+
+test("a FIFO prune lock is refused by both prunes and writers without blocking", () => {
+  const c = pruneFixture();
+  const x = c.native("fifo");
+  const lock = join(c.home, ".cache/omp-dori/native-prune.lock");
+  const made = Bun.spawnSync(["python3", "-c", "import os,sys; os.mkfifo(sys.argv[1])", lock]);
+  expect(made.exitCode).toBe(0);
+  expect(() => c.prune()).toThrow("Another native cache prune holds");
+  expect(() => leaseNativeIdentity(c.home, x.identity, process.pid, 0)).toThrow("A native cache prune holds");
+  expect(existsSync(x.omp)).toBe(true);
 });

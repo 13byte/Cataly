@@ -30,9 +30,12 @@ export const scrubForThread = (line: string, home: string): string =>
     .replace(/`/g, "'")
     .trim();
 
-// A report starts with [REPORT], or is the last quoted element of a complete argv row (optionally a spawn call).
-// Mid-sentence examples and whole placeholders ($name, ${name}, {name}, %s, <what>) are not progress (#29).
-// Anchor placeholder checks to the full grammar: 'deployed api | %s' remains a real report.
+// A report is a line that starts with [REPORT], or the last quoted element of an argv row, the shape lanes are told
+// to send it in: an argv array ending in "lead:p1", "[REPORT] key | kind | text". Instructions
+// and prompts that quote the grammar mid-sentence are dropped before parsing, so an example is never posted as the
+// lane's progress. A report whose whole text is one unfilled placeholder ($name, ${name}, {name}, %s, <what>) is a
+// template, quoted or not (#29). The match is anchored to the [REPORT] key | kind | text structure, so
+// 'deployed api | %s' stays a real report.
 const placeholderOnly =
   /^\s*\[REPORT\][^|]*\|[^|]*\|\s*["'`]?(\$\{?[A-Za-z_]\w*\}?|\{[A-Za-z_][\w.]*\}|%[sdif]|<[^>]+>)["'`)\s]*$/;
 // An argv row is the whole line (optionally inside one spawn call): [ then quoted strings separated by commas, then ]. Only its last element can be the
@@ -99,8 +102,7 @@ const remember = (deps: FlowDeps, key: string, patch: Partial<Lane>) =>
 export const freshnessTick = async (deps: FlowDeps, home: string): Promise<SweepAct[]> => {
   const acts: SweepAct[] = [];
   const now = deps.clock.now();
-  // One tick shares each journal's parsed progress until the journal changes.
-  const reports = new Reports(deps.config.stateDir, { memo: true });
+  const reports = new Reports(deps.config.stateDir);
   const supervision = new Supervision({ ...deps, stateDir: deps.config.stateDir, reports }, deps.config.supervision);
   for (const lane of await deps.registry.open()) {
     if (statusOf(lane) === "paused") {

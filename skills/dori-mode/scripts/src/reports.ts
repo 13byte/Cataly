@@ -1,4 +1,4 @@
-import { appendFileSync, chmodSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { LANE_KEY } from "./registry.ts";
@@ -86,19 +86,7 @@ export const parseEvent = (line: string, key: string): LaneEvent => {
 // each other's state. The last event is the persisted progress state; no
 // second mutable snapshot can race with this journal or registry done claims.
 export class Reports {
-  /** Progress by journal, with the stat stamp it was read under; kept only by a memoizing (one-tick) instance. */
-  private readonly memo: Map<string, { readonly stamp: string; readonly progress: Progress | null }> | undefined;
-  /**
-   * `memo` lets one sweep re-read a journal only once it changed: any append, from this sweep or a lane, grows the file.
-   * The stamp is taken before the read, so an append racing it only causes one more full read; a corrupt line still
-   * throws on every read.
-   */
-  constructor(
-    readonly stateDir: string,
-    options: { readonly memo?: boolean } = {},
-  ) {
-    this.memo = options.memo ? new Map() : undefined;
-  }
+  constructor(readonly stateDir: string) {}
 
   path(key: string): string {
     if (!LANE_KEY.test(key)) throw new ReportError(`invalid lane key: ${key}`);
@@ -107,11 +95,7 @@ export class Reports {
 
   read(key: string): Progress | null {
     const path = this.path(key);
-    const st = statSync(path, { bigint: true, throwIfNoEntry: false });
-    if (!st) return null;
-    const stamp = `${st.ino}:${st.size}:${st.mtimeNs}:${st.ctimeNs}`;
-    const memo = this.memo?.get(path);
-    if (memo?.stamp === stamp) return memo.progress;
+    if (!existsSync(path)) return null;
     let progress: Progress | null = null;
     let lastReport: Report | null = null;
     for (const [index, line] of readFileSync(path, "utf8").split("\n").entries()) {
@@ -130,7 +114,6 @@ export class Reports {
         progress = { state: event.state, lastReport, lastEvent: event };
       }
     }
-    this.memo?.set(path, { stamp, progress });
     return progress;
   }
 
