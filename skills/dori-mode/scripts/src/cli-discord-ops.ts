@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { type Command, die, messageText } from "./cli-context.ts";
 import { type DcChannel, Discord, isForumType } from "./messenger/discord.ts";
+import { DiscordChannels, purposeText } from "./messenger/discord-channels.ts";
 import { discordInboundEnv } from "./messenger/discord-inbound-state.ts";
 import { fetchHttp } from "./messenger/http.ts";
 import { DISCORD_LIMIT } from "./messenger/split.ts";
@@ -134,6 +135,34 @@ export const threadDiscord: Command = async ({ positionals, need, opt, strings, 
     });
     console.log(`THREAD ${id}`);
   } else die("thread discord needs create or set");
+};
+
+/** The operator's purpose notes per channel or thread: `set <channel> --purpose T`, `clear <channel>`, `list`. */
+export const channelDiscord: Command = async ({ positionals, opt, config }) => {
+  const action = positionals[1];
+  const store = new DiscordChannels(config.stateDir);
+  if (action === "list") {
+    for (const [id, entry] of Object.entries(store.read()))
+      console.log(
+        `CHANNEL ${id} name=${JSON.stringify(entry.name ?? "")} purpose=${JSON.stringify(entry.purpose)} updated=${entry.updatedAt}`,
+      );
+    return;
+  }
+  if (action !== "set" && action !== "clear") return die("channel discord needs set, clear or list");
+  const raw = positionals[2] ?? die(`channel discord ${action} needs a channel or thread`);
+  if (action === "clear") {
+    // An ID needs no lookup, so a deleted channel's note can still be removed.
+    const id = /^\d+$/.test(raw) ? discordInboundEnv("channel", raw) : (await channelOf(client(), raw)).id;
+    console.log(`${(await store.clear(id)) ? "PURPOSE_CLEARED" : "PURPOSE_NONE"} ${id}`);
+    return;
+  }
+  // Checked before the lookup, so a bad purpose sends no request.
+  const purpose = purposeText(opt("purpose") ?? "");
+  const channel = await channelOf(client(), raw);
+  // A DM or an unnamed channel may answer with a null name: only a string is recorded.
+  const name = typeof channel.name === "string" ? channel.name : undefined;
+  const entry = await store.set(channel.id, purpose, name, Date.now());
+  console.log(`PURPOSE ${channel.id} ${JSON.stringify(entry.purpose)}`);
 };
 
 export const reactDiscord: Command = async ({ need, opt, values }) => {
