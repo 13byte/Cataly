@@ -84,7 +84,14 @@ test("an explicitly configured external OMP needs no native receipt, but the man
     return Bun.spawnSync(
       [process.execPath, join(source, "skills/dori-mode/scripts/src/cli.ts"), "checkpoints", "fixture"],
       {
-        env: { HOME: home, PATH: process.env["PATH"], DORI_CONFIG: config, DORI_TELEMETRY: "0", DO_NOT_TRACK: "1" },
+        env: {
+          HOME: home,
+          USERPROFILE: home,
+          PATH: process.env["PATH"],
+          DORI_CONFIG: config,
+          DORI_TELEMETRY: "0",
+          DO_NOT_TRACK: "1",
+        },
         timeout: 15_000,
       },
     );
@@ -96,7 +103,10 @@ test("an explicitly configured external OMP needs no native receipt, but the man
     err: "",
   });
 
-  for (const executable of ["omp", join(home, ".dori/bin/omp"), join(source, "scripts/consumer/omp")]) {
+  const managedExecutables = ["omp", join(home, ".dori/bin/omp")];
+  // The release-local consumer launcher is a POSIX script identified by its slash-separated relative path.
+  if (process.platform !== "win32") managedExecutables.push(join(source, "scripts/consumer/omp"));
+  for (const executable of managedExecutables) {
     const managed = invoke(executable);
     expect(managed.exitCode).not.toBe(0);
     expect(managed.stdout.toString()).toBe("");

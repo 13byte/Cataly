@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { fileDiscordInboundStore } from "../src/messenger/discord-inbound-state.ts";
 import { withState } from "./fakes.ts";
 
-// POSIX-only: the Discord cursor store requires a private (0700) uid-owned directory.
+// POSIX-only: the Discord queue and cursor stores require private uid-owned directories.
 const posix = test.skipIf(process.platform === "win32");
 
 const inboundCli = async (
@@ -146,7 +146,7 @@ posix("--context ends each group with where it was posted and the purposes recor
 });
 
 for (const threads of [undefined, "on", "off"] as const) {
-  test(`public thread setting ${threads ?? "unset"} retains owner output and explicit cursor`, async () => {
+  posix(`public thread setting ${threads ?? "unset"} retains owner output and explicit cursor`, async () => {
     const result = await inboundCli(["--loop", "0"], threads === undefined ? {} : { DORI_DISCORD_THREADS: threads });
     expect({ code: result.code, err: result.err, cursor: result.cursor }).toEqual({
       code: 0,

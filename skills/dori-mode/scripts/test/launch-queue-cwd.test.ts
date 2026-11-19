@@ -62,16 +62,21 @@ test("an ordinary launch and relative Done check use the same legacy cwd with a 
   expect(await checkDone(lane.done, deps.run, { cwd: lane.cwd })).toMatchObject([{ ok: true }]);
 });
 
-test.each(["relative --cwd", "absolute --cwd", "home-relative defaultCwd"])(
-  "queued %s follows the link before resolving its parent",
-  async (source) => {
+for (const source of ["relative --cwd", "absolute --cwd", "home-relative defaultCwd", "absolute symlink"] as const) {
+  const followsParent = source !== "absolute symlink";
+  // Win32 resolves `..` lexically before following the link. Plain link canonicalization is still portable.
+  const description = followsParent ? "follows the link before resolving its parent" : "pins the link target";
+  test.skipIf(process.platform === "win32" && followsParent)(`queued ${source} ${description}`, async () => {
     const { config, physical, lexical, link } = await linkedDirectories();
-    const expected = realpathSync.native(physical);
+    const expected = realpathSync.native(followsParent ? physical : join(physical, "child"));
     const launch = { ...f.input, done: doneSignal };
     const input =
       source === "home-relative defaultCwd"
         ? launch
-        : { ...launch, cwd: `${source === "relative --cwd" ? relative(process.cwd(), link) : link}${sep}..` };
+        : {
+            ...launch,
+            cwd: `${source === "relative --cwd" ? relative(process.cwd(), link) : link}${followsParent ? `${sep}..` : ""}`,
+          };
 
     await enqueueLaunch({ ...f.deps, config }, input, [f.prior.key]);
 
@@ -86,8 +91,8 @@ test.each(["relative --cwd", "absolute --cwd", "home-relative defaultCwd"])(
       expected,
     );
     expect(await checkDone(lane.done, f.deps.run, { cwd: lane.cwd })).toMatchObject([{ ok: false }]);
-  },
-);
+  });
+}
 
 test.each(["missing", "file"])("enqueuing a %s cwd leaves no reservation", async (kind) => {
   const cwd = kind === "file" ? f.input.brief : join(f.state.dir, "absent");

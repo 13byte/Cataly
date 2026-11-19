@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type BoardTarget, updateBoard } from "../src/board.ts";
 import type { Http, HttpRequest } from "../src/messenger/http.ts";
@@ -30,7 +31,10 @@ beforeEach(() => {
 });
 afterEach(() => state.done());
 
-test("board posts once, reuses ID after restart and edits only changed content without mentions", async () => {
+// Board writes fsync their directory, which Bun on Windows rejects.
+const posix = test.skipIf(process.platform === "win32");
+
+posix("board posts once, reuses ID after restart and edits only changed content without mentions", async () => {
   expect(await updateBoard(options())).toEqual({ action: "posted", messageId: "50" });
   expect(requests).toHaveLength(1);
   await clock.sleep(60_000);
@@ -43,7 +47,7 @@ test("board posts once, reuses ID after restart and edits only changed content w
   expect(JSON.parse(readFileSync(recordPath(), "utf8")).pending).toBe(false);
 });
 
-test("ambiguous create is recorded before network and never retried in-process or after restart", async () => {
+posix("ambiguous create is recorded before network and never retried in-process or after restart", async () => {
   reply = { status: 503, body: "unavailable" };
   await expect(updateBoard(options())).rejects.toThrow("unconfirmed");
   expect(requests).toHaveLength(1);
@@ -55,7 +59,7 @@ test("ambiguous create is recorded before network and never retried in-process o
   expect(requests.map((r) => r.method)).toEqual(["POST", "PATCH"]);
 });
 
-test("lost transport, malformed reply and failed edit hold, never create a replacement", async () => {
+posix("lost transport, malformed reply and failed edit hold, never create a replacement", async () => {
   const fail: Http = async (request) => {
     requests.push(request);
     throw new Error("lost response");
@@ -70,14 +74,14 @@ test("lost transport, malformed reply and failed edit hold, never create a repla
   await expect(updateBoard({ ...options(), messageId: "99" })).rejects.toThrow("does not match");
 });
 
-test("missing create ID cannot become a confirmed board", async () => {
+posix("missing create ID cannot become a confirmed board", async () => {
   reply = { status: 200, body: "{}" };
   await expect(updateBoard(options())).rejects.toThrow("missing message ID");
   await expect(updateBoard(options())).rejects.toThrow("unconfirmed");
   expect(requests).toHaveLength(1);
 });
 
-test("numeric Discord create ID keeps delivery pending without binding a rounded snowflake", async () => {
+posix("numeric Discord create ID keeps delivery pending without binding a rounded snowflake", async () => {
   reply = { status: 200, body: '{"id":9007199254740993}' };
   await expect(updateBoard(options())).rejects.toThrow("missing message ID");
   expect(JSON.parse(readFileSync(recordPath(), "utf8"))).toMatchObject({ pending: true });
@@ -93,7 +97,7 @@ test("numeric Discord create ID keeps delivery pending without binding a rounded
   expect(requests[1]?.url).toEndWith("/channels/40/messages/9007199254740993");
 });
 
-test("a stored Discord snowflake must be a string and retain every digit", async () => {
+posix("a stored Discord snowflake must be a string and retain every digit", async () => {
   const snowflake = "9007199254740993";
   reply = { status: 200, body: JSON.stringify({ id: snowflake }) };
   expect(await updateBoard(options())).toEqual({ action: "posted", messageId: snowflake });
@@ -109,7 +113,7 @@ test("a stored Discord snowflake must be a string and retain every digit", async
   expect(requests[1]?.url).toEndWith(`/channels/40/messages/${snowflake}`);
 });
 
-test("a second writer cannot create while the first send is pending", async () => {
+posix("a second writer cannot create while the first send is pending", async () => {
   const { promise: waiting, resolve: finish } = Promise.withResolvers<void>();
   const { promise: sending, resolve: reached } = Promise.withResolvers<void>();
   const first = updateBoard({
@@ -127,7 +131,7 @@ test("a second writer cannot create while the first send is pending", async () =
   expect(requests).toHaveLength(1);
 });
 
-test("Telegram keeps chat/topic identity, one message and a persisted edit ID", async () => {
+posix("Telegram keeps chat/topic identity, one message and a persisted edit ID", async () => {
   reply = { status: 200, body: JSON.stringify({ ok: true, result: { message_id: 99 } }) };
   const tg = { ...options(), target: { platform: "telegram" as const, to: "-100", thread: 7 } };
   expect(await updateBoard(tg)).toEqual({ action: "posted", messageId: "99" });
@@ -150,7 +154,7 @@ test("Telegram keeps chat/topic identity, one message and a persisted edit ID", 
   expect(JSON.parse(String(requests[3]?.body)).message_id).toBe(99);
 });
 
-test("unbound Telegram recovery preserves the pending record without touching another topic", async () => {
+posix("unbound Telegram recovery preserves the pending record without touching another topic", async () => {
   const tg = { ...options(), target: { platform: "telegram" as const, to: "-100", thread: 7 } };
   reply = { status: 503, body: "unavailable" };
   await expect(updateBoard(tg)).rejects.toThrow("unconfirmed");
@@ -176,11 +180,16 @@ test("a Telegram message ID does not establish the first board binding", async (
   expect(readdirSync(join(state.dir, "boards"))).toEqual([]);
 });
 
-test("damaged board records and oversized bodies cannot post", async () => {
+test("oversized board bodies cannot post", async () => {
   await expect(updateBoard({ ...options(), body: "x".repeat(2001) })).rejects.toThrow("one message");
   expect(requests).toHaveLength(0);
-  await updateBoard(options());
-  writeFileSync(recordPath(), "{broken");
+});
+
+test("damaged board records cannot post", async () => {
+  const dir = join(state.dir, "boards");
+  mkdirSync(dir);
+  const key = createHash("sha256").update(JSON.stringify(target)).digest("hex");
+  writeFileSync(join(dir, `${key}.json`), "{broken");
   await expect(updateBoard(options())).rejects.toThrow("record unreadable");
-  expect(requests).toHaveLength(1);
+  expect(requests).toHaveLength(0);
 });

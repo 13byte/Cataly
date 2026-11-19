@@ -70,8 +70,10 @@ test("doctor skips malformed stored lane keys before reporting supervision or re
     thread: "none",
     openedAt: new Date(now).toISOString(),
   };
-  const malformedLaunched = "bad-launched\nWARN forged journal status";
-  const malformedAdopted = "bad-adopted\nWARN forged adopted status";
+  // Windows forbids LF in filenames but permits the Unicode line separator.
+  const separator = process.platform === "win32" ? "\u2028" : "\n";
+  const malformedLaunched = `bad-launched${separator}WARN forged journal status`;
+  const malformedAdopted = `bad-adopted${separator}WARN forged adopted status`;
   for (const [file, key, reportProtocol] of [
     ["launched", "launched", "jsonl-v1"],
     ["adopted", "adopted", undefined],
