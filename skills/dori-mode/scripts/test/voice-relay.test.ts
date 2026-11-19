@@ -10,17 +10,7 @@ import { leadRepliesPath } from "../src/voice/relay.ts";
 import type { VoiceSettings } from "../src/voice/settings.ts";
 import { voiceTools } from "../src/voice/tools.ts";
 import type { ToolResult } from "../src/voice/types.ts";
-import {
-  agentIn,
-  depsFor,
-  fakeRunner,
-  laneState,
-  newWorld,
-  sent,
-  type TestState,
-  withState,
-  type World,
-} from "./fakes.ts";
+import { agentIn, depsFor, fakeRunner, laneState, newWorld, sent, withState } from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00.000Z");
 const LEAD = "w1:p1";
@@ -38,8 +28,8 @@ const record = (role: "user" | "assistant", text: string) => ({
 });
 const settings = { textChannelId: "123456789012345678" } as VoiceSettings;
 
-let state: TestState;
-let world: World;
+let state: ReturnType<typeof withState>;
+let world: ReturnType<typeof newWorld>;
 let sleeps: number[];
 let sessionFile: string;
 /** Runs after each call the fake herdr answers, so a test can move the lead on at a chosen step. */
@@ -227,20 +217,23 @@ posix("a send that failed partway is sent-but-unconfirmed and is never typed aga
   await quietAfter();
 });
 
-const refusals: readonly [string, Lead, unknown, string, posixOnly?: true][] = [
-  ["a shell in front", { foreground: "-zsh" }, undefined, "a shell is in front", true],
-  ["a pending approval", { pane: { approvalPending: true } }, undefined, "approval is pending", true],
-  ["a draft in the input", { screen: `${RULE}\n❯ half typed\n${RULE}\n` }, undefined, "input box is not empty", true],
-  ["an open question", { screen: `Do you want to proceed? (y/n)\n${IDLE_SCREEN}` }, undefined, "prompt is open", true],
-  ["no live OMP writer", { pane: null }, undefined, "the lead session is unknown", true],
+const draftScreen = `${RULE}\n❯ half typed\n${RULE}\n`;
+const questionScreen = `Do you want to proceed? (y/n)\n${IDLE_SCREEN}`;
+const refusals: readonly [string, Lead, unknown, string, platform?: "posix" | "win32"][] = [
+  ["a shell in front", { foreground: "-zsh" }, undefined, "a shell is in front", "posix"],
+  ["a pending approval", { pane: { approvalPending: true } }, undefined, "approval is pending", "posix"],
+  ["a draft in the input", { screen: draftScreen }, undefined, "input box is not empty", "posix"],
+  ["an open question", { screen: questionScreen }, undefined, "prompt is open", "posix"],
+  ["no live OMP writer", { pane: null }, undefined, "the lead session is unknown", "posix"],
   ["no lead pane", { leadPane: "" }, undefined, "no lead session is configured"],
   ["an empty message", {}, { message: " `$\\ ", risky: false }, "the message is empty"],
   ["a non-boolean risky", {}, { message: "배포", risky: "no" }, "invalid forward_to_lead arguments"],
   ["no arguments", {}, "not json", "invalid forward_to_lead arguments"],
+  ["a Windows reply path", {}, undefined, "the lead reply path contains shell metacharacters", "win32"],
 ];
 
-for (const [name, lead, args, why, posixOnly] of refusals) {
-  const check = posixOnly ? posix : test;
+for (const [name, lead, args, why, platform] of refusals) {
+  const check = platform === "posix" ? posix : test.skipIf(platform === "win32" && process.platform !== "win32");
   check(`${name}: not-sent, nothing typed, no hidden retry`, async () => {
     world.onEnterStatus = "working";
     const r = await tool(lead)(args ?? { message: "레인 정리", risky: false });
@@ -249,18 +242,7 @@ for (const [name, lead, args, why, posixOnly] of refusals) {
     expect(r.result).toContain(why);
     expect(r.result).toContain("no retry is scheduled");
     expect(typed()).toHaveLength(0);
+    if (platform === "win32") expect(world.calls).toEqual([]);
     await quietAfter();
   });
 }
-
-test.skipIf(process.platform !== "win32")(
-  "a native Windows reply path stops the relay before probing or typing",
-  async () => {
-    const r = await tool()({ message: "레인 정리", risky: false });
-    expect(r.ok).toBe(false);
-    expect(r.result).toStartWith("not-sent: the lead reply path contains shell metacharacters.");
-    expect(r.result).toContain("no retry is scheduled");
-    expect(world.calls).toEqual([]);
-    await quietAfter();
-  },
-);
