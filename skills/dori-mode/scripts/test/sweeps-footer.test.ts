@@ -68,7 +68,15 @@ test("the footer CLI command survives a skill path with a space or a quote", asy
   }
 });
 
-test("the selected footer runtime receives one data argument and missing destinations still journal reports", async () => {
+// The launcher stubs are extensionless POSIX executables invoked by the generated shell footer.
+const posix = test.skipIf(process.platform === "win32");
+posix(
+  "the selected footer runtime receives one data argument and missing destinations still journal reports",
+  verifyFooterRuntime,
+  15_000,
+);
+
+async function verifyFooterRuntime() {
   const dir = mkdtempSync(join(tmpdir(), "dori footer send "));
   const priorConfig = process.env["DORI_CONFIG"];
   try {
@@ -150,4 +158,4 @@ next line`;
     else process.env["DORI_CONFIG"] = priorConfig;
     rmSync(dir, { recursive: true, force: true });
   }
-}, 15_000);
+}

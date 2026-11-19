@@ -3,6 +3,9 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+// These installer/gate cases use POSIX executables and a shell PATH.
+const posix = test.skipIf(process.platform === "win32");
+
 const script = join(import.meta.dir, "../scripts/ci-install-herdr.sh");
 const fixture = () => {
   const dir = mkdtempSync(join(tmpdir(), "dori-ci-download-"));
@@ -52,7 +55,7 @@ test "$(cat "$path")" = verified`,
   };
 };
 
-test.each([0, 2])("installs only verified bytes after %s transient failures", (failures) => {
+posix.each([0, 2])("installs only verified bytes after %s transient failures", (failures) => {
   const f = fixture();
   try {
     expect(f.run(failures).exitCode).toBe(0);
@@ -65,7 +68,7 @@ test.each([0, 2])("installs only verified bytes after %s transient failures", (f
   }
 });
 
-test.each([1, 124])("bounds retries and cleans partial bytes on download exit %s", (code) => {
+posix.each([1, 124])("bounds retries and cleans partial bytes on download exit %s", (code) => {
   const f = fixture();
   try {
     expect(f.run(3, "verified", code).exitCode).toBe(22);
@@ -77,7 +80,7 @@ test.each([1, 124])("bounds retries and cleans partial bytes on download exit %s
   }
 });
 
-test("checksum rejection preserves existing binary and cleans download", () => {
+posix("checksum rejection preserves existing binary and cleans download", () => {
   const f = fixture();
   try {
     expect(f.run(0, "tampered").exitCode).not.toBe(0);
@@ -88,9 +91,6 @@ test("checksum rejection preserves existing binary and cleans download", () => {
     f.close();
   }
 });
-
-// POSIX-only: the gate step is a bash script and the fake bun is a shell script on a ':' PATH.
-const posix = test.skipIf(process.platform === "win32");
 
 posix("the hc gate requires both E2E files and runs each through bun", () => {
   const workflow = Bun.YAML.parse(readFileSync(join(import.meta.dir, "../.github/workflows/ci.yml"), "utf8")) as {

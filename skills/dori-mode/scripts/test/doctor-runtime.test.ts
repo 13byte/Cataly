@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { platform } from "../../../../src/platform/index.ts";
 import { processIdentity } from "../../../../src/update/deployment-process.ts";
 import type { MonitorSpec } from "../../../../src/update/deployment-types.ts";
 import type { Manifest } from "../src/boot-monitors.ts";
@@ -8,6 +9,8 @@ import { monitorRuntimeFindings } from "../src/doctor-monitors.ts";
 import { doctorCheck } from "../src/doctor.ts";
 import type { PaneState } from "../src/lane-state.ts";
 import { agentIn, depsFor, fakeClock, laneState, newWorld, withState } from "./fakes.ts";
+
+const liveSeverity = platform.supportsProcessReaders ? "OK" : "WARN";
 
 test("only a fresh matching receipt and an owned live child establish monitor liveness", async () => {
   const state = withState();
@@ -36,7 +39,7 @@ test("only a fresh matching receipt and an owned live child establish monitor li
       data: { version: 1, sessionId: "owner", monitors: [spec] },
     };
     const identity = processIdentity(child.pid);
-    expect(identity).toBeDefined();
+    if (platform.supportsProcessReaders) expect(identity).toBeDefined();
     mkdirSync(join(state.dir, "runtime"));
     const health = {
       version: 1,
@@ -47,16 +50,22 @@ test("only a fresh matching receipt and an owned live child establish monitor li
       startedAt,
       updatedAt: startedAt,
       presetLoaded: true,
-      monitors: [{ ...spec, pid: child.pid, startTicks: identity!.startTicks }],
+      monitors: [{ ...spec, pid: child.pid, startTicks: identity?.startTicks ?? "unavailable" }],
     };
     const path = join(state.dir, "runtime", `${encodeURIComponent(lead.paneId)}.json`);
     const check = () => monitorRuntimeFindings(state.dir, [manifest], lead, Date.now());
     const save = (value: unknown) => writeFileSync(path, JSON.stringify(value), { mode: 0o600 });
     save(health);
-    expect(check()).toEqual([{ check: "monitor-runtime", severity: "OK", detail: '"watch" live with recorded spec' }]);
+    if (platform.supportsProcessReaders) {
+      expect(check()).toEqual([
+        { check: "monitor-runtime", severity: "OK", detail: '"watch" live with recorded spec' },
+      ]);
+    } else {
+      expect(check()).toMatchObject([{ check: "monitor-runtime", severity: "WARN" }]);
+    }
     save({ ...health, monitors: [] });
     expect(check()[0]?.severity).toBe("WARN");
-    expect(check()[0]?.detail).toContain("no matching live child");
+    if (platform.supportsProcessReaders) expect(check()[0]?.detail).toContain("no matching live child");
     save({ ...health, monitors: [{ ...health.monitors[0], startTicks: "wrong-incarnation" }] });
     expect(check()[0]?.severity).toBe("WARN");
     save({ ...health, monitors: [{ ...health.monitors[0], cwd: "/different" }] });
@@ -79,8 +88,12 @@ test("only a fresh matching receipt and an owned live child establish monitor li
     const multiple = { ...manifest, data: { ...manifest.data, monitors: [{ ...spec, name: "broken" }, spec] } };
     save({ ...health, monitors: [{ ...health.monitors[0], name: "broken", filter: "[" }, health.monitors[0]] });
     const independent = monitorRuntimeFindings(state.dir, [multiple], lead, Date.now());
-    expect(independent.map((finding) => finding.severity)).toEqual(["WARN", "OK"]);
-    expect(independent[0]?.detail).toContain("invalid or unreadable process receipt");
+    if (platform.supportsProcessReaders) {
+      expect(independent.map((finding) => finding.severity)).toEqual(["WARN", "OK"]);
+      expect(independent[0]?.detail).toContain("invalid or unreadable process receipt");
+    } else {
+      expect(independent[0]?.severity).toBe("WARN");
+    }
     const restartingSpec: MonitorSpec = { ...spec, restart: "on-failure" };
     const restartingManifest = { ...manifest, data: { ...manifest.data, monitors: [restartingSpec] } };
     const restartFindings = [undefined, "always", "on-failure"].map((restart) => {
@@ -125,15 +138,15 @@ test("only a fresh matching receipt and an owned live child establish monitor li
     expect(restartFindings).toEqual([
       { restart: undefined, severities: ["WARN"] },
       { restart: "always", severities: ["WARN"] },
-      { restart: "on-failure", severities: ["OK"] },
+      { restart: "on-failure", severities: [liveSeverity] },
     ]);
     expect(filterFindings).toEqual([
       { exitCode: 1, severities: ["WARN"] },
       { exitCode: 1, severities: ["WARN"] },
       { exitCode: 1, severities: ["WARN"] },
       { exitCode: 1, severities: ["WARN"] },
-      { exitCode: 0, severities: ["OK"] },
-      { exitCode: 0, severities: ["OK"] },
+      { exitCode: platform.supportsProcessReaders ? 0 : 1, severities: [liveSeverity] },
+      { exitCode: platform.supportsProcessReaders ? 0 : 1, severities: [liveSeverity] },
     ]);
   } finally {
     if (child.exitCode === null) child.kill();

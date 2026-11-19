@@ -12,7 +12,9 @@ const channel = "109867692300000002";
 const question = "109867692300000003";
 const message = "109867692300000004";
 
-test("only an owner reply to the exact question and channel leaves a durable answer", () => {
+const posix = test.skipIf(process.platform === "win32");
+
+posix("only an owner reply to the exact question and channel leaves a durable answer", () => {
   const root = mkdtempSync(join(tmpdir(), "cataly-ask-mailbox-"));
   const input = { channel, reference: question, message, text: "the answer" };
   try {

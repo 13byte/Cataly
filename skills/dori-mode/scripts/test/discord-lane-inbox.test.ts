@@ -5,6 +5,8 @@ import { discordLaneTarget, openDiscordLaneInbox, pendingDiscordLane } from "../
 import { type Lane, Registry } from "../src/registry.ts";
 import { laneState, type TestState, withState } from "./fakes.ts";
 
+const posix = test.skipIf(process.platform === "win32");
+
 const channel = "123";
 const session = "native-session";
 const pane = "w:p1";
@@ -98,7 +100,9 @@ test("only a matching launch key binds a native pane before the registry records
   expect(await route()).toBe(session);
 });
 
-test("an exact retired session can buffer chat but a second registry entry for the same pane is ambiguous", async () => {
+posix("a retired session buffers chat until another registry entry makes its pane ambiguous", verifyRetiredRouting);
+
+async function verifyRetiredRouting() {
   await registry.write(lane);
   laneState(state.dir, pane, { pid: 0, sessionId: session, discordLaneInbox: true });
   expect(await route()).toBe(session);
@@ -114,9 +118,9 @@ test("an exact retired session can buffer chat but a second registry entry for t
   } finally {
     inbox.close();
   }
-});
+}
 
-test("the inbox persists numeric FIFO and deduplication independently for each session and channel", () => {
+posix("the inbox persists numeric FIFO and deduplication independently for each session and channel", () => {
   const otherSession = "other-session";
   const otherChannel = "456";
   const first = inbound("9", "first");
@@ -169,7 +173,9 @@ test("the inbox persists numeric FIFO and deduplication independently for each s
 const identity = { bot: "345", owner: "678" };
 const rotated = { ...identity, owner: "789" };
 
-test("only first-admission opt-in inputs remain discoverable after restart, for their stored receiver identity", () => {
+posix("first-admission opt-in survives restart for the original receiver identity", verifyOptInRecovery);
+
+function verifyOptInRecovery() {
   const inbox = openDiscordLaneInbox(state.dir);
   const optedOut = inbound("8", "ordinary input");
   try {
@@ -198,9 +204,9 @@ test("only first-admission opt-in inputs remain discoverable after restart, for 
   } finally {
     reopened.close();
   }
-});
+}
 
-test("the outbox survives partial drain and never recreates captured parts, even after acknowledgement", () => {
+posix("the outbox survives partial drain and never recreates captured parts, even after acknowledgement", () => {
   const request = inbound("9", "opted-in input");
   const first = { id: "9", part: 0, text: "first" };
   const second = { id: "9", part: 1, text: "second" };

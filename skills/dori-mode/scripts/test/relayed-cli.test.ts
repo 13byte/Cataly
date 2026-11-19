@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { freshnessTick } from "../src/freshness.ts";
 import { Reports, reportId } from "../src/reports.ts";
-import { run } from "../src/run.ts";
 import { depsFor, fakeClock, newWorld, withState } from "./fakes.ts";
 
-const cli = new URL("../src/cli.ts", import.meta.url).pathname;
+const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 
 test("report --owner --json and relayed bind the exact report across CLI processes", async () => {
   const state = withState();
@@ -32,17 +32,24 @@ test("report --owner --json and relayed bind the exact report across CLI process
     });
     const config = join(state.dir, "config.json");
     await Bun.write(config, JSON.stringify({ stateDir: state.dir }));
-    const invoke = (...args: string[]) =>
-      run([
-        "env",
-        "-i",
-        `HOME=${state.dir}`,
-        `PATH=${process.env["PATH"]}`,
-        `DORI_CONFIG=${config}`,
-        process.execPath,
-        cli,
-        ...args,
+    const invoke = async (...args: string[]) => {
+      const child = Bun.spawn([process.execPath, cli, ...args], {
+        env: {
+          HOME: state.dir,
+          PATH: process.env["PATH"] ?? process.env["Path"],
+          DORI_CONFIG: config,
+          ...(process.platform === "win32" ? { SystemRoot: process.env["SystemRoot"], USERPROFILE: state.dir } : {}),
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [out, err, code] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+        child.exited,
       ]);
+      return { code, out: out.trim(), err: err.trim() };
+    };
     const reported = await invoke(
       "report",
       "relay-lane",
