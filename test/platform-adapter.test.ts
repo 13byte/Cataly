@@ -2,10 +2,11 @@
 // run. The running host's own readers get one smoke test, so moving them into src/platform/ cannot go silent.
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { constants, tmpdir } from "node:os";
 import { join } from "node:path";
 import { herdrDeploymentCli } from "../src/update/deployment-cli.ts";
-import type { HostOs, PlatformAdapter } from "../src/platform/adapter.ts";
+import type { HostOs } from "../src/platform/adapter.ts";
+import { darwinMemFreePct } from "../src/platform/darwin.ts";
 import { adapterFor, platform } from "../src/platform/index.ts";
 import { linuxAdapter } from "../src/platform/linux.ts";
 
@@ -31,47 +32,10 @@ function fixtureProc(startTicks: string): { root: string; done: () => void } {
   return { root, done: () => rmSync(root, { recursive: true, force: true }) };
 }
 
-const fake: PlatformAdapter = {
-  os: "linux",
-  memFreePct: () => 100,
-  procStat: () => ({ zombie: false, ppid: 1, pgid: 1, tpgid: -1, startTicks: "1" }),
-  cmdline: () => "bun\0",
-  exePath: () => "/bin/bun",
-  cwdPath: () => "/",
-  children: () => [],
-  bootId: () => "boot",
-  liveOwnerStart: () => "",
-  terminate: () => {},
-  supportsProcessReaders: true,
-  posixOwnership: true,
-  directoryFsync: true,
-  supportsHerdrNativeUi: true,
-  procfs: true,
-  flockLibrary: () => "libc.so.6",
-  syncDirectory: () => {},
-  defaultRuntime: () => "herdr",
-  supportsReleaseProfile: () => false,
-  nativeCacheLabel: () => "native-linux-x64",
-  programName: (word) => word,
-  isAbsolutePath: () => false,
-  pathSeparators: /\//,
-};
-
 describe("platform adapter contract", () => {
-  test("a hand-written adapter satisfies every member", () => {
-    expect(fake.os).toBe("linux");
-    expect(fake.procStat(1).startTicks).toBe("1");
-    expect(fake.children(1)).toEqual([]);
-  });
-
   test("the adapter is the one chosen for this process's platform", () => {
     expect<HostOs>(platform.os).toBe(process.platform as HostOs);
     expect(adapterFor(platform.os)).toBe(platform);
-  });
-
-  test("the adapter is created once instead of re-reading the platform", () => {
-    expect(platform === platform).toBe(true);
-    expect(platform).toBe(platform);
   });
 });
 
@@ -171,6 +135,55 @@ describe("capability matrix", () => {
     } finally {
       proc.done();
     }
+  });
+
+  test("a Linux signal refires the caller's identity check after binding and before signalling", () => {
+    const proc = fixtureProc("777");
+    try {
+      const signalled: number[] = [];
+      const closed: number[] = [];
+      let unloaded = 0;
+      const adapter = linuxAdapter(proc.root, () => ({
+        pidfd: {
+          open: () => 3,
+          signal: (_fd: number, signal: number) => {
+            signalled.push(signal);
+            return 0;
+          },
+          close: (fd: number) => {
+            closed.push(fd);
+          },
+        },
+        unload: () => {
+          unloaded++;
+        },
+      }));
+      // A target that re-execs into another image keeps the pid and start time; only the caller's whole check refuses it.
+      expect(() => adapter.terminate(4242, { startTicks: "777", bootId: "boot-1" }, () => false)).toThrow(
+        "native pidfd identity binding failed",
+      );
+      expect(signalled).toEqual([]);
+      expect(closed).toEqual([3]);
+      expect(unloaded).toBe(1);
+
+      adapter.terminate(4242, { startTicks: "777", bootId: "boot-1" }, () => true);
+      expect(signalled).toEqual([constants.signals.SIGTERM]);
+      expect(closed).toEqual([3, 3]);
+    } finally {
+      proc.done();
+    }
+  });
+
+  test("macOS reads the kernel's memory level and falls back to free pages", () => {
+    expect(adapterFor("darwin").memFreePct).toBe(darwinMemFreePct);
+    const free = () => 3;
+    expect(darwinMemFreePct(() => "72\n", free)).toBe(72);
+    expect(
+      darwinMemFreePct(() => {
+        throw new Error("no sysctl");
+      }, free),
+    ).toBe(3);
+    expect(darwinMemFreePct(() => "garbage", free)).toBe(3);
   });
 
   test("path separators follow the host", () => {

@@ -29,27 +29,57 @@ const sameIncarnation = (root: string, pid: number, expected: TerminateIdentity)
 /** A failure of the binding itself, kept apart from a missing libc so the two keep their distinct messages. */
 class SignalFailed extends Error {}
 
+/** The libc pidfd calls the binding makes, behind one handle that unloads them; a test supplies its own. */
+export type PidfdLibc = {
+  readonly pidfd: {
+    open(pid: number): number;
+    signal(fd: number, signal: number): number;
+    close(fd: number): void;
+  };
+  readonly unload: () => void;
+};
+
+const libcPidfd = (): PidfdLibc => {
+  const native = dlopen("libc.so.6", {
+    pidfd_open: { args: ["i32", "u32"], returns: "i32" },
+    pidfd_send_signal: { args: ["i32", "i32", "ptr", "u32"], returns: "i32" },
+    close: { args: ["i32"], returns: "i32" },
+  } as const);
+  return {
+    pidfd: {
+      open: (pid) => native.symbols.pidfd_open(pid, 0),
+      signal: (fd, signal) => native.symbols.pidfd_send_signal(fd, signal, null, 0),
+      close: (fd) => native.symbols.close(fd),
+    },
+    unload: () => native.close(),
+  };
+};
+
 /** Open a pidfd, prove it is the expected incarnation, signal through it and close it. */
-function signalThroughPidfd(root: string, pid: number, expected: TerminateIdentity | undefined): void {
+function signalThroughPidfd(
+  root: string,
+  pid: number,
+  expected: TerminateIdentity | undefined,
+  stillOurs: (() => boolean) | undefined,
+  libc: () => PidfdLibc,
+): void {
   // A pid that already differs is not ours to signal, which is how the caller settles it before binding.
   if (expected && !sameIncarnation(root, pid, expected)) throw new SignalFailed("native pidfd identity binding failed");
   try {
-    const native = dlopen("libc.so.6", {
-      pidfd_open: { args: ["i32", "u32"], returns: "i32" },
-      pidfd_send_signal: { args: ["i32", "i32", "ptr", "u32"], returns: "i32" },
-      close: { args: ["i32"], returns: "i32" },
-    } as const);
-    const fd = native.symbols.pidfd_open(pid, 0);
+    const { pidfd, unload } = libc();
+    const fd = pidfd.open(pid);
     try {
       if (fd < 0) throw new SignalFailed("native pidfd identity binding failed");
       // The fd binds one process; a pid reused between the check above and this open is refused here.
       if (expected && !sameIncarnation(root, pid, expected))
         throw new SignalFailed("native pidfd identity binding failed");
-      if (native.symbols.pidfd_send_signal(fd, constants.signals.SIGTERM, null, 0) !== 0)
-        throw new SignalFailed("bound native termination failed");
+      // The fd pins the pid, not the image: the caller re-reads the whole identity, so a process that re-execs into
+      // another executable keeps the pid and start time but is no longer the one the caller meant.
+      if (stillOurs && !stillOurs()) throw new SignalFailed("native pidfd identity binding failed");
+      if (pidfd.signal(fd, constants.signals.SIGTERM) !== 0) throw new SignalFailed("bound native termination failed");
     } finally {
-      if (fd >= 0) native.symbols.close(fd);
-      native.close();
+      if (fd >= 0) pidfd.close(fd);
+      unload();
     }
   } catch (error) {
     if (error instanceof SignalFailed) throw error;
@@ -58,7 +88,7 @@ function signalThroughPidfd(root: string, pid: number, expected: TerminateIdenti
 }
 
 /** The Linux adapter over one /proc root: tests point the root at a fixture instead of the kernel's. */
-export function linuxAdapter(root = PROC): PlatformAdapter {
+export function linuxAdapter(root = PROC, libc: () => PidfdLibc = libcPidfd): PlatformAdapter {
   return {
     os: "linux",
 
@@ -92,7 +122,7 @@ export function linuxAdapter(root = PROC): PlatformAdapter {
 
     bootId: () => bootId(root),
     liveOwnerStart,
-    terminate: (pid, expected) => signalThroughPidfd(root, pid, expected),
+    terminate: (pid, expected, stillOurs) => signalThroughPidfd(root, pid, expected, stillOurs, libc),
 
     supportsProcessReaders: true,
     posixOwnership: true,

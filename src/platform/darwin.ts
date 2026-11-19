@@ -84,18 +84,27 @@ function libproc(): Darwin {
 const gone = (pid: number, what: string): Error =>
   Object.assign(new Error(`process ${pid} ${what} is unavailable`), { code: "ENOENT" });
 
+/**
+ * The kernel's available-memory level when it answers a sane percentage, otherwise the free-pages fallback. The two
+ * readers are parameters so their policy can be pinned without a real sysctl or real free memory.
+ */
+export const darwinMemFreePct = (
+  readLevel: () => string = sysctlMemoryLevel,
+  freePct: () => number = memoryFreePct,
+): number => {
+  try {
+    const level = Number(readLevel().trim());
+    if (Number.isFinite(level) && level >= 0 && level <= 100) return Math.round(level);
+  } catch {
+    // fall through to freemem(): a missing sysctl must not stop the loop from reading memory at all
+  }
+  return freePct();
+};
+
 export const darwin: PlatformAdapter = {
   os: "darwin",
 
-  memFreePct(): number {
-    try {
-      const level = Number(sysctlMemoryLevel().trim());
-      if (Number.isFinite(level) && level >= 0 && level <= 100) return Math.round(level);
-    } catch {
-      // fall through to freemem(): a missing sysctl must not stop the loop from reading memory at all
-    }
-    return memoryFreePct();
-  },
+  memFreePct: darwinMemFreePct,
 
   procStat(pid: number): ProcStat {
     const info = libproc().pidinfo(pid, PROC_PIDTBSDINFO, BSDINFO_SIZE);
@@ -159,8 +168,9 @@ export const darwin: PlatformAdapter = {
 
   liveOwnerStart,
 
-  // No pidfd here: the caller's identity re-read immediately before kill(2) is today's whole binding.
-  terminate(pid: number, _expected?: TerminateIdentity): void {
+  // No pidfd here: the caller's identity re-read immediately before kill(2) is today's whole binding, so `stillOurs`
+  // is ignored and the caller re-checks identity after any failure.
+  terminate(pid: number, _expected?: TerminateIdentity, _stillOurs?: () => boolean): void {
     try {
       process.kill(pid, constants.signals.SIGTERM);
     } catch (error) {

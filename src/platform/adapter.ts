@@ -15,7 +15,7 @@ export interface PlatformAdapter {
   readonly os: HostOs;
 
   /**
-   * Percent of memory available to start new work, as src/host.ts reports it: macOS returns the kernel's own
+   * Percent of memory available to start new work, as src/harness.ts reports it: macOS returns the kernel's own
    * available-memory level (kern.memorystatus_level, the figure behind Activity Monitor) and falls back to
    * freemem/totalmem when sysctl fails; every other host rounds os.freemem()/os.totalmem().
    */
@@ -50,13 +50,15 @@ export interface PlatformAdapter {
 
   /**
    * SIGTERM one pid through this OS's binding primitive. Linux opens a pidfd and signals through it, refusing with
-   * `native pidfd identity binding failed` when the supplied `expected` incarnation no longer matches; macOS has no
+   * `native pidfd identity binding failed` when the supplied `expected` incarnation no longer matches; between that
+   * open and the signal it also calls `stillOurs`, the caller's whole identity check (start time, boot id and the
+   * executable image), refusing on false so a process that re-execs into another image is not signalled. macOS has no
    * pidfd and sends kill(2), rethrowing its ESRCH error so src/update/deployment-signal.ts maps `code === "ESRCH"` to
-   * false instead of treating a vanished pid as one it signalled. Every other failure carries the messages
-   * src/update/deployment-signal.ts printed; process-identity comparison stays with the caller, which re-checks it
-   * after a failure.
+   * false instead of treating a vanished pid as one it signalled; it ignores `stillOurs` and leaves that check to the
+   * caller. Every other failure carries the messages src/update/deployment-signal.ts printed; process-identity
+   * comparison stays with the caller, which re-checks it after a failure.
    */
-  terminate(pid: number, expected?: TerminateIdentity): void;
+  terminate(pid: number, expected?: TerminateIdentity, stillOurs?: () => boolean): void;
 
   /** True when procStat, cmdline, exePath, cwdPath, children and bootId read real kernel facts (Windows: false). */
   readonly supportsProcessReaders: boolean;

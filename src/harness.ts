@@ -2,7 +2,7 @@ import { accessSync, existsSync, readFileSync } from "node:fs";
 import { cpus, loadavg } from "node:os";
 import { join, resolve } from "node:path";
 import { shq } from "./delivery.ts";
-import { memFreePct } from "./host.ts";
+import { platform } from "./platform/index.ts";
 import { doriLaunchEnv, processOmpCommand, resolveConsumerOmpCommand } from "./release/runtime.ts";
 import { type Exec, spawnExec } from "./runtime/exec.ts";
 import { HcRuntime } from "./runtime/hc/index.ts";
@@ -73,7 +73,7 @@ export const defaultDeps = (): Deps => {
           : "omp";
     },
     doriCmd: process.env["DORI_CMD"] ?? `DORI_HOME=${shq(store.root)} bun ${shq(CLI)}`,
-    host: () => ({ load1: loadavg()[0] ?? 0, cores: cpus().length, memFreePct: memFreePct() }),
+    host: () => ({ load1: loadavg()[0] ?? 0, cores: cpus().length, memFreePct: platform.memFreePct() }),
     usage: new Telemetry(store.root),
   };
 };

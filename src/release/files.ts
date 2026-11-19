@@ -124,7 +124,7 @@ export function saveJson(path: string, value: unknown): void {
 }
 
 export function syncDirectory(path: string): void {
-  platform.syncDirectory(path);
+  if (platform.directoryFsync) platform.syncDirectory(path);
 }
 
 export function pointer(path: string): string | undefined {

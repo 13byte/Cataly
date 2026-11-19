@@ -12,7 +12,7 @@ const noReader = (): never => {
 export const windows: PlatformAdapter = {
   os: "win32",
 
-  // os.freemem()/os.totalmem() is the only memory figure Windows exposes here, as src/host.ts already used.
+  // os.freemem()/os.totalmem() is the only memory figure Windows exposes here, as the host reader always answered.
   memFreePct: memoryFreePct,
 
   procStat(_pid: number): ProcStat {
@@ -42,7 +42,7 @@ export const windows: PlatformAdapter = {
   // ps cannot report a start time here, so this is "" and the lock owner never counts as live; today's answer.
   liveOwnerStart,
 
-  terminate(_pid: number, _expected?: TerminateIdentity): void {
+  terminate(_pid: number, _expected?: TerminateIdentity, _stillOurs?: () => boolean): void {
     // The non-macOS branch reached libc pidfd on this host too and failed with exactly this message.
     throw new Error("Linux libc pidfd_open and pidfd_send_signal are required for native replacement");
   },
