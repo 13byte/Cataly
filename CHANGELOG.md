@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added opt-in idle-only freshness nudges, owner summaries and report-kind posting policy, with exact report relay receipts to prevent duplicate owner updates.
+
 - New lane registry records and brief footers retain requested launch text and its configuration origin without changing default ULW, raw message delivery or startup goal checks. Launch-selection provenance describes matching text rather than programmatic assignment history. Same-value reassignment retains the matching default or loaded-file origin, with regression coverage for both cases.
 
 - Add explicit lane parking, exact-session reopening, abandonment receipts and a read-only hold ledger. Keep worktrees, accepted pending Discord messages and ordinary Done verification.

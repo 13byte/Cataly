@@ -114,11 +114,13 @@ Select `DORI_HOME` explicitly before primary startup (`~/.dori`), or launch the 
 | done flow | `dori watch` | `^LANE_` |
 | dead panes | `dori dead-panes --loop 3` | `^(DEAD_PANE\|UNRECOGNISED_PANE\|WARN)` |
 | host guard | `dori guard --loop 1` | `^(HOST_GUARD\|WARN)` |
-| freshness | `dori freshness --loop 5` | `^(NUDGED\|POSTED\|POST-FAILED\|NO-REPORT\|PENDING-REPORT\|STALE-REPORT\|STALLED\|JOURNAL-ERROR\|WORKING-WHILE-PAUSED\|BLOCKED\|WARNING\|SUPERVISION-ERROR\|WARN)` |
+| freshness | `dori freshness --loop 5` | `^(NUDGED\|NUDGE-FAILED\|POSTED\|POST-FAILED\|NO-REPORT\|PENDING-REPORT\|STALE-REPORT\|UNRELAYED\|STALLED\|JOURNAL-ERROR\|WORKING-WHILE-PAUSED\|BLOCKED\|WARNING\|SUPERVISION-ERROR\|WARN)` |
 | PR follow-up (opt-in, needs `gh` auth) | `dori pr watch --loop 3` | `^(PR_(FEEDBACK\|CI_FAIL\|HEAD_MOVED\|MERGED\|CLOSED\|REOPENED\|WATCH_WARN)\|WARN)` |
 | Slack inbound (Slack only) | `dori inbound slack --loop 1` | `^INBOUND` |
 | Telegram inbound (Telegram only) | `DORI_TELEGRAM_TOKEN=… DORI_TELEGRAM_OWNER_ID=… dori inbound telegram --loop 1` | `^INBOUND` |
 | presence (opt-in) | `dori presence discord` (or retained Slack: `dori presence slack`) | `^PRESENCE_` |
+
+The recommended freshness filter covers all policies. `dori doctor` requires `NUDGE-FAILED` only when `freshness.nudge` is `"idle-only"`, and `UNRELAYED` only when `freshness.postRaw` is `false` or `freshness.autoPostKinds` is set (including an empty list).
 
 The supported public receiver is **`dori inbound discord`**. It requires the owner's bot token and the two configured IDs, polls every three seconds by default, and emits only that owner's messages from the exact channel. `--loop` is in minutes: `--loop 0.1` polls every six seconds and `--loop 0` runs once. First start saves a latest-message baseline without replay; wait for `INBOUND_READY discord owner=... channel=... bot=...`, then send a fresh owner message. Later records are `INBOUND discord <channel> <message> from=owner ref=<id|-> <JSON text>`, followed by `INBOUND_REPLY` for available reply context and ordered `INBOUND_ATTACHMENT` records for attachments, including voice metadata ([format](scripts.md#dori-inbound-discord---loop-minutes---gateway)). Attachment-only messages keep text `""`; metadata delivery starts no transcription. An owned per-channel cursor survives an explicit restart.
 

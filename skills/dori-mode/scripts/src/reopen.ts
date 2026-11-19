@@ -87,6 +87,11 @@ export const reopenLane = async (deps: FlowDeps, seen: Lane, note?: string): Pro
         lifecycleEpoch: epoch,
         pausedFrom: "working",
         lastReplyAt: deps.clock.now(),
+        // A new generation starts with no report receipt or previously observed screen report.
+        lastPostedReport: undefined,
+        lastPostedReportId: undefined,
+        lastPostedReportOwner: undefined,
+        lastSeenReport: undefined,
         lastFreshnessNote: undefined,
         pausedSeenWorking: undefined,
       });

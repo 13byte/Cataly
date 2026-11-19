@@ -60,6 +60,8 @@ const flags = parseArgs({
     emoji: { type: "string" },
     remove: { type: "boolean" },
     kind: { type: "string" },
+    owner: { type: "string" },
+    report: { type: "string" },
     step: { type: "string" },
     result: { type: "string" },
     "remote-effect": { type: "string", multiple: true },
@@ -86,6 +88,7 @@ const flags = parseArgs({
 let commands: Readonly<Record<string, Command>> = {};
 switch (command) {
   case "report":
+  case "relayed":
   case "lesson":
   case "worklog":
   case "checkpoint":

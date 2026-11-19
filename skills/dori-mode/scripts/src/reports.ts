@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -14,6 +15,7 @@ type EventFields = {
 export type Report = EventFields & {
   readonly type: "report";
   readonly kind: ReportKind;
+  readonly owner?: string;
 };
 export type Activity = EventFields & {
   readonly type: "activity";
@@ -56,6 +58,20 @@ export const reportLine = (report: Report): string =>
     // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern deliberately matches control characters to reject or strip them
     .replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "")}`;
 
+export const reportId = (report: Report): string =>
+  createHash("sha256")
+    .update(
+      JSON.stringify([
+        report.key,
+        report.at,
+        report.kind,
+        report.text,
+        report.owner ?? null,
+        report.generation ?? null,
+      ]),
+    )
+    .digest("hex");
+
 export const parseEvent = (line: string, key: string): LaneEvent => {
   const value: unknown = JSON.parse(line);
   if (
@@ -82,7 +98,14 @@ export const parseEvent = (line: string, key: string): LaneEvent => {
   };
   if (value.type === "reopen") return { ...common, type: "reopen" };
   if (value.type === "report" && "kind" in value && isReportKind(value.kind)) {
-    return { ...common, type: "report", kind: value.kind };
+    if ("owner" in value && (typeof value.owner !== "string" || !value.owner.trim()))
+      throw new ReportError(`invalid owner summary for ${key}`);
+    return {
+      ...common,
+      type: "report",
+      kind: value.kind,
+      ...("owner" in value ? { owner: value.owner as string } : {}),
+    };
   }
   if (value.type === "activity" && "state" in value && (value.state === "running" || value.state === "stalled")) {
     return { ...common, type: "activity", state: value.state };
@@ -140,7 +163,7 @@ export class Reports {
     appendFileSync(path, `${JSON.stringify(event)}\n`, { encoding: "utf8", mode: 0o600 });
   }
 
-  report(key: string, kind: ReportKind, text: string, now: number, generation?: string): Report {
+  report(key: string, kind: ReportKind, text: string, now: number, generation?: string, owner?: string): Report {
     const report: Report = {
       type: "report",
       key,
@@ -148,6 +171,7 @@ export class Reports {
       text: text.trim(),
       at: new Date(now).toISOString(),
       ...(generation === undefined ? {} : { generation }),
+      ...(owner === undefined ? {} : { owner: owner.trim() }),
     };
     this.append(report);
     return report;
