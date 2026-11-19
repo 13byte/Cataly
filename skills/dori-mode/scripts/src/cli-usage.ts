@@ -5,6 +5,9 @@ export const USAGE = `dori <command> [options]
   upstream <command> --config FILE     maintainer staging: check, stage, watch, status, snapshot, restore, recover, restart
   launch <key> --title T --brief FILE --done "merged o/r#N; closed o/r#M" [--thread REF] [--model M] [--cwd DIR]
          [--wall-minutes N|none] [--token-limit N|none] [--cost-limit N|none] [--activity-path FILE ...] [--dry-run]
+         --template NAME [--set name=value]... replaces --brief; [--after a,b --expires-hours N] queues without starting
+  queue list | start <key> | cancel <key>
+                                       start only on explicit command after verified predecessors, host capacity and expiry checks
   adopt  <key> --pane ID --title T --brief FILE --done "..." [--thread REF]
   lanes [--thread REF] [--open]        list registered lanes, optionally for one exact thread
   status [<key>] [--json]              read-only lane, runtime, journal, decision and monitor observations

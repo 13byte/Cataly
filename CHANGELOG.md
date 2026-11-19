@@ -22,6 +22,8 @@
 
 - Added opt-in idle-only freshness nudges, owner summaries and report-kind posting policy, with exact report relay receipts to prevent duplicate owner updates.
 
+- Add literal brief templates and durable prerequisite queues with explicit starts, live completion and host checks, expiry, cancellation and restart visibility.
+
 - Read-only `dori sync` shares one successful process-table snapshot and one herdr pane list within a pass. Later passes, failed reads, hc group queries and all `--write` observations stay fresh.
 
 - Align lead and skill routing: answer direct requests in place, honor explicitly main-scoped implementation, and isolate independent work without requiring a lane or supervisor solely because it has several steps or a PR.

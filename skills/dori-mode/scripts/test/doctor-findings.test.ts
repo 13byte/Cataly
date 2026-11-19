@@ -32,6 +32,19 @@ test("guard and watch diagnostics probe actual state-change events", () => {
   expect(monitorFilterFindings([manifest("watch", "^LANE_")], "owner")).toEqual([]);
 });
 
+const watchFilterBeforeQueue = "^LANE_(?:WATCH_READY$|(?:WATCH_WARN|DONE_CLAIMED|CHANGED|NOT_DONE|CLOSED|HELD) \\S)";
+
+test("doctor warns when a previously complete watch filter drops all three queue events", () => {
+  expect(monitorFilterFindings([manifest("watch", watchFilterBeforeQueue)], "owner")).toEqual([
+    {
+      check: "monitor-filter",
+      severity: "WARN",
+      detail:
+        '"custom-name" misses probes: LANE_QUEUE_READY LANE_QUEUE_HELD LANE_QUEUE_WARN; inspect dori monitor-presets watch in the owner session',
+    },
+  ]);
+});
+
 test("doctor accepts bare readiness lines and payload-bearing monitor events", async () => {
   const state = withState();
   try {
@@ -47,7 +60,7 @@ test("doctor accepts bare readiness lines and payload-bearing monitor events", a
     });
     const watch = manifest(
       "watch",
-      "^LANE_(?:WATCH_READY$|(?:WATCH_WARN|DONE_CLAIMED|CHANGED|NOT_DONE|CLOSED|HELD) \\S)",
+      `${watchFilterBeforeQueue}|^LANE_QUEUE_(?:READY \\S+; live checks |HELD \\S+ \\S+\\(working\\)$|WARN \\S+\\.json: invalid queue record: \\S+$)`,
     );
     const guard = manifest(
       "guard",
