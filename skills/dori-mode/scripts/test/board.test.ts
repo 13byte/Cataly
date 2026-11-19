@@ -47,36 +47,74 @@ posix("board posts once, reuses ID after restart and edits only changed content 
   expect(JSON.parse(readFileSync(recordPath(), "utf8")).pending).toBe(false);
 });
 
-posix("ambiguous create is recorded before network and never retried in-process or after restart", async () => {
-  reply = { status: 503, body: "unavailable" };
-  await expect(updateBoard(options())).rejects.toThrow("unconfirmed");
-  expect(requests).toHaveLength(1);
-  expect(JSON.parse(readFileSync(recordPath(), "utf8")).pending).toBe(true);
+for (const status of [408, 503]) {
+  posix(`HTTP ${status} leaves a create pending until explicit recovery`, async () => {
+    reply = { status, body: "unavailable" };
+    let recordAtSend: string | undefined;
+    await expect(
+      updateBoard({
+        ...options(),
+        http: async (request) => {
+          recordAtSend = readFileSync(recordPath(), "utf8");
+          return http(request);
+        },
+      }),
+    ).rejects.toThrow("unconfirmed");
+    expect(requests).toHaveLength(1);
+    const pending = readFileSync(recordPath(), "utf8");
+    expect(recordAtSend).toBe(pending);
+    expect(JSON.parse(pending)).toMatchObject({ pending: true });
+    expect(JSON.parse(pending)).not.toHaveProperty("messageId");
+    reply = { status: 200, body: JSON.stringify({ id: "50" }) };
+    await expect(updateBoard(options())).rejects.toThrow("inspect the destination");
+    expect(requests).toHaveLength(1);
+    expect(readFileSync(recordPath(), "utf8")).toBe(pending);
+    expect(await updateBoard({ ...options(), messageId: "50" })).toEqual({ action: "edited", messageId: "50" });
+    expect(requests.map((r) => r.method)).toEqual(["POST", "PATCH"]);
+    expect(JSON.parse(readFileSync(recordPath(), "utf8"))).toMatchObject({ pending: false, messageId: "50" });
+  });
+}
+
+posix("a confirmed create refusal clears pending and allows a later explicit create", async () => {
+  reply = { status: 403, body: JSON.stringify({ code: 50013, message: "Missing Permissions" }) };
+  await expect(updateBoard(options())).rejects.toThrow("403");
+  expect(requests.map((r) => r.method)).toEqual(["POST"]);
+  expect(readdirSync(join(state.dir, "boards"))).toEqual([]);
+
   reply = { status: 200, body: JSON.stringify({ id: "50" }) };
-  await expect(updateBoard(options())).rejects.toThrow("inspect the destination");
-  expect(requests).toHaveLength(1);
-  expect(await updateBoard({ ...options(), messageId: "50" })).toEqual({ action: "edited", messageId: "50" });
-  expect(requests.map((r) => r.method)).toEqual(["POST", "PATCH"]);
+  expect(await updateBoard(options())).toEqual({ action: "posted", messageId: "50" });
+  expect(requests.map((r) => r.method)).toEqual(["POST", "POST"]);
+  expect(JSON.parse(readFileSync(recordPath(), "utf8"))).toMatchObject({ pending: false, messageId: "50" });
 });
 
 posix("lost transport, malformed reply and failed edit hold, never create a replacement", async () => {
   const fail: Http = async (request) => {
     requests.push(request);
-    throw new Error("lost response");
+    throw new Error("lost response from https://example.test/bots/synthetic-token");
   };
-  await expect(updateBoard({ ...options(), http: fail })).rejects.toThrow("lost response");
+  await expect(updateBoard({ ...options(), http: fail })).rejects.toThrow(
+    /^board delivery unconfirmed; the write may have succeeded\. Inspect the original destination before attempting recovery; do not resend\.$/,
+  );
+  expect(JSON.parse(readFileSync(recordPath(), "utf8"))).toMatchObject({ pending: true });
   await expect(updateBoard(options())).rejects.toThrow("unconfirmed");
-  await updateBoard({ ...options(), messageId: "50" });
+
+  reply = { status: 200, body: "{" };
+  await expect(updateBoard({ ...options(), messageId: "50" })).rejects.toThrow("unconfirmed");
+  expect(JSON.parse(readFileSync(recordPath(), "utf8"))).toMatchObject({ pending: true, messageId: "50" });
+  await expect(updateBoard(options())).rejects.toThrow("unconfirmed");
+
+  reply = { status: 200, body: JSON.stringify({ id: "50" }) };
+  expect(await updateBoard({ ...options(), messageId: "50" })).toEqual({ action: "edited", messageId: "50" });
   reply = { status: 404, body: JSON.stringify({ message: "Unknown Message" }) };
   await expect(updateBoard({ ...options(), body: "changed" })).rejects.toThrow("404");
   await expect(updateBoard({ ...options(), body: "changed" })).rejects.toThrow("unconfirmed");
-  expect(requests.filter((r) => r.method === "POST")).toHaveLength(1);
+  expect(requests.map((r) => r.method)).toEqual(["POST", "PATCH", "PATCH", "PATCH"]);
   await expect(updateBoard({ ...options(), messageId: "99" })).rejects.toThrow("does not match");
 });
 
 posix("missing create ID cannot become a confirmed board", async () => {
   reply = { status: 200, body: "{}" };
-  await expect(updateBoard(options())).rejects.toThrow("missing message ID");
+  await expect(updateBoard(options())).rejects.toThrow(/missing message ID.*Inspect the original destination/);
   await expect(updateBoard(options())).rejects.toThrow("unconfirmed");
   expect(requests).toHaveLength(1);
 });

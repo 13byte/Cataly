@@ -154,18 +154,23 @@ test("a partially accepted reply never produces a complete delivery receipt", as
     const at = Date.now() - 100;
     await recordOwes(state, inbound(ids.message), at);
     await recordMark(state, ids.thread, ids.message, at + 1);
-    for (const failure of [{ status: 403, body: { message: "Denied" } }, { failure: "fetch" as const }]) {
+    const route = `POST /channels/${ids.thread}/messages`;
+    const first = {
+      body: { id: "71", type: 19, message_reference: { message_id: ids.message, channel_id: ids.thread } },
+    };
+    for (const { failure, uncertain } of [
+      { failure: { status: 403, body: { message: "Denied" } }, uncertain: false },
+      { failure: { failure: "fetch" as const }, uncertain: true },
+      { failure: { status: 503, body: {} }, uncertain: true },
+      { failure: { raw: "not JSON" }, uncertain: true },
+      { failure: { raw: "" }, uncertain: true },
+    ]) {
       const result = await f.invoke(
         ["send", "discord", "--thread", ids.thread, "--reply", ids.message, "--text", longAnswer],
-        {
-          routes: {
-            [`POST /channels/${ids.thread}/messages`]: {
-              sequence: [{ body: { id: "71" } }, failure],
-            },
-          },
-        },
+        { routes: { [route]: { sequence: [first, failure, { body: { id: "73" } }] } } },
       );
-      expect(result.code).toBe(1);
+      expect([result.code, result.out, result.keys]).toEqual([1, "", [route, route]]);
+      expect(result.err.includes("delivery uncertain")).toBe(uncertain);
       expect(result.err).toContain("already posted: 71");
       expect(openOwes(state, Date.now()).map((owe) => owe.message)).toEqual([ids.message]);
       expect(existsSync(join(state, "owes", "sent.jsonl"))).toBe(false);
@@ -201,3 +206,41 @@ test("an uncertain split reply reports the known IDs without settling the reques
     expect(existsSync(join(state, "owes", "sent.jsonl"))).toBe(false);
   });
 }, 60_000);
+
+test.each([{}, { id: "invalid" }])(
+  "a later rejection cannot make a split reply with a missing or invalid ID certain: %j",
+  async (gap) => {
+    await withDiscordCli(async (f) => {
+      const state = dirname(f.tmp);
+      const at = Date.now() - 100;
+      await recordOwes(state, inbound(ids.message), at);
+      await recordMark(state, ids.thread, ids.message, at + 1);
+      const route = `POST /channels/${ids.thread}/messages`;
+      const result = await f.invoke(
+        ["send", "discord", "--thread", ids.thread, "--reply", ids.message, "--text", longAnswer.repeat(2)],
+        {
+          routes: {
+            [route]: {
+              sequence: [
+                {
+                  body: { id: "71", type: 19, message_reference: { message_id: ids.message, channel_id: ids.thread } },
+                },
+                { body: gap },
+                { body: { id: "73" } },
+                { status: 403, body: { message: "Denied" } },
+                { body: { id: "75" } },
+              ],
+            },
+          },
+        },
+      );
+      expect([result.code, result.out, result.keys]).toEqual([1, "", [route, route, route, route]]);
+      expect(result.err).toContain("outcome uncertain (already posted: 71 73)");
+      expect(result.err).toContain("403");
+      expect(result.err).toContain("do not resend");
+      expect(openOwes(state, Date.now()).map((owe) => owe.message)).toEqual([ids.message]);
+      expect(existsSync(join(state, "owes", "sent.jsonl"))).toBe(false);
+    });
+  },
+  60_000,
+);

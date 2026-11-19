@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import { discordInbound } from "../src/messenger/discord-inbound.ts";
-import { MessengerError } from "../src/messenger/http.ts";
+import { DeliveryUncertainError, MessengerError } from "../src/messenger/http.ts";
 import { discordRestWorld, memoryDiscordCursor, ownerMessage } from "./discord-inbound-fakes.ts";
-import { liveWorld } from "./discord-inbound-live-fakes.ts";
+import { liveWorld, memoryLiveWorld, settle } from "./discord-inbound-live-fakes.ts";
 
 // POSIX-only: the Discord inbound queue requires a private (0700) uid-owned directory.
 const posix = test.skipIf(process.platform === "win32");
@@ -131,6 +131,12 @@ test("discovery still propagates authentication, transient and other endpoint fa
     expect(error).toBeInstanceOf(MessengerError);
     expect((error as MessengerError).status).toBe(status);
     expect((error as Error).message).not.toMatch(/private|diagnostic|unit-private-token/);
+    if (status >= 500) {
+      expect(error).toBeInstanceOf(DeliveryUncertainError);
+      expect(error).toMatchObject({ code: "DELIVERY_UNCERTAIN", outcome: "uncertain" });
+      expect(String(error)).toContain("do not resend");
+      expect(world.requests.filter(({ method }) => method === "POST")).toHaveLength(1);
+    }
     expect(cursors.stores.size).toBe(0);
   }
 });
@@ -151,3 +157,26 @@ posix(
     expect(world.intake.channels()).toEqual(["50"]);
   },
 );
+
+test("an uncertain scope-all DM open stops Gateway backfill and keeps its queued sync", async () => {
+  const createWorld = process.platform === "win32" ? memoryLiveWorld : liveWorld;
+  const world = await createWorld([], { ownerId: "10", channelIds: [], all: true });
+  const [socket] = world.sockets;
+  if (!socket) throw new Error("gateway did not open");
+  const requested = world.rest.requests.length;
+  world.rest.state.failure.set("/users/@me/channels", 503);
+  await world.connect(socket);
+
+  expect(socket.closed).toBe(true);
+  const error = await world.live.done.catch((failure: unknown) => failure);
+  expect(error).toBeInstanceOf(DeliveryUncertainError);
+  expect(error).toMatchObject({ status: 503, code: "DELIVERY_UNCERTAIN", outcome: "uncertain" });
+  expect(String(error)).toContain("do not resend");
+  expect(world.queue.first()?.kind).toBe("sync");
+
+  world.advance(120_000);
+  await settle();
+  const writes = world.rest.requests.slice(requested).filter(({ method }) => method === "POST");
+  expect(writes.map(({ url }) => new URL(url).pathname)).toEqual(["/api/v10/users/@me/channels"]);
+  expect(world.logs).not.toContain("DISCORD_GATEWAY_BACKFILL_RETRY discord retry_in=2s");
+});

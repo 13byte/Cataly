@@ -6,7 +6,7 @@ import { channelDiscord, reactDiscord, sendDiscord, threadDiscord, withLocalAudi
 import { discordClock, discordInboundCommand, openDiscordSocket, untilStopped } from "./cli-discord.ts";
 import { ChannelPurposeError } from "./messenger/discord-channels.ts";
 import { discordPresence } from "./messenger/discord-presence.ts";
-import { fetchHttp, MessengerError, UnsafeMessageError } from "./messenger/http.ts";
+import { fetchHttp, inboundPollRetryDelay, MessengerError, UnsafeMessageError } from "./messenger/http.ts";
 import { Slack } from "./messenger/slack.ts";
 import { pollSlackInbound } from "./messenger/slack-inbound.ts";
 import { slackPresence } from "./messenger/slack-presence.ts";
@@ -164,14 +164,18 @@ const inbound: Command = async ({ key, loopMinutes, config, deps, values }) => {
   const slack = new Slack(fetchHttp, realClock, auth, undefined, ledger);
   const me = String((await slack.call("auth.test", {}))["user_id"] ?? die("auth.test returned no user_id"));
   console.log("INBOUND_READY slack");
-  await every(minutes, async () => {
-    // Full text, JSON-escaped on one line, as Telegram's: a monitor reads nothing but this line.
-    await pollSlackInbound(slack, ledger, { selfUserId: me }, (i) =>
-      console.log(
-        `INBOUND ${i.source} ${i.channel} ${i.threadTs ?? "-"} ${i.ts || "-"} ${i.user ?? "-"} ${JSON.stringify(i.text ?? "")}`,
-      ),
-    );
-  });
+  await every(
+    minutes,
+    async () => {
+      // Full text, JSON-escaped on one line, as Telegram's: a monitor reads nothing but this line.
+      await pollSlackInbound(slack, ledger, { selfUserId: me }, (i) =>
+        console.log(
+          `INBOUND ${i.source} ${i.channel} ${i.threadTs ?? "-"} ${i.ts || "-"} ${i.user ?? "-"} ${JSON.stringify(i.text ?? "")}`,
+        ),
+      );
+    },
+    inboundPollRetryDelay,
+  );
 };
 
 export const messengerCommands: Readonly<Record<string, Command>> = {
