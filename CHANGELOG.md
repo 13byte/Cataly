@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Require per-PR copied/adapted source provenance, concept-only attribution, and component-specific license/notice preservation.
+
 - Exercise native prompt rendering across role, ULW, workflow, profile, child-tool, and compaction boundaries in an isolated offline composition matrix.
 
 - Lane final reports separate the outcome, changes or findings, verified evidence, unrun checks and handoff. Done claims cite the saved report and live Done receipts without treating partial or blocked work as done.
