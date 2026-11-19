@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   prepare:
-    if: github.repository == 'vntrevx/omp-dori'
+    if: github.repository == 'vntrevx/Cataly'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:

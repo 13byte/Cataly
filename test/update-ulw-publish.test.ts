@@ -56,7 +56,7 @@ async function fixture() {
     }
     if (path.includes("/pulls?")) return state.pull ? [state.pull] : [];
     if (path.endsWith("/pulls")) {
-      state.pull = { state: "open", html_url: "https://github.com/vntrevx/omp-dori/pull/999", head: { sha: commit } };
+      state.pull = { state: "open", html_url: "https://github.com/vntrevx/Cataly/pull/999", head: { sha: commit } };
       return state.pull;
     }
     if (path.includes("/runs?")) return { workflow_runs: state.runs };
@@ -74,7 +74,8 @@ async function fixture() {
 test("publication changes only three metadata blobs on a new draft branch and dispatches exact-head CI", async () => {
   const f = await fixture();
   const url = await publishUlwCandidate(f.source, f.directory, f.api);
-  expect(url).toEndWith("/999");
+  expect(url).toBe("https://github.com/vntrevx/Cataly/pull/999");
+  expect(f.calls.every((call) => call.path.startsWith("repos/vntrevx/Cataly/"))).toBe(true);
   const tree = f.calls.find((call) => call.path.endsWith("/git/trees"))!.body as { tree: { path: string }[] };
   expect(tree.tree.map((entry) => entry.path)).toEqual(["omp-ulw.lock", "omp-ulw.overlay.lock", "omp-ulw.patch"]);
   expect(f.calls.find((call) => call.path.endsWith("/pulls"))!.body).toMatchObject({
