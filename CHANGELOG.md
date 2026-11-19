@@ -24,6 +24,8 @@
 
 - Restore the Discord 👀 read receipt after accepting lane chat or an exact ASK reply. A failed reaction does not block message delivery.
 
+- Lane briefs and generated footers retain task sources, recorded locations, scoped acceptance, preserved resources and resume context without copying the lead transcript or inventing missing authority.
+
 - Route ordinary Discord messages for an unambiguously connected lane to its own OMP session. Existing connections need no new setting; exact ASK replies still resolve the open form instead of starting a turn.
 
 - Supported native OMP ASK forms are automatically available through an already connected Discord receiver with an unambiguous destination. Existing settings and explicit routes stay in place; only the configured owner's reply to the exact message answers that ASK.
