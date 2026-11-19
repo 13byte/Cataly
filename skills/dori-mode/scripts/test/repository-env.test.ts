@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { delimiter, join } from "node:path";
+import { join } from "node:path";
 
 import type { Lane } from "../src/registry.ts";
 import { withState } from "./fakes.ts";
@@ -27,16 +27,13 @@ describe("Dori-owned repository operations", () => {
   let lane: Lane;
   const git = (...args: string[]) => execFileSync("git", args, { cwd: state.dir, env: fixtureEnv, encoding: "utf8" });
   const poisoned = () => ({ ...fixtureEnv, GIT_DIR: join(foreign, ".git"), GIT_WORK_TREE: foreign });
-  const unpushed = (
-    seen: Lane = { ...lane, worktrees: [input] },
-    env: Record<string, string | undefined> = poisoned(),
-  ) =>
+  const unpushed = (seen: Lane = { ...lane, worktrees: [input] }) =>
     observe(
       `await unpushedWork({
         ...depsFor(newWorld(), fakeClock(0), ${JSON.stringify(state.dir)}, { defaultCwd: ${JSON.stringify(input)} }),
         run, exists: existsSync,
       }, ${JSON.stringify(seen)})`,
-      env,
+      poisoned(),
     );
 
   beforeEach(() => {
@@ -95,7 +92,8 @@ describe("Dori-owned repository operations", () => {
     ).toEqual({
       discovered: [],
       gitDir: join(foreign, ".git"),
-      ordinary: { code: 0, out: foreign, err: "" },
+      // Git prints canonical paths, including filesystem links and Windows aliases.
+      ordinary: { code: 0, out: git("-C", foreign, "rev-parse", "--show-toplevel").trim(), err: "" },
     });
   });
 
@@ -128,44 +126,33 @@ describe("Dori-owned repository operations", () => {
   });
 
   test("an unreadable fallback repository is held when Git trust was supplied only by environment", () => {
-    const executable = Bun.which("git");
-    if (!executable) throw new Error("git is required for the repository fixture");
-    const bin = join(state.dir, "bin");
-    mkdirSync(bin);
-    // Exercise Git's real safe.directory check without changing any filesystem owner.
-    writeFileSync(
-      join(bin, "git"),
-      `#!${process.execPath}
-const child = Bun.spawn([${JSON.stringify(executable)}, ...process.argv.slice(2)], {
-  env: { ...process.env, GIT_TEST_ASSUME_DIFFERENT_OWNER: "1", GIT_CONFIG_NOSYSTEM: "1" },
-  stdin: "inherit", stdout: "inherit", stderr: "inherit",
-});
-process.exit(await child.exited);
-`,
-      { mode: 0o700 },
-    );
     const config = join(state.dir, "trusted.gitconfig");
-    writeFileSync(config, `[safe]\n  directory = ${JSON.stringify(input)}\n`);
-    const env = {
-      ...fixtureEnv,
-      PATH: `${bin}${delimiter}${fixtureEnv["PATH"] ?? ""}`,
-      GIT_CONFIG_GLOBAL: config,
-      LC_ALL: "C",
-    };
+    const canonical = git("-C", input, "rev-parse", "--show-toplevel").trim();
+    writeFileSync(config, `[safe]\n  directory = ${JSON.stringify(canonical)}\n`);
+    writeFileSync(join(input, "tracked.txt"), "changed\n");
     const argv = JSON.stringify(["git", "-C", input, "rev-parse", "--is-inside-work-tree"]);
     expect(
       observe(
-        `({
-      trusted: (await run(${argv})).code,
-      refused: (await run(${argv}, { env: { ...process.env,
+        `await (async () => {
+      // Exercise native Git ownership checks after repoGit strips ambient Git variables.
+      const foreignOwnerGit = (argv, opts = {}) => run(argv, {
+        ...opts, env: { ...(opts.env ?? process.env),
+          GIT_TEST_ASSUME_DIFFERENT_OWNER: "1", GIT_CONFIG_NOSYSTEM: "1",
+        },
+      });
+      const trusted = await foreignOwnerGit(${argv});
+      const refused = await foreignOwnerGit(${argv}, { env: { ...process.env,
         GIT_CONFIG_GLOBAL: ${JSON.stringify(join(state.dir, "empty.gitconfig"))},
-      } })).err.includes("detected dubious ownership"),
-    })`,
-        env,
+      } });
+      const reasons = await unpushedWork({
+        ...depsFor(newWorld(), fakeClock(0), ${JSON.stringify(state.dir)}, { defaultCwd: ${JSON.stringify(input)} }),
+        run: foreignOwnerGit, exists: existsSync,
+      }, ${JSON.stringify(lane)});
+      return { trusted: trusted.code, refused: refused.err.includes("detected dubious ownership"), reasons };
+    })()`,
+        { ...fixtureEnv, GIT_CONFIG_GLOBAL: config, LC_ALL: "C" },
       ),
-    ).toEqual({ trusted: 0, refused: true });
-    writeFileSync(join(input, "tracked.txt"), "changed\n");
-    expect(unpushed(lane, env)).toEqual([`unpushed work in ${input} (git state unreadable)`]);
+    ).toEqual({ trusted: 0, refused: true, reasons: [`unpushed work in ${input} (git state unreadable)`] });
   });
 
   test("closing removes only the owned worktree, not a matching foreign worktree", () => {
