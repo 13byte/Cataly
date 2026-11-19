@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { nativeCacheFixture, overlayFixture } from "./source-bundle-setup.ts";
@@ -96,14 +96,25 @@ test("an explicitly configured external OMP needs no native receipt, but the man
       },
     );
   };
-  const external = invoke(join(home, "external/bin/omp"));
+  const externalBin = join(home, "external", "bin");
+  mkdirSync(externalBin, { recursive: true });
+  const external = invoke(join(externalBin, "omp"));
   expect({ code: external.exitCode, out: external.stdout.toString(), err: external.stderr.toString() }).toEqual({
     code: 0,
     out: "[]\n",
     err: "",
   });
 
-  for (const executable of ["omp", join(home, ".dori", "bin", "omp"), join(source, "scripts", "consumer", "omp")]) {
+  const managedPaths = ["omp", join(home, ".dori", "bin", "omp"), join(source, "scripts", "consumer", "omp")];
+  if (process.platform === "win32") {
+    const alias = join(home, "dori-junction");
+    symlinkSync(join(home, ".dori"), alias, "junction");
+    managedPaths.push(
+      join(alias, "bin", "omp"),
+      join(alias, "releases", "releases", basename(source), "scripts", "consumer", "omp"),
+    );
+  }
+  for (const executable of managedPaths) {
     const managed = invoke(executable);
     expect(managed.exitCode === 0 ? { unexpectedlyAccepted: executable } : null).toBeNull();
     expect(managed.stdout.toString()).toBe("");
