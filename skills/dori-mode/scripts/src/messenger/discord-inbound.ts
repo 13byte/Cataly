@@ -165,7 +165,7 @@ export const discordInbound = async (
       return;
     await deliver(message, store, emit, newer(message.id, cursor) ? message.id : cursor);
   };
-  const pollChannel = discordThreadPoll({ ownerId, botId, current, readPage, accepts, accept, deliver });
+  const pollChannel = discordThreadPoll({ ownerId, botId, current, readPage, valid, accepts, accept, deliver });
   await refresh(true);
   let polls = 0;
   return {

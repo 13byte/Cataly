@@ -171,3 +171,51 @@ for (const inRest of [false, true]) {
     }
   });
 }
+
+for (const sync of [false, true]) {
+  for (const admittedAfter of [undefined, "102"]) {
+    for (const excluded of ["105", "107", "109"]) {
+      test(`mixed archived ${sync ? "sync" : "message"} rows discard ${excluded}/${admittedAfter ?? "legacy"}`, async () => {
+        const world = await queuedWorld({
+          history: [ownerMessage("100"), ownerMessage("110", { channel_id: "50" })],
+          messages: [],
+          cursors: { "20": "100", "50": "102" },
+          sync,
+        });
+        world.queue().push("message", ownerMessage(excluded, { channel_id: "50" }), admittedAfter);
+        world.queue().push("message", ownerMessage("107", { channel_id: "50" }), "102", "20");
+        const beforeEmit: (string | undefined)[] = [];
+        const run = await world.restart(() => {
+          beforeEmit.push(world.cursor("50"));
+        });
+        await settle();
+        expect(world.received).toEqual(["50:107", "50:110"]);
+        expect(beforeEmit).toEqual(["102", "107"]);
+        expect(world.saves).toEqual(["50:107", "50:110"]);
+        expect(run.intake.channels()).toEqual(["20"]);
+        expect(world.queue().first()).toBeNull();
+        await world.restart();
+        await settle();
+        expect(world.received).toEqual(["50:107", "50:110"]);
+        expect(world.queue().first()).toBeNull();
+      });
+    }
+  }
+
+  test(`malformed archived ${sync ? "sync" : "message"} row still stops recovery`, async () => {
+    const world = await queuedWorld({
+      history: [ownerMessage("100"), ownerMessage("110", { channel_id: "50" })],
+      messages: [],
+      cursors: { "20": "100", "50": "102" },
+      sync,
+    });
+    const malformed = ownerMessage("1x", { channel_id: "50" });
+    world.queue().push("message", malformed, "102");
+    world.queue().push("message", ownerMessage("107", { channel_id: "50" }), "102", "20");
+    const run = await world.restart();
+    expect(await run.outcome).toMatchObject({ code: "DISCORD_INBOUND_PROTOCOL_ERROR", status: 502 });
+    expect(world.received).toEqual([]);
+    expect(world.cursor("50")).toBe("102");
+    expect(world.queue().nextOwner("50", "10", "110", "0", 0)?.payload).toBe(JSON.stringify(malformed));
+  });
+}
