@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import {
   resolveConsumerOmpCommand,
   resolveConsumerOmpUlwPath,
@@ -101,6 +101,10 @@ export const configPath = (): string => process.env["DORI_CONFIG"] ?? join(homed
 
 export const expandHome = (path: string, home = homedir()): string =>
   path === "~" ? home : path.startsWith("~/") ? join(home, path.slice(2)) : path;
+
+// Enqueue alone needs the spelling before path.join removes `..` after a possible symlink.
+const queueCwds = new WeakMap<DoriConfig, string>();
+export const queueDefaultCwd = (config: DoriConfig): string => queueCwds.get(config) ?? config.defaultCwd;
 
 export class ConfigError extends Error {}
 
@@ -216,7 +220,7 @@ export const loadConfig = async (path = configPath(), home = homedir()): Promise
     }
   }
   const command = resolveProcessOmpCommand(merged.agentCommand, path);
-  return {
+  const config: DoriConfig = {
     ...merged,
     agentCommand:
       command === merged.agentCommand || process.env["DORI_AGENT_ARGV"] === undefined
@@ -231,6 +235,8 @@ export const loadConfig = async (path = configPath(), home = homedir()): Promise
     }),
     leadPane: process.env["DORI_LEAD_PANE"] ?? merged.leadPane,
   };
+  if (merged.defaultCwd.startsWith("~/")) queueCwds.set(config, `${home}${sep}${merged.defaultCwd.slice(2)}`);
+  return config;
 };
 
 export const fill = (template: ArgvTemplate, values: Readonly<Record<string, string>>): string[] =>
