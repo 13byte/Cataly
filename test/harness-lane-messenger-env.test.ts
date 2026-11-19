@@ -6,8 +6,7 @@ import { setup } from "./harness-setup.ts";
 import { migrateWorld } from "./migrate-setup.ts";
 
 // Inspect only the messenger assignments sent to the terminal server, never caller credentials.
-const messengerArgs = (command: string[]) =>
-  command.filter((arg) => /^DORI_(DISCORD|TELEGRAM)_TOKEN=/.test(arg));
+const messengerArgs = (command: string[]) => command.filter((arg) => /^DORI_(DISCORD|TELEGRAM)_TOKEN=/.test(arg));
 const emptyOverrides = ["DORI_DISCORD_TOKEN=", "DORI_TELEGRAM_TOKEN="];
 
 async function withFixtureConfig(root: string, run: () => Promise<number>): Promise<number> {
