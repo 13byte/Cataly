@@ -13,10 +13,10 @@ const observe = (expression: string, env: Record<string, string | undefined>): u
     import { closeLane, watchTick } from ${JSON.stringify(new URL("../src/done-flow.ts", import.meta.url).href)};
     import { discoverWorktrees, unpushedWork } from ${JSON.stringify(new URL("../src/close-worktrees.ts", import.meta.url).href)};
     import { run, type Runner } from ${JSON.stringify(new URL("../src/run.ts", import.meta.url).href)};
-    // Inject only into the real Git child, after repoGit has constructed its filtered environment.
-    const differentOwner: Runner = (argv, opts) => run(argv, {
-      ...opts, env: { ...(opts?.env ?? process.env), GIT_TEST_ASSUME_DIFFERENT_OWNER: "1" },
-    });
+    // Exercise real Git ownership checks without inheriting runner-wide trust.
+    const differentOwner: Runner = (argv, opts) => { const child = opts?.env ?? process.env;
+      return run(argv, { ...opts, env: { ...child, GIT_CONFIG_NOSYSTEM: "1", GIT_TEST_ASSUME_DIFFERENT_OWNER: "1",
+        GIT_CONFIG_GLOBAL: child.GIT_CONFIG_GLOBAL ?? ${JSON.stringify(join(env["HOME"] ?? "", "empty.gitconfig"))} } }); };
     import { depsFor, fakeClock, newWorld } from ${JSON.stringify(new URL("./fakes.ts", import.meta.url).href)};
     console.log(JSON.stringify(${expression}));
   `;
