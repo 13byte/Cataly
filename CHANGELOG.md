@@ -2,11 +2,7 @@
 
 ## Unreleased
 
-- Platform behaviour now sits behind one `PlatformAdapter` in `src/platform/`, with a single implementation per host (darwin, linux, win32) in place of scattered `process.platform` checks. Answers, messages and failure modes are unchanged.
-
-- `src/release/files.ts` flushes a directory only through the adapter's `syncDirectory` instead of testing `directoryFsync` first; on Windows that release path no longer opens and fsyncs a directory, and it is unreachable there because `provision.ts` prerequisites reject win32. A manifest `cwd` carrying `..` behind either separator is rejected again on every host, as it was before the adapter named a separator set.
-
-- Biome is replaced by oxlint for linting, Prettier for formatting and a husky `pre-commit` hook that runs both. `bun run check` now runs `lint` (`oxlint --deny-warnings`) then `format:check`, `bun run format` replaces `bun run fmt`, and the formatter options, rule severities and ignore patterns carry over unchanged. Biome's optional-chain correction (the default fix behind `useOptionalChain`) has no oxlint equivalent, so code it had already fixed stays as it is.
+- Exercise native prompt rendering across role, ULW, workflow, profile, child-tool, and compaction boundaries in an isolated offline composition matrix.
 
 - Hide explicitly selected `monitor` tools from native child sessions while preserving inherited role behavior, ordinary main/child tools and the separate main-session execution guard.
 
@@ -76,6 +72,12 @@
 - Linux host sampling now reads load and memory directly from `/proc`, avoiding two `cat` children and three failed macOS command attempts per sample. Disk and session sampling, unknown-value behavior, and non-Linux probes are unchanged.
 
 - The skill CLI loads command implementations on demand, avoiding updater, messenger and lane graphs for successful journal commands and all configuration/command graphs for `--version`. Ordinary commands retain configuration and consumer-native admission before execution; usage, exit codes and original error classes remain unchanged.
+
+- Platform behaviour now sits behind one `PlatformAdapter` in `src/platform/`, with a single implementation per host (darwin, linux, win32) in place of scattered `process.platform` checks. Answers, messages and failure modes are unchanged.
+
+- `src/release/files.ts` flushes a directory only through the adapter's `syncDirectory` instead of testing `directoryFsync` first; on Windows that release path no longer opens and fsyncs a directory, and it is unreachable there because `provision.ts` prerequisites reject win32. A manifest `cwd` carrying `..` behind either separator is rejected again on every host, as it was before the adapter named a separator set.
+
+- Biome is replaced by oxlint for linting, Prettier for formatting and a husky `pre-commit` hook that runs both. `bun run check` now runs `lint` (`oxlint --deny-warnings`) then `format:check`, `bun run format` replaces `bun run fmt`, and the formatter options, rule severities and ignore patterns carry over unchanged. Biome's optional-chain correction (the default fix behind `useOptionalChain`) has no oxlint equivalent, so code it had already fixed stays as it is.
 
 - Automatic CI keeps its release gate in `.github/workflows/ci.yml`: the Linux `check`, `e2e-herdr` and `e2e-hc` jobs on `ubuntu-24.04`, and exact-commit release validation and contributor requirements still require exactly those three. A separate `.github/workflows/cross-os.yml` now runs on each pull request and `main` push outside that gate: `test-macos` on a GitHub-hosted `macos-15` arm64 runner runs the full root, skill and extension suites against prepared fixtures, allowing the slower runner `--timeout=30000` for the root suite, and its genuine Darwin arm64 hc consumer release smoke runs only on `main` pushes and manual runs; `test-windows` on a GitHub-hosted `windows-2025` runner runs the static checks and the three test suites. Windows CI is not product support, and the supported release scope stays Linux x64/herdr plus the documented isolated macOS arm64/hc profile. Windows coverage gates POSIX-only cases individually, or by their whole `describe` suite when every case in it needs the POSIX runtime, with `skipIf(process.platform === "win32")` and a reason comment, never by excluding files or relaxing a security check, and Windows path handling was fixed where it was wrong — `realDirectory` stops at the root, directory fsync is skipped on win32, local Git paths are recognized on Windows, and the bound ULW overlay and the skill monitor, supervision and OMP argv matching handle Windows path separators. The workflows now pin their runner versions and per-job `timeout-minutes` and use Node 24 action releases; the Linux and cross-OS jobs share one composite setup action and a Bun install cache, and the release workflows use the same pinned Node 24 checkout and artifact actions.
 
