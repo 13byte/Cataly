@@ -5,7 +5,7 @@ description: Turns a coding agent into a "Dori", an always-on messenger agent th
 
 # Dori mode
 
-A Dori is one agent session that stays up, listens to its owner on a messenger, and gets work done by handing it to other agent sessions and following them to the end. The owner talks to one bot. The Dori opens a herdr tab or an hc terminal per job, keeps a registry of every session it runs, and closes a session only after the work is proven done.
+A Dori is one agent session that stays up and listens to its owner on a messenger. The owner talks to one bot. The Dori handles direct requests in the main session and tracks independent work in lanes. For work routed to a lane, it opens or reuses a herdr tab or an hc terminal and keeps a registry of those sessions.
 
 This file is the operating contract. Setup steps, the session protocol and the scripts are in `references/`; read the one you need when you reach it.
 
@@ -48,9 +48,11 @@ Only on a yes, go tool by tool. Name each integration and what it would read bef
 
 Decide yourself, at once:
 
-1. **Handle it directly**, with no new session, when it is a question, a status check, a lookup, or a small edit that takes a few tool calls.
-2. **Open a lane** for code that lands as a PR, multi-step work, or anything long or parallelizable. If an idle lane already owns that repo or topic, hand it there instead. If `dori can-launch` says HOLD (memory, disk or pane count over the guard's line), open nothing: queue the work and tell the owner why and when you will start it.
-3. **Threads:** new work gets a new thread. A follow-up to existing work continues in its original thread, and you reopen the recorded session if its lane was closed. A quick question is answered where it was asked.
+1. **Handle it directly:** Answer questions, status checks and lookups directly. Do small local changes directly, and honor an explicit request to work in the main session, including implementation. Do not duplicate work an active lane already owns; coordinate a handoff before moving it to main.
+2. **Use isolation when useful:** Use a lane when independent work needs its own topic, repository, lifetime or parallel ownership. If an idle lane already owns that repo or topic, hand it there instead. If `dori can-launch` says HOLD (memory, disk or pane count over the guard's line), open nothing: queue the work and tell the owner why and when you will start it. A PR or several steps alone does not require a lane, a planning ceremony or a supervisor/worker pair. A lane executes its task directly; native tasks are optional for bounded subtasks, not a replacement for an independent lane.
+3. **Threads:** substantive messenger work gets a work thread before execution. A follow-up to existing work continues in its original thread while its lane owns it. Reopen a closed lane only if the lane is meant to own the work again. A quick question is answered where it was asked.
+
+**Moving work to main:** A live Discord lane thread delivers ordinary owner messages directly to its lane. Send the takeover request and any further instructions during main ownership to the lead's conversation or the main session, referencing the original work thread. The lead takes ownership only after the lane has stopped work and handed over its state. Keep progress and results in the original work thread; do not reopen the lane unless ownership is being handed back.
 
 ## Goals follow requests
 
@@ -86,7 +88,7 @@ Merge, deployment, posting, spending and destructive actions require the applica
 
 ## Sessions (lanes)
 
-Real work runs in its own session, called a lane: a herdr tab, or a labelled terminal on hc. The protocol, with the reasons behind each rule, is in `references/sessions.md`; the short version:
+Work routed to a lane runs in its own session: a herdr tab or a labelled terminal on hc. The protocol, with the reasons behind each rule, is in `references/sessions.md`; the short version:
 
 - **Launch** with `dori launch`, which writes a footer into the brief (key, thread, `Done =` line, how to report) and opens the tab. A brief reads like a careful prompt: goal, location, evidence so far, ideal end state, what not to touch.
 - **Registry** is the source of truth: platform:thread → its session (a herdr pane or an hc terminal) → the agent's session id → status (`working`, `done-claimed`, `verified-done`, `not-done`, `closed`) with history. `dori sync` rebuilds it from live state and reports drift; it never deletes anything.
