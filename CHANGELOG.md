@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `dori decision` records who may settle each choice: `ask --kind routine` (reversible, in scope, at least two options, in the work's thread) lets the lead record `decision choose <id> <N> --reason TEXT --source REF --thread REF` after posting its choice and reason in that thread, while unmarked and pre-existing decisions stay owner-only; `list` shows `kind` and the answer's `authority`, `digest` shows `kind`, the same rules hold for hand-written or raced records, and no decision answer or choice grants a native execution approval.
+
 - Require per-PR copied/adapted source provenance, concept-only attribution, and component-specific license/notice preservation.
 
 - Record observed source/native/ULW identities, environment, commands, receipts and unverified surfaces together in PR and release evidence.
