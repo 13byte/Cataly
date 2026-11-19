@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Align lead and skill routing: answer direct requests in place, honor explicitly main-scoped implementation, and isolate independent work without requiring a lane or supervisor solely because it has several steps or a PR.
+
 - New lane registry records and brief footers retain requested launch text and its configuration origin without changing default ULW, raw message delivery or startup goal checks. Launch-selection provenance describes matching text rather than programmatic assignment history. Same-value reassignment retains the matching default or loaded-file origin, with regression coverage for both cases.
 
 - Add explicit lane parking, exact-session reopening, abandonment receipts and a read-only hold ledger. Keep worktrees, accepted pending Discord messages and ordinary Done verification.
