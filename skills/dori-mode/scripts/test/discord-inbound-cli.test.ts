@@ -4,9 +4,14 @@ import { join } from "node:path";
 import { fileDiscordInboundStore } from "../src/messenger/discord-inbound-state.ts";
 import { withState } from "./fakes.ts";
 
-const inboundCli = async (args: string[], environment: Record<string, string> = {}) => {
+const inboundCli = async (
+  args: string[],
+  environment: Record<string, string> = {},
+  prepare: (stateDir: string) => void = () => {},
+) => {
   const state = withState();
   try {
+    prepare(state.dir);
     const config = join(state.dir, "config.json");
     writeFileSync(config, JSON.stringify({ stateDir: state.dir, runtime: "herdr", hooks: {} }));
     const child = Bun.spawn(
@@ -65,7 +70,7 @@ test("public Discord intake defaults to three seconds and honors --loop in minut
     expect(JSON.parse(receipt?.slice("DISCORD_INBOUND_QA ".length) ?? "null")).toEqual({
       delays: [milliseconds, milliseconds],
       polls: 2,
-      requests: 5,
+      requests: 8, // Existing quiet probes plus the default-on configured-channel metadata read.
     });
   }
 });
@@ -93,6 +98,7 @@ test("invalid owner, authentication, permission and content-intent setup never a
     { DORI_TEST_DISCORD_CASE: "intent" },
     { DORI_DISCORD_SCOPE: "everything" },
     { DORI_DISCORD_CHANNEL_IDS: "20,abc" },
+    { DORI_DISCORD_THREADS: "sometimes" },
   ] as const) {
     const { out, err, code, cursor } = await inboundCli(["--loop", "0"], environment);
     expect({ code, out, cursor }).toEqual({ code: 1, out: "", cursor: undefined });
@@ -100,3 +106,53 @@ test("invalid owner, authentication, permission and content-intent setup never a
     expect(err).not.toContain("invalid-token");
   }
 });
+
+test("--context ends each group with where it was posted and the purposes recorded there", async () => {
+  const purposes = (dir: string) =>
+    writeFileSync(
+      join(dir, "discord-channels.json"),
+      JSON.stringify({
+        "30": { purpose: "omp-dori development", name: "dev", updatedAt: "2026-11-17T00:00:00.000Z" },
+        "20": { purpose: "one task", updatedAt: "2026-11-17T00:00:00.000Z" },
+      }),
+    );
+  const message = 'INBOUND discord 20 101 from=owner ref=- "first owner text"';
+  const where = await inboundCli(["--loop", "0", "--context"], { DORI_TEST_DISCORD_CASE: "context" }, purposes);
+  expect({ code: where.code, err: where.err, cursor: where.cursor }).toEqual({ code: 0, err: "", cursor: "102" });
+  expect(where.out.trim().split("\n").slice(1)).toEqual([
+    message,
+    `INBOUND_CONTEXT discord 20 101 ${JSON.stringify({
+      channel: { id: "30", name: "dev", topic: "editable topic", purpose: "omp-dori development" },
+      thread: { id: "20", name: "task thread", purpose: "one task" },
+    })}`,
+  ]);
+  // A failed lookup still delivers the message and commits it; the record says what is known, without the body.
+  const denied = await inboundCli(["--loop", "0", "--context"], { DORI_TEST_DISCORD_CASE: "context-denied" }, purposes);
+  expect({ code: denied.code, cursor: denied.cursor }).toEqual({ code: 0, cursor: "102" });
+  expect(denied.out.trim().split("\n").slice(1)).toEqual([
+    message,
+    `INBOUND_CONTEXT discord 20 101 ${JSON.stringify({
+      channel: { id: "20", purpose: "one task" },
+      thread: null,
+      error: "channel lookup failed (HTTP 403)",
+    })}`,
+  ]);
+  // Without --context nothing is looked up and the output is unchanged, even where lookups would fail.
+  const plain = await inboundCli(["--loop", "0"], { DORI_TEST_DISCORD_CASE: "context-denied" }, purposes);
+  expect(plain.out.trim().split("\n").slice(1)).toEqual([message]);
+});
+
+for (const threads of [undefined, "on", "off"] as const) {
+  test(`public thread setting ${threads ?? "unset"} retains owner output and explicit cursor`, async () => {
+    const result = await inboundCli(["--loop", "0"], threads === undefined ? {} : { DORI_DISCORD_THREADS: threads });
+    expect({ code: result.code, err: result.err, cursor: result.cursor }).toEqual({
+      code: 0,
+      err: "",
+      cursor: "102",
+    });
+    expect(result.out.trim().split("\n")).toEqual([
+      "INBOUND_READY discord owner=10 channel=20 bot=99",
+      'INBOUND discord 20 101 from=owner ref=- "first owner text"',
+    ]);
+  });
+}
