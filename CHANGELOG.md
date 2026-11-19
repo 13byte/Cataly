@@ -10,6 +10,8 @@
 
 - Read-only `dori sync` shares one successful process-table snapshot and one herdr pane list within a pass. Later passes, failed reads, hc group queries and all `--write` observations stay fresh.
 
+- Restore the Discord 👀 read receipt after accepting lane chat or an exact ASK reply. A failed reaction does not block message delivery.
+
 - Route ordinary Discord messages for an unambiguously connected lane to its own OMP session. Existing connections need no new setting; exact ASK replies still resolve the open form instead of starting a turn.
 
 - Supported native OMP ASK forms are automatically available through an already connected Discord receiver with an unambiguous destination. Existing settings and explicit routes stay in place; only the configured owner's reply to the exact message answers that ASK.
