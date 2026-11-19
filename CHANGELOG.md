@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add read-only `dori doctor` configuration, adoption and monitor diagnostics, canonical `monitor-presets`, and an advisory boot summary. Doctor checks external terminal metadata and verifies the native monitor's restart policy; documented filters include supervision and loop-error events.
+
 - Read-only `dori sync` shares one successful process-table snapshot and one herdr pane list within a pass. Later passes, failed reads, hc group queries and all `--write` observations stay fresh.
 
 - Supported native OMP ASK forms are automatically available through an already connected Discord receiver with an unambiguous destination. Existing settings and explicit routes stay in place; only the configured owner's reply to the exact message answers that ASK.
