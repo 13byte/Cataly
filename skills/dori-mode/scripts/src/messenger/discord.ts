@@ -1,15 +1,7 @@
 import type { Clock } from "../run.ts";
-import { guardText, type Http, MessengerError, withBackoff } from "./http.ts";
+import { discordErrorCode, retryAfter } from "./discord-response.ts";
+import { DEFAULT_RETRY, guardText, type Http, MessengerError, withBackoff } from "./http.ts";
 import { DISCORD_LIMIT, splitForDiscord } from "./split.ts";
-
-const retryAfter = (body: string): number | undefined => {
-  try {
-    const n = (JSON.parse(body) as { retry_after?: number }).retry_after;
-    return typeof n === "number" ? n : undefined;
-  } catch {
-    return undefined;
-  }
-};
 
 export type DcChannel = {
   readonly id: string;
@@ -20,21 +12,56 @@ export type DcChannel = {
   readonly available_tags?: readonly { readonly id: string; readonly name: string }[];
 };
 
+type Delivery = { readonly ids: string[]; readonly replyConfirmed: boolean };
+type PostedMessage = {
+  readonly id: string;
+  readonly type?: number;
+  readonly message_reference?: { readonly message_id?: string; readonly channel_id?: string };
+};
+
 /** Forum and media channels contain posts, each represented by a thread. */
 export const isForumType = (type: number): boolean => type === 15 || type === 16;
+
+/**
+ * An environment-supplied REST API prefix may target only loopback HTTP.
+ * Credentials and query/fragment components are not usable API prefixes.
+ */
+export function discordApiBase(value: string | undefined): string {
+  const fallback = "https://discord.com/api/v10";
+  if (value === undefined || value === "") return fallback;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new MessengerError("DORI_DISCORD_API_BASE is not a URL", 0);
+  }
+  if (
+    url.protocol !== "http:" ||
+    url.username !== "" ||
+    url.password !== "" ||
+    !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) ||
+    url.href !== url.origin + url.pathname
+  )
+    throw new MessengerError(
+      "DORI_DISCORD_API_BASE must use a loopback http origin without credentials, query or fragment",
+      0,
+    );
+  return url.href.replace(/\/+$/, "");
+}
 
 export class Discord {
   constructor(
     private readonly http: Http,
     private readonly clock: Clock,
     private readonly botToken: string,
-    private readonly base = "https://discord.com/api/v10",
+    private readonly base = discordApiBase(process.env["DORI_DISCORD_API_BASE"]),
   ) {}
 
   async call<T = unknown>(
     method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE",
     path: string,
     body?: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<T> {
     const res = await withBackoff(
       this.http,
@@ -44,12 +71,18 @@ export class Discord {
         url: `${this.base}${path}`,
         headers: { Authorization: `Bot ${this.botToken}`, "Content-Type": "application/json" },
         ...(body ? { body: JSON.stringify(body) } : {}),
+        ...(signal === undefined ? {} : { signal }),
       },
-      undefined,
+      // Cancellable live metadata owns its existing 2s–30s retry outside this single HTTP attempt.
+      signal === undefined ? undefined : { ...DEFAULT_RETRY, attempts: 1 },
       retryAfter,
     );
     if (res.status >= 300)
-      throw new MessengerError(`discord ${method} ${path}: ${res.status} ${res.body.slice(0, 160)}`, res.status);
+      throw new MessengerError(
+        `discord ${method} ${path}: ${res.status} ${res.body.slice(0, 160)}`,
+        res.status,
+        discordErrorCode(res.body),
+      );
     return (res.body ? JSON.parse(res.body) : {}) as T;
   }
 
@@ -59,6 +92,11 @@ export class Discord {
    * part stops the rest; its error names the parts already posted, which stay.
    */
   async send(channelId: string, content: string, opts: { readonly replyTo?: string } = {}): Promise<string[]> {
+    return (await this.sendDelivery(channelId, content, opts)).ids;
+  }
+
+  /** Preserve first-message reply evidence instead of inferring it from the request. */
+  async sendDelivery(channelId: string, content: string, opts: { readonly replyTo?: string } = {}): Promise<Delivery> {
     return await this.post(channelId, splitForDiscord(guardText(content)), opts.replyTo);
   }
 
@@ -68,20 +106,28 @@ export class Discord {
     parts: readonly string[],
     replyTo?: string,
     before: readonly string[] = [],
-  ): Promise<string[]> {
+  ): Promise<Delivery> {
     const ids: string[] = [...before];
     const total = before.length + parts.length;
+    let replyConfirmed = false;
     for (const part of parts) {
       const reference =
         ids.length === 0 && replyTo !== undefined
           ? { message_reference: { message_id: replyTo, fail_if_not_exists: false } }
           : {};
       try {
-        const sent = await this.call<{ id: string }>("POST", `/channels/${channelId}/messages`, {
+        const sent = await this.call<PostedMessage>("POST", `/channels/${channelId}/messages`, {
           content: part,
           allowed_mentions: { parse: [] },
           ...reference,
         });
+        if (ids.length === 0 && replyTo !== undefined) {
+          const ref = sent.message_reference;
+          replyConfirmed =
+            sent.type === 19 &&
+            ref?.message_id === replyTo &&
+            (ref.channel_id === undefined || ref.channel_id === channelId);
+        }
         ids.push(sent.id);
       } catch (e) {
         if (ids.length === 0) throw e;
@@ -94,7 +140,7 @@ export class Discord {
         );
       }
     }
-    return ids;
+    return { ids, replyConfirmed };
   }
 
   /** One message is edited in place: text over the limit is refused before any request, never split. */

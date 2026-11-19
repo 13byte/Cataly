@@ -6,7 +6,7 @@ import { type RuntimeChoice, readRuntimeChoice } from "../../../../src/runtime/s
 import type { RuntimeKind, SessionRuntime } from "../../../../src/runtime/types.ts";
 import { configPath, type DoriConfig } from "./config.ts";
 
-export type Ran = { readonly code: number; readonly out: string; readonly err: string };
+export type Ran = { readonly code: number; readonly out: string; readonly err: string; readonly spawnFailed?: true };
 export type RunOptions = { readonly cwd?: string; readonly timeoutMs?: number; readonly preserveOutput?: boolean };
 export type Runner = (argv: readonly string[], opts?: RunOptions) => Promise<Ran>;
 
@@ -20,7 +20,7 @@ export const run: Runner = async (argv, opts = {}) => {
       ...(opts.timeoutMs ? { timeout: opts.timeoutMs, killSignal: "SIGKILL" } : {}),
     });
   } catch (e) {
-    return { code: 127, out: "", err: e instanceof Error ? e.message : String(e) };
+    return { code: 127, out: "", err: e instanceof Error ? e.message : String(e), spawnFailed: true as const };
   }
   const [out, err, code] = await Promise.all([
     new Response(p.stdout as ReadableStream).text(),
@@ -70,11 +70,53 @@ export class ChosenRuntimes extends Runtimes {
   }
 }
 
+/** Pass-local adapters, with runtime discovery shared by all calls on the original flow. */
+class ScopedRuntimes extends ChosenRuntimes {
+  constructor(
+    private readonly original: ChosenRuntimes,
+    make: (kind: RuntimeKind) => SessionRuntime,
+  ) {
+    super(
+      () => {
+        if (original.choice) return original.choice;
+        throw original.failure;
+      },
+      (kind) => {
+        original.for({ runtime: kind, id: "" });
+        return make(kind);
+      },
+    );
+  }
+
+  override kinds(): readonly RuntimeKind[] {
+    return this.original.kinds();
+  }
+}
+
 /** `DORI_RUNTIME` > the config's `runtime` > the root's detection (inside hc, inside herdr, hc on PATH, else herdr). */
 export const runtimeChoice = (config: Pick<DoriConfig, "runtime">, env: Env): RuntimeChoice => {
   const fromEnv = env["DORI_RUNTIME"];
   if (!fromEnv && config.runtime !== undefined) return { kind: config.runtime, source: "config" };
   return readRuntimeChoice({ env, configPath: configPath() });
+};
+
+const runtimeFactory = (
+  config: Pick<DoriConfig, "runtime"> & Partial<Pick<DoriConfig, "stateDir">>,
+  env: Env,
+  runner: Runner,
+  clock: Clock,
+): ((kind: RuntimeKind) => SessionRuntime) => {
+  const exec: Exec = async (cmd, argv) => {
+    const r = await runner([cmd, ...argv]);
+    return { code: r.code, stdout: r.out, stderr: r.err, ...(r.spawnFailed ? { spawnFailed: true as const } : {}) };
+  };
+  const options = { env, sleep: clock.sleep, ...(config.stateDir === undefined ? {} : { stateDir: config.stateDir }) };
+  const make: Record<RuntimeKind, () => SessionRuntime> = {
+    // Explicit env owns absence too; undefined would invoke the constructor's process.env default.
+    herdr: () => new HerdrRuntime(exec, env["DORI_HERDR_SESSION"] ?? "", options),
+    hc: () => new HcRuntime(exec, options),
+  };
+  return (kind) => make[kind]();
 };
 
 /** Every runtime behind the skill's Runner, so tests swap the binaries for a recorder; sleeps go through the clock. */
@@ -83,38 +125,27 @@ export const runtimesFor = (
   env: Env,
   runner: Runner = run,
   clock: Clock = realClock,
-): ChosenRuntimes => {
-  const exec: Exec = async (cmd, argv) => {
-    const r = await runner([cmd, ...argv]);
-    return { code: r.code, stdout: r.out, stderr: r.err };
-  };
-  const options = { env, sleep: clock.sleep, ...(config.stateDir === undefined ? {} : { stateDir: config.stateDir }) };
-  const make: Record<RuntimeKind, () => SessionRuntime> = {
-    // Explicit env owns absence too; undefined would invoke the constructor's process.env default.
-    herdr: () => new HerdrRuntime(exec, env["DORI_HERDR_SESSION"] ?? "", options),
-    hc: () => new HcRuntime(exec, options),
-  };
-  return new ChosenRuntimes(
-    () => runtimeChoice(config, env),
-    (kind) => make[kind](),
-  );
-};
+): ChosenRuntimes => new ChosenRuntimes(() => runtimeChoice(config, env), runtimeFactory(config, env, runner, clock));
 
 const built = new WeakMap<object, ChosenRuntimes>();
 
-/** The deps' own runtimes when injected, else one registry per deps object over its Runner and clock. */
-export const runtimesOf = (deps: {
-  readonly run: Runner;
-  readonly clock: Clock;
-  readonly config: Pick<DoriConfig, "runtime"> & Partial<Pick<DoriConfig, "stateDir">>;
-  readonly rts?: ChosenRuntimes;
-  readonly env?: Env;
-}): ChosenRuntimes => {
+/** Injected runtimes are authoritative. A scoped Runner preserves the original choice and runtime discovery order. */
+export const runtimesOf = (
+  deps: {
+    readonly run: Runner;
+    readonly clock: Clock;
+    readonly config: Pick<DoriConfig, "runtime"> & Partial<Pick<DoriConfig, "stateDir">>;
+    readonly rts?: ChosenRuntimes;
+    readonly env?: Env;
+  },
+  scopedRun?: Runner,
+): ChosenRuntimes => {
   if (deps.rts) return deps.rts;
+  const env = deps.env ?? process.env;
   let rts = built.get(deps);
   if (!rts) {
-    rts = runtimesFor(deps.config, deps.env ?? process.env, deps.run, deps.clock);
+    rts = runtimesFor(deps.config, env, deps.run, deps.clock);
     built.set(deps, rts);
   }
-  return rts;
+  return scopedRun ? new ScopedRuntimes(rts, runtimeFactory(deps.config, env, scopedRun, deps.clock)) : rts;
 };

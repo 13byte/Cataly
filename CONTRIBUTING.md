@@ -77,16 +77,14 @@ Consumers use the [verified release guide](docs/releases.md) and
 models and publication permissions. Consumer release management uses neither.
 Build fixed assets with `bun scripts/release.ts build --out DIST --prerelease`.
 The [exact-commit release procedure](docs/releases.md#building-and-publishing-releases)
-describes the publication gates. Those gates (`scripts/release-gate.ts`, its
-check-run URL binding, and `src/release/bundle.ts`) and the guards in the tag
-(`release.yml`) and daily ULW (`ulw-update.yml`) workflows now use the repository
-identity `vntrevx/Cataly`, so the tag and daily ULW jobs run again and publication
-checks accept the new identity. They still verify only the exact commits this
-repository's own `ci.yml` produced.
+describes the publication gates. The tag/scheduled workflow guards, ULW publisher,
+and exact-commit release checks require the canonical identity `vntrevx/Cataly`;
+forks and the former repository name are not admitted as publication identities.
+The rename does not weaken the existing tag, commit, workflow, or check bindings.
 
 ULW preparation uses `bun scripts/update-ulw.ts --out /absolute/new-directory`.
-After the repository gates are updated, the daily workflow can propose a separate
-metadata-only draft and exact-head CI. It does not approve compatibility, merge
+The daily workflow checks at 03:00 UTC (12:00 KST, with possible GitHub scheduling
+delay) and can propose a separate metadata-only draft and exact-head CI. It does not approve compatibility, merge
 itself, publish a release, or update a user installation. Review conflicts and
 preserve notices and existing settings.
 
@@ -201,6 +199,13 @@ synthetic loopback providers. Missing managed overlays must send no request for
 Dori or lane roles, including direct dispatch, while ordinary sessions still
 reach the local provider. These tests neither use real provider credentials nor
 establish live TUI, messenger, provider, or external-user behavior.
+
+Manager-only extension tools need both default-inactive presentation and an
+execution guard based on the selected role and native `ctx.agent.kind`. Inherited
+roles or copied role flags alone do not grant manager access. For each such tool,
+cover authorized main-session access, child/grandchild visibility with explicit
+tool selection, direct child-call rejection, and preservation of ordinary main
+and child tools. See the [manager-tool boundary](docs/runtime.md#manager-tool-boundary).
 
 ## Ready for review
 

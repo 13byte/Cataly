@@ -8,6 +8,62 @@
 
 - Biome is replaced by oxlint for linting, Prettier for formatting and a husky `pre-commit` hook that runs both. `bun run check` now runs `lint` (`oxlint --deny-warnings`) then `format:check`, `bun run format` replaces `bun run fmt`, and the formatter options, rule severities and ignore patterns carry over unchanged. Biome's optional-chain correction (the default fix behind `useOptionalChain`) has no oxlint equivalent, so code it had already fixed stays as it is.
 
+- Hide explicitly selected `monitor` tools from native child sessions while preserving inherited role behavior, ordinary main/child tools and the separate main-session execution guard.
+
+- Add opt-in `dori inbound discord --wake-lanes` for cleanly retired herdr tabs: queue owner messages for the exact registered OMP session and post lane replies back to the original Discord thread. Existing settings and monitor defaults are unchanged.
+
+- Bind Discord owed-answer receipts to the exact owner request and every accepted reply part; unrelated posts, legacy receipts and partial sends do not settle another request (omp-superagent comparison F22).
+
+- New lane registry records and brief footers retain requested launch text and its configuration origin without changing default ULW, raw message delivery or startup goal checks. Launch-selection provenance describes matching text rather than programmatic assignment history. Same-value reassignment retains the matching default or loaded-file origin, with regression coverage for both cases.
+
+- Add explicit lane parking, exact-session reopening, abandonment receipts and a read-only hold ledger. Keep worktrees, accepted pending Discord messages and ordinary Done verification.
+
+- Added opt-in last-lane thread completion, exact-thread lane and worklog links, and lead-owned idempotent Discord title status without automatic archiving.
+
+- Clarify that autonomous local work and successful review do not authorize merge, deployment, publication, spending or destructive cleanup; preserve read-only requests and all existing execution gates.
+
+- Add read-only lane status, historical ETA summaries and opt-in single-message Discord/Telegram boards. Boards validate options before delivery, omit URL credentials and parameters, and retain pending holds; Telegram recovery requires an existing message binding.
+
+- Add read-only `dori doctor` configuration, adoption and monitor diagnostics, canonical `monitor-presets`, and an advisory boot summary. Doctor checks external terminal metadata and verifies the native monitor's restart policy; documented filters include supervision and loop-error events.
+
+- Added opt-in idle-only freshness nudges, owner summaries and report-kind posting policy, with exact report relay receipts to prevent duplicate owner updates.
+
+- Add literal brief templates and durable prerequisite queues with explicit starts, live completion and host checks, expiry, cancellation and restart visibility.
+
+- Read-only `dori sync` shares one successful process-table snapshot and one herdr pane list within a pass. Later passes, failed reads, hc group queries and all `--write` observations stay fresh.
+
+- Align lead and skill routing: answer direct requests in place, honor explicitly main-scoped implementation, and isolate independent work without requiring a lane or supervisor solely because it has several steps or a PR.
+
+- Restore the Discord 👀 read receipt after accepting lane chat or an exact ASK reply. A failed reaction does not block message delivery.
+
+- Lane briefs and generated footers retain task sources, recorded locations, scoped acceptance, preserved resources and resume context without copying the lead transcript or inventing missing authority.
+
+- Route ordinary Discord messages for an unambiguously connected lane to its own OMP session. Existing connections need no new setting; exact ASK replies still resolve the open form instead of starting a turn.
+
+- Supported native OMP ASK forms are automatically available through an already connected Discord receiver with an unambiguous destination. Existing settings and explicit routes stay in place; only the configured owner's reply to the exact message answers that ASK.
+
+- Keep ambient Discord and Telegram tokens out of launched lane agents, reject empty tokens before network access, and preserve native authentication and the existing Slack token-file flow.
+
+- Dori and duty report observed progress at meaningful result boundaries without creating reporting-only model timers, while retaining code watches, inbound delivery and explicit long-silence alerts.
+
+- `dori voice discord` adds an opt-in, paid, owner-only Discord voice assistant configured by `voice` in the existing Dori config. It reads lanes and reports, searches the web, posts notes and forwards work to the lead once, claiming delivery only after receipt is observed; forwarded requests carry a written-approval policy, not an effect-point authorization gate. Daily, cumulative and backend spending caps apply, though in-flight usage can exceed them. Native codecs are optional dependencies loaded only by this command. See [the voice guide](docs/discord-voice.md).
+
+- Opted-in Dori monitors can restart unexpectedly exited receiver processes with a bounded retry policy. The policy survives session resume and managed handoff; clean exits, explicit stops, and monitors without the policy retain their existing behavior.
+
+- Document opt-in GPT-6.2 Sol Ultrafast defaults for external OMP 19 lanes and cover the alias in the GPT-6.2 prompt integration. Explicit external commands no longer require a consumer-native receipt; managed launchers retain receipt checks and their pinned runtime.
+
+- Reuse an already-published ULW candidate after unrelated main changes only after verifying its canonical PR, accepted parent and exact metadata-only tree. Preserve closed decisions and exact-head CI deduplication without rewriting branches or repeating Git object uploads.
+
+- Follow the canonical `vntrevx/Cataly` repository identity in the ULW/release workflow guards and their shared publisher/release checks. The exact repository, tag, commit, workflow and trusted check bindings remain enforced; forks and the former identity are refused.
+
+- Schedule the ULW candidate workflow for 03:00 UTC (12:00 KST) daily, retaining manual dispatch and fail-closed publication. Preparation errors name conflicting paths without executing upstream code.
+
+- Port the bound ULW overlay to `6ec7ecd40b2b5667f37c9802999db1d12ebbc2ae`: preserve upstream GPT-6.2 Astra/Sol standalone prompts alongside the retained DeepSeek profiles, Claude routing and native-host adaptations. Regenerate authenticated patch/tree/postimage identities; reviewed source does not by itself publish a release or update existing installations.
+
+- Discord REST clients accept an optional `DORI_DISCORD_API_BASE` for isolated loopback HTTP tests, retaining the production endpoint by default. Path prefixes are normalized, and credentials, query strings, fragments and non-loopback origins are rejected without exposing the configured value.
+
+- Discord owner intake now follows active threads whose parent is a watched channel, so an owner reply posted in a thread of the intake channel is received without listing the thread ID. Threads are listed at startup and refreshed every tenth REST poll and on every Gateway READY/RESUMED, live dispatches are matched through one cached channel lookup, a channel counts as a thread only for Discord's thread channel types (a text channel's `parent_id` names its category), threads of unwatched channels stay outside intake, an unreadable thread is skipped like scope-all discovery, and an archived thread keeps its cursor for a later reactivation. A thread first seen after startup starts at its own creation, never before the parent's startup position. `DORI_DISCORD_THREADS=off` restores channel-only intake.
+- Unknown live thread scope is resolved before SQLite payload admission using at most 100 volatile frames, 1 MiB aggregate serialized payload bytes, one resolver and 256 historical metadata results. Known-scoped frames still enter the existing durable FIFO immediately. Overflow stops intake visibly without deleting committed work; crash, close or overflow can lose unresolved candidates. No unscoped payload is written to disk. Admitted thread rows retain parent provenance for recovery under the current intake scope, including an enabled configured parent after archiving or lost history access. Excluded queued rows are discarded when drained rather than held for a later scope change.
 
 - Discord REST intake probes one latest message before draining history. Quiet, empty and deleted-head channels avoid downloading up to 100 bodies; active channels pay one additional sequential probe and its rate-limit budget while retaining complete pagination, existing delivery/checkpoint and qualified late-arrival boundaries, and the received head if it is deleted between requests.
 
@@ -24,6 +80,8 @@
 - Automatic CI keeps its release gate in `.github/workflows/ci.yml`: the Linux `check`, `e2e-herdr` and `e2e-hc` jobs on `ubuntu-24.04`, and exact-commit release validation and contributor requirements still require exactly those three. A separate `.github/workflows/cross-os.yml` now runs on each pull request and `main` push outside that gate: `test-macos` on a GitHub-hosted `macos-15` arm64 runner runs the full root, skill and extension suites against prepared fixtures, allowing the slower runner `--timeout=30000` for the root suite, and its genuine Darwin arm64 hc consumer release smoke runs only on `main` pushes and manual runs; `test-windows` on a GitHub-hosted `windows-2025` runner runs the static checks and the three test suites. Windows CI is not product support, and the supported release scope stays Linux x64/herdr plus the documented isolated macOS arm64/hc profile. Windows coverage gates POSIX-only cases individually, or by their whole `describe` suite when every case in it needs the POSIX runtime, with `skipIf(process.platform === "win32")` and a reason comment, never by excluding files or relaxing a security check, and Windows path handling was fixed where it was wrong — `realDirectory` stops at the root, directory fsync is skipped on win32, local Git paths are recognized on Windows, and the bound ULW overlay and the skill monitor, supervision and OMP argv matching handle Windows path separators. The workflows now pin their runner versions and per-job `timeout-minutes` and use Node 24 action releases; the Linux and cross-OS jobs share one composite setup action and a Bun install cache, and the release workflows use the same pinned Node 24 checkout and artifact actions.
 
 - The GitHub repository is now `vntrevx/Cataly`, renamed from `vntrevx/omp-dori`; GitHub redirects the old URLs. The release gate, workflows, installers and documentation links follow the new name, while product and CLI names such as `omp-dori`, `dori`, `~/.omp-dori` and `LICENSE.omp-dori` are unchanged.
+
+- Managed release preparation installs only production dependencies for the root and skill packages, leaving out development-only gate tools. The extension keeps its full frozen host install; private HOME/cache, lifecycle-script rejection, source admission and existing prepared releases are unchanged.
 
 - Monitor stdout/stderr use bounded incremental line framing and 64 KiB delivery batches. Oversized lines or rendered messages are preserved in private temporary files with explicit path/size notices instead of being truncated or accumulated in memory; storage/read failures stop the child and report potentially incomplete output. Normal filters, UTF-8, EOF, stop and session ownership behavior remain intact.
 
@@ -47,6 +105,7 @@
 - Full CI now checks native OMP and both ULW fixture prerequisites before the expensive suites, so an absent real-ULW fixture cannot produce a successful full gate with its native composition tests skipped. The contributor guide and PR template require explicit dependencies, preserved contracts, final-revision regression evidence and measured performance claims; the four required CI jobs and test discovery remain unchanged.
 
 - Isolated consumer install and rollback use the fully verified selected release's reference renderer under the existing launch gate, restoring the older release's exact wrapper bytes instead of retaining the updater's newer automatic-launch template. Missing or changed renderers hold activation. Older clients need the new bootstrap or an explicit same-release reinstall to publish the new launch hook.
+- Configured Dori MAIN turns request bounded continuations for recent open Discord obligations. CLI intake and monitor delivery admit owner messages into private, per-file locked JSONL snapshots capped at 200 lines; atomic replacement isolates corrupt tails and preserves concurrent admitted records. Complete accepted channel sends and successful exact-message read marks are both required after the owe; reply IDs do not change that matching policy. Writers wait asynchronously under contention, monitor readers backpressure, and session invalidation cancels undelivered admissions before they can wake a later session. Gateway close cancels its pending ledger admission without dropping the queued payload or advancing its cursor. The settle hook remains synchronous, obligations expire after 30 minutes, and each owe allows at most three continuations.
 
 - Bound-source admission computes its Git tree through a private index copy, reusing the narrowly reviewed fix from PR #67 without changing its shared index or lock. Parallel consumer launches no longer contend on Git's implicit write-tree index lock; content, mode, postimage and exact-tree checks remain required.
 
@@ -190,3 +249,5 @@ CI coverage for macOS/hc is distinct from supported live consumer behavior. A so
 The terminal-admission integration group uses a test-local 20-second budget for two distinct real Git/fsync candidate lifecycles. Runtime command deadlines, assertion coverage and the default budget of unrelated tests are unchanged.
 
 The Sustainable Use License, OMP attribution in `LICENSE.omp-dori`, `NOTICE`, public dependency pin and third-party notices remain unchanged.
+
+- Unreleased: Extend the Telegram transport regression matrix for cross-field route spoofing and message/edit identity ordering alongside existing delivery and recovery coverage.

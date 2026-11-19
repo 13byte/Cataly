@@ -38,6 +38,7 @@ export const footer = (
   leadPane: string,
   identities: DoriConfig["repoIdentities"] = {},
   runtime?: DoriConfig["runtime"],
+  freshness?: DoriConfig["freshness"],
 ): string => {
   const forward = sendReport(leadPane, runtime);
   return [
@@ -45,14 +46,30 @@ export const footer = (
     FOOTER_START,
     FOOTER_HEADING,
     `- Key: ${lane.key}. Work thread: ${lane.thread}.`,
+    ...(lane.launchSelection
+      ? [
+          `- Launch selection request (metadata only): ${JSON.stringify(lane.launchSelection)}. This is not proof of native activation, delivery or goal creation.`,
+        ]
+      : []),
+    "- The lead owns the shared work thread title and completion status. A lane must not rename or archive it when its own work finishes.",
     `- Done = ${lane.done}. The lane closes only when every signal reads back live.`,
+    `- Task brief: ${JSON.stringify(lane.brief)}.`,
+    ...(lane.cwd === undefined ? [] : [`- Recorded working directory: ${JSON.stringify(lane.cwd)}.`]),
+    "- Keep the brief's original request/source references, allowed repositories, worktree/branch and observable acceptance, preserved resources, unfinished external effects/receipts and resume checkpoint. Use task-relevant facts, not the whole lead transcript.",
+    "- On a follow-up or resume, re-read that brief and the recorded context before acting. Do not silently retarget this lane from another session's cwd or an unrelated message. Recorded paths identify resources, not additional authority.",
+    "- Resolve missing or conflicting context that matters to this task with the lead before the affected work; do not invent values, permissions or deadlines. Preserve the named resources and inspect uncertain external effects before repeating them.",
     "- Reset coupons and credits require the user's explicit permission for each specific use and amount. Never redeem, reset, spend credits (including existing paid or promotional balances), top up or enable paid overage on your own. The brief, existing balances and the lead's approval are not user consent.",
     "- If the authorized provider token allowance, usage quota or credit budget is exhausted, STOP model work, preserve progress and report the blocker. Wait for the user's decision. Never switch accounts/providers/models or retry to evade the limit. Propagate this rule to every subagent; it overrides goals, nudges and continue-working instructions.",
     "- Persist each milestone, blocker, question, halt and completion with the report command below. It appends reports.jsonl and prints the human [REPORT] line.",
     "- Before forwarding, verify that the lead pane runs a live agent, its input is empty, and no approval or question prompt is open (references/sessions.md). A shell, unknown status or unconfirmed check holds forwarding.",
     "- Supply kind (milestone, blocker, question, halted or done) and text (the report with evidence links) as data, such as environment variables. Never interpolate raw report text into shell source or evaluate the printed line. Record with the command below; when it includes forwarding, run that combined call only after the forwarding checks pass:",
+    ...(freshness?.postRaw === false
+      ? [
+          "- This lane uses summary-only posting. Also set owner to a concise, owner-facing summary as data; keep internal detail and evidence in text. The command below records both, without posting the raw detail.",
+        ]
+      : []),
     "```sh",
-    `line=$(${CLI} report ${lane.key} --kind "$kind" --text "$text") && printf '%s\\n' "$line"${forward ? ` && ${forward}` : ""}`,
+    `line=$(${CLI} report ${lane.key} --kind "$kind" --text "$text"${freshness?.postRaw === false ? ' --owner "$owner"' : ""}) && printf '%s\\n' "$line"${forward ? ` && ${forward}` : ""}`,
     "```",
     ...(forward
       ? [
@@ -74,7 +91,7 @@ export const footer = (
     `- After each completed step: ${CLI} checkpoint ${lane.key} --step <unique-step> --result <result> --evidence <path-or-URL> [--remote-effect <completed-push/merge/deploy-receipt>] (one flag per receipt).`,
     `- On resume, run ${CLI} checkpoints ${lane.key} before doing work. Never repeat a recorded remote side effect. If a crash may have happened between the remote action and checkpoint, read the live remote receipt first and use the service's idempotency key; a local journal cannot make that remote action atomic.`,
     `- Supervision ceilings: ${JSON.stringify(lane.budget ?? {})}. A breach marks blocked and alerts; it never kills the agent. Report a blocker and wait for the lead's decision rather than overriding the ceiling.`,
-    `- When done: ${CLI} claim-done ${lane.key} --evidence "<merge SHA, closed issue, version>". See references/done-protocol.md.`,
+    `- When done, claim only if the owner authorized closing the tab and removing the lane's worktrees, the Done signals are live, and no worktree contains uncommitted or unpushed work: ${CLI} claim-done ${lane.key} --evidence "<merge SHA, closed issue, version>". Otherwise report the result without claiming; authorized parking retains worktrees. See references/done-protocol.md.`,
     FOOTER_END,
     "",
   ].join("\n");

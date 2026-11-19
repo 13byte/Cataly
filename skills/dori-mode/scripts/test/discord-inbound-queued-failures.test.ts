@@ -16,7 +16,6 @@ for (const fault of ["emit", "save", "ack"] as const)
     });
     const lookup = Promise.withResolvers<void>();
     const entered = Promise.withResolvers<void>();
-    world.rest.state.blocked.set("/channels/20", lookup.promise);
     world.rest.state.responses.set(
       "/channels/20",
       JSON.stringify({ id: "20", type: 11, name: "task", parent_id: "30" }),
@@ -35,6 +34,7 @@ for (const fault of ["emit", "save", "ack"] as const)
     });
     const groups: string[] = [];
     const emit = async (message: DiscordInbound) => {
+      world.rest.state.blocked.set("/channels/20", lookup.promise);
       entered.resolve();
       const context = await where(message.channel);
       if (broken && fault === "emit" && message.message === "105") throw failure;

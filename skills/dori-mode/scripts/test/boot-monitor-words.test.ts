@@ -8,6 +8,8 @@ import { laneCommands } from "../src/cli-lanes.ts";
 import { messengerCommands } from "../src/cli-messenger.ts";
 import { opsCommands } from "../src/cli-ops.ts";
 import { prCommands } from "../src/cli-pr.ts";
+import { statusCommands } from "../src/cli-status.ts";
+import { voiceCommand } from "../src/cli-voice.ts";
 import { DORI_COMMANDS, DORI_VALUE_OPTIONS } from "../src/monitor-dori.ts";
 import type { Lane, LaneStatus } from "../src/registry.ts";
 import { withState } from "./fakes.ts";
@@ -151,6 +153,51 @@ test("a shared dori watch inside a loop, a condition, a subshell, a cd or an env
   expect(monitorCleanup(open, [manifest([{ command: "while true; do dori inbound slack; done # api" }])])).toEqual([]);
 });
 
+test("relayed is a command word, while its target still identifies a closed lane", () => {
+  const lanes = ["relayed", "api"].map((key) => lane(key, "closed"));
+  const receipt = "a".repeat(64);
+  const result = monitorCleanup(lanes, [
+    manifest([
+      { argv: ["dori", "relayed", "api", "--report", receipt], monitorId: "mon_ARGV" },
+      { command: `dori relayed api --report ${receipt}`, monitorId: "mon_COMMAND" },
+      { argv: ["dori", "relayed", "relayed", "--report", receipt], monitorId: "mon_TARGET" },
+    ]),
+  ]);
+  expect(result.map((m) => [m.monitorId, m.match])).toEqual([
+    ["mon_ARGV", ["api:argv:key"]],
+    ["mon_COMMAND", ["api:command:key"]],
+    ["mon_TARGET", ["relayed:argv:key"]],
+  ]);
+});
+
+test.each(["owner", "report"])("report option values do not hide a messenger platform: %s", (option) => {
+  const monitors: Monitor[] = [
+    { argv: ["dori", "inbound", `--${option}`, "slack", "discord"] },
+    { command: `dori inbound --${option} slack discord` },
+  ];
+  expect(monitorCleanup([lane("discord", "closed")], [manifest(monitors)])).toEqual([]);
+});
+
+test("lanes is a command word, but report can still target a lane named lanes", () => {
+  const result = monitorCleanup(
+    [lane("lanes", "closed")],
+    [
+      manifest([
+        { argv: ["dori", "lanes", "--thread", "discord:123", "--open"], monitorId: "mon_ARGV" },
+        { command: "dori lanes --open", monitorId: "mon_COMMAND" },
+        { argv: ["dori", "report", "lanes", "--kind", "done", "--text", "complete"], monitorId: "mon_TARGET" },
+      ]),
+    ],
+  );
+  expect(result.map((m) => [m.monitorId, m.match])).toEqual([["mon_TARGET", ["lanes:argv:key"]]]);
+});
+
+test("a Discord voice monitor does not belong to lanes named voice or discord", () => {
+  const lanes = ["voice", "discord"].map((key) => lane(key, "closed"));
+  const monitors = [{ argv: ["dori", "voice", "discord"] }, { command: "dori voice discord" }];
+  expect(monitorCleanup(lanes, [manifest(monitors)])).toEqual([]);
+});
+
 test("the dori command vocabulary is every command the CLI dispatches", () => {
   const tables = [
     ["cli-journal.ts", journalCommands],
@@ -159,6 +206,8 @@ test("the dori command vocabulary is every command the CLI dispatches", () => {
     ["cli-messenger.ts", messengerCommands],
     ["cli-decisions.ts", decisionCommands],
     ["cli-pr.ts", prCommands],
+    ["cli-status.ts", statusCommands],
+    ["cli-voice.ts", { voice: voiceCommand }],
   ] as const;
   // Every word the CLI dispatches, and the module the command lives in: cli.ts's own three come before its tables.
   const groupOf = new Map<string, string>([
@@ -170,9 +219,10 @@ test("the dori command vocabulary is every command the CLI dispatches", () => {
   expect(Object.keys(DORI_COMMANDS).sort()).toEqual([...groupOf.keys()].sort());
 
   const config = join(state.dir, "config.json");
-  mkdirSync(join(state.dir, "state/lanes"), { recursive: true });
+  const lanes = join(state.dir, "state", "lanes");
+  mkdirSync(lanes, { recursive: true });
   writeFileSync(config, JSON.stringify({ runtime: "herdr", stateDir: join(state.dir, "state"), ompUlwPath: "" }));
-  writeFileSync(join(state.dir, "state/lanes/zzz.json"), JSON.stringify(lane("zzz", "working")));
+  writeFileSync(join(lanes, "zzz.json"), JSON.stringify(lane("zzz", "working")));
   // The real CLI; the preload fails the load of a blocked module, so a dispatched command stops at its own command
   // module before doing anything and a word no table holds only reaches the usage.
   const invoke = (args: readonly string[], blocked: readonly string[] = []) => {
