@@ -1,7 +1,7 @@
 import { formatRef } from "../../../../src/runtime/types.ts";
 import type { FlowDeps } from "./done-flow.ts";
 import { statusOf } from "./registry.ts";
-import { runtimesOf } from "./run.ts";
+import { type Ran, type Runner, runtimesOf } from "./run.ts";
 import { procTable, resolveSession } from "./session-id.ts";
 import { listSessions, listWatched } from "./sessions.ts";
 
@@ -14,15 +14,30 @@ export type SyncRow = {
 };
 export type SyncResult = { readonly rows: SyncRow[]; readonly drift: string[]; readonly unregistered: SyncRow[] };
 
+// Share only successful read-only observations for this pass. hc group listings and all action checks stay fresh.
+const PASS_SHARED = /^(?:ps -A -o pid=,ppid=,command=|herdr (?:--session \S+ )?pane list)$/;
+const passRunner = (run: Runner): Runner => {
+  const seen = new Map<string, Ran>();
+  return async (argv, opts) => {
+    const key = JSON.stringify(argv);
+    if (opts || !PASS_SHARED.test(argv.join(" "))) return run(argv, opts);
+    const ran = seen.get(key) ?? (await run(argv));
+    if (ran.code === 0) seen.set(key, ran);
+    return ran;
+  };
+};
+
 export const syncRegistry = async (deps: FlowDeps, write: boolean): Promise<SyncResult> => {
-  const rts = runtimesOf(deps);
+  const scopedRun = write ? undefined : passRunner(deps.run);
   const lanes = await deps.registry.open();
+  const rts = runtimesOf(deps, scopedRun);
   const sessions = await listSessions(rts, { lanes });
   const live = new Map(sessions.map((s) => [formatRef(s.ref), s]));
-  const table = await procTable(deps.run);
+  const run = scopedRun ?? deps.run;
+  const table = await procTable(run);
   const rows: SyncRow[] = [];
   const drift: string[] = [];
-  const resolveDeps = { run: deps.run, sessionsDir: deps.config.sessionsDir, stateDir: deps.config.stateDir, rts };
+  const resolveDeps = { run, sessionsDir: deps.config.sessionsDir, stateDir: deps.config.stateDir, rts };
   for (const lane of lanes) {
     const session = lane.sessionRef ? live.get(formatRef(lane.sessionRef)) : undefined;
     if (!session) drift.push(`${lane.key}: pane ${lane.pane ?? "(none)"} is gone but the lane is ${statusOf(lane)}`);
