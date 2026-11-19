@@ -74,6 +74,17 @@ export interface PlatformAdapter {
    */
   readonly supportsHerdrNativeUi: boolean;
 
+  /**
+   * True when a process's kernel state is readable under `/proc`: its task list (a zombie leader's threads still run),
+   * `CapEff`, `environ` and `cwd`. src/release/native-cache-lease.ts asks before a zombie counts as ended, and
+   * native-cache-uses.ts before it reads capabilities or resolves a home. Where false, a zombie has ended, only root
+   * can enter an owner-only entry, and a relative home cannot be resolved against the process.
+   */
+  readonly procfs: boolean;
+
+  /** The C library `flock(2)` is loaded from, as src/release/native-cache-lease.ts locks the prune file. */
+  flockLibrary(): string;
+
   /** Flush a directory's own entries after a rename or link; a no-op where directoryFsync is false. */
   syncDirectory(path: string): void;
 

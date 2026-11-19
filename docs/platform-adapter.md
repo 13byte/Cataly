@@ -22,6 +22,8 @@
 | `posixOwnership` | Whether file ownership is compared by uid, as `src/release/files.ts` `owned()` does | `true` | `true` | `false` |
 | `directoryFsync` | Whether a directory can be opened and fsynced, as `src/update/deployment-files.ts` does | `true` | `true` | `false` |
 | `supportsHerdrNativeUi` | Whether herdr's native UI path, reading a pane's screen and sending it keys, is open on this host | `false` | `true` | `false` |
+| `procfs` | Whether a process's kernel state is readable under `/proc`: its task list (a zombie leader's threads still run), `CapEff`, `environ` and `cwd` | `false`: a zombie has ended, only root can enter another user's directory, a relative home stays unresolved | `true` | `false`, as darwin |
+| `flockLibrary()` | The C library `flock(2)` is loaded from, as the native cache lease locks its prune file | `libSystem.B.dylib` | `libc.so.6` | `libc.so.6`, the non-darwin default the lease used |
 | `syncDirectory(path)` | Flush a directory's own entries after a rename or link; a no-op where `directoryFsync` is false | Opens and fsyncs | Opens and fsyncs | No-op |
 | `defaultRuntime()` | The runtime a fresh installation selects with none configured | `"hc"` | `"herdr"` | `"herdr"` |
 | `supportsReleaseProfile(platform, arch, runtime)` | Whether a release built for that profile is admitted, as `src/release/provision.ts` prerequisites do | `darwin`/`arm64`/`hc` only | `linux`/`x64`/`herdr` only | Never |
@@ -42,6 +44,7 @@ Tests never run on another OS. `adapterFor(os)` returns the implementation for a
 
 - **POSIX ownership is a darwin and linux assumption.** Comparing ownership by uid (`posixOwnership`) and the permission-bit checks built on it run only where the property is true; Windows code must not assume a uid or POSIX modes.
 - **Directory fsync is conditional.** Open and fsync a directory only where `directoryFsync` is true, and call `syncDirectory` rather than the syscall; on Windows the flush is a no-op.
+- **Per-process kernel state is Linux-only.** Where `procfs` is false, a zombie process has ended, only root can enter an owner-only entry, and a relative home cannot be resolved against the process, so the native cache's use scan holds on all three.
 - **The herdr native UI is Linux-only.** `herdrDeploymentCli` in `src/update/deployment-cli.ts` attaches its `nativeUi` read and exit operations only where `supportsHerdrNativeUi` is true, so darwin and win32 deployments have no `nativeUi` key.
 - **The default runtime differs.** A fresh installation on darwin selects `hc`; linux and win32 select `herdr`.
 - **Only two release profiles are admitted.** `supportsReleaseProfile` accepts `linux`/`x64`/`herdr` and `darwin`/`arm64`/`hc`, and nothing on Windows. A host never admits another host's release.

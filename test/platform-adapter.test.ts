@@ -46,6 +46,8 @@ const fake: PlatformAdapter = {
   posixOwnership: true,
   directoryFsync: true,
   supportsHerdrNativeUi: true,
+  procfs: true,
+  flockLibrary: () => "libc.so.6",
   syncDirectory: () => {},
   defaultRuntime: () => "herdr",
   supportsReleaseProfile: () => false,
@@ -126,6 +128,18 @@ describe("capability matrix", () => {
     expect(adapterFor("linux").supportsHerdrNativeUi).toBe(true);
     expect(adapterFor("darwin").supportsHerdrNativeUi).toBe(false);
     expect(adapterFor("win32").supportsHerdrNativeUi).toBe(false);
+  });
+
+  test("only Linux reads a process's kernel state through /proc", () => {
+    expect(adapterFor("linux").procfs).toBe(true);
+    expect(adapterFor("darwin").procfs).toBe(false);
+    expect(adapterFor("win32").procfs).toBe(false);
+  });
+
+  test("the lock's C library follows the host, as the lease loaded it before the adapter", () => {
+    expect(adapterFor("darwin").flockLibrary()).toBe("libSystem.B.dylib");
+    expect(adapterFor("linux").flockLibrary()).toBe("libc.so.6");
+    expect(adapterFor("win32").flockLibrary()).toBe("libc.so.6");
   });
 
   test("the herdr deployment CLI carries nativeUi exactly where this host's adapter does", () => {

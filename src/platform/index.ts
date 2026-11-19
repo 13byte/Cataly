@@ -40,6 +40,8 @@ function unsupported(os: string): PlatformAdapter {
     posixOwnership: process.getuid !== undefined,
     directoryFsync: true,
     supportsHerdrNativeUi: false,
+    procfs: false,
+    flockLibrary: () => "libc.so.6",
     syncDirectory,
     defaultRuntime: () => "herdr",
     supportsReleaseProfile: () => false,

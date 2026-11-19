@@ -49,7 +49,7 @@ export function nativeDirectory(source: string, home: string): string {
  */
 export function leaseNativePath(home: string, path: string, holder = process.pid): void {
   const cache = join(home, ".cache/omp-dori");
-  const entry = new RegExp(`^native-${process.platform}-${process.arch}-([a-f0-9]{64})$`);
+  const entry = new RegExp(`^${platform.nativeCacheLabel()}-([a-f0-9]{64})$`);
   const inside = (candidate: string, root: string) =>
     candidate.startsWith(`${root}/`) ? entry.exec(candidate.slice(root.length + 1).split("/", 1)[0]!)?.[1] : undefined;
   const real = (candidate: string) => {

@@ -98,6 +98,9 @@ export function linuxAdapter(root = PROC): PlatformAdapter {
     posixOwnership: true,
     directoryFsync: true,
     supportsHerdrNativeUi: true,
+    // /proc carries each task's stat, CapEff, environ and cwd; the adapter's readers take the root from the fixture.
+    procfs: true,
+    flockLibrary: () => "libc.so.6",
     syncDirectory,
 
     defaultRuntime: () => "herdr",

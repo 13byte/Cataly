@@ -51,6 +51,9 @@ export const windows: PlatformAdapter = {
   posixOwnership: false,
   directoryFsync: false,
   supportsHerdrNativeUi: false,
+  procfs: false,
+  // Nothing takes a prune lock here, so this is the non-darwin default the lease loaded before the adapter.
+  flockLibrary: () => "libc.so.6",
 
   syncDirectory(_path: string): void {
     // Windows cannot open a directory for fsync; src/update/deployment-files.ts skipped the flush here.

@@ -1,4 +1,5 @@
 import { readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
+import { platform } from "../platform/index.ts";
 import { liveTasks, processIsKernelThread } from "./process-cwd.ts";
 
 /** What `processFiles` reads: paths by pid, and live pids whose files could not be read (they may use anything). */
@@ -33,11 +34,11 @@ function groupFiles(pid: string, tasks: readonly string[]): string[] {
  * leader that exited leaves its threads running); elsewhere what `lsof` lists for this user. `unread` holds live pids
  * whose files could not be read, whatever their working directory shows. Null when nothing at all could be read.
  */
-export function processFiles(platform = process.platform): ProcessFiles | null {
+export function processFiles(os = platform.os): ProcessFiles | null {
   const files = new Map<string, string[]>();
   const unread: string[] = [];
   const uid = process.getuid?.();
-  if (platform !== "linux") {
+  if (os !== "linux") {
     let lsof: ReturnType<typeof Bun.spawnSync>;
     try {
       lsof = Bun.spawnSync(["lsof", "-n", ...(uid === undefined ? [] : ["-u", String(uid)]), "-F", "pn"], {

@@ -174,6 +174,9 @@ export const darwin: PlatformAdapter = {
   posixOwnership: true,
   directoryFsync: true,
   supportsHerdrNativeUi: false,
+  // No /proc: a zombie has ended, only root can enter another user's directory, and a relative home stays unresolved.
+  procfs: false,
+  flockLibrary: () => "libSystem.B.dylib",
   syncDirectory,
 
   defaultRuntime: () => "hc",
