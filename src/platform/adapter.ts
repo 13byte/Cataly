@@ -21,7 +21,10 @@ export interface PlatformAdapter {
    */
   memFreePct(): number;
 
-  /** One process's kernel facts; throws `process <pid> status is unavailable` when the process is gone. */
+  /**
+   * One process's kernel facts; throws when the process is gone. macOS names the missing reader
+   * (`process <pid> status is unavailable`), Linux surfaces the ENOENT its `/proc` read raises.
+   */
   procStat(pid: number): ProcStat;
 
   /** The argument vector with each argument NUL-terminated, as the OS cmdline holds it; throws when unreadable. */
@@ -29,6 +32,12 @@ export interface PlatformAdapter {
 
   /** A path that opens, stats and resolves to the process's executable image; throws when the process is gone. */
   exePath(pid: number): string;
+
+  /**
+   * The executable's path as an identity token, as src/update/proc.ts procExeTarget reads it: Linux's `/proc/<pid>/exe`
+   * link target, which keeps the old path of a replaced image, and elsewhere exactly what exePath returns.
+   */
+  procExeLink(pid: number): string;
 
   /** A path that resolves to the process's working directory; throws when the process is gone. */
   cwdPath(pid: number): string;
@@ -66,8 +75,15 @@ export interface PlatformAdapter {
   /** True when file ownership is compared by uid, as src/release/files.ts owned() does (Windows: false). */
   readonly posixOwnership: boolean;
 
-  /** True when a directory can be opened and fsynced, as src/update/deployment-files.ts does (Windows: false). */
+  /** True when a directory can be opened and fsynced; Windows answers false and its syncDirectory no-ops. */
   readonly directoryFsync: boolean;
+
+  /**
+   * True where a hard link must be made without following a symlink, as src/update/deployment-files.ts preserves an
+   * installation pointer's inode on rollback. macOS links through `linkat` with flags 0; elsewhere `link(2)` already
+   * links the path itself.
+   */
+  readonly preservesHardLinks: boolean;
 
   /**
    * True when herdr's native UI path — reading a pane's screen and sending it keys — is open on this host. It is
@@ -105,9 +121,12 @@ export interface PlatformAdapter {
   /** A program word's name: its part after the last separator, on Windows without the `.exe` it runs as. */
   programName(word: string): string;
 
-  /** node:path.isAbsolute for this OS, as src/release/cli.ts tests --home and DORI_HOME. */
-  isAbsolutePath(path: string): boolean;
+  /**
+   * True where a program word may name this host's executable with a Windows executable suffix, as
+   * src/runtime/omp-argv.ts reads an OMP launch line (`C:\bin\omp.exe`). Only Windows answers true.
+   */
+  readonly windowsExecutableNames: boolean;
 
-  /** The characters this OS splits a path on: /[\\/]/ on Windows, / elsewhere. */
-  readonly pathSeparators: RegExp;
+  /** `node:path` isAbsolute for this OS, as src/update/load.ts tests an update's `cwd` and `remote`. */
+  isAbsolutePath(path: string): boolean;
 }

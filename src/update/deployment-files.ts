@@ -26,7 +26,7 @@ export function syncDirectory(path: string): void {
 
 /** Darwin link(2) follows symlinks; rollback must preserve the link inode itself. */
 function preserveLink(path: string, backup: string): void {
-  if (platform.os !== "darwin") {
+  if (!platform.preservesHardLinks) {
     linkSync(path, backup);
     return;
   }

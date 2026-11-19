@@ -16,7 +16,7 @@ const SCRIPT_PROGRAMS = new Set([...SHELLS, ...Object.keys(LAUNCHERS), ...RUNNER
 // OMP's own executable or published entry, also as Windows spells it (`C:\bin\omp.exe`, `\dist\cli.js`).
 const isOmpExecutable = (word: string): boolean =>
   OMP_EXECUTABLE.test(word) ||
-  (platform.os === "win32" &&
+  (platform.windowsExecutableNames &&
     (platform.programName(word) === "omp" || /@oh-my-pi[\\/]pi-coding-agent[\\/]dist[\\/]cli\.js$/i.test(word)));
 // `words` start at a program (assignments aside): only that program's script option is read as a script.
 const names = (words: readonly string[]): boolean => {

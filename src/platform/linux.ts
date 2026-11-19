@@ -1,8 +1,8 @@
 // Linux: every process fact comes from /proc, SIGTERM goes through a pidfd so a reused pid cannot be retargeted, and
 // the filesystem is POSIX. The /proc root is a parameter so a fixture can stand in for the kernel in tests.
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { constants } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { join, posix } from "node:path";
 import { dlopen } from "bun:ffi";
 import type { ProcStat } from "../update/proc.ts";
 import type { PlatformAdapter, TerminateIdentity } from "./adapter.ts";
@@ -107,6 +107,8 @@ export function linuxAdapter(root = PROC, libc: () => PidfdLibc = libcPidfd): Pl
 
     cmdline: (pid) => readFileSync(join(root, String(pid), "cmdline"), "utf8"),
     exePath: (pid) => join(root, String(pid), "exe"),
+    // The exe link's target is the identity token: a replaced image keeps the path it was started from.
+    procExeLink: (pid) => readlinkSync(join(root, String(pid), "exe")),
     cwdPath: (pid) => join(root, String(pid), "cwd"),
 
     children(pid: number, everyThread = false): number[] {
@@ -127,6 +129,7 @@ export function linuxAdapter(root = PROC, libc: () => PidfdLibc = libcPidfd): Pl
     supportsProcessReaders: true,
     posixOwnership: true,
     directoryFsync: true,
+    preservesHardLinks: false,
     supportsHerdrNativeUi: true,
     // /proc carries each task's stat, CapEff, environ and cwd; the adapter's readers take the root from the fixture.
     procfs: true,
@@ -139,8 +142,8 @@ export function linuxAdapter(root = PROC, libc: () => PidfdLibc = libcPidfd): Pl
 
     nativeCacheLabel: () => `native-linux-${process.arch}`,
     programName: (word) => word.split("/").at(-1) ?? "",
-    isAbsolutePath: isAbsolute,
-    pathSeparators: /\//,
+    windowsExecutableNames: false,
+    isAbsolutePath: posix.isAbsolute,
   };
 }
 

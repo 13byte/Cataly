@@ -1,6 +1,6 @@
 // Windows: no process readers, no POSIX ownership and no directory fsync. Each reader throws the message the shared
 // reader threw on this host before, so callers fail closed instead of reading another OS's facts.
-import { isAbsolute } from "node:path";
+import { win32 } from "node:path";
 import type { ProcStat } from "../update/proc.ts";
 import type { PlatformAdapter, TerminateIdentity } from "./adapter.ts";
 import { liveOwnerStart, memoryFreePct } from "./shared.ts";
@@ -27,6 +27,10 @@ export const windows: PlatformAdapter = {
     return noReader();
   },
 
+  procExeLink(_pid: number): string {
+    return noReader();
+  },
+
   cwdPath(_pid: number): string {
     return noReader();
   },
@@ -50,6 +54,7 @@ export const windows: PlatformAdapter = {
   supportsProcessReaders: false,
   posixOwnership: false,
   directoryFsync: false,
+  preservesHardLinks: false,
   supportsHerdrNativeUi: false,
   procfs: false,
   // Nothing takes a prune lock here, so this is the non-darwin default the lease loaded before the adapter.
@@ -66,6 +71,6 @@ export const windows: PlatformAdapter = {
 
   nativeCacheLabel: () => `native-win32-${process.arch}`,
   programName: (word) => (word.split(/[\\/]/).at(-1) ?? "").replace(/\.exe$/i, ""),
-  isAbsolutePath: isAbsolute,
-  pathSeparators: /[\\/]/,
+  windowsExecutableNames: true,
+  isAbsolutePath: win32.isAbsolute,
 };

@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
-import { platform } from "../platform/index.ts";
+import { platform, procfsOn } from "../platform/index.ts";
 import { liveTasks, processIsKernelThread } from "./process-cwd.ts";
 
 /** What `processFiles` reads: paths by pid, and live pids whose files could not be read (they may use anything). */
@@ -38,7 +38,7 @@ export function processFiles(os = platform.os): ProcessFiles | null {
   const files = new Map<string, string[]>();
   const unread: string[] = [];
   const uid = process.getuid?.();
-  if (os !== "linux") {
+  if (!procfsOn(os)) {
     let lsof: ReturnType<typeof Bun.spawnSync>;
     try {
       lsof = Bun.spawnSync(["lsof", "-n", ...(uid === undefined ? [] : ["-u", String(uid)]), "-F", "pn"], {

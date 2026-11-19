@@ -1,6 +1,6 @@
 // The one selection point: the host is read once at import, and every caller asks this module instead of re-testing
 // process.platform. An unrecognised host still imports; its process readers throw at use, where proc.ts already threw.
-import { isAbsolute } from "node:path";
+import { posix } from "node:path";
 import type { HostOs, PlatformAdapter } from "./adapter.ts";
 import { darwin } from "./darwin.ts";
 import { linux } from "./linux.ts";
@@ -12,6 +12,14 @@ const adapters: Record<HostOs, PlatformAdapter> = { darwin, linux, win32: window
 /** The adapter for one host: what tests inject instead of running on that OS. */
 export function adapterFor(os: HostOs): PlatformAdapter {
   return adapters[os];
+}
+
+/**
+ * Whether `/proc` carries `os`'s process facts, as that host's adapter answers; a host with no implementation has
+ * none. src/release/process-cwd.ts and process-files.ts take a host for tests and ask here instead of re-testing one.
+ */
+export function procfsOn(os: string): boolean {
+  return adapters[os as HostOs]?.procfs === true;
 }
 
 /**
@@ -29,6 +37,7 @@ function unsupported(os: string): PlatformAdapter {
     procStat: noReader,
     cmdline: noReader,
     exePath: noReader,
+    procExeLink: noReader,
     cwdPath: noReader,
     children: noReader,
     bootId: noReader,
@@ -39,6 +48,7 @@ function unsupported(os: string): PlatformAdapter {
     supportsProcessReaders: false,
     posixOwnership: process.getuid !== undefined,
     directoryFsync: true,
+    preservesHardLinks: false,
     supportsHerdrNativeUi: false,
     procfs: false,
     flockLibrary: () => "libc.so.6",
@@ -47,8 +57,8 @@ function unsupported(os: string): PlatformAdapter {
     supportsReleaseProfile: () => false,
     nativeCacheLabel: () => `native-${os}-${process.arch}`,
     programName: (word) => word.split("/").at(-1) ?? "",
-    isAbsolutePath: isAbsolute,
-    pathSeparators: /\//,
+    windowsExecutableNames: false,
+    isAbsolutePath: posix.isAbsolute,
   };
 }
 

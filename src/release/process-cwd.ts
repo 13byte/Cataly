@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, readlinkSync } from "node:fs";
-import { platform } from "../platform/index.ts";
+import { platform, procfsOn } from "../platform/index.ts";
 import { procStat } from "../update/proc.ts";
 
 /**
@@ -73,7 +73,7 @@ export type ProcessCwds = { readonly cwds: Map<string, string>; readonly unreada
 export function processCwds(pids: readonly string[], os = platform.os): ProcessCwds | null {
   const cwds = new Map<string, string>();
   const unreadable: string[] = [];
-  if (os === "linux") {
+  if (procfsOn(os)) {
     for (const pid of pids) {
       if (processIsKernelThread(pid) === true) continue;
       try {

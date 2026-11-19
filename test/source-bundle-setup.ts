@@ -12,25 +12,11 @@ const NATIVE_VIEWER_FIXTURE = "isolated viewer admission bytes, not an applicati
 export function fixtureGit(cwd: string, ...argv: string[]): string {
   const windows = process.platform === "win32";
   const devNull = windows ? "NUL" : "/dev/null";
-  const git = ["git", "-c", `core.hooksPath=${devNull}`, ...argv];
+  // No automatic gc or maintenance: a detached one would outlive the call with its working directory in the fixture.
+  const git = ["git", "-c", `core.hooksPath=${devNull}`, "-c", "gc.auto=0", "-c", "maintenance.auto=false", ...argv];
   const result = Bun.spawnSync(
-    windows
-      ? git
-      : // No automatic gc or maintenance: a detached one would outlive the call with its working directory in the fixture.
-        [
-          "/bin/sh",
-          "-c",
-          'umask 077; exec "$@"',
-          "dori-source-fixture",
-          "git",
-          "-c",
-          "core.hooksPath=/dev/null",
-          "-c",
-          "gc.auto=0",
-          "-c",
-          "maintenance.auto=false",
-          ...argv,
-        ],
+    // umask keeps the fixture private on POSIX; the Windows shell has neither command.
+    windows ? git : ["/bin/sh", "-c", 'umask 077; exec "$@"', "dori-source-fixture", ...git],
     {
       cwd,
       env: {

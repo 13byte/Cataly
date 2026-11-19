@@ -239,6 +239,10 @@ describe("Dori candidate boundaries", () => {
     expect(load({ reporter: { name: "notify", argv: ["notify", "{text}", "{candidate}"], timeoutMs: 1000 } })).toThrow(
       "may use only",
     );
+    // `..` behind a backslash climbs on every host, whatever separator the adapter's host uses.
+    expect(load({ worker: { ...f.config.worker, cwd: "a\\..\\b" } })).toThrow(
+      "worker.cwd must be relative to the isolated candidate",
+    );
     expect(load({ runtime: "hc" })).toThrow('runtime:"herdr"');
   });
 });

@@ -4,6 +4,8 @@
 
 - Platform behaviour now sits behind one `PlatformAdapter` in `src/platform/`, with a single implementation per host (darwin, linux, win32) in place of scattered `process.platform` checks. Answers, messages and failure modes are unchanged.
 
+- `src/release/files.ts` flushes a directory only through the adapter's `syncDirectory` instead of testing `directoryFsync` first; on Windows that release path no longer opens and fsyncs a directory, and it is unreachable there because `provision.ts` prerequisites reject win32. A manifest `cwd` carrying `..` behind either separator is rejected again on every host, as it was before the adapter named a separator set.
+
 - Biome is replaced by oxlint for linting, Prettier for formatting and a husky `pre-commit` hook that runs both. `bun run check` now runs `lint` (`oxlint --deny-warnings`) then `format:check`, `bun run format` replaces `bun run fmt`, and the formatter options, rule severities and ignore patterns carry over unchanged. Biome's optional-chain correction (the default fix behind `useOptionalChain`) has no oxlint equivalent, so code it had already fixed stays as it is.
 
 

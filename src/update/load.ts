@@ -84,7 +84,7 @@ const command = (value: unknown, label: string, agent = false): UpdateCommand =>
   const name = text(value["name"], `${label}.name`);
   if (!NAME.test(name)) throw new UpdateError(`${label}.name must match ${NAME}`);
   const cwd = value["cwd"] === undefined ? undefined : text(value["cwd"], `${label}.cwd`);
-  if (cwd !== undefined && (platform.isAbsolutePath(cwd) || cwd.split(platform.pathSeparators).includes("..")))
+  if (cwd !== undefined && (platform.isAbsolutePath(cwd) || cwd.split(/[\\/]/).includes("..")))
     throw new UpdateError(`${label}.cwd must be relative to the isolated candidate`);
   const engine = value["engine"];
   if (engine !== undefined && engine !== "omp" && engine !== "external") {

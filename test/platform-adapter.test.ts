@@ -1,7 +1,7 @@
 // The contract's proof: every host's capability matrix as the product reads it, with the host injected instead of
 // run. The running host's own readers get one smoke test, so moving them into src/platform/ cannot go silent.
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { constants, tmpdir } from "node:os";
 import { join } from "node:path";
 import { herdrDeploymentCli } from "../src/update/deployment-cli.ts";
@@ -9,6 +9,7 @@ import type { HostOs } from "../src/platform/adapter.ts";
 import { darwinMemFreePct } from "../src/platform/darwin.ts";
 import { adapterFor, platform } from "../src/platform/index.ts";
 import { linuxAdapter } from "../src/platform/linux.ts";
+import { memoryFreePct } from "../src/platform/shared.ts";
 
 /** A /proc fixture: one pid with its stat and two task child lists, plus the boot id a signal identity names. */
 function fixtureProc(startTicks: string): { root: string; done: () => void } {
@@ -100,15 +101,42 @@ describe("capability matrix", () => {
     expect(adapterFor("win32").procfs).toBe(false);
   });
 
+  test("only macOS preserves an installation pointer's inode through linkat", () => {
+    expect(adapterFor("darwin").preservesHardLinks).toBe(true);
+    expect(adapterFor("linux").preservesHardLinks).toBe(false);
+    expect(adapterFor("win32").preservesHardLinks).toBe(false);
+  });
+
+  test("only Windows reads a launch word spelled with an .exe suffix", () => {
+    expect(adapterFor("win32").windowsExecutableNames).toBe(true);
+    expect(adapterFor("darwin").windowsExecutableNames).toBe(false);
+    expect(adapterFor("linux").windowsExecutableNames).toBe(false);
+  });
+
+  test("a Linux exe link target is the identity token; the other hosts answer with the image path", () => {
+    const proc = fixtureProc("777");
+    try {
+      const adapter = linuxAdapter(proc.root);
+      symlinkSync(process.execPath, join(proc.root, "4242", "exe"));
+      expect(adapter.exePath(4242)).toBe(join(proc.root, "4242", "exe"));
+      expect(adapter.procExeLink(4242)).toBe(process.execPath);
+    } finally {
+      proc.done();
+    }
+    // No /proc link here: the identity token is the image path libproc reports.
+    expect(adapterFor("darwin").procExeLink).toBe(adapterFor("darwin").exePath);
+    expect(() => adapterFor("win32").procExeLink(1)).toThrow("no process reader for win32");
+  });
+
   test("the lock's C library follows the host, as the lease loaded it before the adapter", () => {
     expect(adapterFor("darwin").flockLibrary()).toBe("libSystem.B.dylib");
     expect(adapterFor("linux").flockLibrary()).toBe("libc.so.6");
     expect(adapterFor("win32").flockLibrary()).toBe("libc.so.6");
   });
 
-  test("the herdr deployment CLI carries nativeUi exactly where this host's adapter does", () => {
+  test("the herdr deployment CLI carries nativeUi exactly where the host admits it", () => {
     const cli = herdrDeploymentCli(async () => ({ code: 0, stdout: "", stderr: "" }));
-    expect("nativeUi" in cli).toBe(platform.supportsHerdrNativeUi);
+    expect("nativeUi" in cli).toBe({ darwin: false, linux: true, win32: false }[platform.os]);
   });
 
   test("the every-thread flag reaches the Linux task walk", () => {
@@ -176,6 +204,9 @@ describe("capability matrix", () => {
 
   test("macOS reads the kernel's memory level and falls back to free pages", () => {
     expect(adapterFor("darwin").memFreePct).toBe(darwinMemFreePct);
+    // Only macOS consults sysctl: the other hosts never spawn it, they round the shared free-page ratio.
+    expect(adapterFor("linux").memFreePct).toBe(memoryFreePct);
+    expect(adapterFor("win32").memFreePct).toBe(memoryFreePct);
     const free = () => 3;
     expect(darwinMemFreePct(() => "72\n", free)).toBe(72);
     expect(
@@ -186,10 +217,11 @@ describe("capability matrix", () => {
     expect(darwinMemFreePct(() => "garbage", free)).toBe(3);
   });
 
-  test("path separators follow the host", () => {
-    expect(adapterFor("win32").pathSeparators.test("C:\\a")).toBe(true);
-    expect(adapterFor("linux").pathSeparators.test("C:\\a")).toBe(false);
+  test("absolute paths follow the adapter's own OS, not the running host", () => {
     expect(adapterFor("linux").isAbsolutePath("/a")).toBe(true);
+    expect(adapterFor("linux").isAbsolutePath("C:\\a")).toBe(false);
+    expect(adapterFor("darwin").isAbsolutePath("/a")).toBe(true);
+    expect(adapterFor("win32").isAbsolutePath("C:\\a")).toBe(true);
   });
 });
 

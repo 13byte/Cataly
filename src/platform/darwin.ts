@@ -2,7 +2,7 @@
 // The FFI binding opens once per process; every reader throws when the process is gone, so callers keep failing closed.
 import { execFileSync } from "node:child_process";
 import { constants } from "node:os";
-import { isAbsolute } from "node:path";
+import { posix } from "node:path";
 import type { ProcStat } from "../update/proc.ts";
 import type { PlatformAdapter, TerminateIdentity } from "./adapter.ts";
 import { liveOwnerStart, memoryFreePct, syncDirectory } from "./shared.ts";
@@ -84,6 +84,13 @@ function libproc(): Darwin {
 const gone = (pid: number, what: string): Error =>
   Object.assign(new Error(`process ${pid} ${what} is unavailable`), { code: "ENOENT" });
 
+/** libproc's executable path: no /proc link here, so the identity token and the image path are the same answer. */
+const executablePath = (pid: number): string => {
+  const path = libproc().pidpath(pid);
+  if (!path) throw gone(pid, "executable");
+  return path;
+};
+
 /**
  * The kernel's available-memory level when it answers a sane percentage, otherwise the free-pages fallback. The two
  * readers are parameters so their policy can be pinned without a real sysctl or real free memory.
@@ -140,11 +147,8 @@ export const darwin: PlatformAdapter = {
     return out.map((arg) => `${arg}\0`).join("");
   },
 
-  exePath(pid: number): string {
-    const path = libproc().pidpath(pid);
-    if (!path) throw gone(pid, "executable");
-    return path;
-  },
+  exePath: executablePath,
+  procExeLink: executablePath,
 
   cwdPath(pid: number): string {
     const info = libproc().pidinfo(pid, PROC_PIDVNODEPATHINFO, VNODEPATHINFO_SIZE);
@@ -183,6 +187,8 @@ export const darwin: PlatformAdapter = {
   supportsProcessReaders: true,
   posixOwnership: true,
   directoryFsync: true,
+  // link(2) follows a symlink here; rollback links the pointer's own inode through linkat instead.
+  preservesHardLinks: true,
   supportsHerdrNativeUi: false,
   // No /proc: a zombie has ended, only root can enter another user's directory, and a relative home stays unresolved.
   procfs: false,
@@ -195,6 +201,6 @@ export const darwin: PlatformAdapter = {
 
   nativeCacheLabel: () => `native-darwin-${process.arch}`,
   programName: (word) => word.split("/").at(-1) ?? "",
-  isAbsolutePath: isAbsolute,
-  pathSeparators: /\//,
+  windowsExecutableNames: false,
+  isAbsolutePath: posix.isAbsolute,
 };

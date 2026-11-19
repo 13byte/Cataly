@@ -124,7 +124,8 @@ export function saveJson(path: string, value: unknown): void {
 }
 
 export function syncDirectory(path: string): void {
-  if (platform.directoryFsync) platform.syncDirectory(path);
+  // Every adapter answers: Windows knows it cannot open a directory for fsync and does nothing.
+  platform.syncDirectory(path);
 }
 
 export function pointer(path: string): string | undefined {

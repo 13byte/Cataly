@@ -1,7 +1,6 @@
 // One process's kernel facts for deployment identity, read the same way on every call. The readers are the platform
 // adapter's (src/platform/darwin.ts reads libproc and sysctl, src/platform/linux.ts reads /proc); every reader throws
 // when the process is gone or the host has no reader, so callers keep failing closed.
-import { readlinkSync } from "node:fs";
 import { platform } from "../platform/index.ts";
 
 export type ProcStat = {
@@ -42,10 +41,9 @@ export function procExe(pid: number): string {
   return platform.exePath(pid);
 }
 
-/** The executable's path as the kernel names it (Linux's exe link target). */
+/** The executable's path as the kernel names it: Linux's exe link target, the image path everywhere else. */
 export function procExeTarget(pid: number): string {
-  // Linux names the image through the /proc exe link; the other adapters report the path itself.
-  return platform.os === "linux" ? readlinkSync(`/proc/${pid}/exe`) : platform.exePath(pid);
+  return platform.procExeLink(pid);
 }
 
 /** A path that resolves to the process's working directory. */
