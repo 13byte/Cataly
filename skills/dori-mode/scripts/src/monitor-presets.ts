@@ -4,11 +4,13 @@ import type { SweepAct } from "./freshness.ts";
 // A new sweep outcome must get a diagnostic probe before the preset can compile.
 const freshnessEvents = {
   nudged: true,
+  "nudge-failed": true,
   posted: true,
   "post-failed": true,
   "no-report": true,
   "pending-report": true,
   "stale-report": true,
+  unrelayed: true,
   stalled: true,
   "journal-error": true,
   "working-while-paused": true,

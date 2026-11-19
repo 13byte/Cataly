@@ -14,8 +14,9 @@ export const USAGE = `dori <command> [options]
   boot                                 read-only check after a restart: Slack auth, vanished panes, journals, open worklog items and decisions, stale watches
   doctor [--json] [--repo owner/repo]   read-only configuration, adoption and monitor diagnostics; exit 1 on warnings
   monitor-presets [name] [--json]      recommended argv and filters; starts nothing
-  report <key> --kind milestone|blocker|question|halted|done --text TEXT
+  report <key> --kind milestone|blocker|question|halted|done --text TEXT [--owner SUMMARY] [--json]
                                        append a durable progress report and print its [REPORT] line
+  relayed <key> --report ID            acknowledge the exact journal report already sent by the lead (--json supplies ID)
   checkpoint <key> --step ID --result TEXT --evidence PATH [--remote-effect RECEIPT]...
                                        record a completed step once; a conflicting rewrite is refused
   checkpoints <key>                    read completed steps before resuming remote work
