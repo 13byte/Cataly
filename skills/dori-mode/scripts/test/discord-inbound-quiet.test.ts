@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { Discord } from "../src/messenger/discord.ts";
 import { discordInbound } from "../src/messenger/discord-inbound.ts";
 import { discordRestWorld, memoryDiscordCursor, ownerMessage } from "./discord-inbound-fakes.ts";
+import { queuedWorld, settle } from "./discord-inbound-live-fakes.ts";
 import { fakeClock } from "./fakes.ts";
 
 test("ten quiet channels request only one head each and never rewrite their cursors", async () => {
@@ -113,4 +114,56 @@ for (const explicit of [false, true]) {
       expect(cursor.saved).toEqual([]);
     });
   }
+}
+
+for (const explicit of [false, true]) {
+  for (const [fault, body] of [
+    ["json", "{"],
+    ["page", "{}"],
+    ["message", "[null]"],
+    ["id", '[{"id":"bad"}]'],
+    ["oversized", JSON.stringify([ownerMessage("100"), ownerMessage("99")])],
+    ["channel", JSON.stringify([ownerMessage("99", { channel_id: "21" })])],
+  ] as const) {
+    test(`a ${fault} head is fatal before the quiet shortcut for ${explicit ? "explicit" : "discovered"} channels`, async () => {
+      const world = discordRestWorld([ownerMessage("100")]);
+      world.state.guilds = [{ id: "5", channels: ["20"], threads: [] }];
+      const cursor = memoryDiscordCursor("100");
+      const intake = await discordInbound(world.discord, () => cursor.store, {
+        ownerId: "10",
+        channelIds: explicit ? ["20"] : [],
+        all: !explicit,
+      });
+      world.requests.length = 0;
+      world.state.responses.set("/channels/20/messages", body);
+      await expect(intake.poll(() => {})).rejects.toMatchObject({
+        status: 502,
+        code: "DISCORD_INBOUND_PROTOCOL_ERROR",
+      });
+      expect(world.requests.map((request) => new URL(request.url).searchParams.get("limit"))).toEqual(["1"]);
+      expect(intake.channels()).toEqual(["20"]);
+      expect(cursor.saved).toEqual([]);
+      expect(cursor.store.load()).toBe("100");
+    });
+  }
+}
+
+for (const head of [undefined, "99", "107"]) {
+  test(`a quiet REST head (${head}) leaves retained older owners available to the admitted FIFO`, async () => {
+    const world = queuedWorld({
+      history: head ? [ownerMessage(head)] : [],
+      messages: [ownerMessage("105"), ownerMessage("109")],
+      cursors: { "20": "107" },
+      admissions: { "105": "102", "109": "107" },
+    });
+    await world.start();
+    await settle();
+    expect(world.received).toEqual(["20:105", "20:109"]);
+    expect(world.saves).toEqual(["20:107", "20:109"]);
+    expect(world.cursor()).toBe("109");
+    expect(world.queue().first()).toBeNull();
+    expect(
+      world.rest.requests.map((request) => new URL(request.url).searchParams.get("limit")).filter(Boolean),
+    ).toEqual(["1", "1"]);
+  });
 }
