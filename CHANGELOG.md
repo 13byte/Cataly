@@ -34,6 +34,8 @@
 
 - Supported native OMP ASK forms are automatically available through an already connected Discord receiver with an unambiguous destination. Existing settings and explicit routes stay in place; only the configured owner's reply to the exact message answers that ASK.
 
+- Keep ambient Discord and Telegram tokens out of launched lane agents, reject empty tokens before network access, and preserve native authentication and the existing Slack token-file flow.
+
 - Dori and duty report observed progress at meaningful result boundaries without creating reporting-only model timers, while retaining code watches, inbound delivery and explicit long-silence alerts.
 
 - `dori voice discord` adds an opt-in, paid, owner-only Discord voice assistant configured by `voice` in the existing Dori config. It reads lanes and reports, searches the web, posts notes and forwards work to the lead once, claiming delivery only after receipt is observed; forwarded requests carry a written-approval policy, not an effect-point authorization gate. Daily, cumulative and backend spending caps apply, though in-flight usage can exceed them. Native codecs are optional dependencies loaded only by this command. See [the voice guide](docs/discord-voice.md).
