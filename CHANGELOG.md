@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Reuse an already-published ULW candidate after unrelated main changes only after verifying its canonical PR, accepted parent and exact metadata-only tree. Preserve closed decisions and exact-head CI deduplication without rewriting branches or repeating Git object uploads.
+
 - Follow the canonical `vntrevx/Cataly` repository identity in the ULW/release workflow guards and their shared publisher/release checks. The exact repository, tag, commit, workflow and trusted check bindings remain enforced; forks and the former identity are refused.
 
 - Schedule the ULW candidate workflow for 03:00 UTC (12:00 KST) daily, retaining manual dispatch and fail-closed publication. Preparation errors name conflicting paths without executing upstream code.
