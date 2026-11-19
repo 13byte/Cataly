@@ -7,6 +7,7 @@ type PollIntake = {
   botId: string;
   current(store: DiscordInboundStore): string;
   readPage(channel: string, limit: number, before?: string): Promise<readonly Message[] | undefined>;
+  valid(message: Message): boolean;
   accepts(message: Message, parent?: string | null): boolean;
   accept(message: Message, emit: Emit, after?: string | null, parent?: string | null): Promise<void>;
   deliver(message: Message, store: DiscordInboundStore, emit: Emit): Promise<void>;
@@ -16,7 +17,7 @@ type PollIntake = {
 export const discordThreadPoll =
   (intake: PollIntake) =>
   async (channelId: string, store: DiscordInboundStore, emit: Emit, queue?: DiscordInboundQueue): Promise<void> => {
-    const { current, readPage, ownerId, botId, accepts, accept, deliver } = intake;
+    const { current, readPage, ownerId, botId, valid, accepts, accept, deliver } = intake;
     const after = current(store);
     const latest = await readPage(channelId, 1);
     if (latest === undefined) return;
@@ -57,7 +58,11 @@ export const discordThreadPoll =
           job = queue.nextOwner(channelId, ownerId, message.id, after, row)
         ) {
           const retained = JSON.parse(job.payload) as Message;
-          if (!accepts(retained, job.parent)) throw inboundProtocolError("Discord inbound queue message is invalid");
+          if (!valid(retained)) throw inboundProtocolError("Discord inbound queue message is invalid");
+          if (!accepts(retained, job.parent)) {
+            queue.remove(job.id);
+            continue;
+          }
           after = retained.id;
           row = job.id;
           if (!isOwnerMessage(retained, ownerId, botId)) continue;
