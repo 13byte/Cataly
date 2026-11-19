@@ -6,7 +6,7 @@ import { Lessons } from "./lessons.ts";
 import { pendingDiscordLane } from "./messenger/discord-lane-inbox.ts";
 import { type CloseLesson, commitClose, recordDoneDecision } from "./native-close.ts";
 import { type Lane, type Registry, sameLaneGeneration, sessionOf, statusOf, withStatus } from "./registry.ts";
-import { type ChosenRuntimes, type Clock, iso, type Runner, runtimesOf } from "./run.ts";
+import { type ChosenRuntimes, type Clock, iso, repoGit, type Runner, runtimesOf } from "./run.ts";
 import { closeSession, sendVerified } from "./sessions.ts";
 import { type Check, checkDone, type SignalIo } from "./signals.ts";
 import { Supervision } from "./supervision.ts";
@@ -141,7 +141,7 @@ const closeHeld = async (
   const root = lane.cwd ?? deps.config.defaultCwd;
   const worktrees = await discoverWorktrees(lane, deps.run, [deps.config.defaultCwd]);
   for (const wt of worktrees.filter(deps.exists ?? existsSync)) {
-    const r = await deps.run(["git", "-C", root, "worktree", "remove", wt]);
+    const r = await repoGit(deps.run, root, ["worktree", "remove", wt]);
     cleanup.push(r.code === 0 ? `worktree ${wt} removed` : `worktree ${wt} kept: ${r.err.slice(0, 120)}`);
   }
   const receipt = { outcome: "done", checks, note, cleanup };
