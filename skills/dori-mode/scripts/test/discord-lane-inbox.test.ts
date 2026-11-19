@@ -100,9 +100,7 @@ test("only a matching launch key binds a native pane before the registry records
   expect(await route()).toBe(session);
 });
 
-posix("a retired session buffers chat until another registry entry makes its pane ambiguous", verifyRetiredRouting);
-
-async function verifyRetiredRouting() {
+posix("a retired lane buffers chat until its pane binding is ambiguous", async () => {
   await registry.write(lane);
   laneState(state.dir, pane, { pid: 0, sessionId: session, discordLaneInbox: true });
   expect(await route()).toBe(session);
@@ -118,7 +116,7 @@ async function verifyRetiredRouting() {
   } finally {
     inbox.close();
   }
-}
+});
 
 posix("the inbox persists numeric FIFO and deduplication independently for each session and channel", () => {
   const otherSession = "other-session";
@@ -173,9 +171,7 @@ posix("the inbox persists numeric FIFO and deduplication independently for each 
 const identity = { bot: "345", owner: "678" };
 const rotated = { ...identity, owner: "789" };
 
-posix("first-admission opt-in survives restart for the original receiver identity", verifyOptInRecovery);
-
-function verifyOptInRecovery() {
+posix("first-admission opt-in survives restart for the original receiver", () => {
   const inbox = openDiscordLaneInbox(state.dir);
   const optedOut = inbound("8", "ordinary input");
   try {
@@ -204,7 +200,7 @@ function verifyOptInRecovery() {
   } finally {
     reopened.close();
   }
-}
+});
 
 posix("the outbox survives partial drain and never recreates captured parts, even after acknowledgement", () => {
   const request = inbound("9", "opted-in input");
