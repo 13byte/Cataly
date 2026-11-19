@@ -42,7 +42,10 @@ test("park preserves incomplete and unpushed work, session, thread, reason and r
   expect(await watchTick(f.deps)).toEqual([]);
 });
 
-test.each(["parked", "abandoned"] as const)("%s waits for accepted native Discord work", async (outcome) => {
+// The native Discord inbox requires POSIX ownership and permission checks.
+const posix = test.skipIf(process.platform === "win32");
+
+posix.each(["parked", "abandoned"] as const)("%s waits for accepted native Discord work", async (outcome) => {
   const lane = { ...f.lane, thread: "discord:123", session: f.session };
   await f.deps.registry.write(lane);
   const inbox = openDiscordLaneInbox(f.state.dir);

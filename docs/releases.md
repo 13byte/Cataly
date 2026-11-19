@@ -46,7 +46,7 @@ For the historical `v0.1.2` assets below, install git, Bun, native OMP and herdr
 
 Consumers need neither the GitHub CLI nor GitHub write permission to install, check, update or roll back Dori. These operations do not call porting/review models or change global provider settings. Later AI sessions use your own configured provider and quota; Discord uses your own application/bot account and token. No maintainer credentials, private session history or model authentication ship in the assets.
 
-Use the canonical repository **https://github.com/vntrevx/omp-dori** and the exact tag **`v0.1.2`**. Its intended canonical release path is **https://github.com/vntrevx/omp-dori/releases/tag/v0.1.2**. Check the repository owner, tag and release commit there before downloading. Do not substitute a fork, an arbitrary `main` script or an unverified mirror.
+Use the canonical repository **https://github.com/vntrevx/Cataly** and the exact tag **`v0.1.2`**. Its intended canonical release path is **https://github.com/vntrevx/Cataly/releases/tag/v0.1.2**. Check the repository owner, tag and release commit there before downloading. Do not substitute a fork, an arbitrary `main` script or an unverified mirror.
 
 Each release has four fixed assets:
 
@@ -66,7 +66,7 @@ After publication, use an account with its own home and no existing running Dori
 ```sh
 download_dir="$(mktemp -d)" || exit 1
 cd "$download_dir" || exit 1
-release_url="https://github.com/vntrevx/omp-dori/releases/download/v0.1.2"
+release_url="https://github.com/vntrevx/Cataly/releases/download/v0.1.2"
 for asset in install.sh release-manifest.json SHA256SUMS omp-dori-v0.1.2.tar.gz; do
   curl --proto '=https' --tlsv1.2 -fL "$release_url/$asset" -o "$asset" || exit 1
 done
@@ -413,14 +413,14 @@ The output is a review artifact, not an installed update. A conflict requires a 
 - **Interrupted activation:** run `~/.dori/bin/dori update status` and retain the release state/journal if it reports an unresolved inconsistency. Do not hand-edit the active pointer to manufacture success.
 - **Discord messages work but the bot is offline:** inspect the opt-in Gateway presence monitor, its genuine READY/RESUMED and heartbeat logs, your token/intents and the actual Discord indicator. REST success alone proves none of these.
 
-For a support report, include the exact tag, release commit/source hash shown by the manifest or status, OS/architecture, Bun/OMP versions, selected runtime, command and sanitized output. State whether the input was a canonical network release or `--from`. Report checksum failure, skipped checks and unexercised behavior honestly. Exclude tokens, auth files, private session transcripts and project data. Use the repository's [issues](https://github.com/vntrevx/omp-dori/issues) after reviewing what you are submitting.
+For a support report, include the exact tag, release commit/source hash shown by the manifest or status, OS/architecture, Bun/OMP versions, selected runtime, command and sanitized output. State whether the input was a canonical network release or `--from`. Report checksum failure, skipped checks and unexercised behavior honestly. Exclude tokens, auth files, private session transcripts and project data. Use the repository's [issues](https://github.com/vntrevx/Cataly/issues) after reviewing what you are submitting.
 
 ## Source checkouts for maintainers
 
 Source installation is separate from public release installation. Use an ordinary checkout outside the frozen consumer release directories:
 
 ```sh
-git clone https://github.com/vntrevx/omp-dori.git "$HOME/src/omp-dori"
+git clone https://github.com/vntrevx/Cataly.git "$HOME/src/omp-dori"
 cd "$HOME/src/omp-dori"
 DORI_INSTALL_MODE=side DORI_NO_PULL=1 DORI_SRC="$PWD" bash scripts/install-source.sh
 ```
@@ -463,7 +463,7 @@ The general interface is `bun scripts/release.ts build --out DIST [--prerelease]
 
 Before publication, maintainers perform isolated real-binary install/update/failure-recovery QA without personal HOME/auth/history mounts, review the change freshly and obtain the required CI evidence for the exact release commit. Report the actual results separately: source checks or a historical port replay are not a future clean-consumer run, a provider test or an independent external-user beta.
 
-The `.github/workflows/release.yml` tag workflow validates the tag against the canonical package version. It requires successful **`check`**, **`e2e-herdr`** and **`e2e-hc`** results for that exact commit from the repository's own CI workflow and the trusted GitHub Actions app **15368**. A tag push alone does not prove `ci.yml` ran. The first release is explicitly marked prerelease. Existing tags, releases and assets must not be overwritten; publication needs maintainer permissions and consumers need none.
+The `.github/workflows/release.yml` tag workflow validates the tag against the canonical package version. It requires successful **`check`**, **`e2e-herdr`** and **`e2e-hc`** results for that exact commit from the repository's own CI workflow and the trusted GitHub Actions app **15368**. A tag push alone does not prove `ci.yml` ran. The separate `.github/workflows/cross-os.yml` workflow reports macOS and Windows results on pull requests and `main` pushes, but it is outside this release gate and forms no part of release evidence. The first release is explicitly marked prerelease. Existing tags, releases and assets must not be overwritten; publication needs maintainer permissions and consumers need none.
 
 Every maintainer release-metadata mutation names the tag and commit identity explicitly and reads back the known release ID rather than re-resolving a draft by tag; a body-only draft update can drop that draft's tag binding. The local producer publication path uses the GitHub CLI and needs a `gh` that supports `--paginate` together with `--slurp` for paginated API reads, including release-asset listing, which the trusted Actions runner provides; an older host `gh` without `--slurp` is not a supported producer environment. This is a maintainer tool requirement only: consumer install, check, update and rollback still need no `gh`.
 

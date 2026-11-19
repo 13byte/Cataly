@@ -12,7 +12,9 @@ const FROZEN = ["install", "--frozen-lockfile", "--ignore-scripts", "--silent"];
 const quote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
 
 // Root and skill runtimes import no devDependency (gate tools only); the extension keeps its complete host install.
-test.each([true, false])(
+// The deployment fixture invokes an executable POSIX shell shim through a private install.
+const posix = test.skipIf(process.platform === "win32");
+posix.each([true, false])(
   "preparation skips root/skill dev tools (runtime deps: %s)",
   async (runtimeDeps) => {
     const f = preparationFixture();

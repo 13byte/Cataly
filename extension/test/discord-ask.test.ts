@@ -14,8 +14,11 @@ const first = "109867692300000026";
 const next = "109867692300000027";
 const event = { toolName: "ask", toolCallId: "tool-ask-1", input: { html } };
 
+// The bridge verifies POSIX ownership and mode on the token and reply mailbox.
+const posix = test.skipIf(process.platform === "win32");
+
 for (const winner of ["Discord", "terminal"] as const) {
-  test(`${winner} answers the native ASK once and closes the other path`, async () => {
+  posix(`${winner} answers the native ASK once and closes the other path`, async () => {
     const root = mkdtempSync(join(tmpdir(), "cataly-discord-ask-"));
     const tokenFile = join(root, "bot-token");
     const previous = process.env["DORI_DISCORD_API_BASE"];

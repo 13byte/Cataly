@@ -5,6 +5,7 @@
 /** Every `dori` command: cli.ts's own and its command tables. */
 export const DORI_COMMANDS: Record<string, true> = {
   adopt: true,
+  board: true,
   boot: true,
   "can-launch": true,
   channel: true,
@@ -15,6 +16,7 @@ export const DORI_COMMANDS: Record<string, true> = {
   "dead-panes": true,
   decision: true,
   doctor: true,
+  eta: true,
   "monitor-presets": true,
   freshness: true,
   guard: true,
@@ -38,6 +40,7 @@ export const DORI_COMMANDS: Record<string, true> = {
   report: true,
   resume: true,
   send: true,
+  status: true,
   sync: true,
   tell: true,
   thread: true,
@@ -45,6 +48,7 @@ export const DORI_COMMANDS: Record<string, true> = {
   update: true,
   upstream: true,
   "verify-pr": true,
+  voice: true,
   watch: true,
   worklog: true,
 };
@@ -105,6 +109,7 @@ const MESSENGER_COMMANDS: Record<string, true> = {
   thread: true,
   react: true,
   channel: true,
+  voice: true,
 };
 const PLATFORMS: Record<string, true> = { slack: true, telegram: true, discord: true };
 

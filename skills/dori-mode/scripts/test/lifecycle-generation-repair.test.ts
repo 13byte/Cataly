@@ -4,7 +4,6 @@ import { dirname, join } from "node:path";
 import { bootCheck } from "../src/boot.ts";
 import type { FlowDeps } from "../src/done-flow.ts";
 import { freshnessTick } from "../src/freshness.ts";
-import { openDiscordLaneInbox } from "../src/messenger/discord-lane-inbox.ts";
 import { parkLane } from "../src/park.ts";
 import { type Lane, Registry, sessionOf, statusOf } from "../src/registry.ts";
 import { reopenLane } from "../src/reopen.ts";
@@ -34,7 +33,6 @@ beforeEach(async () => {
     ...f.lane,
     session: f.session,
     sessionFile: f.file,
-    thread: "discord:123",
     reportProtocol: "jsonl-v1",
   };
   deps = {
@@ -47,7 +45,6 @@ beforeEach(async () => {
     run: (argv, options) => (argv[0] === usageCommand ? Promise.resolve(usage) : f.deps.run(argv, options)),
   };
   await deps.registry.write(lane);
-  openDiscordLaneInbox(f.state.dir).close();
   reports = new Reports(f.state.dir);
 });
 

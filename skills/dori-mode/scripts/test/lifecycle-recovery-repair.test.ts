@@ -2,8 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { holdLines } from "../src/holds.ts";
 import { paneStatePath, readPaneState, writePaneState } from "../src/lane-state.ts";
-import type { DiscordInbound } from "../src/messenger/discord-inbound-api.ts";
-import { discordLaneTarget, type LaneMessage, openDiscordLaneInbox } from "../src/messenger/discord-lane-inbox.ts";
+import { discordLaneTarget, openDiscordLaneInbox } from "../src/messenger/discord-lane-inbox.ts";
 import { parkLane } from "../src/park.ts";
 import { pauseLane, resumeLane } from "../src/pause.ts";
 import { type Lane, Registry, statusOf } from "../src/registry.ts";
@@ -83,10 +82,7 @@ async function interruptPark(): Promise<Lane> {
   expect(saved).toMatchObject({ session: f.session, sessionFile: f.file });
   return saved;
 }
-async function queueOwner(inbox: {
-  add: (session: string, message: DiscordInbound) => void;
-  next: (session: string, channel: string) => LaneMessage | null;
-}) {
+async function queueOwner(inbox: ReturnType<typeof openDiscordLaneInbox>) {
   const target = await discordLaneTarget(f.state.dir, owner.channel);
   expect(target).toEqual({ key: lane.key, session: f.session });
   inbox.add(target!.session, owner);
@@ -94,7 +90,10 @@ async function queueOwner(inbox: {
   expect(pending).toEqual({ id: owner.message, text: 'INBOUND discord 123 456 from=owner ref=- "owner follow-up"' });
   return pending;
 }
-test("explicit reopen recovers interrupted park with accepted owner work still queued for the exact session", async () => {
+// The native Discord inbox requires POSIX ownership and permission checks.
+const posix = test.skipIf(process.platform === "win32");
+
+posix("explicit reopen recovers interrupted park without losing queued owner work", async () => {
   const saved = await interruptPark();
   const inbox = openDiscordLaneInbox(f.state.dir);
   try {
@@ -120,7 +119,7 @@ test("explicit reopen recovers interrupted park with accepted owner work still q
     inbox.close();
   }
 });
-test("holds recommends reopen during interrupted park; matching retry after ack preserves the saved intent", async () => {
+posix("holds recommends reopen and preserves the interrupted park intent after ack", async () => {
   const saved = await interruptPark();
   const inbox = openDiscordLaneInbox(f.state.dir);
   try {

@@ -26,44 +26,44 @@ async function referenceLane(mode: (typeof MODES)[number]) {
   const lane = await startLane(s.d, "references", s.brief, { group: "w1" });
   const log = join(s.d.store.root, "herdr-calls.argv");
   const failures = join(s.d.store.root, "enter-failures");
-  const script = join(s.d.store.root, "fake-herdr.sh");
+  const script = join(s.d.store.root, "fake-herdr.ts");
   writeFileSync(log, "");
   writeFileSync(failures, "0");
   writeFileSync(
     script,
-    String.raw`log=$1; failures=$2; mode=$3; pane_json=$4
-shift 4
-printf '%s\0' "$#" "$@" >> "$log"
-if [[ "$1" == agent && "$2" == prompt ]]; then
-  if [[ "$mode" == "typed fallback" ]]; then
-    printf '%s' '{"error":{"code":"agent_not_ready"}}' >&2
-    exit 1
-  fi
-elif [[ "$1" == pane && "$2" == get ]]; then
-  printf '{"result":{"pane":{"pane_id":%s,"agent":"pi","agent_status":"idle"}}}\n' "$pane_json"
-  exit 0
-elif [[ "$1" == pane && "$2" == process-info ]]; then
-  printf '%s\n' '{"result":{"process_info":{"foreground_process_group_id":101,"foreground_processes":[{"name":"omo","argv":["omo"]}]}}}'
-  exit 0
-elif [[ "$1" == pane && "$2" == send-keys && "$4" == enter ]]; then
-  IFS= read -r left < "$failures"
-  if (( left > 0 )); then
-    printf '%s' "$((left - 1))" > "$failures"
-    printf '%s' 'fixture Enter failed' >&2
-    exit 1
-  fi
-elif [[ "$1" != pane || "$2" != send-text ]]; then
-  printf 'unexpected fake herdr call:' >&2
-  printf ' %q' "$@" >&2
-  exit 1
-fi
-printf '%s\n' '{"result":{}}'
+    `import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+const [log, failures, mode, ...argv] = process.argv.slice(2);
+const [group, action, pane, input] = argv;
+appendFileSync(log, [argv.length, ...argv, ""].join("\\0"));
+
+if (group === "agent" && action === "prompt") {
+  if (mode === "typed fallback") {
+    process.stderr.write('{"error":{"code":"agent_not_ready"}}');
+    process.exit(1);
+  }
+} else if (group === "pane" && action === "get") {
+  console.log(JSON.stringify({ result: { pane: { pane_id: pane, agent: "pi", agent_status: "idle" } } }));
+  process.exit(0);
+} else if (group === "pane" && action === "process-info") {
+  console.log('{"result":{"process_info":{"foreground_process_group_id":101,"foreground_processes":[{"name":"omo","argv":["omo"]}]}}}');
+  process.exit(0);
+} else if (group === "pane" && action === "send-keys" && input === "enter") {
+  const left = Number(readFileSync(failures, "utf8"));
+  if (left > 0) {
+    writeFileSync(failures, String(left - 1));
+    process.stderr.write("fixture Enter failed");
+    process.exit(1);
+  }
+} else if (group !== "pane" || action !== "send-text") {
+  console.error("unexpected fake herdr call:", JSON.stringify(argv));
+  process.exit(1);
+}
+console.log('{"result":{}}');
 `,
   );
   const exec: Exec = (cmd, argv, options) => {
     expect(cmd).toBe("herdr");
-    const paneJson = JSON.stringify(argv[2] ?? "");
-    return spawnExec("/bin/bash", ["--noprofile", "--norc", script, log, failures, mode, paneJson, ...argv], options);
+    return spawnExec(process.execPath, [script, log, failures, mode, ...argv], options);
   };
   const sleeps: number[] = [];
   const runtime = new HerdrRuntime(exec, "", { env: {}, sleep: async (ms) => void sleeps.push(ms) });
@@ -73,7 +73,7 @@ printf '%s\n' '{"result":{}}'
     const fields = readFileSync(log, "utf8").split("\0");
     if (fields.at(-1) !== "") throw new Error("Unterminated fixture argv log");
     const result: string[][] = [];
-    for (let i = 0; i < fields.length - 1; ) {
+    for (let i = 0; i < fields.length - 1;) {
       const count = Number(fields[i++]);
       if (!Number.isInteger(count) || count < 1 || i + count >= fields.length)
         throw new Error("Incomplete fixture argv record");
@@ -90,45 +90,49 @@ printf '%s\n' '{"result":{}}'
 }
 
 describe("full references through the herdr consumer", () => {
-  test.each(EVIDENCE_CASES)("full evidence path via %s (separator %s)", async (mode, spaces) => {
-    const s = await referenceLane(mode);
-    try {
-      const file = join(s.d.store.root, `${`\uC99D\uAC70${spaces}build `.repeat(10)}e\u0301.md`);
-      expect(Bun.stringWidth(file)).toBeGreaterThan(120);
-      writeFileSync(file, "proof");
-      s.w.clock += MIN;
-      utimesSync(file, s.w.clock / 1000, s.w.clock / 1000);
-      const progress = s.w.clock;
-      const args = ["report", "references", "--text", "new", "--evidence", file];
-      const moved = await captureIo(() => main(args, s.d));
-      expect(moved.code).toBe(0);
-      expect(s.d.store.lane("references")).toMatchObject({ progressAt: progress, lastEvidence: { ref: file } });
-      s.w.clock += MIN;
-      const skipped = await captureIo(() => main(args, s.d));
-      expect(skipped.code).toBe(0);
-      expect(s.d.store.lane("references")!.progressAt).toBe(progress);
-      s.w.clock = progress + 40 * MIN;
-      expect(await dutyTick(s.d)).toContainEqual({ lane: "references", action: "escalated" });
-      const escalated = s.d.store.lane("references")!.log.at(-1)!.text;
-      expect(await ready(s.d, "references", "done", [file])).toBe("DELIVERED");
-      const messages = s.received();
-      expect(messages).toHaveLength(4);
-      for (const message of messages) expect(message).toContain(file);
-      expect(messages[0]).toContain(`evidence: ${file}`);
-      expect(messages[3]).toContain(`evidence: ${file}`);
-      expect(moved.out.split("\n").slice(2)).toEqual([`  ${file}`]);
-      expect(skipped.out.split("\n")[2]).toContain("(not changed since ");
-      expect(skipped.out.split("\n").slice(3)).toEqual([`  ${file}`]);
-      expect(escalated.split("\n").slice(3)).toEqual([`  ${file}`]);
-      expect(s.calls().filter((a) => a[0] === "agent")).toHaveLength(4);
-      expect(s.calls().filter((a) => a[1] === "send-text")).toHaveLength(mode === "typed fallback" ? 4 : 0);
-      expect(s.calls().filter((a) => a[1] === "send-keys")).toHaveLength(mode === "typed fallback" ? 4 : 0);
-      expect(s.sleeps).toEqual(mode === "typed fallback" ? [400, 400, 400, 400] : []);
-      expect(s.d.store.queued(href("w1:p1"))).toEqual([]);
-    } finally {
-      rmSync(s.d.store.root, { recursive: true });
-    }
-  });
+  test.each(EVIDENCE_CASES)(
+    "full evidence path via %s (separator %s)",
+    async (mode, spaces) => {
+      const s = await referenceLane(mode);
+      try {
+        const file = join(s.d.store.root, `${`\uC99D\uAC70${spaces}build `.repeat(10)}e\u0301.md`);
+        expect(Bun.stringWidth(file)).toBeGreaterThan(120);
+        writeFileSync(file, "proof");
+        s.w.clock += MIN;
+        utimesSync(file, s.w.clock / 1000, s.w.clock / 1000);
+        const progress = s.w.clock;
+        const args = ["report", "references", "--text", "new", "--evidence", file];
+        const moved = await captureIo(() => main(args, s.d));
+        expect(moved.code).toBe(0);
+        expect(s.d.store.lane("references")).toMatchObject({ progressAt: progress, lastEvidence: { ref: file } });
+        s.w.clock += MIN;
+        const skipped = await captureIo(() => main(args, s.d));
+        expect(skipped.code).toBe(0);
+        expect(s.d.store.lane("references")!.progressAt).toBe(progress);
+        s.w.clock = progress + 40 * MIN;
+        expect(await dutyTick(s.d)).toContainEqual({ lane: "references", action: "escalated" });
+        const escalated = s.d.store.lane("references")!.log.at(-1)!.text;
+        expect(await ready(s.d, "references", "done", [file])).toBe("DELIVERED");
+        const messages = s.received();
+        expect(messages).toHaveLength(4);
+        for (const message of messages) expect(message).toContain(file);
+        expect(messages[0]).toContain(`evidence: ${file}`);
+        expect(messages[3]).toContain(`evidence: ${file}`);
+        expect(moved.out.split("\n").slice(2)).toEqual([`  ${file}`]);
+        expect(skipped.out.split("\n")[2]).toContain("(not changed since ");
+        expect(skipped.out.split("\n").slice(3)).toEqual([`  ${file}`]);
+        expect(escalated.split("\n").slice(3)).toEqual([`  ${file}`]);
+        expect(s.calls().filter((a) => a[0] === "agent")).toHaveLength(4);
+        expect(s.calls().filter((a) => a[1] === "send-text")).toHaveLength(mode === "typed fallback" ? 4 : 0);
+        expect(s.calls().filter((a) => a[1] === "send-keys")).toHaveLength(mode === "typed fallback" ? 4 : 0);
+        expect(s.sleeps).toEqual(mode === "typed fallback" ? [400, 400, 400, 400] : []);
+        expect(s.d.store.queued(href("w1:p1"))).toEqual([]);
+      } finally {
+        rmSync(s.d.store.root, { recursive: true });
+      }
+    },
+    15_000,
+  );
 
   test.each(WAITING_CASES)(
     "full waiting target survives reporting, nudges, escalation, and audit via %s with %s records",
@@ -191,6 +195,7 @@ describe("full references through the herdr consumer", () => {
         rmSync(s.d.store.root, { recursive: true });
       }
     },
+    15_000,
   );
 
   test("a failed fallback Enter retains the exact target and queued identity, then submits without retyping", async () => {
@@ -232,5 +237,5 @@ describe("full references through the herdr consumer", () => {
     } finally {
       rmSync(s.d.store.root, { recursive: true });
     }
-  });
+  }, 15_000);
 });

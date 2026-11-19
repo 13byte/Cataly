@@ -3,7 +3,6 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, symlinkSy
 import { join } from "node:path";
 import { BRIEF_START } from "../src/launch-footer.ts";
 import { renderTemplate } from "../src/launch-template.ts";
-import { TemplateError } from "../src/launch-errors.ts";
 import { launchLane, prepareLaunch } from "../src/launch.ts";
 import { LaunchQueue } from "../src/launch-queue-store.ts";
 import { Registry } from "../src/registry.ts";
@@ -21,16 +20,23 @@ beforeEach(async () => {
 });
 afterEach(() => f.state.done());
 const template = (name: string, text: string) => writeFileSync(join(templates, name + ".md"), text);
-const cli = async (...args: string[]) => {
-  const p = Bun.spawn([process.execPath, join(import.meta.dir, "../src/cli.ts"), ...args], {
-    cwd: f.state.dir,
-    env: { HOME: f.state.dir, PATH: join(f.state.dir, "bin"), DORI_CONFIG: config },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
-  return { out, err, code };
-};
+const cliWith =
+  (preload?: string) =>
+  async (...args: string[]) => {
+    const p = Bun.spawn(
+      [process.execPath, ...(preload ? ["--preload", preload] : []), join(import.meta.dir, "../src/cli.ts"), ...args],
+      {
+        cwd: f.state.dir,
+        env: { HOME: f.state.dir, PATH: join(f.state.dir, "bin"), DORI_CONFIG: config },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    const out = new Response(p.stdout).text();
+    const err = new Response(p.stderr).text();
+    return { out: await out, err: await err, code: await p.exited };
+  };
+const cli = cliWith();
 
 test("includes and variables render literally without evaluating shell or replacement syntax", () => {
   template("common", "Check {{target}}.");
@@ -50,15 +56,18 @@ test("missing variables, malformed expressions and unavailable templates are exp
   expect(() => renderTemplate("../escape", {}, config)).toThrow("invalid template name");
 });
 
-test("include cycles and symlink escapes are rejected by physical file identity", () => {
+test("include cycles are rejected by physical file identity", () => {
   template("a", "{{>b}}");
   template("b", "{{>a}}");
   expect(() => renderTemplate("a", {}, config)).toThrow("cycle");
   template("self", "{{>alias}}");
   symlinkSync(join(templates, "self.md"), join(templates, "alias.md"));
   expect(() => renderTemplate("self", {}, config)).toThrow("cycle");
+});
+
+test("a template symlink to an existing file outside the template directory is rejected", () => {
   symlinkSync(f.input.brief, join(templates, "outside.md"));
-  expect(() => renderTemplate("outside", {}, config)).toThrow(TemplateError);
+  expect(() => renderTemplate("outside", {}, config)).toThrow("template escapes its directory: outside");
 });
 
 test("template dry-run preserves literal footer-shaped text without filesystem or runtime side effects", async () => {
@@ -130,18 +139,16 @@ test.each(["file", "symlink"])("template launch leaves an existing generated out
 });
 
 test.each(["direct", "queued"])("a %s CLI lane reads its generated brief from a different cwd", async (kind) => {
-  const bin = join(f.state.dir, "bin");
+  const herdr = join(f.state.dir, "herdr.ts");
+  const preload = join(f.state.dir, "herdr-preload.ts");
   const repo = join(f.state.dir, "agent-cwd");
   const state = join(f.state.dir, "state");
   const recordedCwd = join(f.state.dir, "pane-cwd");
   const observed = join(f.state.dir, "agent-readback");
-  mkdirSync(bin);
   mkdirSync(repo);
   writeFileSync(
-    join(bin, "herdr"),
-    `#!${process.execPath}
-import { readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+    herdr,
+    `import { readFileSync, writeFileSync } from "node:fs";
 const args = process.argv.slice(2);
 if (args[0] === "tab" && args[1] === "create") {
   writeFileSync(${JSON.stringify(recordedCwd)}, args[args.indexOf("--cwd") + 1]);
@@ -150,15 +157,29 @@ if (args[0] === "tab" && args[1] === "create") {
   console.log(JSON.stringify({ result: { panes: [] } }));
 } else if (args[0] === "pane" && args[1] === "run") {
   const brief = /Read and execute the lane brief at (.+?) in full\\./.exec(args[3])?.[1];
-  const cwd = readFileSync(${JSON.stringify(recordedCwd)}, "utf8");
-  writeFileSync(${JSON.stringify(observed)}, readFileSync(resolve(cwd, brief)));
+  if (!brief) throw new Error("missing brief in the agent command");
+  process.chdir(readFileSync(${JSON.stringify(recordedCwd)}, "utf8"));
+  writeFileSync(${JSON.stringify(observed)}, readFileSync(brief));
   // The fixture has read the brief. Stop at the runtime boundary rather than launch a real agent.
   process.exit(23);
 } else {
   process.exit(1);
 }
 `,
-    { mode: 0o700 },
+  );
+  // Use Bun to run the fixture instead of relying on a PATH shebang, which Windows does not execute.
+  writeFileSync(
+    preload,
+    `const spawn = Bun.spawn.bind(Bun);
+Object.defineProperty(Bun, "spawn", {
+  value: (argv, options) => spawn(
+    Array.isArray(argv) && argv[0] === "herdr"
+      ? [process.execPath, ${JSON.stringify(herdr)}, ...argv.slice(1)]
+      : argv,
+    options,
+  ),
+});
+`,
   );
   writeFileSync(
     config,
@@ -174,8 +195,10 @@ if (args[0] === "tab" && args[1] === "create") {
   template("task", "Read this from the agent working directory.");
   const args = ["launch", f.input.key, "--title", "Task", "--template", "task", "--done", f.input.done];
 
-  if (kind === "queued") expect(await cli(...args, "--after", f.prior.key, "--cwd", repo)).toMatchObject({ code: 0 });
-  const result = kind === "queued" ? await cli("queue", "start", f.input.key) : await cli(...args);
+  const invoke = cliWith(preload);
+  if (kind === "queued")
+    expect(await invoke(...args, "--after", f.prior.key, "--cwd", repo)).toMatchObject({ code: 0 });
+  const result = kind === "queued" ? await invoke("queue", "start", f.input.key) : await invoke(...args);
 
   const lane = await registry.read(f.input.key);
   if (!lane) throw new Error(`generated brief did not reach startup: ${result.err || result.out}`);

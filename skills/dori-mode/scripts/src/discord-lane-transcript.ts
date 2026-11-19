@@ -40,7 +40,7 @@ function savedModel(entries: ReadonlyMap<string, BranchEntry>, leaf: string | nu
   let defaultModel: string | undefined;
   let legacyModel: string | undefined;
   const seen = new Set<string>();
-  for (let id = leaf; id !== null; ) {
+  for (let id = leaf; id !== null;) {
     const entry = entries.get(id);
     if (!entry || seen.has(id)) return;
     seen.add(id);
