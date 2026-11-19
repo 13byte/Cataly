@@ -114,7 +114,8 @@ export const discordInboundQueue = (stateDir: string): DiscordInboundQueue =>
       );
       const remove = db.query("DELETE FROM pending WHERE id = ?");
       const acknowledge = db.query(
-        `DELETE FROM pending WHERE kind = 'message' AND ${channelId} = ? AND ${message} = ?`,
+        `DELETE FROM pending WHERE kind = 'message' AND ${channelId} = ? ` +
+          `AND length(${message}) = ? AND ${message} = ?`,
       );
       const channel = db.query<{ message: unknown }, [string]>(
         `SELECT ${message} AS message FROM pending WHERE kind = 'message' AND ${channelId} = ? ORDER BY ${order} LIMIT 1`,
@@ -143,7 +144,7 @@ export const discordInboundQueue = (stateDir: string): DiscordInboundQueue =>
           }),
         acknowledge: (channel, message) =>
           storage(() => {
-            acknowledge.run(channel, message);
+            acknowledge.run(channel, message.length, message);
           }),
         storeFor: (channelId, seed = true) =>
           storage(() => {
