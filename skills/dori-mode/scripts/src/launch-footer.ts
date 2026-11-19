@@ -79,7 +79,7 @@ export const footer = (
     `- After each completed step: ${CLI} checkpoint ${lane.key} --step <unique-step> --result <result> --evidence <path-or-URL> [--remote-effect <completed-push/merge/deploy-receipt>] (one flag per receipt).`,
     `- On resume, run ${CLI} checkpoints ${lane.key} before doing work. Never repeat a recorded remote side effect. If a crash may have happened between the remote action and checkpoint, read the live remote receipt first and use the service's idempotency key; a local journal cannot make that remote action atomic.`,
     `- Supervision ceilings: ${JSON.stringify(lane.budget ?? {})}. A breach marks blocked and alerts; it never kills the agent. Report a blocker and wait for the lead's decision rather than overriding the ceiling.`,
-    `- When done: ${CLI} claim-done ${lane.key} --evidence "<merge SHA, closed issue, version>". See references/done-protocol.md.`,
+    `- When done, claim only if the owner authorized closing the tab and removing the lane's worktrees, the Done signals are live, and no worktree contains uncommitted or unpushed work: ${CLI} claim-done ${lane.key} --evidence "<merge SHA, closed issue, version>". Otherwise report the result without claiming; authorized parking retains worktrees. See references/done-protocol.md.`,
     FOOTER_END,
     "",
   ].join("\n");
