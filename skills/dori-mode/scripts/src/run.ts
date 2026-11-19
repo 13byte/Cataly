@@ -7,7 +7,12 @@ import type { RuntimeKind, SessionRuntime } from "../../../../src/runtime/types.
 import { configPath, type DoriConfig } from "./config.ts";
 
 export type Ran = { readonly code: number; readonly out: string; readonly err: string };
-export type RunOptions = { readonly cwd?: string; readonly timeoutMs?: number; readonly preserveOutput?: boolean };
+export type RunOptions = {
+  readonly cwd?: string;
+  readonly timeoutMs?: number;
+  readonly preserveOutput?: boolean;
+  readonly env?: Readonly<Record<string, string | undefined>>;
+};
 export type Runner = (argv: readonly string[], opts?: RunOptions) => Promise<Ran>;
 
 export const run: Runner = async (argv, opts = {}) => {
@@ -18,6 +23,7 @@ export const run: Runner = async (argv, opts = {}) => {
       stderr: "pipe",
       ...(opts.cwd ? { cwd: opts.cwd } : {}),
       ...(opts.timeoutMs ? { timeout: opts.timeoutMs, killSignal: "SIGKILL" } : {}),
+      ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
     });
   } catch (e) {
     return { code: 127, out: "", err: e instanceof Error ? e.message : String(e) };
