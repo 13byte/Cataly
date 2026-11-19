@@ -213,14 +213,16 @@ test("branch movement replaces a changed specification under the same monitor na
   const dori = await load({ session: { id: "legacy-session", entries: [] }, flags: { "dori-role": "dori" } });
   sessions.push(dori);
   await dori.emit("session_start");
-  await run(dori, { op: "start", name: "inbound", argv: ["sleep", "60"], filter: "." });
+  const sleeping = (milliseconds: number) => [process.execPath, "-e", `await Bun.sleep(${milliseconds})`];
+  const replacement = sleeping(61_000);
+  await run(dori, { op: "start", name: "inbound", argv: sleeping(60_000), filter: "." });
   const before = (await run(dori, { op: "list" })).content[0]?.text ?? "";
   const oldPid = Number(/pid (\d+)/.exec(before)?.[1]);
   expect(alive(oldPid)).toBe(true);
   dori.api.appendEntry("omp-dori:monitor", {
     op: "start",
     name: "inbound",
-    argv: ["sleep", "61"],
+    argv: replacement,
     filter: "^changed",
     cwd: tmpdir(),
   });
@@ -230,12 +232,12 @@ test("branch movement replaces a changed specification under the same monitor na
   const newPid = Number(/pid (\d+)/.exec(after)?.[1]);
   expect(alive(newPid)).toBe(true);
   expect(newPid).not.toBe(oldPid);
-  expect(after).toContain("sleep 61");
+  expect(after).toContain("Bun.sleep(61000)");
   expect(after).toContain("^changed");
   expect(JSON.parse(readFileSync(join(f.stateDir, "monitors", "legacy-session.json"), "utf8"))).toMatchObject({
-    monitors: [{ name: "inbound", argv: ["sleep", "61"], filter: "^changed", cwd: tmpdir() }],
+    monitors: [{ name: "inbound", argv: replacement, filter: "^changed", cwd: tmpdir() }],
   });
-});
+}, 20_000);
 
 test("a managed initial restore reports failure without starting model work, then ordinary restore keeps its repair behavior", async () => {
   const f = fixture();

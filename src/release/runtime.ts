@@ -78,8 +78,9 @@ export function resolveConsumerOmpCommand(
   const paths = consumerPaths(home, doriHome);
   const first = configured[0] ?? "omp";
   const managed =
-    first === join(paths.dori, "bin/omp") ||
-    /^[a-f0-9]{40}-[a-f0-9]{16}\/scripts\/consumer\/omp$/.test(relative(paths.releases, first));
+    isAbsolute(first) &&
+    (first.split("/").join(sep) === join(paths.dori, "bin", "omp") ||
+      /^[a-f0-9]{40}-[a-f0-9]{16}\/scripts\/consumer\/omp$/.test(relative(paths.releases, first).split(sep).join("/")));
   if (first !== "omp" && !managed) return configured;
   const manifest = JSON.parse(readFileSync(join(paths.manifests, `${basename(source)}.json`), "utf8"));
   if (manifest.requirements.omp !== "18.20.0") return configured;

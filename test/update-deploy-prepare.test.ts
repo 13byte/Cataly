@@ -159,7 +159,9 @@ exec ${quote(process.execPath)} "$@"`,
   }
 });
 
-test.each(["tree", "admission"])("pre-stop %s violations remain terminal holds", async (mode) => {
+test.each(["tree", "admission"])("pre-stop %s violations remain terminal holds", assertTerminalHold, 20_000);
+
+async function assertTerminalHold(mode: string) {
   const f = preparationFixture();
   if (mode === "admission") writeFileSync(join(f.candidate, "auth.json"), '{"fixture":"excluded"}\n');
   const input = mode === "tree" ? { ...f.input, tree: "b".repeat(40) } : f.input;
@@ -175,4 +177,4 @@ test.each(["tree", "admission"])("pre-stop %s violations remain terminal holds",
   } finally {
     signals.mockRestore();
   }
-});
+}

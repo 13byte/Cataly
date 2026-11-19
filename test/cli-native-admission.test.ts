@@ -103,12 +103,9 @@ test("an explicitly configured external OMP needs no native receipt, but the man
     err: "",
   });
 
-  const managedExecutables = ["omp", join(home, ".dori/bin/omp")];
-  // The release-local consumer launcher is a POSIX script identified by its slash-separated relative path.
-  if (process.platform !== "win32") managedExecutables.push(join(source, "scripts/consumer/omp"));
-  for (const executable of managedExecutables) {
+  for (const executable of ["omp", join(home, ".dori", "bin", "omp"), join(source, "scripts", "consumer", "omp")]) {
     const managed = invoke(executable);
-    expect(managed.exitCode).not.toBe(0);
+    expect(managed.exitCode === 0 ? { unexpectedlyAccepted: executable } : null).toBeNull();
     expect(managed.stdout.toString()).toBe("");
     expect(managed.stderr.toString()).toContain("consumer-manifests");
   }
