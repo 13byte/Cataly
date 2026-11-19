@@ -32,6 +32,9 @@ export const monitorPresets = [
       "LANE_NOT_DONE",
       "LANE_CLOSED",
       "LANE_HELD",
+      "LANE_QUEUE_READY",
+      "LANE_QUEUE_HELD",
+      "LANE_QUEUE_WARN",
     ],
   },
   {

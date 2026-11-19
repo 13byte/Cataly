@@ -28,6 +28,10 @@ type BoardRecord = {
 };
 
 const isMessageId = (value: unknown): value is string => typeof value === "string" && /^[1-9]\d*$/.test(value);
+const unconfirmedDelivery = (detail: string) =>
+  new BoardError(
+    `board delivery unconfirmed${detail}; the write may have succeeded. Inspect the original destination before attempting recovery; do not resend.`,
+  );
 
 /** An ambiguous send is never replayed, including after a process crash. Recovery requires an explicit message ID. */
 export const updateBoard = async (options: {
@@ -105,23 +109,18 @@ export const updateBoard = async (options: {
     const record = { target, body, updatedAt, ...(id ? { messageId: id } : {}) };
     freshCreate = !previous && !id;
     persist({ ...record, pending: true });
-    // The shared clients retry 5xx; a board cannot replay an ambiguous create. Keep only their safe 429 handling.
-    const http: Http = async (request) => {
-      const response = await (options.http ?? fetchHttp)(request);
-      if (response.status >= 500) throw new BoardError("board delivery unconfirmed (server error)");
-      return response;
-    };
+    const http = options.http ?? fetchHttp;
     const text = `${body}\nUpdated ${updatedAt}`;
     let delivered: unknown;
     if (target.platform === "discord") {
       const discord = new Discord(http, clock, token);
-      if (id) {
-        await discord.call("PATCH", `/channels/${target.to}/messages/${id}`, {
-          content: text,
-          allowed_mentions: { parse: [] },
-        });
-        delivered = id;
-      } else delivered = (await discord.send(target.to, text))[0] ?? "";
+      const messagesPath = `/channels/${target.to}/messages`;
+      const message = await discord.call<{ readonly id?: unknown } | null>(
+        id ? "PATCH" : "POST",
+        id ? `${messagesPath}/${id}` : messagesPath,
+        { content: text, allowed_mentions: { parse: [] } },
+      );
+      delivered = id ?? message?.id;
     } else {
       const telegram = new Telegram(http, clock, token);
       const where = { chatId: target.to, ...(target.thread === undefined ? {} : { threadId: target.thread }) };
@@ -131,13 +130,18 @@ export const updateBoard = async (options: {
         delivered = id;
       } else delivered = String(await telegram.send(where, text));
     }
-    if (!isMessageId(delivered)) throw new BoardError("board delivery unconfirmed (missing message ID)");
+    if (!isMessageId(delivered)) throw unconfirmedDelivery(" (missing message ID)");
     persist({ ...record, messageId: delivered, pending: false });
     return { action: id ? "edited" : "posted", messageId: delivered };
   } catch (error) {
-    // A confirmed 4xx refusal created no message. A later explicit invocation can try with corrected permissions.
-    // Unknown create/edit outcomes still hold; an automatic retry could conceal a changed destination.
-    if (freshCreate && error instanceof MessengerError && error.status >= 400 && error.status < 500) {
+    // Only a confirmed 4xx rejection lets a subsequent invocation attempt a fresh create.
+    if (
+      freshCreate &&
+      error instanceof MessengerError &&
+      error.outcome === "rejected" &&
+      error.status >= 400 &&
+      error.status < 500
+    ) {
       unlinkSync(path);
       const directory = openSync(dir, "r");
       try {
@@ -145,6 +149,9 @@ export const updateBoard = async (options: {
       } finally {
         closeSync(directory);
       }
+    }
+    if (error instanceof MessengerError && error.outcome === "uncertain") {
+      throw unconfirmedDelivery(error.status >= 500 ? " (server error)" : "");
     }
     throw error;
   } finally {

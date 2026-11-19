@@ -170,6 +170,20 @@ test.each(["owner", "report"])("report option values do not hide a messenger pla
   expect(monitorCleanup([lane("discord", "closed")], [manifest(monitors)])).toEqual([]);
 });
 
+test("lanes is a command word, but report can still target a lane named lanes", () => {
+  const result = monitorCleanup(
+    [lane("lanes", "closed")],
+    [
+      manifest([
+        { argv: ["dori", "lanes", "--thread", "discord:123", "--open"], monitorId: "mon_ARGV" },
+        { command: "dori lanes --open", monitorId: "mon_COMMAND" },
+        { argv: ["dori", "report", "lanes", "--kind", "done", "--text", "complete"], monitorId: "mon_TARGET" },
+      ]),
+    ],
+  );
+  expect(result.map((m) => [m.monitorId, m.match])).toEqual([["mon_TARGET", ["lanes:argv:key"]]]);
+});
+
 test("the dori command vocabulary is every command the CLI dispatches", async () => {
   const tables = [
     (await import("../src/cli-journal.ts")).journalCommands,

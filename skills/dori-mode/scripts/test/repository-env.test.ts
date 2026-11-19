@@ -10,7 +10,8 @@ import { withState } from "./fakes.ts";
 const observe = (expression: string, env: Record<string, string | undefined>): unknown => {
   const source = `
     import { existsSync } from "node:fs";
-    import { closeLane, discoverWorktrees, unpushedWork } from ${JSON.stringify(new URL("../src/done-flow.ts", import.meta.url).href)};
+    import { closeLane } from ${JSON.stringify(new URL("../src/done-flow.ts", import.meta.url).href)};
+    import { discoverWorktrees, unpushedWork } from ${JSON.stringify(new URL("../src/close-worktrees.ts", import.meta.url).href)};
     import { run } from ${JSON.stringify(new URL("../src/run.ts", import.meta.url).href)};
     import { depsFor, fakeClock, newWorld } from ${JSON.stringify(new URL("./fakes.ts", import.meta.url).href)};
     console.log(JSON.stringify(${expression}));

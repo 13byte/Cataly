@@ -1,7 +1,7 @@
 /** The Discord Gateway plumbing shared by `dori presence discord` and `dori inbound discord --gateway`. */
 import { join } from "node:path";
 import { takeLock } from "./checkpoint-lock.ts";
-import { die, every } from "./cli-context.ts";
+import { die } from "./cli-context.ts";
 import { withDeliveryLock } from "./delivery-lock.ts";
 import { discordLaneMonitor } from "./discord-lane-monitor.ts";
 import { isDiscordWakePending } from "./discord-lane-wake-pending.ts";
@@ -22,7 +22,7 @@ import { discordInboundLive } from "./messenger/discord-inbound-live.ts";
 import { discordInboundQueue } from "./messenger/discord-inbound-queue.ts";
 import { discordInboundEnv } from "./messenger/discord-inbound-state.ts";
 import { discordLaneRoute, openDiscordLaneInbox } from "./messenger/discord-lane-inbox.ts";
-import { fetchHttp } from "./messenger/http.ts";
+import { DeliveryUncertainError, fetchHttp, RateLimitError } from "./messenger/http.ts";
 import { recordOwes } from "./owes.ts";
 import { realClock } from "./run.ts";
 
@@ -179,17 +179,27 @@ export const discordInboundCommand = async (
     console.log(
       `INBOUND_READY discord owner=${ownerId} channel=${watching} bot=${intake.botId}${gateway ? " mode=gateway" : ""}`,
     );
-    if (!gateway)
-      return await every(pollMinutes, async () => {
+    if (!gateway) {
+      const interval = pollMinutes * 60_000;
+      for (;;) {
+        let wait = interval;
         try {
           await intake.poll(emit);
           receiver?.refresh();
           if (serviceLanes && laneInbox) await serviceLanes(laneInbox, intake.channels());
         } catch (error) {
           receiver?.suspend();
-          throw error;
+          if (error instanceof DeliveryUncertainError) throw error;
+          if (error instanceof RateLimitError) {
+            if (error.retryAfterMs > error.waitLimitMs) throw error;
+            wait = Math.max(interval, error.retryAfterMs);
+          }
+          console.log(`WARN ${error instanceof Error ? error.message : String(error)}`.slice(0, 300));
         }
-      });
+        if (pollMinutes <= 0) return;
+        await realClock.sleep(wait);
+      }
+    }
     // Gateway receipts mean successful backfill on the observed connection, not a separate connectivity probe.
     let connected = false;
     let generation = 0;

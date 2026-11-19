@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import {
   resolveConsumerOmpCommand,
   resolveConsumerOmpUlwPath,
@@ -56,6 +56,7 @@ export type DoriConfig = LaunchConfig & {
   readonly deadPanePatterns: readonly string[];
   readonly guard: GuardThresholds;
   readonly hooks: Hooks;
+  readonly threadDonePolicy?: "every-lane" | "last-lane";
   /** Disabled unless explicitly enabled; models, channels and prices belong to the operator. */
   readonly voice?: Partial<VoiceSettings>;
   /** Expected Git author and committer per lowercase `owner/repo`, for `verify-pr` and the lane footer. */
@@ -100,6 +101,10 @@ export const configPath = (): string => process.env["DORI_CONFIG"] ?? join(homed
 
 export const expandHome = (path: string, home = homedir()): string =>
   path === "~" ? home : path.startsWith("~/") ? join(home, path.slice(2)) : path;
+
+// Enqueue alone needs the spelling before path.join removes `..` after a possible symlink.
+const queueCwds = new WeakMap<DoriConfig, string>();
+export const queueDefaultCwd = (config: DoriConfig): string => queueCwds.get(config) ?? config.defaultCwd;
 
 export class ConfigError extends Error {}
 
@@ -175,6 +180,8 @@ export const loadConfig = async (path = configPath(), home = homedir()): Promise
     throw new ConfigError("invalid doctor: expected an object with an optional ignore array of known check IDs");
   const policyError = freshnessError(raw.freshness);
   if (policyError) throw new ConfigError(policyError);
+  if (raw.threadDonePolicy !== undefined && !["every-lane", "last-lane"].includes(raw.threadDonePolicy))
+    throw new ConfigError("invalid threadDonePolicy: expected every-lane or last-lane");
   if (raw.prAutoTrack !== undefined && typeof raw.prAutoTrack !== "boolean")
     throw new ConfigError("invalid prAutoTrack: expected true or false");
   const merged: DoriConfig = {
@@ -213,7 +220,7 @@ export const loadConfig = async (path = configPath(), home = homedir()): Promise
     }
   }
   const command = resolveProcessOmpCommand(merged.agentCommand, path);
-  return {
+  const config: DoriConfig = {
     ...merged,
     agentCommand:
       command === merged.agentCommand || process.env["DORI_AGENT_ARGV"] === undefined
@@ -228,6 +235,8 @@ export const loadConfig = async (path = configPath(), home = homedir()): Promise
     }),
     leadPane: process.env["DORI_LEAD_PANE"] ?? merged.leadPane,
   };
+  if (merged.defaultCwd.startsWith("~/")) queueCwds.set(config, `${home}${sep}${merged.defaultCwd.slice(2)}`);
+  return config;
 };
 
 export const fill = (template: ArgvTemplate, values: Readonly<Record<string, string>>): string[] =>
