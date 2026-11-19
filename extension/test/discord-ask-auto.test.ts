@@ -28,7 +28,11 @@ test("only the launched lane's exact native session can reuse its recorded bindi
   expect(bindAskLane(entries, "session-b", undefined, record)).toBeUndefined();
 });
 
-test("a live Discord connection accepts the owner reply without an ASK settings file", async () => {
+// The live receiver writes a POSIX-private cursor and receiver lease.
+const posix = test.skipIf(process.platform === "win32");
+posix("live Discord accepts an owner ASK reply without settings", verifyAutomaticAsk, 12_000);
+
+async function verifyAutomaticAsk() {
   const home = mkdtempSync(join(tmpdir(), "cataly-ask-auto-"));
   const state = join(home, "state");
   const config = join(home, "config.json");
@@ -217,4 +221,4 @@ test("a live Discord connection accepts the owner reply without an ASK settings 
     server.stop(true);
     rmSync(home, { recursive: true, force: true });
   }
-}, 12000);
+}

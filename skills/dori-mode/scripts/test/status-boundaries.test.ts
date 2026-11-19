@@ -10,6 +10,8 @@ import { agentIn, depsFor, fakeClock, laneState, newWorld, withState } from "./f
 
 let state: { dir: string; done: () => void };
 const now = Date.parse("2026-01-01T13:00:00.000Z");
+// Board writes fsync their directory, which Bun on Windows rejects.
+const posix = test.skipIf(process.platform === "win32");
 const lane: Lane = {
   key: "status-demo",
   title: "demo",
@@ -62,8 +64,7 @@ test("board removes all local path forms but keeps web evidence links", async ()
   expect(body).toContain("https://example.test/report");
 });
 
-test.each(["discord", "telegram"] as const)("board removes private URL data for %s", async (platform) => {
-  const clock = fakeClock(now);
+const renderLinkBoard = async (platform: "discord" | "telegram", clock = fakeClock(now)): Promise<string> => {
   const deps = depsFor(newWorld(), clock, state.dir);
   await deps.registry.write(lane);
   new Reports(state.dir).report(
@@ -72,13 +73,33 @@ test.each(["discord", "telegram"] as const)("board removes private URL data for 
     "https://bad%host/INVALID_PRIVATE 'https://O'MALLEY_USER:PRIVATE_PASS@example.test:8443/build/42?X-Amz-Signature=PRIVATE'SIGNATURE#PRIVATE_FRAGMENT' /srv/LOCAL_PRIVATE proof 'https://example.test/public'. ['https://example.test/bracketed'] {'https://example.test/braced'} https://example.test/team's-report",
     now,
   );
+  return renderBoard(await laneStatus(deps), "/home/test", platform === "discord" ? 1960 : 4056);
+};
+
+const expectPublicLinks = (text: string): void => {
+  expect(text).toContain("https://example.test:8443/build/42 ");
+  expect(text).toContain("https://example.test/public ");
+  expect(text).toContain("https://example.test/bracketed ");
+  expect(text).toContain("https://example.test/braced ");
+  expect(text).toContain("https://example.test/team's-report");
+  expect(text).not.toContain("MALLEY_USER");
+  expect(text).not.toContain("PRIVATE");
+  expect(text).not.toContain("X-Amz-Signature");
+};
+
+test.each(["discord", "telegram"] as const)("board rendering removes private URL data for %s", async (platform) => {
+  expectPublicLinks(await renderLinkBoard(platform));
+});
+
+posix.each(["discord", "telegram"] as const)("board delivery removes private URL data for %s", async (platform) => {
+  const clock = fakeClock(now);
   const requests: unknown[] = [];
   const result = await updateBoard({
     stateDir: state.dir,
     target: { platform, to: "40" },
     clock,
     token: "synthetic",
-    body: renderBoard(await laneStatus(deps), "/home/test", platform === "discord" ? 1960 : 4056),
+    body: await renderLinkBoard(platform, clock),
     http: async (request) => {
       requests.push(JSON.parse(typeof request.body === "string" ? request.body : ""));
       return {
@@ -90,15 +111,7 @@ test.each(["discord", "telegram"] as const)("board removes private URL data for 
   });
   expect(result).toEqual({ action: "posted", messageId: "50" });
   expect(requests).toHaveLength(1);
-  const request = JSON.stringify(requests[0]);
-  expect(request).toContain("https://example.test:8443/build/42 ");
-  expect(request).toContain("https://example.test/public ");
-  expect(request).toContain("https://example.test/bracketed ");
-  expect(request).toContain("https://example.test/braced ");
-  expect(request).toContain("https://example.test/team's-report");
-  expect(request).not.toContain("MALLEY_USER");
-  expect(request).not.toContain("PRIVATE");
-  expect(request).not.toContain("X-Amz-Signature");
+  expectPublicLinks(JSON.stringify(requests[0]));
 });
 
 test("explicit out-of-tree session monitor metadata is included like boot", async () => {
@@ -123,7 +136,7 @@ test("invalid elapsed timestamps are explicit unknown rather than NaN", async ()
   expect(renderStatus(await laneStatus(deps))).not.toContain("NaN");
 });
 
-test("a definite rejected create can be invoked again after permissions are corrected", async () => {
+posix("a definite rejected create can be invoked again after permissions are corrected", async () => {
   for (const platform of ["discord", "telegram"] as const) {
     let calls = 0;
     const options = {
@@ -147,7 +160,7 @@ test("a definite rejected create can be invoked again after permissions are corr
         };
       },
     };
-    await expect(updateBoard(options)).rejects.toThrow();
+    await expect(updateBoard(options)).rejects.toThrow("Forbidden");
     expect(await updateBoard(options)).toEqual({ action: "posted", messageId: "50" });
     expect(calls).toBe(2);
   }

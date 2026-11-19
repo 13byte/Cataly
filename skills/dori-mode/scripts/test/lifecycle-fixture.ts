@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { FlowDeps } from "../src/done-flow.ts";
 import { readPaneState } from "../src/lane-state.ts";
@@ -28,7 +28,8 @@ export const lifecycleFixture = async (): Promise<LifecycleFixture> => {
   const session = "01a11440-ee81-7f90-b2ed-dcc7d51a0adf";
   const dir = sessionDirFor(sessionsDir, cwd);
   mkdirSync(dir, { recursive: true });
-  const file = join(dir, `2026-01-01T12-00-00-000Z_${session}.jsonl`);
+  // Lifecycle receipts and resume commands use canonical transcript paths, even under a symlinked TMPDIR.
+  const file = join(realpathSync(dir), `2026-01-01T12-00-00-000Z_${session}.jsonl`);
   writeFileSync(file, `${JSON.stringify({ type: "session", id: session, cwd })}\n`);
   const lane: Lane = {
     key: "lifecycle-lane",
