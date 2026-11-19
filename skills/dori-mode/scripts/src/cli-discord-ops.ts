@@ -5,7 +5,7 @@ import { basename, join } from "node:path";
 import { type Command, die, messageText } from "./cli-context.ts";
 import { type DcChannel, Discord, isForumType } from "./messenger/discord.ts";
 import { DiscordChannels, purposeText } from "./messenger/discord-channels.ts";
-import { discordInboundEnv } from "./messenger/discord-inbound-state.ts";
+import { discordInboundEnv, isDiscordSnowflake } from "./messenger/discord-inbound-state.ts";
 import { fetchHttp } from "./messenger/http.ts";
 import { DISCORD_LIMIT } from "./messenger/split.ts";
 import { TranscriptionError } from "./messenger/voice.ts";
@@ -86,9 +86,16 @@ export const sendDiscord: Command = async (cli) => {
   }
   if (edit !== undefined) await dc.edit(target, edit, text);
   else {
-    const ids = await dc.send(target, text, reply === undefined ? {} : { replyTo: reply });
-    // A partially posted split send is not a complete answer.
-    await recordSent(config.stateDir, target, Date.now());
+    const { ids, replyConfirmed } = await dc.sendDelivery(target, text, reply === undefined ? {} : { replyTo: reply });
+    if (reply !== undefined) {
+      const known = ids.filter(isDiscordSnowflake);
+      if (known.length !== ids.length) {
+        const posted = known.length ? ` (already posted: ${known.join(" ")})` : "";
+        die(`discord send: incomplete delivery receipt; outcome uncertain${posted}`);
+      }
+      // An accepted plain fallback sends the answer, but it does not settle the exact owner request.
+      if (replyConfirmed) await recordSent(config.stateDir, target, reply, ids, Date.now());
+    }
     console.log(`SENT ${ids.join(" ")}`);
   }
 };
