@@ -14,11 +14,11 @@ const key = "freshness-git-timeout";
 const probes = ["rev-parse", "status"] as const;
 type Probe = (typeof probes)[number];
 
-const setup = async (home: string, budget: boolean) => {
+const setup = async (home: string, budget: boolean, watch = false) => {
   const repo = join(home, "repo");
   const cwd = join(repo, "app");
-  // The writer directory is inside the worktree but outside cwd, requiring the Git root probe.
-  const stateDir = join(repo, "dori-state");
+  // Error fixtures require a writer exclusion. The nested watch must also work with state outside the repository.
+  const stateDir = join(watch ? home : repo, "dori-state");
   mkdirSync(cwd, { recursive: true });
   const git = async (...args: string[]) => {
     const result = await run(["git", "-C", repo, ...args]);
@@ -51,6 +51,7 @@ const setup = async (home: string, budget: boolean) => {
     supervision: {
       hungAfterMinutes: 20,
       staleAfterMinutes: 20,
+      ...(watch ? { activityPaths: ["work.txt"], usageArgv: ["fixture-usage"] } : {}),
       ...(budget ? { defaults: { wallMinutes: 5, tokens: 10 }, usageArgv: ["fixture-usage"] } : {}),
     },
   });
@@ -60,28 +61,37 @@ const setup = async (home: string, budget: boolean) => {
   reports.report(key, "milestone", "staged the initial change", T0);
   const posted: string[][] = [];
   let usageReads = 0;
+  let usageHold: (() => Promise<void>) | undefined;
   return {
     reports,
     posted,
     edit: () => writeFileSync(join(cwd, "work.txt"), "unstaged work after the verified sample\n"),
+    stage: () => git("add", "--", "app/work.txt"),
+    holdUsage: (hold: () => Promise<void>) => {
+      usageHold = hold;
+    },
     usageReads: () => usageReads,
     stored: () => deps.registry.read(key),
     journal: () => readFileSync(journalPath, "utf8"),
     observation: (): Observation => JSON.parse(readFileSync(join(dirname(journalPath), "supervision.json"), "utf8")),
-    tick: async (minutes: number, failure?: Probe) => {
+    tick: async (minutes: number, failure?: Probe, code = 124) => {
       let injected = false;
       const runner: Runner = (argv, opts) => {
         if (argv[0] === "git") {
           if (!injected && failure !== undefined && argv[3] === failure) {
             injected = true;
-            return Promise.resolve({ code: 124, out: "", err: "timeout" });
+            return Promise.resolve({ code, out: "", err: code === 124 ? "timeout" : "fatal: index file corrupt" });
           }
           return run(argv, opts);
         }
         if (argv[0] === "notify") posted.push([...argv.slice(1)]);
         if (argv[0] === "fixture-usage") {
           usageReads++;
-          return Promise.resolve({ code: 0, out: JSON.stringify({ tokens: minutes < 5 ? 1 : 10 }), err: "" });
+          return Promise.resolve(usageHold?.()).then(() => ({
+            code: 0,
+            out: JSON.stringify({ tokens: minutes < 5 ? 1 : 10 }),
+            err: "",
+          }));
         }
         return deps.run(argv, opts);
       };
@@ -93,6 +103,59 @@ const setup = async (home: string, budget: boolean) => {
     },
   };
 };
+
+test("an unreadable Git index cannot revive a stalled lane or replace its verified dirty baseline", async () => {
+  const fixture = withState();
+  try {
+    const f = await setup(fixture.dir, false);
+    await f.tick(0);
+    expect((await f.tick(20)).map((act) => act.kind)).toEqual(["stalled"]);
+    const journal = f.journal();
+    const verified = f.observation();
+    const actions = await f.tick(21, "status", 128);
+    expect(f.reports.read(key)?.state).toBe("stalled");
+    expect(actions.map((act) => act.kind)).toEqual(["supervision-error"]);
+    expect(f.journal()).toBe(journal);
+    expect(f.observation()).toEqual(verified);
+    await f.tick(22);
+    expect(f.journal()).toBe(journal);
+    expect(f.observation().activeAt).toBe(verified.activeAt);
+  } finally {
+    fixture.done();
+  }
+});
+
+test("staging a watched file below the Git root during a read-only usage hook is lane progress", async () => {
+  const fixture = withState();
+  try {
+    const f = await setup(fixture.dir, false, true);
+    f.edit();
+    await f.tick(0);
+    const before = f.observation();
+    expect(JSON.parse(before.activity ?? "{}").changes).toEqual(["AM app/work.txt"]);
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    f.holdUsage(() => {
+      entered.resolve();
+      return release.promise;
+    });
+    const sweep = f.tick(10);
+    try {
+      expect(await Promise.race([entered.promise.then(() => true), sweep.then(() => false)])).toBe(true);
+      await f.stage();
+    } finally {
+      release.resolve();
+      await sweep;
+    }
+    expect(f.observation().activity).toBe(before.activity);
+    expect(await f.tick(20)).toEqual([]);
+    expect(f.observation().activeAt).toBe(T0 + 20 * MIN);
+    expect(JSON.parse(f.observation().activity ?? "{}").changes).toEqual(["A  app/work.txt"]);
+    expect((await f.tick(40)).map((act) => act.kind)).toEqual(["stalled"]);
+  } finally {
+    fixture.done();
+  }
+});
 
 test("a required Git root timeout suppresses a current stalled milestone but still posts a new question", async () => {
   const fixture = withState();

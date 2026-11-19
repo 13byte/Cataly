@@ -9,7 +9,7 @@ const pathspecEnv = {
   GIT_NOGLOB_PATHSPECS: "0",
 };
 const probeOptions = { timeoutMs: 10_000, preserveOutput: true } as const;
-const noWorktree = ({ code, out, err }: Ran): boolean =>
+export const noWorktree = ({ code, out, err }: Ran): boolean =>
   code === 128 &&
   !out &&
   (err === "fatal: not a git repository (or any of the parent directories): .git" ||
@@ -52,8 +52,11 @@ const childGitEnv = (env: RunOptions["env"]): GitEnv => ({
   GIT_GRAFT_FILE: undefined,
 });
 
-export const gitStatus = (run: Runner, rawCwd: string, cwd: string, writers: string): Promise<Ran> =>
-  status(run, rawCwd, cwd, writers, undefined, Boolean(process.env["GIT_DIR"] || process.env["GIT_WORK_TREE"]));
+type Status = Ran & { readonly root?: string };
+export const gitStatus = (run: Runner, rawCwd: string, cwd: string, writers: string, hasWatches: boolean) => {
+  const explicitWorktree = Boolean(process.env["GIT_DIR"] || process.env["GIT_WORK_TREE"]);
+  return status(run, rawCwd, cwd, writers, undefined, explicitWorktree, hasWatches);
+};
 
 async function status(
   run: Runner,
@@ -62,13 +65,15 @@ async function status(
   writers: string,
   env: RunOptions["env"],
   explicitWorktree: boolean,
-): Promise<Ran> {
+  hasWatches = false,
+): Promise<Status> {
   const argv = ["git", "-C", rawCwd, "status", "--porcelain=v1", "-z", "--untracked-files=normal"];
   const fromCwd = relative(cwd, writers);
   let exclude = !explicitWorktree && fromCwd && inDirectory(fromCwd) ? `:(exclude,literal)${fromCwd}` : undefined;
   let actualRoot: string | undefined;
-  // Ask Git only if its root could contain a writer outside cwd, or a nested worktree could aggregate its dirtiness.
-  if (exclude ? nestedWorktree(cwd, writers) : explicitWorktree || rootMayContain(cwd, writers)) {
+  // Ask Git for its root only to locate the writer or match a root-relative row against a nested lane's watches.
+  const nestedWatch = hasWatches && !existsSync(join(cwd, ".git")) && rootMayContain(cwd, cwd);
+  if (nestedWatch || (exclude ? nestedWorktree(cwd, writers) : explicitWorktree || rootMayContain(cwd, writers))) {
     const root = await run(["git", "-C", rawCwd, "rev-parse", "--show-toplevel"], {
       ...probeOptions,
       env: { ...env, LC_ALL: "C" },
@@ -84,8 +89,9 @@ async function status(
     if (!exclude && fromRoot && inDirectory(fromRoot)) exclude = `:(top,exclude,literal)${fromRoot}`;
   }
   if (exclude) argv.push("--", exclude);
-  const statusEnv = exclude ? { ...env, ...pathspecEnv } : env;
-  const result = await run(argv, statusEnv ? { ...probeOptions, env: statusEnv } : probeOptions);
+  const statusEnv = { ...env, ...(exclude ? pathspecEnv : {}), LC_ALL: "C" };
+  const raw = await run(argv, { ...probeOptions, env: statusEnv });
+  const result = actualRoot ? { ...raw, root: actualRoot } : raw;
   if (result.code !== 0 || !result.out || !actualRoot || !nestedWorktree(actualRoot, writers)) return result;
 
   // Porcelain reports a dirty submodule as one path, so a pathspec cannot remove its descendant writer lock.

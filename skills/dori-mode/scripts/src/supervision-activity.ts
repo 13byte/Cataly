@@ -2,7 +2,7 @@ import { lstatSync, realpathSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import type { Checkpoint } from "./checkpoints.ts";
 import type { Progress } from "./reports.ts";
-import { gitStatus, IncompleteGitObservation, inDirectory } from "./supervision-git.ts";
+import { gitStatus, IncompleteGitObservation, inDirectory, noWorktree } from "./supervision-git.ts";
 import type { SupervisedLane, SupervisionOptions } from "./supervision-observe.ts";
 import type { SupervisionDeps } from "./supervision.ts";
 
@@ -49,14 +49,16 @@ export const laneActivity = async (
       .map((path) => resolve(cwd, path))
       .filter((path) => !inDirectory(relative(locks, canonicalIfPresent(path)))),
   );
-  const watching = !retained && paths.size > 0 ? new Set(paths) : undefined;
+  const watched = new Set(paths);
+  const watching = !retained && watched.size > 0 ? new Set(watched) : undefined;
   const declared = watching ? { files: new Map<string, FileSample>(), changes: [] as string[] } : undefined;
   const changes: string[] = [];
   let gitObserved = false;
   // Don't absorb the first successful Git result into an effect baseline; the next sweep must see it as progress.
   if (options.gitActivity !== false && lane.cwd && (!before || before.gitObserved)) {
-    const result = await gitStatus(run, lane.cwd, canonicalIfPresent(lane.cwd), locks);
-    if (result.code === 124 || (before?.gitObserved && result.code !== 0)) {
+    const physicalCwd = canonicalIfPresent(lane.cwd);
+    const result = await gitStatus(run, lane.cwd, physicalCwd, locks, watched.size > 0);
+    if (result.code !== 0 && (before?.gitObserved || !noWorktree(result))) {
       throw new IncompleteGitObservation(`git status exited ${result.code}`);
     }
     if (result.code === 0) {
@@ -65,13 +67,20 @@ export const laneActivity = async (
       for (let index = 0; index < entries.length; index++) {
         const entry = entries[index];
         if (!entry) continue;
-        const path = resolve(cwd, entry.slice(3));
+        const name = entry.slice(3);
+        const path = resolve(cwd, name);
+        // Porcelain uses root-relative names. Match watches in lane coordinates without changing saved file keys.
+        const watchPath = result.root ? resolve(cwd, relative(physicalCwd, resolve(result.root, name))) : path;
+        const isWatched = watched.has(watchPath);
         const rel = relative(cwd, path);
         // Dependency churn and paths outside the lane's cwd are not lane progress.
-        if (inDirectory(rel) && !rel.split("/").includes("node_modules") && !retained?.files.has(path)) {
+        if (inDirectory(rel) && !rel.split("/").includes("node_modules") && !(retained && isWatched)) {
           paths.add(path);
           changes.push(entry);
-          if (watching?.has(path)) declared?.changes.push(entry);
+          if (isWatched) {
+            watching?.add(path);
+            declared?.changes.push(entry);
+          }
         }
         if (entry[0] === "R" || entry[0] === "C" || entry[1] === "R" || entry[1] === "C") index++;
       }
