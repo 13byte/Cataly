@@ -96,6 +96,7 @@ switch (command) {
   case "checkpoints":
     commands = (await import("./cli-journal.ts")).journalCommands;
     break;
+  case "lanes":
   case "launch":
   case "adopt":
   case "claim-done":

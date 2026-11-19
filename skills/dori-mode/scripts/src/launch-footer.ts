@@ -51,6 +51,7 @@ export const footer = (
           `- Launch selection request (metadata only): ${JSON.stringify(lane.launchSelection)}. This is not proof of native activation, delivery or goal creation.`,
         ]
       : []),
+    "- The lead owns the shared work thread title and completion status. A lane must not rename or archive it when its own work finishes.",
     `- Done = ${lane.done}. The lane closes only when every signal reads back live.`,
     `- Task brief: ${JSON.stringify(lane.brief)}.`,
     ...(lane.cwd === undefined ? [] : [`- Recorded working directory: ${JSON.stringify(lane.cwd)}.`]),

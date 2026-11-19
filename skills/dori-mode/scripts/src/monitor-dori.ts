@@ -23,6 +23,7 @@ export const DORI_COMMANDS: Record<string, true> = {
   holds: true,
   inbound: true,
   "inbound-lag": true,
+  lanes: true,
   launch: true,
   lesson: true,
   "object-done": true,
