@@ -7,7 +7,12 @@ import type { RuntimeKind, SessionRuntime } from "../../../../src/runtime/types.
 import { configPath, type DoriConfig } from "./config.ts";
 
 export type Ran = { readonly code: number; readonly out: string; readonly err: string; readonly spawnFailed?: true };
-export type RunOptions = { readonly cwd?: string; readonly timeoutMs?: number; readonly preserveOutput?: boolean };
+export type RunOptions = {
+  readonly cwd?: string;
+  readonly timeoutMs?: number;
+  readonly preserveOutput?: boolean;
+  readonly env?: Env;
+};
 export type Runner = (argv: readonly string[], opts?: RunOptions) => Promise<Ran>;
 
 export const run: Runner = async (argv, opts = {}) => {
@@ -16,6 +21,7 @@ export const run: Runner = async (argv, opts = {}) => {
     p = Bun.spawn([...argv], {
       stdout: "pipe",
       stderr: "pipe",
+      ...(opts.env ? { env: opts.env } : {}),
       ...(opts.cwd ? { cwd: opts.cwd } : {}),
       ...(opts.timeoutMs ? { timeout: opts.timeoutMs, killSignal: "SIGKILL" } : {}),
     });
@@ -33,6 +39,15 @@ export const run: Runner = async (argv, opts = {}) => {
     err: (p.signalCode ? `killed by ${p.signalCode} (timeout)` : err).trim(),
   };
 };
+
+/** Repository housekeeping must not inherit another Git invocation's repository or index. */
+export const repoGit = (runner: Runner, root: string, argv: readonly string[]): Promise<Ran> =>
+  runner(["git", "-C", root, ...argv], {
+    env: {
+      ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_"))),
+      LC_ALL: "C",
+    },
+  });
 
 export type Clock = { readonly now: () => number; readonly sleep: (ms: number) => Promise<void> };
 export const realClock: Clock = { now: () => Date.now(), sleep: (ms) => Bun.sleep(ms) };
