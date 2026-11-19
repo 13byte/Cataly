@@ -11,7 +11,8 @@ export type Message = {
   content?: string;
   flags?: number;
   attachments?: unknown;
-  message_reference?: { message_id?: string };
+  /** `type` 0 (or absent) is a reply; 1 is a forward, which names a message but answers nothing. */
+  message_reference?: { message_id?: string; type?: number };
   /** Present on replies, or null when Discord could not load the target (for example, after deletion). */
   referenced_message?: { id?: string; author?: { id?: string }; content?: string } | null;
 };
@@ -35,7 +36,12 @@ export type DiscordInbound = {
   replyTo: InboundReply | null;
   attachments: InboundAttachment[];
 };
-export type Request = <T>(path: string, body?: Record<string, unknown>) => Promise<T>;
+/**
+ * Delivers one owner message; the cursor moves past it only after this returns or, when it returns a promise, after
+ * that resolves. Live intake supplies its lifecycle signal; callbacks that ignore it retain in-flight completion.
+ */
+export type Emit = (message: DiscordInbound, signal?: AbortSignal) => unknown;
+export type Request = <T>(path: string, body?: Record<string, unknown>, signal?: AbortSignal) => Promise<T>;
 
 const REQUEST_FAILED = "Discord inbound request failed; check the connection and Discord API availability";
 
@@ -61,10 +67,12 @@ export const isTransient = (error: unknown): boolean =>
 /** Maps Discord failures to actionable errors that never echo a response body. */
 export const inboundRequest =
   (discord: Discord): Request =>
-  async <T>(path: string, body?: Record<string, unknown>): Promise<T> => {
+  async <T>(path: string, body?: Record<string, unknown>, signal?: AbortSignal): Promise<T> => {
     try {
-      return await discord.call<T>(body ? "POST" : "GET", path, body);
+      return await discord.call<T>(body ? "POST" : "GET", path, body, signal);
     } catch (error) {
+      if (signal?.aborted && error === signal.reason) throw error;
+      if (error instanceof Error && error.name === "AbortError") throw error;
       if (error instanceof SyntaxError) throw inboundProtocolError("Discord inbound response is invalid");
       const status = error instanceof MessengerError ? error.status : 0;
       let message = REQUEST_FAILED;
@@ -119,8 +127,9 @@ export const toInbound = (message: Message): DiscordInbound => {
       403,
     );
   }
-  const reference = message.message_reference?.message_id;
-  const replied = message.referenced_message;
+  const isReply = (message.message_reference?.type ?? 0) === 0;
+  const reference = isReply ? message.message_reference?.message_id : undefined;
+  const replied = isReply ? message.referenced_message : undefined;
   return {
     channel: message.channel_id,
     message: message.id,
@@ -164,62 +173,6 @@ const toAttachments = (message: Message): InboundAttachment[] => {
 };
 
 const TEXT_CHANNELS = new Set([0, 5]); // text and announcement
-
-/** A channel's guild, type and thread parent; `undefined` only when an optional lookup finds it inaccessible. */
-export type ChannelInfo = { guild?: string; type?: number; parent?: string };
-
-/** Discord's thread channel types; a category's `parent_id` names its parent category, not a thread parent. */
-const THREAD_CHANNELS = new Set([10, 11, 12]); // announcement, public and private thread
-
-/** Identifies one channel: its guild, and its thread parent when the channel is itself a thread. */
-export const channelInfo = async (
-  request: Request,
-  channelId: string,
-  optional: boolean,
-): Promise<ChannelInfo | undefined> => {
-  let value: unknown;
-  try {
-    value = await request<unknown>(`/channels/${channelId}`);
-  } catch (error) {
-    if (optional && error instanceof MessengerError && (error.status === 403 || error.status === 404)) return undefined;
-    throw error;
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw inboundProtocolError("Discord inbound channel response is invalid");
-  }
-  const { guild_id, parent_id, type } = value as Record<string, unknown>;
-  const thread = typeof type === "number" && THREAD_CHANNELS.has(type);
-  return {
-    ...(isDiscordSnowflake(guild_id) ? { guild: guild_id } : {}),
-    ...(typeof type === "number" ? { type } : {}),
-    ...(thread && isDiscordSnowflake(parent_id) ? { parent: parent_id } : {}),
-  };
-};
-
-/** Every active thread in one guild with its parent channel; `undefined` when that guild is inaccessible. */
-export const activeThreads = async (
-  request: Request,
-  guildId: string,
-): Promise<{ id: string; parent: string }[] | undefined> => {
-  let value: unknown;
-  try {
-    value = await request<unknown>(`/guilds/${guildId}/threads/active`);
-  } catch (error) {
-    if (error instanceof MessengerError && (error.status === 403 || error.status === 404)) return undefined;
-    throw error;
-  }
-  const threads: unknown = (value as { threads?: unknown } | null)?.threads;
-  if (!Array.isArray(threads)) throw inboundProtocolError("Discord inbound thread response is invalid");
-  const found: { id: string; parent: string }[] = [];
-  for (const thread of threads) {
-    if (!thread || typeof thread !== "object" || Array.isArray(thread)) {
-      throw inboundProtocolError("Discord inbound thread response is invalid");
-    }
-    const { id, parent_id } = thread as Record<string, unknown>;
-    if (isDiscordSnowflake(id) && isDiscordSnowflake(parent_id)) found.push({ id, parent: parent_id });
-  }
-  return found;
-};
 
 /** Every text channel and active thread in the bot's guilds, plus the owner's DM with the bot. */
 export const discoverChannels = async (request: Request, ownerId: string): Promise<string[]> => {

@@ -10,7 +10,7 @@ export type TestDiscordMessage = {
   author: { id: string; bot?: boolean; system?: boolean };
   content?: string;
   webhook_id?: string;
-  message_reference?: { message_id?: string };
+  message_reference?: { message_id?: string; type?: number };
   referenced_message?: { id: string; author: { id: string }; content: string } | null;
   flags?: number;
   attachments?: unknown;
@@ -63,6 +63,7 @@ export const discordRestWorld = (messages: TestDiscordMessage[] = []) => {
     dm: undefined as string | undefined,
     denied: new Set<string>(),
     mixChannels: false,
+    aborted: [] as string[],
   };
   const requests: HttpRequest[] = [];
   const http: Http = async (request) => {
@@ -74,9 +75,25 @@ export const discordRestWorld = (messages: TestDiscordMessage[] = []) => {
     if (request.headers?.["Authorization"] !== "Bot unit-private-token") {
       return { status: 401, headers: {}, body: '{"diagnostic":"private authentication body"}' };
     }
-    await state.blocked.get(path);
+    const blocked = state.blocked.get(path);
+    if (blocked && request.signal) {
+      const signal = request.signal;
+      signal.throwIfAborted();
+      const gate = Promise.withResolvers<void>();
+      const abort = () => {
+        state.aborted.push(path);
+        gate.reject(signal.reason);
+      };
+      signal.addEventListener("abort", abort, { once: true });
+      void blocked.then(gate.resolve, gate.reject);
+      try {
+        await gate.promise;
+      } finally {
+        signal.removeEventListener("abort", abort);
+      }
+    } else await blocked;
     if (state.unreachable.has(path)) throw new TypeError("private transport diagnostic");
-    const response = state.responses.get(path);
+    const response = state.responses.get(path + url.search) ?? state.responses.get(path);
     if (response !== undefined) return { status: 200, headers: {}, body: response };
     let body: unknown;
     if (path === "/users/@me") body = { id: state.botId, bot: state.bot };

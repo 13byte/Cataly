@@ -1,42 +1,46 @@
-import { activeThreads, channelInfo, newer, type Request, unavailable } from "./discord-inbound-api.ts";
+import { newer, type Request, unavailable } from "./discord-inbound-api.ts";
 import type { DiscordInboundStore } from "./discord-inbound-state.ts";
+import { activeThreads, channelInfo } from "./discord-inbound-thread-api.ts";
 
-/** Everything thread following shares with the channel intake that owns it. */
 export type ThreadWatch = {
   request: Request;
-  /** Configured channel and thread IDs: never dropped, and their failures stay fatal. */
   explicit: readonly string[];
   watched: Map<string, DiscordInboundStore>;
-  /** Watched plain channels with the position captured when each was first attached. */
+  /** Configured plain channels and their original start positions, never their category parents. */
   parents: Map<string, string>;
-  /** Watches one channel; `seed` sets a cold-start cursor instead of the channel's latest message. */
   attach: (channelId: string, seed?: string) => Promise<string | undefined>;
 };
 
-/**
- * Follows active threads whose parent is a watched channel: lists them per guild, keeps one cursor per thread
- * through the intake's stores, and drops archived threads while keeping their cursors for a later reactivation.
- */
-export const discordThreads = (watch: ThreadWatch) => {
-  const { request, explicit, watched, parents, attach } = watch;
-  /** Cached thread parent per channel id; `null` means the channel is not a thread or is inaccessible. */
-  const threadParent = new Map<string, string | null>();
-  /** Threads watched only because a listing or a live dispatch named them. */
+/** Active polling membership is separate from the bounded cache of historical lookup results. */
+export const discordThreads = ({ request, explicit, watched, parents, attach }: ThreadWatch) => {
+  const members = new Map<string, string>();
+  const history = new Map<string, string | null>();
   const discovered = new Set<string>();
-  /** Active threads whose history read was denied; retried only after the listing drops them. */
   const skipped = new Set<string>();
   const guildOf = new Map<string, string | null>();
-  const guildFor = async (channelId: string): Promise<string | undefined> => {
-    const cached = guildOf.get(channelId);
+  let previousActive = new Set<string>();
+  const remember = (id: string, parent: string | null) => {
+    history.delete(id);
+    history.set(id, parent);
+    if (history.size > 256) history.delete(history.keys().next().value!);
+  };
+  const cached = (id: string): string | null | undefined => {
+    const member = members.get(id);
+    if (member !== undefined) return parents.has(member) ? member : null;
+    const parent = history.get(id);
+    if (parent !== undefined) remember(id, parent); // LRU: reads refresh retention.
+    return parent;
+  };
+  const guildFor = async (id: string): Promise<string | undefined> => {
+    const cached = guildOf.get(id);
     if (cached !== undefined) return cached ?? undefined;
-    const guild = (await channelInfo(request, channelId, false))?.guild ?? null;
-    guildOf.set(channelId, guild);
+    const guild = (await channelInfo(request, id, false))?.guild ?? null;
+    guildOf.set(id, guild);
     return guild ?? undefined;
   };
-  /** A thread first seen after startup starts at its own creation, never before the parent's start position. */
-  const seedFor = (threadId: string, parent: string): string => {
+  const seedFor = (thread: string, parent: string): string => {
     const floor = parents.get(parent);
-    return floor === undefined || newer(threadId, floor) ? threadId : floor;
+    return floor === undefined || newer(thread, floor) ? thread : floor;
   };
   const follow = async (initial: boolean): Promise<void> => {
     if (parents.size === 0) return;
@@ -52,22 +56,33 @@ export const discordThreads = (watch: ThreadWatch) => {
         if (parents.has(thread.parent)) active.set(thread.id, thread.parent);
       }
     }
-    for (const id of [...discovered]) {
+    // Denied IDs never entered discovered: the previous listing, not successful attachment, owns their reset.
+    for (const id of previousActive) {
+      if (!active.has(id)) {
+        skipped.delete(id);
+        history.delete(id);
+        if (!explicit.includes(id)) members.delete(id);
+      }
+    }
+    previousActive = new Set(active.keys());
+    for (const id of discovered) {
       if (active.has(id)) continue;
       discovered.delete(id);
-      skipped.delete(id);
-      threadParent.delete(id);
-      if (!explicit.includes(id)) watched.delete(id); // Archived thread: keep its cursor, stop polling it.
+      history.delete(id);
+      if (!explicit.includes(id)) {
+        members.delete(id);
+        watched.delete(id); // Stop polling archived threads without deleting their cursor or admitted rows.
+      }
     }
     for (const [id, parent] of active) {
       if (skipped.has(id)) continue;
-      threadParent.set(id, parent);
+      members.set(id, parent);
+      history.delete(id);
       if (watched.has(id)) {
         discovered.add(id);
         continue;
       }
       try {
-        // The startup listing baselines like any cold start; a thread found later starts at its first message.
         if ((await attach(id, initial ? undefined : seedFor(id, parent))) === undefined) {
           skipped.add(id);
           continue;
@@ -75,32 +90,32 @@ export const discordThreads = (watch: ThreadWatch) => {
         discovered.add(id);
       } catch (error) {
         if (explicit.includes(id) || !unavailable(error)) throw error;
-        skipped.add(id); // Denied history: an operator must grant access; do not retry every refresh.
+        skipped.add(id);
       }
     }
   };
-  /** Records an attached configured channel: a plain parent, or a thread that already watches itself. */
-  const register = async (channelId: string, latest: string): Promise<void> => {
-    const info = await channelInfo(request, channelId, false);
-    guildOf.set(channelId, info?.guild ?? null); // Cached: the listing and live lookups reuse it.
-    if (info?.parent !== undefined) threadParent.set(channelId, info.parent);
-    else parents.set(channelId, latest);
+  const register = async (id: string, latest: string): Promise<void> => {
+    const info = await channelInfo(request, id, false);
+    guildOf.set(id, info?.guild ?? null);
+    if (info?.parent !== undefined) members.set(id, info.parent);
+    else parents.set(id, latest);
   };
-  /** The watched parent of a live channel; `undefined` when it is not a thread under a watched channel. */
-  const parentOf = async (channelId: string): Promise<string | undefined> => {
-    const cached = threadParent.get(channelId);
-    if (cached !== undefined) return cached ?? undefined;
-    if (parents.size === 0) return undefined; // No watched plain channel can own a thread: skip the lookup.
-    const info = await channelInfo(request, channelId, true);
+  const parentOf = async (id: string, signal?: AbortSignal): Promise<string | undefined> => {
+    signal?.throwIfAborted();
+    const known = cached(id);
+    if (known !== undefined) return known ?? undefined;
+    if (parents.size === 0) return undefined;
+    const info = await channelInfo(request, id, true, signal);
+    signal?.throwIfAborted(); // A closed generation must not populate even the metadata cache.
     const parent = info?.parent !== undefined && parents.has(info.parent) ? info.parent : null;
-    threadParent.set(channelId, parent);
+    remember(id, parent);
     return parent ?? undefined;
   };
-  /** Adopts a thread first seen through a live dispatch, so it is polled and never dropped as unlisted. */
-  const adopt = (threadId: string, parent: string): string => {
-    discovered.add(threadId);
-    threadParent.set(threadId, parent);
-    return seedFor(threadId, parent);
+  const adopt = (id: string, parent: string): string => {
+    discovered.add(id);
+    members.set(id, parent);
+    history.delete(id);
+    return seedFor(id, parent);
   };
-  return { follow, register, parentOf, adopt };
+  return { follow, register, parentOf, adopt, cached, seedFor };
 };
