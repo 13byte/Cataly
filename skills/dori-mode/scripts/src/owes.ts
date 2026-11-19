@@ -195,19 +195,18 @@ export const bumpAttempts = (stateDir: string, ids: readonly string[]): Record<s
   return next;
 };
 
-/** The text the session is continued with: the exact command, never a paraphrase of the rule. */
+/** Supported CLI guidance with exact per-message mark commands, not an unavailable helper alias. */
 export const reminder = (owes: readonly InboundOwe[]): string => {
-  // A burst must not become a wall of text: one command settles the channel, so five lines is already generous.
+  // A send covers its channel, but each obligation needs its own mark; bound previews and commands to five.
   const shown = owes.slice(0, 5);
-  const lines = shown.map(
-    (owe) =>
-      `- channel ${owe.channel}, owner message ${owe.message} (${new Date(owe.at).toISOString()}): ${JSON.stringify(owe.text)}`,
-  );
+  const lines = shown.flatMap((owe) => [
+    `- channel ${owe.channel}, owner message ${owe.message} (${new Date(owe.at).toISOString()}): ${JSON.stringify(owe.text)}`,
+    `  dori react discord --to ${owe.channel} --message ${owe.message}`,
+  ]);
   if (owes.length > shown.length) lines.push(`- and ${owes.length - shown.length} more`);
   return [
-    "BLOCKED: the owner wrote to you and this settle is missing one or both halves of the answer.",
-    "A terminal-only reply is silence to the owner. Do both now, for every message listed:",
-    "  dori-signal check <owner message id>",
+    "BLOCKED: a recent owner message is missing one or both local Discord receipts.",
+    "Check what remains before acting: do not duplicate an accepted answer or reaction. Use each mark command only if missing.",
     '  dori send discord --to <channel> --text "<the answer you just gave>"',
     ...lines,
   ].join("\n");

@@ -58,7 +58,7 @@ describe("session_stop owes gate", () => {
     await recordSent(stateDir, CHANNEL, at + 1);
     const stillBlocked = await stop(pi);
     expect(stillBlocked?.continue).toBe(true);
-    expect(stillBlocked?.additionalContext).toContain("dori-signal check <owner message id>");
+    expect(stillBlocked?.additionalContext).toContain(`dori react discord --to ${CHANNEL} --message 100`);
 
     await recordMark(stateDir, CHANNEL, "100", at + 2);
     expect(await stop(pi)).toBeUndefined();
@@ -92,23 +92,27 @@ describe("session_stop owes gate", () => {
   test("a monitor line is recorded as an owe through the real delivery path, not only the CLI writer", async () => {
     const pi = await doriSession();
     const tool = pi.tools.get("monitor")!;
-    await tool.execute(
-      "call",
-      {
-        op: "start",
-        name: "inbound",
-        argv: ["sh", "-c", `echo '${inbound("200")}'; exec sleep 30`],
-        filter: "^INBOUND",
-      },
-      undefined,
-      undefined,
-      pi.ctx(),
-    );
-    await until(() => openOwes(stateDir, Date.now()).length > 0);
-    expect(pi.messages[0]?.content).toContain(`INBOUND discord ${CHANNEL} 200 from=owner`);
-    expect(openOwes(stateDir, Date.now()).map((owe) => owe.message)).toEqual(["200"]);
-    const blocked = await stop(pi);
-    expect(blocked?.additionalContext).toContain("owner message 200");
+    try {
+      await tool.execute(
+        "call",
+        {
+          op: "start",
+          name: "inbound",
+          argv: ["sh", "-c", `echo '${inbound("200")}'; exec sleep 30`],
+          filter: "^INBOUND",
+        },
+        undefined,
+        undefined,
+        pi.ctx(),
+      );
+      await until(() => openOwes(stateDir, Date.now()).length > 0);
+      expect(pi.messages[0]?.content).toContain(`INBOUND discord ${CHANNEL} 200 from=owner`);
+      expect(openOwes(stateDir, Date.now()).map((owe) => owe.message)).toEqual(["200"]);
+      const blocked = await stop(pi);
+      expect(blocked?.additionalContext).toContain("owner message 200");
+    } finally {
+      await pi.emit("session_shutdown");
+    }
   });
 
   test("a torn ledger cannot stop the session from settling", async () => {

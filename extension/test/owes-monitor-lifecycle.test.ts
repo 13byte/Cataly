@@ -76,10 +76,8 @@ for (const ending of ["session_switch", "session_shutdown"] as const) {
       await pi.emit(ending);
       release();
       held = false;
-      // Allow the cancelled retry and the real child pipe teardown to settle, without advancing fake timers.
-      const turn = Promise.withResolvers<void>();
-      setImmediate(turn.resolve);
-      await turn.promise;
+      // Outlast the real 50ms lock retry: without the delivery signal, an owe would be published after release.
+      await Bun.sleep(BATCH_MS);
       expect(pi.messages).toEqual([]);
       expect(openOwes(root, Date.now())).toEqual([]);
     } finally {
