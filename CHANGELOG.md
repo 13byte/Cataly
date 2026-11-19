@@ -2,8 +2,6 @@
 
 ## Unreleased
 
-- Lane briefs and generated footers retain task sources, recorded locations, scoped acceptance, preserved resources and resume context without copying the lead transcript or inventing missing authority.
-
 - Add opt-in `dori inbound discord --wake-lanes` for cleanly retired herdr tabs: queue owner messages for the exact registered OMP session and post lane replies back to the original Discord thread. Existing settings and monitor defaults are unchanged.
 
 - New lane registry records and brief footers retain requested launch text and its configuration origin without changing default ULW, raw message delivery or startup goal checks. Launch-selection provenance describes matching text rather than programmatic assignment history. Same-value reassignment retains the matching default or loaded-file origin, with regression coverage for both cases.
@@ -17,6 +15,8 @@
 - Read-only `dori sync` shares one successful process-table snapshot and one herdr pane list within a pass. Later passes, failed reads, hc group queries and all `--write` observations stay fresh.
 
 - Restore the Discord 👀 read receipt after accepting lane chat or an exact ASK reply. A failed reaction does not block message delivery.
+
+- Lane briefs and generated footers retain task sources, recorded locations, scoped acceptance, preserved resources and resume context without copying the lead transcript or inventing missing authority.
 
 - Route ordinary Discord messages for an unambiguously connected lane to its own OMP session. Existing connections need no new setting; exact ASK replies still resolve the open form instead of starting a turn.
 
