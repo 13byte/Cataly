@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, join, parse, resolve } from "node:path";
 import { nativeCacheFixture, overlayFixture } from "./source-bundle-setup.ts";
 
 // POSIX-only: native admission fixtures build private directories that POSIX mode bits mark.
@@ -79,11 +79,12 @@ test("an explicitly configured external OMP needs no native receipt, but the man
   mkdirSync(join(stateDir, "lanes"), { recursive: true });
   writeFileSync(join(stateDir, "lanes/fixture.json"), JSON.stringify({ key: "fixture", status: "working" }));
   const config = join(home, "config.json");
-  const invoke = (executable: string) => {
+  const invoke = (executable: string, cwd?: string) => {
     writeFileSync(config, JSON.stringify({ stateDir, agentCommand: [executable], ompUlwPath: "/explicit-ulw" }));
     return Bun.spawnSync(
       [process.execPath, join(source, "skills/dori-mode/scripts/src/cli.ts"), "checkpoints", "fixture"],
       {
+        cwd,
         env: {
           HOME: home,
           USERPROFILE: home,
@@ -96,17 +97,24 @@ test("an explicitly configured external OMP needs no native receipt, but the man
       },
     );
   };
+  const assertExternal = (executable: string, cwd?: string) => {
+    const run = invoke(executable, cwd);
+    expect({ executable, code: run.exitCode, out: run.stdout.toString(), err: run.stderr.toString() }).toEqual({
+      executable,
+      code: 0,
+      out: "[]\n",
+      err: "",
+    });
+  };
   const externalBin = join(home, "external", "bin");
   mkdirSync(externalBin, { recursive: true });
-  const external = invoke(join(externalBin, "omp"));
-  expect({ code: external.exitCode, out: external.stdout.toString(), err: external.stderr.toString() }).toEqual({
-    code: 0,
-    out: "[]\n",
-    err: "",
-  });
+  assertExternal(join(externalBin, "omp"));
 
   const managedPaths = ["omp", join(home, ".dori", "bin", "omp"), join(source, "scripts", "consumer", "omp")];
   if (process.platform === "win32") {
+    const drive = parse(home).root;
+    assertExternal(join(drive, "bin", "omp"), join(home, ".dori"));
+    assertExternal(join(drive, basename(source), "scripts", "consumer", "omp"), join(source, ".."));
     const alias = join(home, "dori-junction");
     symlinkSync(join(home, ".dori"), alias, "junction");
     managedPaths.push(
@@ -120,4 +128,4 @@ test("an explicitly configured external OMP needs no native receipt, but the man
     expect(managed.stdout.toString()).toBe("");
     expect(managed.stderr.toString()).toContain("consumer-manifests");
   }
-});
+}, 20_000);

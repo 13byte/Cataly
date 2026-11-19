@@ -69,8 +69,8 @@ function managedWindowsAlias(command: string, dori: string, releases: string): b
   // Identify only the fixed launcher layout; the executable may not exist yet.
   if (process.platform !== "win32") return false;
   const path = command.replaceAll("\\", "/");
-  const shim = /^(.+)\/bin\/omp$/.exec(path);
-  const launcher = /^(.+)\/[a-f0-9]{40}-[a-f0-9]{16}\/scripts\/consumer\/omp$/.exec(path);
+  const shim = /^(.+\/)bin\/omp$/.exec(path);
+  const launcher = /^(.+\/)[a-f0-9]{40}-[a-f0-9]{16}\/scripts\/consumer\/omp$/.exec(path);
   const alias = shim?.[1] ?? launcher?.[1];
   if (!alias) return false;
   const root = shim ? dori : releases;
