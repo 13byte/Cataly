@@ -56,6 +56,7 @@ export type DoriConfig = LaunchConfig & {
   readonly deadPanePatterns: readonly string[];
   readonly guard: GuardThresholds;
   readonly hooks: Hooks;
+  readonly threadDonePolicy?: "every-lane" | "last-lane";
   /** Disabled unless explicitly enabled; models, channels and prices belong to the operator. */
   readonly voice?: Partial<VoiceSettings>;
   /** Expected Git author and committer per lowercase `owner/repo`, for `verify-pr` and the lane footer. */
@@ -175,6 +176,8 @@ export const loadConfig = async (path = configPath(), home = homedir()): Promise
     throw new ConfigError("invalid doctor: expected an object with an optional ignore array of known check IDs");
   const policyError = freshnessError(raw.freshness);
   if (policyError) throw new ConfigError(policyError);
+  if (raw.threadDonePolicy !== undefined && !["every-lane", "last-lane"].includes(raw.threadDonePolicy))
+    throw new ConfigError("invalid threadDonePolicy: expected every-lane or last-lane");
   if (raw.prAutoTrack !== undefined && typeof raw.prAutoTrack !== "boolean")
     throw new ConfigError("invalid prAutoTrack: expected true or false");
   const merged: DoriConfig = {

@@ -8,6 +8,7 @@ import { parkLane } from "./park.ts";
 import { reopenLane } from "./reopen.ts";
 import { holdLines } from "./holds.ts";
 import { tellLane } from "./tell.ts";
+import { statusOf } from "./registry.ts";
 
 const launch: Command = async ({ key, opt, need, ceiling, strings, values, deps }) => {
   const wallMinutes = ceiling("wall-minutes"),
@@ -108,6 +109,26 @@ const tell: Command = async ({ key, need, lane, deps }) => {
 export const laneCommands: Readonly<Record<string, Command>> = {
   launch,
   adopt,
+  lanes: async ({ values, need, deps }) => {
+    const thread = values["thread"] === undefined ? undefined : need("thread");
+    const lanes = (await deps.registry.list()).filter(
+      (lane) => (thread === undefined || lane.thread === thread) && (!values["open"] || statusOf(lane) !== "closed"),
+    );
+    console.log(
+      JSON.stringify(
+        lanes.map((lane) => ({
+          key: lane.key,
+          title: lane.title,
+          thread: lane.thread,
+          status: statusOf(lane),
+          openedAt: lane.openedAt,
+          closedAt: lane.closedAt,
+        })),
+        null,
+        2,
+      ),
+    );
+  },
   "claim-done": async (cli) => {
     const target = await cli.lane(cli.key);
     const evidence = cli.need("evidence");

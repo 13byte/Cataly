@@ -62,7 +62,7 @@ export const adoptLane = async (deps: FlowDeps, input: LaunchInput & { readonly 
   const base: Lane = {
     key: input.key,
     title: input.title,
-    thread: input.thread ?? "none",
+    thread: input.thread?.trim() ? input.thread : "none",
     brief: input.brief,
     done: input.done,
     cwd: input.cwd ?? deps.config.defaultCwd,
@@ -86,7 +86,7 @@ export const prepareLaunch = async (
   const draft: Lane = {
     key: input.key,
     title: input.title,
-    thread: input.thread ?? "none",
+    thread: input.thread?.trim() ? input.thread : "none",
     brief: input.brief,
     done: input.done,
     cwd,

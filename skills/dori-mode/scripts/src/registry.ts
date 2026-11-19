@@ -46,6 +46,7 @@ export type Lane = {
   readonly openedAt: string;
   readonly lifecycleEpoch?: string;
   readonly nativeCloseIntent?: NativeCloseIntent;
+  readonly threadClosePending?: true;
   readonly closedAt?: string;
   readonly lastReplyAt?: number;
   readonly lastNudgeAt?: number;
@@ -79,7 +80,6 @@ export const upgradeLane = (lane: Lane): Lane =>
   lane.sessionRef || !lane.pane
     ? lane
     : { ...lane, sessionRef: { runtime: LEGACY_RUNTIME, id: lane.pane, ...(lane.tab ? { container: lane.tab } : {}) } };
-
 /** The lane's session, whichever way the record was written (or built in memory). */
 export const sessionOf = (lane: Lane): SessionRef | undefined => upgradeLane(lane).sessionRef;
 
@@ -220,15 +220,15 @@ export class Registry {
       .filter((lane) => lane !== null);
   }
 
-  /** Like list(), but unreadable records and keys not matching their filename are isolated in `unreadable`. */
-  async scan(): Promise<{ lanes: Lane[]; unreadable: string[] }> {
+  /** Isolate unreadable and miskeyed rows; strict scans also flag a row that vanishes during the read. */
+  async scan(strict = false): Promise<{ lanes: Lane[]; unreadable: string[] }> {
     const lanes: Lane[] = [];
     const unreadable: string[] = [];
     for (const f of this.files()) {
       try {
         const lane: unknown = this.readNow(basename(f, ".json"));
-        if (lane === null) continue;
-        if (typeof lane !== "object" || !("key" in lane) || lane.key !== basename(f, ".json"))
+        if (lane === null && !strict) continue;
+        if (lane === null || typeof lane !== "object" || !("key" in lane) || lane.key !== basename(f, ".json"))
           throw new Error("not a lane record");
         lanes.push(lane as Lane);
       } catch {
