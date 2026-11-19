@@ -10,6 +10,8 @@
 
 - The scripts reference documents what Discord, Slack and Telegram inbound intake can recover on first install, for threads created while offline, after edits behind the saved position, and when platform retention or rate limits interrupt intake. Runtime behavior is unchanged.
 
+- Unreleased (source only): Telegram inbound now verifies bot identity and an empty webhook before readiness or polling; startup rejection and interruption leave the cursor and existing webhook untouched.
+
 - Exercise native prompt rendering across role, ULW, workflow, profile, child-tool, and compaction boundaries in an isolated offline composition matrix.
 
 - Lane final reports separate the outcome, changes or findings, verified evidence, unrun checks and handoff. Done claims cite the saved report and live Done receipts without treating partial or blocked work as done.
