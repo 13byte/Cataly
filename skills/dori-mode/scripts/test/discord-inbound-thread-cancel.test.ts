@@ -116,6 +116,41 @@ test("close cancels a thread retry timer and never adopts, persists or wakes aft
   expect(world.pending.size).toBe(0);
 });
 
+test.each([8, 3_600])(
+  "live metadata keeps the server's %is rate-limit floor or stops at the budget",
+  async (seconds) => {
+    const world = await liveWorld([ownerMessage("100")], { ownerId: "10", channelIds: ["20"] });
+    const [socket] = world.sockets;
+    if (!socket) throw new Error("gateway did not open");
+    await world.connect(socket);
+    const path = "/channels/50";
+    world.rest.state.threadParents.set("50", "20");
+    world.rest.state.failure.set(path, 429);
+    world.rest.state.retryAfter.set(path, String(seconds));
+    await world.dispatch(socket, ownerMessage("201", { channel_id: "50" }));
+    const requests = world.rest.requests.length;
+    world.rest.state.failure.delete(path);
+
+    if (seconds === 3_600) {
+      expect(socket.closed).toBe(true);
+      await expect(world.live.done).rejects.toMatchObject({ status: 429, code: "RATE_LIMIT_WAIT_EXCEEDED" });
+      world.advance(60_000);
+      await settle();
+      expect(world.rest.requests).toHaveLength(requests);
+      expect(world.received).toEqual([]);
+    } else {
+      world.advance(2_000);
+      await settle();
+      expect(world.rest.requests).toHaveLength(requests);
+      expect(world.received).toEqual([]);
+      world.advance(6_000);
+      await settle();
+      expect(world.received).toEqual(["50:201"]);
+      expect(world.cursor("50")).toBe("201");
+    }
+  },
+);
+
 for (const fault of [new Error("real resolver fault"), new DOMException("unrelated abort", "AbortError")]) {
   test(`close preserves a non-owned resolver failure: ${fault.message}`, async () => {
     const entered = Promise.withResolvers<void>();

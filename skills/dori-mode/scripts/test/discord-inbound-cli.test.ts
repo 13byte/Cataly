@@ -75,6 +75,13 @@ test("public Discord intake defaults to three seconds and honors --loop in minut
   }
 });
 
+test("a REST poll exits nonzero on a Retry-After above the automatic wait budget", async () => {
+  const { out, err, code, cursor } = await inboundCli([], { DORI_TEST_DISCORD_CASE: "long-rate-limit" });
+  expect({ code, cursor }).toEqual({ code: 1, cursor: "100" });
+  expect(err).toContain("HTTP 429; Retry-After exceeds the 60s automatic retry limit");
+  expect(out.trim()).toBe("INBOUND_READY discord owner=10 channel=20 bot=99");
+});
+
 test("an extra channel list naming the same channel is read once and announced once", async () => {
   const { out, err, code } = await inboundCli(["--loop", "0"], { DORI_DISCORD_CHANNEL_IDS: " 20 ,20" });
   expect({ code, err }).toEqual({ code: 0, err: "" });
