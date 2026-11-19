@@ -67,6 +67,7 @@ const USAGE = `dori <command> [options]
                                        open a forum post or text-channel thread; rename, replace tags, archive or reopen
   react discord --to CHANNEL [--thread ID] --message ID [--emoji E] [--remove]
                                        add or remove the bot's own reaction (eyes by default); --thread needs no --to
+  voice discord                       opt-in owner-only voice assistant (voice.enabled in config; paid provider usage)
   channel discord set <channel> --purpose T | clear <channel> | list
                                        the operator's purpose note per channel or thread, shown by inbound --context
   presence <slack|discord>             keep the account shown as online until stopped
@@ -203,6 +204,10 @@ switch (command) {
     break;
   case "pr":
     commands = (await import("./cli-pr.ts")).prCommands;
+    break;
+  case "voice":
+    // Keep the opt-in voice graph out of unrelated command startup paths.
+    commands = { voice: (await import("./cli-voice.ts")).voiceCommand };
     break;
 }
 const handler = Object.hasOwn(commands, command) ? commands[command] : undefined;
