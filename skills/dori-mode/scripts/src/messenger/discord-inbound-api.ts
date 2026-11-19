@@ -1,6 +1,6 @@
 import type { Discord } from "./discord.ts";
 import { isDiscordSnowflake } from "./discord-inbound-state.ts";
-import { MessengerError } from "./http.ts";
+import { DeliveryUncertainError, MessengerError, RateLimitError } from "./http.ts";
 
 export type Message = {
   id: string;
@@ -56,13 +56,21 @@ export const unavailable = (error: unknown): boolean =>
 export const inboundProtocolError = (message: string): MessengerError =>
   new MessengerError(message, 502, "DISCORD_INBOUND_PROTOCOL_ERROR");
 
-/** A rate limit, a server error or an unreachable API: worth retrying; anything else needs the operator. */
-export const isTransient = (error: unknown): boolean =>
-  error instanceof MessengerError &&
-  error.code !== "DISCORD_INBOUND_PROTOCOL_ERROR" &&
-  (error.status === 429 ||
-    error.status >= 500 ||
-    (error.status === 0 && error.code === "DISCORD_INBOUND_REQUEST_FAILED"));
+/** Only retry a known rejection or a read failure; keep any server rate-limit floor. */
+export const transientRetryDelay = (error: unknown, delay: number): number | undefined => {
+  if (!(error instanceof MessengerError) || error.outcome === "uncertain") return undefined;
+  if (error instanceof RateLimitError) {
+    return error.retryAfterMs <= error.waitLimitMs ? Math.max(delay, error.retryAfterMs) : undefined;
+  }
+  if (
+    error.code !== "DISCORD_INBOUND_PROTOCOL_ERROR" &&
+    (error.status === 429 ||
+      error.status >= 500 ||
+      (error.status === 0 && error.code === "DISCORD_INBOUND_REQUEST_FAILED"))
+  )
+    return delay;
+  return undefined;
+};
 
 /** Maps Discord failures to actionable errors that never echo a response body. */
 export const inboundRequest =
@@ -73,6 +81,7 @@ export const inboundRequest =
     } catch (error) {
       if (signal?.aborted && error === signal.reason) throw error;
       if (error instanceof Error && error.name === "AbortError") throw error;
+      if (error instanceof DeliveryUncertainError || error instanceof RateLimitError) throw error;
       if (error instanceof SyntaxError) throw inboundProtocolError("Discord inbound response is invalid");
       const status = error instanceof MessengerError ? error.status : 0;
       let message = REQUEST_FAILED;

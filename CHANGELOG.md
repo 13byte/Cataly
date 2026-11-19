@@ -12,6 +12,8 @@
 
 - Bind Discord owed-answer receipts to the exact owner request and every accepted reply part; unrelated posts, legacy receipts and partial sends do not settle another request (omp-superagent comparison F22).
 
+- Messenger mutations stop on ambiguous transport/server failures with an actionable uncertain-delivery outcome and confirmed partial-send IDs, while reads and rejected rate-limited requests retain bounded retry behavior.
+
 - New lane registry records and brief footers retain requested launch text and its configuration origin without changing default ULW, raw message delivery or startup goal checks. Launch-selection provenance describes matching text rather than programmatic assignment history. Same-value reassignment retains the matching default or loaded-file origin, with regression coverage for both cases.
 
 - Add explicit lane parking, exact-session reopening, abandonment receipts and a read-only hold ledger. Keep worktrees, accepted pending Discord messages and ordinary Done verification.
