@@ -79,7 +79,7 @@ test("an explicitly configured external OMP needs no native receipt, but the man
   mkdirSync(join(stateDir, "lanes"), { recursive: true });
   writeFileSync(join(stateDir, "lanes/fixture.json"), JSON.stringify({ key: "fixture", status: "working" }));
   const config = join(home, "config.json");
-  const invoke = (executable: string, cwd?: string) => {
+  const invoke = (executable: string, cwd = home) => {
     writeFileSync(config, JSON.stringify({ stateDir, agentCommand: [executable], ompUlwPath: "/explicit-ulw" }));
     return Bun.spawnSync(
       [process.execPath, join(source, "skills/dori-mode/scripts/src/cli.ts"), "checkpoints", "fixture"],
