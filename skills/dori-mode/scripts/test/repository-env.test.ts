@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { Lane } from "../src/registry.ts";
@@ -9,7 +9,7 @@ import { withState } from "./fakes.ts";
 // Supply ambient variables at process startup, not only in Bun test's process.env view.
 const observe = (expression: string, env: Record<string, string | undefined>): unknown => {
   const source = `
-    import { existsSync, realpathSync } from "node:fs";
+    import { existsSync } from "node:fs";
     import { closeLane, watchTick } from ${JSON.stringify(new URL("../src/done-flow.ts", import.meta.url).href)};
     import { discoverWorktrees, unpushedWork } from ${JSON.stringify(new URL("../src/close-worktrees.ts", import.meta.url).href)};
     import { run, type Runner } from ${JSON.stringify(new URL("../src/run.ts", import.meta.url).href)};
@@ -95,7 +95,7 @@ describe("Dori-owned repository operations", () => {
       return {
         discovered,
         gitDir: process.env.GIT_DIR,
-        ordinary: { ...ordinary, out: ordinary.code === 0 ? realpathSync(ordinary.out) : ordinary.out },
+        ordinary,
       };
     })()`,
         poisoned(),
@@ -103,7 +103,7 @@ describe("Dori-owned repository operations", () => {
     ).toEqual({
       discovered: [],
       gitDir: join(foreign, ".git"),
-      ordinary: { code: 0, out: realpathSync(foreign), err: "" },
+      ordinary: { code: 0, out: git("-C", foreign, "rev-parse", "--show-toplevel").trim(), err: "" },
     });
   });
 
