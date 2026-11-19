@@ -1,25 +1,25 @@
 /**
- * Owes: one owner message on Discord creates an obligation to answer on Discord, and a turn may not settle while
- * an obligation is open.
+ * Owes: owner messages on Discord create tracked obligations. The Dori MAIN settle hook requests bounded
+ * continuations for recent obligations missing their channel-send or exact-message mark receipt.
  *
  * The failure this exists for (2026-11-17): an owner message woke the lead, the lead answered in its terminal only,
  * and the owner saw silence. A rule in memory did not prevent it, so the obligation is data with a gate on it:
  *
  * - The Dori extension appends an owe for every `INBOUND discord <ch> <msg> from=owner` line it is handed.
  * - `dori send discord` appends a receipt after the API accepts the message.
- * - The extension's `session_stop` handler refuses to settle while an owe has no receipt after it.
+ * - The extension's synchronous `session_stop` hook requests at most MAX_CONTINUATIONS for each recent open owe.
  *
- * Two files, two writers, no locking: `inbound.jsonl` is written only by the session process and `sent.jsonl` only
- * by the CLI. Both are append-only, and a torn final line is dropped on read rather than repaired.
+ * Inbound deliveries and CLI receipts share capped JSONL snapshots. Each file's writer lock covers deduplication
+ * and atomic publication; corrupt old lines are skipped without swallowing the next admitted record.
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { readLines, updateLines } from "./owes-file.ts";
 
 /** An obligation older than this is stale: a crash must not resurrect yesterday's unanswered message. */
 export const OWE_TTL_MS = 30 * 60_000;
 /** Continuations per owe before the gate gives up loudly rather than looping the session forever. */
 export const MAX_CONTINUATIONS = 3;
-const KEEP_LINES = 200;
 export type InboundOwe = {
   /** `<channel>:<message>` — the Discord ids already identify the message uniquely. */
   readonly id: string;
@@ -40,13 +40,6 @@ const attemptsPath = (stateDir: string): string => join(dir(stateDir), "attempts
 
 const ensureDir = (stateDir: string): void => {
   mkdirSync(dir(stateDir), { recursive: true, mode: 0o700 });
-};
-
-const readLines = (path: string): string[] => {
-  if (!existsSync(path)) return [];
-  return readFileSync(path, "utf8")
-    .split("\n")
-    .filter((line) => line.trim() !== "");
 };
 
 /** A torn or foreign line is skipped, never fatal: a broken ledger must not stop the session from settling. */
@@ -111,34 +104,34 @@ export const owesInText = (text: string, at: number): InboundOwe[] => {
   return out;
 };
 
-/** Appends the obligations found in a monitor delivery; returns how many were new. */
-export const recordOwes = (stateDir: string, text: string, at: number): number => {
+/** Publishes obligations from one delivery; the count acknowledges only committed new message IDs. */
+export const recordOwes = async (stateDir: string, text: string, at: number, signal?: AbortSignal): Promise<number> => {
   const found = owesInText(text, at);
   if (found.length === 0) return 0;
   ensureDir(stateDir);
-  const path = inboundPath(stateDir);
-  const known = new Set(readLines(path).map((line) => parse(line, isOwe)?.id));
-  const fresh = found.filter((owe) => !known.has(owe.id));
-  for (const owe of fresh) appendCapped(path, JSON.stringify(owe));
-  return fresh.length;
+  return await updateLines(
+    inboundPath(stateDir),
+    (previous) => {
+      const known = new Set(previous.map((line) => parse(line, isOwe)?.id));
+      const fresh: string[] = [];
+      for (const owe of found) {
+        if (known.has(owe.id)) continue;
+        known.add(owe.id);
+        fresh.push(JSON.stringify(owe));
+      }
+      return { lines: fresh.length ? [...previous, ...fresh] : previous, value: fresh.length };
+    },
+    signal,
+  );
 };
 
-/** Appends one line to a capped jsonl, rewriting only when the cap is passed so a hot path stays one append. */
-const appendCapped = (path: string, line: string): void => {
-  const previous = readLines(path);
-  if (previous.length < KEEP_LINES) {
-    appendFileSync(path, `${line}\n`, { mode: 0o600 });
-    return;
-  }
-  const temporary = `${path}.${process.pid}.tmp`;
-  writeFileSync(temporary, `${[...previous.slice(-KEEP_LINES + 1), line].join("\n")}\n`, { mode: 0o600 });
-  renameSync(temporary, path);
-};
-
-/** Records that a message was accepted by Discord, which is what closes every earlier owe on that channel. */
-export const recordSent = (stateDir: string, channel: string, at: number): void => {
+/** Records a complete send accepted by Discord; the channel match still needs each exact-message mark. */
+export const recordSent = async (stateDir: string, channel: string, at: number): Promise<void> => {
   ensureDir(stateDir);
-  appendCapped(sentPath(stateDir), JSON.stringify({ channel, at }));
+  await updateLines(sentPath(stateDir), (previous) => ({
+    lines: [...previous, JSON.stringify({ channel, at })],
+    value: undefined,
+  }));
 };
 
 /**
@@ -146,10 +139,13 @@ export const recordSent = (stateDir: string, channel: string, at: number): void 
  * said twice that the answer arrived with no reaction on their message, which reads as being ignored. A mark names
  * one message, so nothing else can stand in for it.
  */
-export const recordMark = (stateDir: string, channel: string, message: string, at: number): void => {
+export const recordMark = async (stateDir: string, channel: string, message: string, at: number): Promise<void> => {
   if (!/^\d{1,20}$/.test(channel) || !/^\d{1,20}$/.test(message)) return;
   ensureDir(stateDir);
-  appendCapped(marksPath(stateDir), JSON.stringify({ channel, message, at }));
+  await updateLines(marksPath(stateDir), (previous) => ({
+    lines: [...previous, JSON.stringify({ channel, message, at })],
+    value: undefined,
+  }));
 };
 
 /**

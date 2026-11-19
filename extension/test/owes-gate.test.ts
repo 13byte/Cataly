@@ -42,7 +42,7 @@ describe("session_stop owes gate", () => {
     const pi = await doriSession();
     expect(await stop(pi)).toBeUndefined();
 
-    recordOwes(stateDir, inbound("100"), Date.now());
+    await recordOwes(stateDir, inbound("100"), Date.now());
     const blocked = await stop(pi);
     expect(blocked?.continue).toBe(true);
     expect(blocked?.additionalContext).toContain("dori send discord --to <channel>");
@@ -52,22 +52,22 @@ describe("session_stop owes gate", () => {
   test("a send receipt alone leaves the settle blocked until the read receipt is recorded too", async () => {
     const pi = await doriSession();
     const at = Date.now();
-    recordOwes(stateDir, inbound("100"), at);
+    await recordOwes(stateDir, inbound("100"), at);
     expect((await stop(pi))?.continue).toBe(true);
 
-    recordSent(stateDir, CHANNEL, at + 1);
+    await recordSent(stateDir, CHANNEL, at + 1);
     const stillBlocked = await stop(pi);
     expect(stillBlocked?.continue).toBe(true);
     expect(stillBlocked?.additionalContext).toContain("dori-signal check <owner message id>");
 
-    recordMark(stateDir, CHANNEL, "100", at + 2);
+    await recordMark(stateDir, CHANNEL, "100", at + 2);
     expect(await stop(pi)).toBeUndefined();
   });
 
   test("a lane session is never gated: the messenger is the only one that owes the owner", async () => {
     const pi = await load({ session: { id: "s1", entries: [] }, flags: { "dori-role": "lane" } });
     await pi.emit("session_start");
-    recordOwes(stateDir, inbound("100"), Date.now());
+    await recordOwes(stateDir, inbound("100"), Date.now());
     expect(await stop(pi)).toBeUndefined();
   });
 
@@ -78,13 +78,13 @@ describe("session_stop owes gate", () => {
       agent: { kind: "sub", id: "Sub", parentId: "main" },
     });
     await pi.emit("session_start");
-    recordOwes(stateDir, inbound("100"), Date.now());
+    await recordOwes(stateDir, inbound("100"), Date.now());
     expect(await stop(pi)).toBeUndefined();
   });
 
   test("the gate gives up after MAX_CONTINUATIONS instead of looping a wedged session forever", async () => {
     const pi = await doriSession();
-    recordOwes(stateDir, inbound("100"), Date.now());
+    await recordOwes(stateDir, inbound("100"), Date.now());
     for (let i = 0; i < MAX_CONTINUATIONS; i++) expect((await stop(pi))?.continue).toBe(true);
     expect(await stop(pi)).toBeUndefined();
   });
