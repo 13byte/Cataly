@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- New lane registry records and brief footers retain requested launch text and its configuration origin without changing default ULW, raw message delivery or startup goal checks. Launch-selection provenance describes matching text rather than programmatic assignment history. Same-value reassignment retains the matching default or loaded-file origin, with regression coverage for both cases.
+
 - Add explicit lane parking, exact-session reopening, abandonment receipts and a read-only hold ledger. Keep worktrees, accepted pending Discord messages and ordinary Done verification.
 
 - Add read-only lane status, historical ETA summaries and opt-in single-message Discord/Telegram boards. Boards validate options before delivery, omit URL credentials and parameters, and retain pending holds; Telegram recovery requires an existing message binding.
