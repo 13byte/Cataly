@@ -143,7 +143,16 @@ export const discordInbound = async (
     queue?: DiscordInboundQueue,
   ): Promise<void> => {
     const after = current(store);
-    const pending = new Map<string, Message>();
+    const latest = await readPage(channelId, 1);
+    if (latest === undefined) return;
+    if (latest.some((message) => message.channel_id !== channelId)) {
+      throw inboundProtocolError("Discord inbound channel response does not match the configured channel");
+    }
+    const head = latest[0];
+    // No REST gap: leave retained queue records and their admission cursors for the FIFO drain.
+    if (!head || !newer(head.id, after)) return;
+    // Keep the probed message even if it disappears before the full history read.
+    const pending = new Map<string, Message>([[head.id, head]]);
     let before: string | undefined;
     for (;;) {
       const messages = await readPage(channelId, 100, before);
