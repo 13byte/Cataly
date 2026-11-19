@@ -3,7 +3,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-test("native renderer and ExtensionRunner preserve the role, workflow and compaction matrix", async () => {
+// The authenticated ULW source verifier is provisioned with POSIX PATH syntax;
+// the Windows workflow provisions only the native host fixtures.
+test.skipIf(process.platform === "win32")("native prompt composition preserves roles, workflows and state", async () => {
   const root = resolve(import.meta.dir, "../..");
   const home = mkdtempSync(join(tmpdir(), "dori-native-matrix-"));
   try {
