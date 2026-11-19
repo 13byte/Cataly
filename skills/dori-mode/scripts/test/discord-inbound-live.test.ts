@@ -158,7 +158,8 @@ for (const fault of ["json", "page", "message", "oversized", "pagination", "chan
       failure = error;
     });
     try {
-      const path = "/channels/20/messages";
+      const path = "/channels/20/messages?limit=100";
+      if (["json", "page", "message", "oversized"].includes(fault)) world.rest.state.messages.push(ownerMessage("101"));
       if (fault === "json") world.rest.state.responses.set(path, "{");
       if (fault === "page") world.rest.state.responses.set(path, "{}");
       if (fault === "message") world.rest.state.responses.set(path, '[{"id":"bad"}]');
@@ -176,6 +177,12 @@ for (const fault of ["json", "page", "message", "oversized", "pagination", "chan
       socket.ready(1);
       socket.receive({ op: 0, t: "MESSAGE_CREATE", s: 2, d: ownerMessage("300") });
       await settle();
+      if (["json", "page", "message", "oversized"].includes(fault)) {
+        const limits = world.rest.requests
+          .filter((request) => new URL(request.url).pathname.endsWith("/channels/20/messages"))
+          .map((request) => new URL(request.url).searchParams.get("limit"));
+        expect(limits.slice(-2)).toEqual(["1", "100"]);
+      }
       expect(failure).toBeInstanceOf(MessengerError);
       expect((failure as MessengerError).status).toBe(502);
       expect(world.received).toEqual([]);
