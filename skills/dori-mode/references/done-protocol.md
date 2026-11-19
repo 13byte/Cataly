@@ -19,6 +19,8 @@ The key is in your brief's lane footer. If you leave it out, the lane registered
 
 Before using the separate manual `dori close` path, check each lane worktree for uncommitted changes and commits not on a remote. Manual close still checks Done signals, but does not run the watcher's unpushed-work preflight.
 
+Worktree discovery, pre-close Git checks and non-forced worktree cleanup discard inherited `GIT_*` overrides, such as `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE`, so they inspect the selected repository rather than another Git invocation's context. The general command runner and user-supplied Done commands keep their normal environment, including Git identity and configuration. These Git diagnostics use the C locale: a fallback cwd is skipped only when Git reports it is not a worktree; other inspection failures hold the close as `git state unreadable`. Required trust settings must be available in normal Git configuration, not solely in discarded `GIT_CONFIG_*` overrides.
+
 ## If the Dori objects, or a check fails
 
 You get `[LEAD] not done: <reasons>; keep working, claim again when fixed` in your pane, and the lane goes back to not-done. This happens when:

@@ -5,7 +5,7 @@ import { Lessons } from "./lessons.ts";
 import { pendingDiscordLane } from "./messenger/discord-lane-inbox.ts";
 import { type CloseLesson, commitClose, recordDoneDecision } from "./native-close.ts";
 import { type Lane, type Registry, sameLaneGeneration, sessionOf, statusOf, withStatus } from "./registry.ts";
-import { type ChosenRuntimes, type Clock, iso, type Runner, runtimesOf } from "./run.ts";
+import { type ChosenRuntimes, type Clock, iso, repoGit, type Runner, runtimesOf } from "./run.ts";
 import { closeSession, sendVerified } from "./sessions.ts";
 import { checkDone, type SignalIo } from "./signals.ts";
 import { Supervision } from "./supervision.ts";
@@ -84,7 +84,7 @@ export const discoverWorktrees = async (
   const found = new Set<string>(lane.worktrees ?? []);
   const ours = (name: string) => name === lane.key || name.startsWith(`${lane.key}-`);
   for (const root of new Set([lane.cwd ?? "", ...extraRoots].filter(Boolean))) {
-    const r = await run(["git", "-C", root, "worktree", "list", "--porcelain"]);
+    const r = await repoGit(run, root, ["worktree", "list", "--porcelain"]);
     if (r.code !== 0) continue;
     let path = "";
     for (const line of r.out.split("\n")) {
@@ -103,19 +103,20 @@ export const discoverWorktrees = async (
 export const unpushedWork = async (deps: FlowDeps, lane: Lane): Promise<string[]> => {
   const exists = deps.exists ?? existsSync;
   const reasons: string[] = [];
-  // Check owned worktrees instead of blocking on changes in the human's checkout.
-  // If the lane works directly in its cwd, that checkout must be checked instead.
+  // Check owned worktrees, not the human checkout; use cwd for lanes with no worktree of their own.
   const owned = await discoverWorktrees(lane, deps.run, [deps.config.defaultCwd]);
   const roots = owned.length ? owned : [lane.cwd ?? deps.config.defaultCwd];
   for (const wt of roots) {
     if (!exists(wt)) continue;
     // Only the fallback cwd may be skipped when it is not a checkout (#42).
     if (!owned.length) {
-      const inside = await deps.run(["git", "-C", wt, "rev-parse", "--is-inside-work-tree"]);
+      const inside = await repoGit(deps.run, wt, ["rev-parse", "--is-inside-work-tree"]);
+      if (inside.code !== 0 && !inside.err.startsWith("fatal: not a git repository (or any "))
+        reasons.push(`unpushed work in ${wt} (git state unreadable)`);
       if (inside.code !== 0 || inside.out.trim() !== "true") continue;
     }
-    const dirty = await deps.run(["git", "-C", wt, "status", "--porcelain", "--untracked-files=no"]);
-    const ahead = await deps.run(["git", "-C", wt, "rev-list", "--count", "HEAD", "--not", "--remotes"]);
+    const dirty = await repoGit(deps.run, wt, ["status", "--porcelain", "--untracked-files=no"]);
+    const ahead = await repoGit(deps.run, wt, ["rev-list", "--count", "HEAD", "--not", "--remotes"]);
     if (dirty.code !== 0 || ahead.code !== 0) reasons.push(`unpushed work in ${wt} (git state unreadable)`);
     else if (dirty.out.trim() || Number(ahead.out.trim()) > 0) reasons.push(`unpushed work in ${wt}`);
   }
@@ -176,7 +177,7 @@ const closeHeld = async (
   const root = lane.cwd ?? deps.config.defaultCwd;
   const worktrees = await discoverWorktrees(lane, deps.run, [deps.config.defaultCwd]);
   for (const wt of worktrees.filter(deps.exists ?? existsSync)) {
-    const r = await deps.run(["git", "-C", root, "worktree", "remove", wt]);
+    const r = await repoGit(deps.run, root, ["worktree", "remove", wt]);
     cleanup.push(r.code === 0 ? `worktree ${wt} removed` : `worktree ${wt} kept: ${r.err.slice(0, 120)}`);
   }
   const receipt = { outcome: "done", checks, note, cleanup };
