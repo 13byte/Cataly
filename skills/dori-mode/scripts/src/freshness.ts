@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { type HeadlessObservation, HeadlessRuntime } from "../../../../src/runtime/headless.ts";
 
 import { withDeliveryLock } from "./delivery-lock.ts";
 import type { FlowDeps } from "./done-flow.ts";
@@ -70,6 +71,7 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
     // Only launched lanes report through the journal; an adopted lane keeps the screen path even if a record exists.
     let previous: Progress | null = null;
     let screen: string | null = null;
+    let native: HeadlessObservation | undefined;
     let legacyReport: string | null | undefined;
     let supervised: SupervisionResult | null = null;
     let supervisionError: string | undefined;
@@ -78,54 +80,108 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
     if (lane.reportProtocol === "jsonl-v1") {
       try {
         previous = reports.read(lane.key, scope);
-        screen = await readScreen(runtimesOf(deps), ref);
+        if (ref.runtime !== "headless") screen = await readScreen(runtimesOf(deps), ref);
       } catch (error) {
         await journalProblem(deps, lane, acts, error);
         continue;
       }
       try {
+        if (ref.runtime === "headless") {
+          const runtime = runtimesOf(deps).for(ref);
+          if (runtime instanceof HeadlessRuntime && lane.session && lane.sessionFile) {
+            const seen = await runtime.observe(ref);
+            if (
+              seen.ref.runtime === ref.runtime &&
+              seen.ref.id === ref.id &&
+              seen.role === "lane" &&
+              seen.detail === undefined &&
+              (seen.status === "idle" || seen.status === "working" || seen.status === "blocked") &&
+              seen.sessionId === lane.session &&
+              seen.sessionFile === lane.sessionFile &&
+              seen.pid !== undefined &&
+              Number.isSafeInteger(seen.pid) &&
+              seen.pid > 0
+            )
+              native = seen;
+          }
+        }
+      } catch (error) {
+        supervisionError = error instanceof Error ? error.message : String(error);
+      }
+      try {
         // A launched lane is supervised once its journal exists; without one there is no progress to judge.
-        if (existsSync(reports.path(lane.key))) supervised = await supervision.sweep(lane, screen);
+        if (existsSync(reports.path(lane.key))) {
+          const activeSince =
+            native?.status === "working" && native.held === false && native.dialogs.length === 0
+              ? native.activeSince
+              : undefined;
+          supervised = await supervision.sweep(lane, native === undefined ? screen : "", activeSince);
+        }
         // Another sweep owns this lane through its effect baseline; don't replace its result with screen inference.
         if (supervised?.busy) continue;
-        supervisionError = supervised?.observationError;
+        supervisionError = supervised?.observationError ?? supervisionError;
         incompleteSample = supervised?.observationIncomplete === true;
       } catch (error) {
         supervisionError = error instanceof Error ? error.message : String(error);
       }
-    } else {
+    } else if (ref.runtime !== "headless") {
       legacyReport = await sampleLegacyReport(deps, lane, ref, now);
     }
     await withDeliveryLock(deps, lane.key, async () => {
       // The screen and usage hook can outlive park/reopen; never apply them to the replacement lane.
       const current = await deps.registry.read(lane.key);
       if (!current || current.nativeCloseIntent || !sameLaneGeneration(lane, current)) return;
+      const nativeStatus =
+        native?.held === false &&
+        native.dialogs.length === 0 &&
+        (native.status === "idle" || native.status === "working")
+          ? native.status
+          : undefined;
+      if (ref.runtime === "headless") {
+        const live = sessionOf(current);
+        if (
+          live?.runtime !== ref.runtime ||
+          live.id !== ref.id ||
+          current.session !== lane.session ||
+          current.sessionFile !== lane.sessionFile
+        )
+          return;
+        const dialogs = native?.held === true ? native.dialogs.map(({ kind, id }) => `${kind} ${id}`).join(", ") : "";
+        if ((dialogs || nativeStatus !== undefined) && current.lastNativeHold !== (dialogs || undefined)) {
+          if (!(await rememberFreshness(deps, current, { lastNativeHold: dialogs || undefined }))) return;
+          if (dialogs)
+            acts.push({ kind: "blocked", lane: lane.key, detail: `native input held (${dialogs}); inspect the lane` });
+        }
+      }
       // Supervision is advisory: its failure is printed once per reason, and the lane's reports still flow.
       if (supervisionError !== undefined && supervisionError !== current.lastSupervisionError) {
         if (!(await rememberFreshness(deps, current, { lastSupervisionError: supervisionError }))) return;
         acts.push({ kind: "supervision-error", lane: lane.key, detail: supervisionError });
-      } else if (supervisionError === undefined && supervised?.enabled && current.lastSupervisionError) {
+      } else if (
+        supervisionError === undefined &&
+        supervised?.enabled &&
+        !incompleteSample &&
+        current.lastSupervisionError
+      ) {
         if (!(await rememberFreshness(deps, current, { lastSupervisionError: undefined }))) return;
       }
-      for (const detail of supervised?.alerts ?? []) {
-        acts.push({
-          kind: supervised?.state === "blocked" ? "blocked" : supervised?.state === "stalled" ? "stalled" : "warning",
-          lane: lane.key,
-          detail,
-        });
+      for (const alert of supervised?.alertEvents ?? []) {
+        acts.push({ ...alert, lane: lane.key });
       }
       let progress: Progress | null = null;
       try {
-        // Deliver durable reports even when this sample cannot support a screen-derived transition.
-        if (incompleteSample) progress = reports.read(lane.key, scope);
-        else if (screen !== null) {
+        // Deliver durable reports even when this sample cannot support an inferred transition.
+        if (incompleteSample || (ref.runtime === "headless" && nativeStatus === undefined))
+          progress = reports.read(lane.key, scope);
+        else if (screen !== null || nativeStatus !== undefined) {
           progress = reports.observe(
             lane.key,
-            screen,
+            screen ?? "",
             now,
             deps.config.nudgeAfterMin * 60_000,
             !supervised?.hung,
             scope,
+            nativeStatus,
           );
         }
       } catch (error) {
@@ -139,7 +195,10 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
         }
         return;
       }
-      await notifyFreshness(deps, current, ref, progress, legacyReport, now, home, acts);
+      // An idle host without a goal may be a registered launch whose kickoff never landed.
+      const nudgeObservation =
+        nativeStatus !== undefined && native?.goal && native.goal.status !== "none" ? native : undefined;
+      await notifyFreshness(deps, current, ref, progress, legacyReport, now, home, acts, nudgeObservation);
     });
   }
   return acts;
