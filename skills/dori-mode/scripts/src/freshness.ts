@@ -15,6 +15,8 @@ import { Supervision, type SupervisionResult } from "./supervision.ts";
 export type SweepAct = {
   readonly kind:
     | "nudged"
+    | "held"
+    | "delivery-error"
     | "nudge-failed"
     | "posted"
     | "no-report"

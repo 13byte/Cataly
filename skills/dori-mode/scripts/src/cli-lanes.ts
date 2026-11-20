@@ -4,6 +4,7 @@ import { type Command, die } from "./cli-context.ts";
 import { enqueueLaunch, startQueued, cancelQueued } from "./launch-queue.ts";
 import { LaunchQueue } from "./launch-queue-store.ts";
 import { autoTrackLinks } from "./cli-pr.ts";
+import { DeliveryState } from "./delivery-state.ts";
 import { claimDone, closeLane, objectDone } from "./done-flow.ts";
 import { adoptLane, launchLane, prepareLaunch } from "./launch.ts";
 import type { LaunchInput } from "./launch-input.ts";
@@ -11,7 +12,7 @@ import { pauseLane, resumeLane } from "./pause.ts";
 import { parkLane } from "./park.ts";
 import { reopenLane } from "./reopen.ts";
 import { holdLines } from "./holds.ts";
-import { tellLane } from "./tell.ts";
+import { resolveTell, tellLane } from "./tell.ts";
 import { statusOf } from "./registry.ts";
 
 const launch: Command = async ({ key, opt, need, ceiling, strings, values, deps }) => {
@@ -137,9 +138,20 @@ const pauseOrResume: Command = async ({ command, key, opt, lane, deps }) => {
   process.exit(r.code);
 };
 
-const tell: Command = async ({ key, need, lane, deps }) => {
-  const target = await lane(key ?? die("tell needs a lane key"));
-  const r = await tellLane(deps, target, need("text"));
+const tell: Command = async ({ key, need, values, positionals, lane, deps }) => {
+  const target = key ?? die("tell needs a lane key");
+  const { text, status, resolve } = values;
+  if (positionals.length !== 1 || [text, status, resolve].filter((value) => value !== undefined).length !== 1)
+    die("choose exactly one: --text TEXT, --status, or --resolve REQUEST_ID --note REASON");
+  if (values["note"] !== undefined && resolve === undefined) die("--note requires --resolve");
+  if (status === true) {
+    console.log(`TELL_STATE ${target} ${JSON.stringify(new DeliveryState(deps.registry, target).read())}`);
+    return;
+  }
+  const r =
+    resolve !== undefined
+      ? await resolveTell(deps, target, need("resolve"), need("note"))
+      : await tellLane(deps, await lane(target), need("text"));
   console.log(r.line);
   process.exit(r.code);
 };

@@ -10,7 +10,8 @@ import { isReportKind } from "./report-events.ts";
 import { reportDelivery } from "./report-delivery.ts";
 import { type Progress, reportId, reportLine } from "./reports.ts";
 import { runtimesOf } from "./run.ts";
-import { readScreen, sendVerified } from "./sessions.ts";
+import { readScreen } from "./sessions.ts";
+import { tellLane } from "./tell.ts";
 
 const lastHeard = (lane: Lane): number => lane.lastReplyAt ?? Date.parse(lane.openedAt);
 
@@ -54,6 +55,8 @@ const sameReceipt = (a: Lane, b: Lane): boolean =>
   a.lastPostedReportOwner === b.lastPostedReportOwner &&
   JSON.stringify(a.lastPostedReportDelivery) === JSON.stringify(b.lastPostedReportDelivery) &&
   a.lastRelayedAt === b.lastRelayedAt;
+// A broken delivery store cannot persist its own diagnostic bookkeeping.
+const deliveryErrors = new WeakMap<FlowDeps, Map<string, string>>();
 
 /** Called under the delivery lock, after the observed lane has been revalidated. */
 export const notifyFreshness = async (
@@ -87,32 +90,55 @@ export const notifyFreshness = async (
         native.goal?.status !== "paused")) &&
     (!idleOnly || (await trustedIdle(runtimes, ref)))
   ) {
-    const delivery = await sendVerified(
-      runtimes,
-      deps.clock,
-      ref,
-      `[LEAD] your work thread has had no update for ${silentMin} min. Post a 1-2 sentence progress line (done since last, next) and keep its status true.`,
-      idleOnly ? "idle" : undefined,
-      lane.lifecycleEpoch ? lane.session : undefined,
-      idleOnly,
-    );
-    const failure = idleOnly && delivery === "failed" ? `nudge-failed|${heard}` : undefined;
-    // Record the completed attempt on its own pane even if a claim arrived during delivery.
-    const nudged = await deps.registry.update(lane.key, (stored) => {
-      if (!stored || stored.openedAt !== lane.openedAt || stored.lifecycleEpoch !== lane.lifecycleEpoch) return null;
-      const actual = sessionOf(stored);
-      if (actual?.id !== ref.id || actual.runtime !== ref.runtime || stored.session !== lane.session) return null;
-      return failure
-        ? { ...stored, lastNudgeFailure: failure }
-        : { ...stored, lastNudgeAt: now, lastNudgeFailure: undefined };
-    });
-    if (!nudged) return;
-    current = nudged;
-    if (!failure)
-      acts.push({ kind: "nudged", lane: lane.key, detail: `${silentMin} min silent, delivery ${delivery}` });
-    else if (failure !== lane.lastNudgeFailure)
-      acts.push({ kind: "nudge-failed", lane: lane.key, detail: "idle-only delivery failed; left unnudged" });
-    if (!sameLaneGeneration(lane, current)) return;
+    const errors = deliveryErrors.get(deps) ?? new Map<string, string>();
+    deliveryErrors.set(deps, errors);
+    try {
+      const delivery = await tellLane(
+        deps,
+        lane,
+        `[LEAD] your work thread has had no update for ${silentMin} min. Post a 1-2 sentence progress line (done since last, next) and keep its status true.`,
+        { locked: true, idleOnly },
+      );
+      const refused = delivery.code === 2 && !delivery.held;
+      const failure = idleOnly && refused ? `nudge-failed|${heard}` : undefined;
+      // Mark only this registration, even if a claim arrived during delivery.
+      const nudged = await deps.registry.update(lane.key, (stored) => {
+        if (!stored || stored.openedAt !== lane.openedAt || stored.lifecycleEpoch !== lane.lifecycleEpoch) return null;
+        const actual = sessionOf(stored);
+        if (
+          actual?.id !== ref.id ||
+          actual.runtime !== ref.runtime ||
+          stored.session !== lane.session ||
+          stored.sessionFile !== lane.sessionFile ||
+          stored.requestId !== lane.requestId ||
+          stored.runId !== lane.runId
+        )
+          return null;
+        return failure
+          ? { ...stored, lastNudgeFailure: failure }
+          : { ...stored, lastNudgeAt: now, lastNudgeFailure: undefined };
+      });
+      if (!nudged) return;
+      current = nudged;
+      errors.delete(lane.key);
+      if (delivery.code === 0)
+        acts.push({ kind: "nudged", lane: lane.key, detail: `${silentMin} min silent, delivery delivered` });
+      else if (!refused) acts.push({ kind: "held", lane: lane.key, detail: delivery.line });
+      else if (failure === undefined || failure !== lane.lastNudgeFailure)
+        acts.push({
+          kind: "nudge-failed",
+          lane: lane.key,
+          detail: idleOnly ? "idle-only delivery failed; left unnudged" : delivery.line,
+        });
+      if (!sameLaneGeneration(lane, current)) return;
+    } catch (error) {
+      const detail = `${error instanceof Error ? error.message : String(error)}; inspect dori tell ${lane.key} --status and the original session; do not resend`;
+      const signature = `${lane.openedAt}|${lane.lifecycleEpoch}|${lane.runId}|${detail}`;
+      if (errors.get(lane.key) !== signature) {
+        errors.set(lane.key, signature);
+        acts.push({ kind: "delivery-error", lane: lane.key, detail });
+      }
+    }
   }
   const hook = deps.config.hooks.threadReply;
   if (mayInspectReport(deps, current, now, heard)) {

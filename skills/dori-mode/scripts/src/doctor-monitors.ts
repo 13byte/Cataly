@@ -14,6 +14,12 @@ type ProbeEvent =
 const probePayloads: Partial<Record<string, string>> = {
   LANE_WATCH_READY: "",
   LANE_WATCH_WARN: "Error: registry is unreadable",
+  LANE_WATCH_ERROR:
+    "integration ENOSPC: delivery state write failed; inspect the lane lifecycle, dori tell integration --status and the original session; do not resend",
+  LANE_NOTIFY_HELD:
+    "integration TELL_HELD integration delivery=held: request=00000000-0000-4000-8000-000000000000 is uncertain; this message was not sent; inspect dori tell integration --status, then --resolve 00000000-0000-4000-8000-000000000000 --note REASON to end only its hold",
+  LANE_NOTIFY_UNCONFIRMED:
+    "integration TELL_UNCONFIRMED integration delivery=unconfirmed: request=00000000-0000-4000-8000-000000000000; the runtime did not confirm delivery; later messages are held; do not resend",
   LANE_DONE_CLAIMED: "integration w1:p2 checks passed",
   LANE_CHANGED: "integration moved on while this ran (now working, was done-claimed); verification not recorded",
   LANE_NOT_DONE: "integration pending checks",
@@ -30,6 +36,9 @@ const probePayloads: Partial<Record<string, string>> = {
   "HOST_GUARD COMPUTE_READY": "load 2 < 8",
   "HOST_GUARD COMPUTE_BUSY": "load 10",
   NUDGED: "integration 15 min silent, delivery delivered",
+  HELD: "integration TELL_UNCONFIRMED integration delivery=unconfirmed: request=00000000-0000-4000-8000-000000000000; the runtime did not confirm delivery; later messages are held; do not resend",
+  "DELIVERY-ERROR":
+    "integration ENOSPC: delivery state write failed; inspect dori tell integration --status and the original session; do not resend",
   "NUDGE-FAILED": "integration idle-only delivery failed; left unnudged",
   POSTED: "integration Progress (from the lane's last report): checks passed",
   "POST-FAILED": "integration thread hook failed (exit 1)",
