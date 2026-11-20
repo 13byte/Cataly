@@ -19,6 +19,9 @@ export const USAGE = `dori <command> [options]
   board discord|telegram [--to ID] [--thread ID] [--lane KEY] [--loop MIN] [--message ID]
                                        opt-in single status message; reuse its ID, edit only changed content
   eta <prefix> [--json]                historical closed-lane elapsed time (at least 3 samples)
+  usage [<key>] [--since 24h|7d] [--by lane|thread|day] [--json]
+                                       registered lane interval and verified children; API price estimates, not bills
+  quota [--refresh] [--json]            opt-in account limits for display only; no account or credit changes
   sync   [--write]                     registry vs live panes; read-only unless --write
   boot                                 read-only check after a restart: Slack auth, vanished panes, journals, open worklog items and decisions, stale watches
   doctor [--json] [--repo owner/repo]   read-only configuration, adoption and monitor diagnostics; exit 1 on warnings

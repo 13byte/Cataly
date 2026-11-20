@@ -87,7 +87,17 @@ export const syncRegistry = async (deps: FlowDeps, write: boolean): Promise<Sync
             current.hold?.outcome
           )
             return null;
-          return { ...current, session: hit.id, sessionVia: hit.via };
+          const prior = current.priorSessions === undefined ? [] : current.priorSessions;
+          if (!Array.isArray(prior) || prior.some((id) => typeof id !== "string" || !id)) {
+            drift.push(`${lane.key}: invalid prior session bindings; registry unchanged`);
+            return null;
+          }
+          return {
+            ...current,
+            ...(current.session ? { priorSessions: [...new Set([...prior, current.session])] } : {}),
+            session: hit.id,
+            sessionVia: hit.via,
+          };
         }),
       );
       if (!held.ok || !held.value)

@@ -11,7 +11,10 @@ import type { TerminalRuntimeKind } from "../../../../src/runtime/types.ts";
 import { repoIdentities } from "./config-identities.ts";
 import { type DoctorOptions, validDoctorOptions } from "./doctor-config.ts";
 import { type LaunchConfig, launchConfig } from "./launch-selection.ts";
+import type { QuotaOptions } from "./quota.ts";
+import { supervisionOptionsError } from "./supervision-config.ts";
 import type { SupervisionOptions } from "./supervision-observe.ts";
+import { usageOptionsError } from "./usage-options.ts";
 import type { CommitIdentity } from "./verify-pr-check.ts";
 import type { VoiceSettings } from "./voice/settings.ts";
 import { recallSettingsError, type RecallSettings } from "./messenger/recall-text.ts";
@@ -66,6 +69,7 @@ export type DoriConfig = LaunchConfig & {
   /** Expected Git author and committer per lowercase `owner/repo`, for `verify-pr` and the lane footer. */
   readonly repoIdentities: Readonly<Record<string, CommitIdentity>>;
   readonly supervision: SupervisionOptions;
+  readonly quota?: QuotaOptions;
   readonly prAutoTrack: boolean; // opt-in: claim and checkpoint PR links are tracked for `dori pr watch`
   readonly recall?: RecallSettings;
   readonly doctor?: DoctorOptions;
@@ -125,52 +129,6 @@ const checkRuntime = (value: unknown): void => {
     );
 };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const SUPERVISION_KEYS = new Set([
-  "hungAfterMinutes",
-  "staleAfterMinutes",
-  "defaults",
-  "lanes",
-  "usageArgv",
-  "recordCostArgv",
-  "activityPaths",
-  "gitActivity",
-]);
-const CEILINGS = new Set(["wallMinutes", "tokens", "costUsd"]);
-const checkCeilingNames = (where: string, budget: Record<string, unknown>): void => {
-  for (const name of Object.keys(budget))
-    if (!CEILINGS.has(name))
-      throw new ConfigError(
-        `invalid supervision ${where}.${name}: unknown ceiling (expected wallMinutes, tokens or costUsd)`,
-      );
-};
-
-// Refuse malformed supervision settings rather than silently disabling a ceiling.
-const checkSupervision = (value: unknown): void => {
-  if (value === undefined) return;
-  if (!isRecord(value)) throw new ConfigError("invalid supervision: expected an object");
-  for (const name of Object.keys(value))
-    if (!SUPERVISION_KEYS.has(name)) throw new ConfigError(`invalid supervision ${name}: unknown setting`);
-  for (const name of ["defaults", "lanes"] as const)
-    if (value[name] !== undefined && !isRecord(value[name]))
-      throw new ConfigError(`invalid supervision ${name}: expected an object`);
-  if (isRecord(value["defaults"])) checkCeilingNames("defaults", value["defaults"]);
-  for (const [key, budget] of Object.entries(isRecord(value["lanes"]) ? value["lanes"] : {})) {
-    if (!isRecord(budget)) throw new ConfigError(`invalid supervision lanes.${key}: expected an object`);
-    checkCeilingNames(`lanes.${key}`, budget);
-  }
-  for (const name of ["usageArgv", "recordCostArgv", "activityPaths"] as const) {
-    const list = value[name];
-    if (list !== undefined && !(Array.isArray(list) && list.every((item) => typeof item === "string"))) {
-      throw new ConfigError(`invalid supervision ${name}: expected an array of strings`);
-    }
-  }
-  if (value["gitActivity"] !== undefined && typeof value["gitActivity"] !== "boolean")
-    throw new ConfigError("invalid supervision gitActivity: expected true or false");
-};
-
 export const loadConfig = async (path = configPath(), home = homedir(), env = process.env): Promise<DoriConfig> => {
   const selectedHome = env["DORI_HOME"];
   const base = {
@@ -185,10 +143,14 @@ export const loadConfig = async (path = configPath(), home = homedir(), env = pr
   const laneRuntime = env["DORI_LANE_RUNTIME"] ?? raw.laneRuntime;
   if (laneRuntime !== undefined && laneRuntime !== "terminal" && laneRuntime !== "headless")
     throw new ConfigError(`invalid laneRuntime: expected "terminal" or "headless", got ${JSON.stringify(laneRuntime)}`);
-  checkSupervision(raw.supervision);
+  const supervisionError = supervisionOptionsError(raw.supervision);
+  if (supervisionError) throw new ConfigError(supervisionError);
   if (raw.doctor !== undefined && !validDoctorOptions(raw.doctor))
     throw new ConfigError("invalid doctor: expected an object with an optional ignore array of known check IDs");
-  const policyError = freshnessError(raw.freshness) ?? recallSettingsError(raw.recall);
+  const policyError =
+    freshnessError(raw.freshness) ??
+    recallSettingsError(raw.recall) ??
+    usageOptionsError(raw.supervision?.usage, raw.supervision?.usageArgv, raw.quota);
   if (policyError) throw new ConfigError(policyError);
   if (raw.threadDonePolicy !== undefined && !["every-lane", "last-lane"].includes(raw.threadDonePolicy))
     throw new ConfigError("invalid threadDonePolicy: expected every-lane or last-lane");

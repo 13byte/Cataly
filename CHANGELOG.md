@@ -10,6 +10,8 @@
 
 - Add opt-in Discord and Telegram conversation recall, partitioned by authenticated bot, configured owner and verified conversation. `dori recall` requires an explicit identity and space; logical deletion is identity-scoped and leaves legacy records untouched. Recalled excerpts are historical data, never fresh instructions or approvals.
 
+- Add explicit local lane usage and read-only quota commands. Native usage supervision stays opt-in, incomplete observations stay unknown, and quota display never changes accounts, credits or policy.
+
 - Bind opted-in lane reports and checkpoints to the original received request and launch run on terminal and headless lanes, retaining attribution across reopen and wake. Exact Discord reply receipts can be linked explicitly; unsupported delivery paths remain unverified. Validate retained execution history before launch or reopen without dropping completed checkpoint effects, and reject valueless delivery options before acknowledging a report.
 
 - Persist a private local dispatch record before telling or nudging a lane or sending a Done notice. An uncertain delivery holds later tells, nudges and Done notices across restarts. `dori tell <key> --status` inspects the latest record; `--resolve ID --note WHY` releases only that exact hold without confirming, cancelling or replaying the original action. These IDs are not native submission, report or run receipts. Direct native owner input, ASK replies, pause/resume and explicit reopen notes retain their existing admission rules and do not clear the hold.

@@ -132,8 +132,11 @@ const closeHeld = async (
   // Cost is recorded on a best-effort basis: a failing hook is printed and never keeps a verified lane open.
   const supervisor = new Supervision({ ...deps, stateDir: deps.config.stateDir }, deps.config.supervision);
   try {
-    const cost = await supervisor.close(lane);
-    if (cost) lines.push(`COST ${lane.key} tokens=${cost.tokens ?? "unknown"} costUsd=${cost.costUsd ?? "unknown"}`);
+    const cost = await supervisor.close(deps.config.supervision.usage === "omp" ? closed : lane);
+    if (cost)
+      lines.push(
+        `COST ${lane.key} tokens=${cost.tokens ?? "unknown"} costUsd=${cost.costUsd ?? "unknown"}${cost.costBasis ? ` (${cost.costBasis})` : ""}`,
+      );
   } catch (error) {
     lines.push(`COST ${lane.key} not recorded: ${error instanceof Error ? error.message : String(error)}`);
   }

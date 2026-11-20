@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, symlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
-
 import { runtimesFor, runtimesOf } from "../src/run.ts";
 import { resolveSession, sessionDirFor, trustedPaneState } from "../src/session-id.ts";
 import { sendVerified } from "../src/sessions.ts";
@@ -219,7 +218,6 @@ test("sync reads legacy registry records without mutation and persists trusted e
     sessionVia: "extension",
   });
 });
-
 test("sync --write records the session on the lane as stored now, keeping a claim written during its process read", async () => {
   const { deps } = setup();
   const lane = {
@@ -229,6 +227,8 @@ test("sync --write records the session on the lane as stored now, keeping a clai
     pane: P1.id,
     brief: "/b.md",
     done: "closed acme/app#1",
+    session: "01a11440-ee81-7f90-b2ed-dcc7d51a0aaa",
+    priorSessions: ["01a11440-ee81-7f90-b2ed-dcc7d51a0bbb"],
   };
   await deps.registry.write({ ...lane, openedAt: new Date(T0).toISOString() });
   const at = new Date(T0).toISOString();
@@ -242,5 +242,9 @@ test("sync --write records the session on the lane as stored now, keeping a clai
     return deps.run(argv, opts);
   };
   await syncRegistry({ ...deps, run }, true);
-  expect(await deps.registry.read(lane.key)).toMatchObject({ status: "done-claimed", sessionVia: "extension" });
+  expect(await deps.registry.read(lane.key)).toMatchObject({
+    status: "done-claimed",
+    sessionVia: "extension",
+    priorSessions: ["01a11440-ee81-7f90-b2ed-dcc7d51a0bbb", "01a11440-ee81-7f90-b2ed-dcc7d51a0aaa"],
+  });
 });

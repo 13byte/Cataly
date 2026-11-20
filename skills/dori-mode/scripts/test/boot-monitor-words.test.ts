@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Manifest, type Monitor, monitorCleanup, readMonitorManifests } from "../src/boot-monitors.ts";
+import { DORI_COMMANDS, DORI_VALUE_OPTIONS } from "../src/monitor-dori.ts";
 import type { Lane, LaneStatus } from "../src/registry.ts";
 import { withState } from "./fakes.ts";
 
@@ -187,4 +188,15 @@ test("a Discord voice monitor does not belong to lanes named voice or discord", 
   const lanes = ["voice", "discord"].map((key) => lane(key, "closed"));
   const monitors = [{ argv: ["dori", "voice", "discord"] }, { command: "dori voice discord" }];
   expect(monitorCleanup(lanes, [manifest(monitors)])).toEqual([]);
+});
+
+test("the monitor vocabulary matches CLI dispatch and value options", () => {
+  const cli = readFileSync(join(import.meta.dir, "../src/cli.ts"), "utf8");
+  const commands = [
+    ...cli.matchAll(/^\s*case "([\w-]+)":/gm),
+    ...cli.matchAll(/^if \(command === "([\w-]+)"\)/gm),
+  ].flatMap(([, word]) => (word && !word.startsWith("-") ? [word] : []));
+  const values = [...cli.matchAll(/^\s+"?([\w-]+)"?: \{ type: "string"/gm)].map(([, word]) => word ?? "");
+  expect(Object.keys(DORI_COMMANDS).sort()).toEqual([...new Set(commands)].sort());
+  expect(Object.keys(DORI_VALUE_OPTIONS).sort()).toEqual(values.sort());
 });
