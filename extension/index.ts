@@ -33,8 +33,9 @@ import { RuntimeHealthWriter } from "./deployment-health.ts";
 import { DiscordAsk, routeFor } from "./discord-ask.ts";
 import { type AskLane, automaticDiscordAskRoute, bindAskLane } from "./discord-ask-auto.ts";
 import { DiscordLane } from "./discord-lane.ts";
+import { HeadAdmissions } from "./head-admission.ts";
 import { type PromptModel, withLaneBookkeeping } from "./lane-bookkeeping.ts";
-import { MONITOR_DESCRIPTION, Monitors } from "./monitor";
+import { BATCH_MS, MONITOR_DESCRIPTION, Monitors } from "./monitor";
 import { NativeRemote } from "./native-remote.ts";
 import { ROLE_INVARIANTS } from "./role-invariants.ts";
 import { bumpAttempts, MAX_CONTINUATIONS, openOwes, recordOwes, reminder } from "../skills/dori-mode/scripts/src/owes";
@@ -67,9 +68,13 @@ export interface DoriContext {
     getSessionId(): string;
     getSessionFile(): string | undefined;
     getBranch(): SessionEntry[];
+    getEntries?(): readonly SessionEntry[];
     ensureOnDisk?(): Promise<void>;
   };
-  ui: { notify(message: string, type?: "info" | "warning" | "error"): void };
+  ui: {
+    notify(message: string, type?: "info" | "warning" | "error"): void;
+    setStatus?(key: string, text: string | undefined): void;
+  };
 }
 interface Goal {
   objective: string;
@@ -300,19 +305,60 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
   let askLane: AskLane | undefined;
   let ownsDiscordReceiver = false;
   let managedRestorePending = process.env.DORI_MANAGED_STARTUP === "1";
+  let headContext: DoriContext | undefined;
+  const admissions = new HeadAdmissions(
+    () => {
+      const ctx = headContext;
+      if (role !== "dori" || !ctx || !stateDir || requiredLoadError || typeof process.getuid !== "function") return;
+      const manager = ctx.sessionManager;
+      const id = manager.getSessionId();
+      const file = manager.getSessionFile();
+      const { getEntries, ensureOnDisk } = manager;
+      if (id !== session?.id || !file || !getEntries || !ensureOnDisk) return;
+      return {
+        id,
+        file,
+        entries: () => getEntries.call(manager),
+        async ensureOnDisk() {
+          await ensureOnDisk.call(manager);
+          if (headContext !== ctx || manager.getSessionId() !== id || manager.getSessionFile() !== file)
+            throw new Error("native admission head changed during persistence");
+        },
+      };
+    },
+    (details) => pi.appendEntry("omp-dori:admission-rejected", details),
+    (pending, unresolved) => {
+      headContext?.ui.setStatus?.(
+        "dori-head-admission",
+        pending ? `${pending} inbound item(s) awaiting native receipt` : undefined,
+      );
+      if (unresolved)
+        headContext?.ui.notify(
+          `Native admission for ${unresolved} is unconfirmed. Intake state was retained; inspect the original receipt before recovery.`,
+          "warning",
+        );
+    },
+  );
   const monitors = new Monitors(
     async (content, delivery) => {
       const root = stateDir;
       if (!delivery.isCurrent()) return;
-      // Monitor delivery is an admission path in its own right; its message must follow committed persistence.
+      // Commit the obligation before admission; a native receipt is only proof of the aside, not authority.
       if (role === "dori" && root !== undefined) await recordOwes(root, content, Date.now(), delivery.signal);
       if (delivery.isCurrent())
         pi.sendMessage(
-          { customType: "dori-monitor", content, display: true },
+          {
+            customType: "dori-monitor",
+            content,
+            display: true,
+            ...(delivery.details === undefined ? {} : { details: delivery.details }),
+          },
           { triggerTurn: true, deliverAs: "aside" },
         );
     },
     () => (role === "dori" ? session?.id : undefined),
+    BATCH_MS,
+    typeof process.getuid === "function" ? admissions : undefined,
   );
   const runtimeHealth = new RuntimeHealthWriter(monitors);
 
@@ -524,6 +570,16 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       "plan_review_resolved",
     ] as const)
       pi.on(event, (payload, ctx) => nativeRemote.event(event, payload, ctx));
+    pi.on("message_end", (event, ctx) => {
+      if (
+        role === "dori" &&
+        headContext &&
+        ctx.agent.kind === "main" &&
+        ctx.agent.id === headContext.agent.id &&
+        ctx.sessionManager.getSessionId() === session?.id
+      )
+        return admissions.messageEnded(event);
+    });
     // The awaited preflight runs before the built-in opens its form; execution events can arrive later.
     pi.on("tool_call", (event, ctx) => {
       const id = ctx.sessionManager.getSessionId();
@@ -547,6 +603,8 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       if (ctx.agent.kind === "main") {
         remoteActivation++;
         nativeRemote.stop();
+        headContext?.ui.setStatus?.("dori-head-admission", undefined);
+        headContext = undefined;
       }
       discordLane.stop();
       discordAsk.clear();
@@ -670,6 +728,7 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
         },
       });
     if (role === "dori") {
+      headContext = ctx;
       restoreMonitors(ctx, branch, managedRestorePending);
       managedRestorePending = false;
     }
@@ -723,7 +782,12 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       const activation = ctx.agent.kind === "main" ? ++remoteActivation : undefined;
       let remoteJournalReady = true;
       if (activation !== undefined) nativeRemote.revoke();
-      if (eventName !== "session_start" && ctx.agent.kind === "main") discordAsk.clear();
+      if (eventName !== "session_start" && ctx.agent.kind === "main") {
+        discordAsk.clear();
+        headContext?.ui.setStatus?.("dori-head-admission", undefined);
+        headContext = undefined;
+        monitors.invalidateAdmissions();
+      }
       const branch = ctx.sessionManager.getBranch();
       let flaggedRole = false;
       if (ctx.agent.kind === "sub") {

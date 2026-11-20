@@ -5,6 +5,7 @@
  */
 import type { Subprocess } from "bun";
 import type { MonitorSpec } from "../src/update/deployment-types.ts";
+import type { HeadAdmissions } from "./head-admission.ts";
 import { MonitorOutputFile, readMonitorOutput } from "./monitor-output";
 
 /** Lines arriving within this window after the first one are delivered together. */
@@ -24,6 +25,14 @@ type Running = {
   readonly signal: AbortSignal;
   readonly restart?: MonitorSpec["restart"];
   stopped: boolean;
+  admitting: boolean;
+  prepared?: {
+    readonly epoch: number;
+    readonly headFile: string;
+    readonly identity: unknown;
+    readonly fingerprint: unknown;
+    readonly content: unknown;
+  };
 };
 
 export type MonitorInfo = {
@@ -38,6 +47,7 @@ export type MonitorInfo = {
 export type MonitorDelivery = {
   readonly session: string;
   readonly signal: AbortSignal;
+  readonly details?: unknown;
   isCurrent(): boolean;
 };
 type Deliver = (content: string, delivery: MonitorDelivery) => unknown;
@@ -49,17 +59,25 @@ export class Monitors {
   #timer: Timer | undefined;
   #pendingBytes = 0;
   #generation = new AbortController();
+  #admissionEpoch = 0;
   #flight: Promise<void> | undefined;
   readonly #deliver: Deliver;
+  readonly #admissions: HeadAdmissions | undefined;
   readonly #currentSession: () => string | undefined;
   readonly #batchMs: number;
   readonly #restartMs: number;
 
-  constructor(deliver: Deliver, currentSession: () => string | undefined, batchMs = BATCH_MS, restartMs = 5_000) {
+  constructor(
+    deliver: Deliver,
+    currentSession: () => string | undefined,
+    batchMs = BATCH_MS,
+    restart: number | HeadAdmissions = 5_000,
+  ) {
     this.#deliver = deliver;
     this.#currentSession = currentSession;
     this.#batchMs = batchMs;
-    this.#restartMs = restartMs;
+    this.#restartMs = typeof restart === "number" ? restart : 5_000;
+    this.#admissions = typeof restart === "number" ? undefined : restart;
   }
 
   start(
@@ -73,14 +91,27 @@ export class Monitors {
     if (!name) throw new Error("monitor name is required");
     if (this.#running.has(name) || this.#restarts.has(name))
       throw new Error(`monitor "${name}" is already running or waiting to restart; stop it first`);
-    return this.#spawn({ name, argv, filter, cwd, restart }, session, 0);
+    return this.#spawn({ name, argv, filter, cwd, ...(restart ? { restart } : {}) }, session, 0);
   }
 
   #spawn({ name, argv, filter, cwd, restart }: MonitorSpec, session: string, attempt: number): MonitorInfo {
     if (argv.length === 0) throw new Error("argv must name the command to run");
     const pattern = new RegExp(filter);
-    const proc = Bun.spawn([...argv], { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
-    const entry: Running = {
+    let entry: Running;
+    const proc = Bun.spawn([...argv], {
+      cwd,
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+      ...(this.#admissions
+        ? {
+            env: { ...process.env, DORI_MONITOR_ADMISSION: "1" },
+            serialization: "json" as const,
+            ipc: (message: unknown) => this.#ipc(entry, message),
+          }
+        : {}),
+    });
+    entry = {
       name,
       argv: [...argv],
       filter: pattern,
@@ -89,19 +120,24 @@ export class Monitors {
       session,
       signal: this.#generation.signal,
       stopped: false,
+      admitting: false,
       restart,
     };
     this.#running.set(name, entry);
+    const finish = proc.exited.then((code) => {
+      this.#admissions?.stop(proc.pid);
+      return code;
+    });
     let previous = attempt;
     const startedAt = performance.now();
     const exited =
       restart === "on-failure"
-        ? proc.exited.then((code) => {
+        ? finish.then((code) => {
             // Only time spent running the child resets a failure streak, not blocked output delivery.
             if (performance.now() - startedAt >= 60_000) previous = 0;
             return code;
           })
-        : proc.exited;
+        : finish;
     void Promise.all([this.#pump(entry, proc.stdout, "stdout"), this.#pump(entry, proc.stderr, "stderr"), exited])
       .then(async ([, , code]) => {
         if (this.#running.get(name) !== entry) return;
@@ -122,6 +158,7 @@ export class Monitors {
       .catch(async (error: unknown) => {
         if (entry.stopped || !this.#current(entry)) return;
         entry.stopped = true;
+        this.#admissions?.stop(proc.pid);
         entry.proc.kill();
         if (this.#running.get(name) === entry) this.#running.delete(name);
         await this.#queue(
@@ -141,7 +178,7 @@ export class Monitors {
       if (entry.stopped || !this.#current(entry)) return;
       try {
         const { name, argv, filter, cwd, restart, session } = entry;
-        this.#spawn({ name, argv, filter: filter.source, cwd, restart }, session, previous + 1);
+        this.#spawn({ name, argv, filter: filter.source, cwd, ...(restart ? { restart } : {}) }, session, previous + 1);
       } catch (error) {
         void this.#queue(entry, `[${entry.name}] monitor restart failed: ${String(error).slice(0, 1024)}`).catch(
           (reportError: unknown) => console.error("monitor restart reporting failed", reportError),
@@ -155,7 +192,13 @@ export class Monitors {
   /** Live and scheduled specifications, without mistaking a scheduled retry for a live child. */
   specs(): MonitorSpec[] {
     return [...this.#running.values(), ...Array.from(this.#restarts.values(), ({ entry }) => entry)].map(
-      ({ name, argv, filter, cwd, restart }) => ({ name, argv, filter: filter.source, cwd, restart }),
+      ({ name, argv, filter, cwd, restart }) => ({
+        name,
+        argv,
+        filter: filter.source,
+        cwd,
+        ...(restart ? { restart } : {}),
+      }),
     );
   }
 
@@ -170,6 +213,7 @@ export class Monitors {
     const entry = this.#running.get(name);
     if (!entry) return false;
     entry.stopped = true;
+    this.#admissions?.stop(entry.proc.pid);
     entry.proc.kill();
     this.#running.delete(name);
     return true;
@@ -190,12 +234,136 @@ export class Monitors {
   stopAll(): void {
     this.#generation.abort();
     this.#generation = new AbortController();
+    this.invalidateAdmissions();
     for (const name of [...this.#running.keys()]) this.stop(name);
     for (const name of this.#restarts.keys()) this.stop(name);
     clearTimeout(this.#timer);
     this.#timer = undefined;
     this.#pending = [];
     this.#pendingBytes = 0;
+  }
+
+  /** A branch/tree change invalidates pending native handoffs without stopping ordinary monitors. */
+  invalidateAdmissions(): void {
+    this.#admissionEpoch++;
+    this.#admissions?.stop();
+  }
+
+  #ipc(entry: Running, raw: unknown): void {
+    const admissions = this.#admissions;
+    const epoch = this.#admissionEpoch;
+    const sourceIsRunning = () =>
+      !entry.stopped &&
+      entry.proc.exitCode === null &&
+      entry.proc.signalCode === null &&
+      this.#running.get(entry.name) === entry;
+    const isCurrent = () => epoch === this.#admissionEpoch && sourceIsRunning() && this.#current(entry);
+    if (
+      !admissions ||
+      !sourceIsRunning() ||
+      raw === null ||
+      typeof raw !== "object" ||
+      !("protocol" in raw) ||
+      raw.protocol !== "dori-head-admission-v1"
+    )
+      return;
+    const fail = () => {
+      entry.admitting = false;
+      if (!sourceIsRunning()) return;
+      entry.stopped = true;
+      admissions.stop(entry.proc.pid);
+      this.#running.delete(entry.name);
+      entry.proc.kill();
+      void this.#queue(entry, `[monitor] ${entry.name} native admission failed; intake state retained`).catch(
+        (error: unknown) => console.error("monitor admission failure reporting failed", error),
+      );
+    };
+    if (!isCurrent()) {
+      delete entry.prepared;
+      if (
+        !("request" in raw) ||
+        typeof raw.request !== "string" ||
+        raw.request.length === 0 ||
+        raw.request.length > 64
+      ) {
+        fail();
+        return;
+      }
+      try {
+        entry.proc.send({ protocol: raw.protocol, request: raw.request, outcome: "unresolved" });
+      } catch {
+        fail();
+      }
+      return;
+    }
+    if (entry.admitting) {
+      fail();
+      return;
+    }
+    // A prepared delivery is single-use and belongs to this child, source and head activation.
+    const prepared = entry.prepared;
+    delete entry.prepared;
+    if (
+      "op" in raw &&
+      raw.op === "dispatch" &&
+      (!prepared ||
+        prepared.epoch !== epoch ||
+        !("headFile" in raw) ||
+        raw.headFile !== prepared.headFile ||
+        !("identity" in raw) ||
+        raw.identity !== prepared.identity ||
+        !("fingerprint" in raw) ||
+        raw.fingerprint !== prepared.fingerprint ||
+        !("content" in raw) ||
+        raw.content !== prepared.content)
+    ) {
+      fail();
+      return;
+    }
+    entry.admitting = true;
+    void admissions
+      .receive(raw, {
+        source: entry.proc.pid,
+        session: entry.session,
+        accepts(content) {
+          if (!isCurrent()) throw new Error("inactive head source");
+          return content.split("\n").some((line) => entry.filter.test(line));
+        },
+        deliver: async (content, details) => {
+          if (!isCurrent()) throw new Error("inactive head source");
+          await this.#flush(async () => {
+            if (!isCurrent()) throw new Error("inactive head source");
+            const text = content
+              .split("\n")
+              .map((line) => `[${entry.name}] ${line}`)
+              .join("\n");
+            await this.#deliver(this.#bounded(entry, text), {
+              session: entry.session,
+              signal: entry.signal,
+              isCurrent,
+              details,
+            });
+          });
+          if (!isCurrent()) throw new Error("inactive head source");
+        },
+      })
+      .then((reply) => {
+        entry.admitting = false;
+        if (isCurrent() && reply.outcome === "ready" && "identity" in raw && "fingerprint" in raw && "content" in raw) {
+          entry.prepared = {
+            epoch,
+            headFile: reply.headFile,
+            identity: raw.identity,
+            fingerprint: raw.fingerprint,
+            content: raw.content,
+          };
+        }
+        if (sourceIsRunning())
+          entry.proc.send(
+            isCurrent() ? reply : { protocol: reply.protocol, request: reply.request, outcome: "unresolved" },
+          );
+      })
+      .catch(fail);
   }
 
   async #pump(entry: Running, stream: ReadableStream<Uint8Array>, source: string): Promise<void> {
@@ -217,9 +385,8 @@ export class Monitors {
     if (!entry.stopped && entry.filter.test(line)) await this.#queue(entry, `[${entry.name}] ${line}`);
   }
 
-  async #queue(entry: Running, text: string): Promise<void> {
-    if (!this.#current(entry)) return;
-    let bytes = Buffer.byteLength(text);
+  #bounded(entry: Running, text: string): string {
+    const bytes = Buffer.byteLength(text);
     if (bytes > BATCH_MAX_BYTES) {
       const output = new MonitorOutputFile();
       try {
@@ -228,8 +395,14 @@ export class Monitors {
         output.close();
       }
       text = `[monitor] message saved for name=${JSON.stringify(entry.name.slice(0, 256))}${entry.name.length > 256 ? "..." : ""} pid=${entry.proc.pid}: ${bytes} bytes; file=${JSON.stringify(output.path)}`;
-      bytes = Buffer.byteLength(text);
     }
+    return text;
+  }
+
+  async #queue(entry: Running, text: string): Promise<void> {
+    if (!this.#current(entry)) return;
+    text = this.#bounded(entry, text);
+    const bytes = Buffer.byteLength(text);
     while (
       this.#pending.length >= BATCH_MAX_LINES ||
       this.#pendingBytes + bytes + (this.#pending.length ? 1 : 0) > BATCH_MAX_BYTES
@@ -246,7 +419,7 @@ export class Monitors {
       }, this.#batchMs);
   }
 
-  async #flush(): Promise<void> {
+  async #flush(admit?: () => Promise<void>): Promise<void> {
     const signal = this.#generation.signal;
     while (this.#flight) {
       await this.#flight;
@@ -258,43 +431,49 @@ export class Monitors {
     const lines = this.#pending.filter(({ entry }) => this.#current(entry));
     this.#pending = [];
     this.#pendingBytes = 0;
-    if (lines.length === 0) return;
-    const first = lines[0]!.entry;
-    const delivery: MonitorDelivery = {
-      session: first.session,
-      signal: first.signal,
-      isCurrent: () => this.#current(first),
-    };
+    const first = lines[0]?.entry;
+    if (!first && !admit) return;
     const done = (async () => {
-      try {
-        await this.#deliver(lines.map(({ text }) => text).join("\n"), delivery);
-      } catch (error) {
-        if (delivery.signal.aborted && error === delivery.signal.reason) return;
-        if (!delivery.isCurrent()) {
-          console.error("monitor delivery failed after session invalidation", error);
-          return;
-        }
-        const entries = [...new Set(lines.map(({ entry }) => entry))];
-        for (const entry of entries) {
-          entry.stopped = true;
-          if (this.#running.get(entry.name) === entry) {
-            entry.proc.kill();
-            this.#running.delete(entry.name);
+      if (first) {
+        const delivery: MonitorDelivery = {
+          session: first.session,
+          signal: first.signal,
+          isCurrent: () => this.#current(first),
+        };
+        try {
+          await this.#deliver(lines.map(({ text }) => text).join("\n"), delivery);
+        } catch (error) {
+          if (delivery.signal.aborted && error === delivery.signal.reason) return;
+          if (!delivery.isCurrent()) {
+            console.error("monitor delivery failed after session invalidation", error);
+            return;
+          }
+          const entries = [...new Set(lines.map(({ entry }) => entry))];
+          for (const entry of entries) {
+            entry.stopped = true;
+            this.#admissions?.stop(entry.proc.pid);
+            if (this.#running.get(entry.name) === entry) {
+              entry.proc.kill();
+              this.#running.delete(entry.name);
+            }
+          }
+          const notice = `[monitor] delivery failed for name=${JSON.stringify(first.name.slice(0, 256))}; stopped ${entries.length} monitor(s); raw output may be incomplete: ${String(error).slice(0, 2048)}`;
+          try {
+            if (delivery.isCurrent()) await this.#deliver(notice, delivery);
+          } catch (reportError) {
+            console.error(notice, reportError);
           }
         }
-        const notice = `[monitor] delivery failed for name=${JSON.stringify(first.name.slice(0, 256))}; stopped ${entries.length} monitor(s); raw output may be incomplete: ${String(error).slice(0, 2048)}`;
-        try {
-          if (delivery.isCurrent()) await this.#deliver(notice, delivery);
-        } catch (reportError) {
-          console.error(notice, reportError);
-        }
       }
+      await admit?.();
     })();
-    this.#flight = done;
+    // Other writers wait for completion; this caller still receives its own delivery failure.
+    const completed = done.catch(() => undefined);
+    this.#flight = completed;
     try {
       await done;
     } finally {
-      if (this.#flight === done) this.#flight = undefined;
+      if (this.#flight === completed) this.#flight = undefined;
     }
   }
 }

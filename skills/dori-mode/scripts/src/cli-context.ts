@@ -27,16 +27,34 @@ export const envSlackToken = (): string | undefined => {
   }
 };
 
+/** A receiver must release its local state if its supervising IPC channel goes away. */
+export const exitOnDisconnect = (close: () => void): (() => void) => {
+  const disconnected = () => {
+    try {
+      close();
+    } finally {
+      process.exit(1);
+    }
+  };
+  process.once("disconnect", disconnected);
+  return () => {
+    process.off("disconnect", disconnected);
+  };
+};
+
+/** A retry policy may stop (`false`), keep the polling interval (`true`), or specify a delay in milliseconds. */
 export const every = async (
   minutes: number,
   tick: () => Promise<void>,
-  retryDelay?: (error: unknown, intervalMs: number) => number,
+  retry?: (error: unknown, intervalMs: number) => boolean | number,
 ): Promise<void> => {
   const interval = minutes * 60_000;
   for (;;) {
     let wait = interval;
     await tick().catch((e: unknown) => {
-      wait = retryDelay?.(e, interval) ?? interval;
+      const decision = retry?.(e, interval) ?? interval;
+      if (decision === false) throw e;
+      wait = decision === true ? interval : decision;
       console.log(`WARN ${e instanceof Error ? e.message : String(e)}`.slice(0, 300));
     });
     if (minutes <= 0) return;

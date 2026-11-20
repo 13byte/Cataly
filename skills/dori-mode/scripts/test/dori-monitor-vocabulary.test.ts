@@ -37,6 +37,7 @@ test("the dori command vocabulary is every command the CLI dispatches", () => {
     ["upstream", "/src/update/cli.ts"],
     ["remote", "cli-remote.ts"],
     ["headless", "cli-headless.ts"],
+    ["inbound-abandon", "cli-discord-recovery.ts"],
   ]);
   for (const [module, table] of tables) for (const name of Object.keys(table)) groupOf.set(name, module);
   expect(Object.keys(DORI_COMMANDS).sort()).toEqual([...groupOf.keys()].sort());

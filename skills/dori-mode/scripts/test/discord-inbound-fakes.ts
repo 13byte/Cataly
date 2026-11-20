@@ -67,7 +67,7 @@ export const discordRestWorld = (messages: TestDiscordMessage[] = []) => {
     aborted: [] as string[],
   };
   const requests: HttpRequest[] = [];
-  const http: Http = async (request) => {
+  const http: Http = async (request): ReturnType<Http> => {
     requests.push(request);
     const url = new URL(request.url);
     const path = url.pathname.slice("/api/v10".length);

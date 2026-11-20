@@ -1,7 +1,7 @@
 /** The Discord Gateway plumbing shared by `dori presence discord` and `dori inbound discord --gateway`. */
 import { join } from "node:path";
 import { takeLock } from "./checkpoint-lock.ts";
-import { die } from "./cli-context.ts";
+import { die, every, exitOnDisconnect } from "./cli-context.ts";
 import { withDeliveryLock } from "./delivery-lock.ts";
 import { discordLaneMonitor } from "./discord-lane-monitor.ts";
 import { isDiscordWakePending } from "./discord-lane-wake-pending.ts";
@@ -18,12 +18,14 @@ import {
   markDiscordInboundSeen,
 } from "./messenger/discord-inbound.ts";
 import { inboundContext } from "./messenger/discord-inbound-context.ts";
-import type { Emit } from "./messenger/discord-inbound-api.ts";
+import { type Emit, transientRetryDelay } from "./messenger/discord-inbound-api.ts";
 import { discordInboundLive } from "./messenger/discord-inbound-live.ts";
 import { discordInboundQueue } from "./messenger/discord-inbound-queue.ts";
 import { discordInboundEnv } from "./messenger/discord-inbound-state.ts";
 import { discordLaneRoute, openDiscordLaneInbox } from "./messenger/discord-lane-inbox.ts";
-import { DeliveryUncertainError, fetchHttp, RateLimitError } from "./messenger/http.ts";
+import { headEmitter, reconcileHead } from "./messenger/head-admission.ts";
+import { headUnresolved } from "./messenger/head-admission-state.ts";
+import { fetchHttp, MessengerError } from "./messenger/http.ts";
 import { recordOwes } from "./owes.ts";
 import { realClock } from "./run.ts";
 
@@ -65,10 +67,9 @@ const idList = (value: string | undefined): string[] =>
     .map((id) => id.trim())
     .filter((id) => id !== "");
 
-/**
- * Configured parents follow active threads unless DORI_DISCORD_THREADS=off; scope all keeps its own discovery.
- * `context` adds the channel, thread, topic and recorded purposes to each single stdout group.
- */
+// Existing REST lane-route contention is retryable; it must never fall through to head admission.
+class DiscordLaneIntakeHold extends MessengerError {}
+
 export const discordInboundCommand = async (
   deps: FlowDeps,
   options: {
@@ -95,11 +96,21 @@ export const discordInboundCommand = async (
   );
   if (!all && channelIds.length === 0) discordInboundEnv("DORI_DISCORD_CHANNEL_ID", env["DORI_DISCORD_CHANNEL_ID"]);
   const token = env["DORI_DISCORD_TOKEN"] || die("DORI_DISCORD_TOKEN is not set");
-  const queue = discordInboundQueue(stateDir);
+  const mode = env["DORI_MONITOR_ADMISSION"];
+  const native = mode === "1";
+  if (mode !== undefined && (!native || !process.send || !process.connected)) throw headUnresolved();
+  const queue = discordInboundQueue(stateDir, native);
   const delivery = { registry: deps.registry, clock: realClock };
   let receiver: DiscordAskReceiverPublication | undefined;
   let laneInbox: ReturnType<typeof openDiscordLaneInbox> | undefined;
   let releaseWake: (() => void) | undefined;
+  const close = () => {
+    releaseWake?.();
+    receiver?.close();
+    laneInbox?.close();
+    queue.close();
+  };
+  const unregisterDisconnect = native ? exitOnDisconnect(close) : undefined;
   try {
     if (wake) {
       const lock = takeLock(join(stateDir, "discord-lane-monitor.lock"), realClock.now(), (text) => new Error(text), {
@@ -109,6 +120,7 @@ export const discordInboundCommand = async (
         return die("Another Discord lane wake monitor is running for this state directory");
       releaseWake = lock;
     }
+    await reconcileHead(queue);
     if (!gateway && queue.first())
       die("Discord inbound has pending Gateway work; restart with --gateway before REST mode");
     const discord = new Discord(fetchHttp, realClock, token);
@@ -132,7 +144,15 @@ export const discordInboundCommand = async (
       );
     const watching = all ? "all" : intake.channels().join(",");
     const where = context ? inboundContext(discord, new DiscordChannels(stateDir), realClock.now) : undefined;
-    // Context and the owner line remain one stdout group, after the owe is published.
+    // Only the existing lead fallback crosses the native admission path.
+    const emitToHead = headEmitter(queue, intake.botId, ownerId, async (message, signal) => {
+      const text = where
+        ? `${formatDiscordInbound(message)}\n${formatInboundContext(message, await where(message.channel))}`
+        : formatDiscordInbound(message);
+      await recordOwes(stateDir, text, Date.now(), signal);
+      signal?.throwIfAborted();
+      return text;
+    });
     const emit: Emit = async (message, signal) => {
       signal?.throwIfAborted();
       if (
@@ -147,9 +167,10 @@ export const discordInboundCommand = async (
         const held = await withDeliveryLock(delivery, route.key, async () => {
           signal?.throwIfAborted();
           const current = await discordLaneRoute(stateDir, message.channel);
-          if (current && current.key !== route.key) throw new Error("Discord lane route changed; cursor not advanced");
+          if (current && current.key !== route.key)
+            throw new DiscordLaneIntakeHold("Discord lane route changed; cursor not advanced", 0);
           if (current?.kind === "closing")
-            throw new Error("Discord lane native close is in progress; cursor not advanced");
+            throw new DiscordLaneIntakeHold("Discord lane native close is in progress; cursor not advanced", 0);
           let session =
             route.kind === "live" && current?.kind === "live" && current.session === route.session
               ? current.session
@@ -167,43 +188,30 @@ export const discordInboundCommand = async (
           else laneInbox.add(session, message);
           return true;
         });
-        if (!held.ok) throw new Error("Discord lane delivery is locked; cursor not advanced");
+        if (!held.ok) throw new DiscordLaneIntakeHold("Discord lane delivery is locked; cursor not advanced", 0);
         if (held.value) {
           await markDiscordInboundSeen(discord, message);
           return;
         }
       }
-      const text = where
-        ? `${formatDiscordInbound(message)}\n${formatInboundContext(message, await where(message.channel))}`
-        : formatDiscordInbound(message);
-      await recordOwes(stateDir, text, Date.now(), signal);
-      signal?.throwIfAborted();
-      console.log(text);
+      await emitToHead(message, signal);
     };
     console.log(
       `INBOUND_READY discord owner=${ownerId} channel=${watching} bot=${intake.botId}${gateway ? " mode=gateway" : ""}`,
     );
-    if (!gateway) {
-      const interval = pollMinutes * 60_000;
-      for (;;) {
-        let wait = interval;
-        try {
+    if (!gateway)
+      return await every(
+        pollMinutes,
+        async () => {
           await intake.poll(emit);
           receiver?.refresh();
           if (serviceLanes && laneInbox) await serviceLanes(laneInbox, intake.channels());
-        } catch (error) {
+        },
+        (error, interval) => {
           receiver?.suspend();
-          if (error instanceof DeliveryUncertainError) throw error;
-          if (error instanceof RateLimitError) {
-            if (error.retryAfterMs > error.waitLimitMs) throw error;
-            wait = Math.max(interval, error.retryAfterMs);
-          }
-          console.log(`WARN ${error instanceof Error ? error.message : String(error)}`.slice(0, 300));
-        }
-        if (pollMinutes <= 0) return;
-        await realClock.sleep(wait);
-      }
-    }
+          return error instanceof DiscordLaneIntakeHold ? interval : (transientRetryDelay(error, interval) ?? false);
+        },
+      );
     // Gateway receipts mean successful backfill on the observed connection, not a separate connectivity probe.
     let connected = false;
     let generation = 0;
@@ -234,9 +242,7 @@ export const discordInboundCommand = async (
       }),
     );
   } finally {
-    releaseWake?.();
-    receiver?.close();
-    laneInbox?.close();
-    queue.close();
+    unregisterDisconnect?.();
+    close();
   }
 };

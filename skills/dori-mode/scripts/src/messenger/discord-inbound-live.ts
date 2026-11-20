@@ -1,6 +1,6 @@
 import { discordGateway, type GatewayClock, type GatewaySocket } from "./discord-gateway.ts";
 import { type Emit, type Message, transientRetryDelay } from "./discord-inbound-api.ts";
-import type { DiscordInboundQueue } from "./discord-inbound-queue.ts";
+import type { DiscordInboundFifo } from "./discord-inbound-queue.ts";
 import { discordThreadAdmission, type ThreadIntake } from "./discord-inbound-thread-admission.ts";
 
 const GUILD_MESSAGES = 1 << 9;
@@ -9,7 +9,7 @@ const MESSAGE_CONTENT = 1 << 15;
 
 type Intake = ThreadIntake & {
   accepts(message: Message, parent?: string | null): boolean;
-  sync(emit: Emit, queue?: DiscordInboundQueue, scoped?: () => void): Promise<void>;
+  sync(emit: Emit, queue?: DiscordInboundFifo, scoped?: () => void): Promise<void>;
   accept(message: Message, emit: Emit, after?: string | null, parent?: string | null): void | Promise<void>;
 };
 
@@ -27,7 +27,7 @@ export const discordInboundLive = (
   clock: GatewayClock,
   emit: Emit,
   report: (line: string) => void,
-  queue: DiscordInboundQueue,
+  queue: DiscordInboundFifo,
   lifecycle?: DiscordInboundLifecycle,
 ): DiscordInboundLive => {
   const admission = new AbortController();

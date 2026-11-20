@@ -149,6 +149,8 @@ if (flags.values["qualified-routes"] !== undefined) {
   if (flags.tokens.some((token) => token.kind === "option" && token.name === "qualified-routes" && token.inlineValue))
     die("--qualified-routes is a boolean flag; pass it without a value");
 }
+if (command === "inbound-abandon" && flags.tokens.filter((token) => token.kind === "option").length > 1)
+  die("--reason needs one explicit operator abandonment reason; no other options are accepted");
 const deps: FlowDeps = { run, clock: realClock, registry: new Registry(config.stateDir), config };
 let commands: Readonly<Record<string, Command>> = {};
 switch (command) {
@@ -202,6 +204,9 @@ switch (command) {
   case "inbound-lag":
   case "transcribe":
     commands = (await import("./cli-messenger.ts")).messengerCommands;
+    break;
+  case "inbound-abandon":
+    commands = { "inbound-abandon": (await import("./cli-discord-recovery.ts")).abandonDiscordInbound };
     break;
   case "decision":
     commands = (await import("./cli-decisions.ts")).decisionCommands;

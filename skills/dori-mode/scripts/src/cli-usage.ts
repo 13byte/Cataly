@@ -109,4 +109,6 @@ export const USAGE = `dori <command> [options]
                                        --gateway delivers owner messages live with REST backfill and ignores --loop, including 0
                                        --context (Discord) adds INBOUND_CONTEXT: channel, thread, topic and recorded purposes
                                        --wake-lanes (Discord, continuous REST) reopens verified lanes and sends threaded replies
+  inbound-abandon discord BOT:OWNER:CHANNEL:MESSAGE --reason TEXT
+                                       record an explicit decision after the original native head stops; never resend
   inbound-lag [--limit N]              receive-lag percentiles from state/telegram-lag.jsonl (the meter behind the INBOUND lines)`;

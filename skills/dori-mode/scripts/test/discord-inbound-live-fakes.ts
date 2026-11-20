@@ -2,7 +2,7 @@ import { afterEach } from "bun:test";
 import { discordInbound, type DiscordInboundOptions, formatDiscordInbound } from "../src/messenger/discord-inbound.ts";
 import type { Emit } from "../src/messenger/discord-inbound-api.ts";
 import { type DiscordInboundLive, discordInboundLive } from "../src/messenger/discord-inbound-live.ts";
-import { type DiscordInboundQueue, discordInboundQueue } from "../src/messenger/discord-inbound-queue.ts";
+import { type DiscordInboundFifo, discordInboundQueue } from "../src/messenger/discord-inbound-queue.ts";
 import type { DiscordInboundStore } from "../src/messenger/discord-inbound-state.ts";
 import { discordRestWorld, memoryDiscordCursor, type TestDiscordMessage } from "./discord-inbound-fakes.ts";
 import { memoryQueue } from "./discord-inbound-memory-queue.ts";
@@ -18,7 +18,7 @@ export const settle = () => new Promise<void>((resolve) => setImmediate(resolve)
 
 /** REST history, per-channel cursors and a fake Gateway socket wired to one live intake. */
 const liveWorldWithQueue =
-  (createQueue: (dir: string) => DiscordInboundQueue) =>
+  (createQueue: (dir: string) => DiscordInboundFifo) =>
   async (
     history: TestDiscordMessage[],
     options: DiscordInboundOptions,
@@ -112,6 +112,7 @@ type QueuedScenario = {
   options?: DiscordInboundOptions;
   sync?: boolean;
   legacy?: boolean;
+  nativeAdmission?: boolean;
 };
 
 /** Real SQLite close/reopen and atomic cursors; optional faults wrap those same stores, never replace them. */
@@ -124,9 +125,10 @@ export const queuedWorld = ({
   options = { ownerId: "10", channelIds: ["20"] },
   sync = true,
   legacy = false,
+  nativeAdmission = false,
 }: QueuedScenario) => {
   const state = withState();
-  let queue = discordInboundQueue(state.dir);
+  let queue = discordInboundQueue(state.dir, nativeAdmission);
   for (const [channel, cursor] of Object.entries(cursors)) queue.storeFor(channel).save(cursor);
   if (sync) queue.push("sync");
   for (const message of messages)
