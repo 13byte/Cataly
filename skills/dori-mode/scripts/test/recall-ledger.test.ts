@@ -14,6 +14,7 @@ const scope = createRecallScope("discord", "99", "10");
 const STORE = "recall-scoped-v1.sqlite";
 const room = { channel: "20", thread: "20" };
 const topic = { channel: "20", thread: "21" };
+const posix = test.skipIf(process.platform === "win32" || process.getuid === undefined);
 let state: TestState;
 let now: number;
 let warnings: string[];
@@ -47,7 +48,7 @@ test("recall is off by default and creates no ledger", () => {
   expect(existsSync(join(state.dir, STORE))).toBe(false);
 });
 
-test("a past reference recalls owner messages and replies from every thread of the same channel only", () => {
+posix("a past reference recalls owner messages and replies from every thread of the same channel only", () => {
   expect(said("20", "20", "1", "the deploy window is friday 18:00")).toBeUndefined();
   now += 1000;
   said("20", "21", "3", "ok, keep the deploy window note");
@@ -68,7 +69,7 @@ test("a past reference recalls owner messages and replies from every thread of t
   expect(warnings).toEqual([]);
 });
 
-test("a redelivered message is stored once and never recalls itself", () => {
+posix("a redelivered message is stored once and never recalls itself", () => {
   said("20", "20", "1", "earlier: rotate the staging key");
   const again = recalled(said("20", "20", "1", "earlier: rotate the staging key"));
   expect(again.rows).toEqual([]);
@@ -80,7 +81,7 @@ test("a redelivered message is stored once and never recalls itself", () => {
   }
 });
 
-test("stored rows are redacted, owner-only and dropped after the retention period", () => {
+posix("stored rows are redacted, owner-only and dropped after the retention period", () => {
   said("20", "20", "1", "token=abc123secret for the deploy");
   const ledger = openRecallLedger(state.dir, scope, { settings: undefined, now });
   try {
@@ -88,12 +89,12 @@ test("stored rows are redacted, owner-only and dropped after the retention perio
   } finally {
     ledger.close();
   }
-  if (process.platform !== "win32") expect(statSync(join(state.dir, STORE)).mode & 0o077).toBe(0);
+  expect(statSync(join(state.dir, STORE)).mode & 0o077).toBe(0);
   now += 8 * DAY;
   expect(recalled(recall(7).owner({ ...room, ref: "2", text: "yesterday deploy?" })).rows).toEqual([]);
 });
 
-test.skipIf(process.getuid === undefined)(
+test.skipIf(process.platform === "win32" || process.getuid === undefined)(
   "existing ledger and SQLite sidecars must be private single-link files",
   () => {
     const path = join(state.dir, STORE);
@@ -156,7 +157,7 @@ test("a ledger failure is a warning, not a lost message", () => {
   expect(warnings[0]).toStartWith("recall: ");
 });
 
-test("caller-supplied space controls where a reply is recorded, not the first row for its thread", () => {
+posix("caller-supplied space controls where a reply is recorded, not the first row for its thread", () => {
   said("30", "21", "1", "unrelated cached space");
   recall().lead({ ...topic, ref: "1", text: "deployment changed" });
   expect(recalled(said("20", "21", "2", "what changed earlier about deployment?")).rows).toMatchObject([
@@ -165,7 +166,7 @@ test("caller-supplied space controls where a reply is recorded, not the first ro
   expect(recalled(said("30", "21", "2", "what changed earlier about deployment?")).rows).toEqual([]);
 });
 
-test("exact-scope purge clears all its spaces and preserves overlapping rows in every other identity", () => {
+posix("exact-scope purge clears all its spaces and preserves overlapping rows in every other identity", () => {
   const identities = [
     [createRecallScope("discord", "99", "10"), "original"],
     [createRecallScope("discord", "98", "10"), "different bot"],
@@ -201,7 +202,7 @@ test("exact-scope purge clears all its spaces and preserves overlapping rows in 
   }
 });
 
-test("retention on open sweeps only the requested scope", () => {
+posix("retention on open sweeps only the requested scope", () => {
   const old = now - 31 * DAY;
   const otherScope = createRecallScope("discord", "98", "10");
   for (const identity of [scope, otherScope]) {

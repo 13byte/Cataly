@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { expect, spyOn, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { recallCommand } from "../src/cli-recall.ts";
@@ -127,6 +127,30 @@ test.skipIf(process.getuid === undefined)("manual search and purge leave a legac
     expect(await outputOf({ config, rest: [...identity, space, "rollout"] })).toEqual(["RECALL_NONE"]);
     expect(await outputOf({ config, rest: [...identity, "--purge"] })).toEqual(["RECALL_PURGED 0"]);
     expect(readFileSync(path)).toEqual(original);
+  } finally {
+    state.done();
+  }
+});
+
+test.skipIf(process.platform !== "win32")("Windows recall does not create, open, or purge a local ledger", async () => {
+  const state = withState();
+  const path = join(state.dir, scopedStore);
+  const config = { stateDir: state.dir, recall: enabled };
+  const warnings: string[] = [];
+  try {
+    const scope = createRecallScope("telegram", "99", "10");
+    const recall = conversationRecall({ ...config, scope }, (warning) => warnings.push(warning));
+    expect(recall?.owner({ channel: "-1001", thread: "-1001", ref: "1", text: "earlier note" })).toBeUndefined();
+    expect(warnings).toEqual(["recall: recall ledger requires POSIX file ownership and permissions"]);
+    expect(existsSync(path)).toBe(false);
+
+    writeFileSync(path, "fixture ledger kept byte-for-byte");
+    for (const rest of [
+      [...identity, space, "note"],
+      [...identity, "--purge"],
+    ])
+      await expect(recallCommand({ config, rest })).rejects.toThrow("requires POSIX file ownership and permissions");
+    expect(readFileSync(path, "utf8")).toBe("fixture ledger kept byte-for-byte");
   } finally {
     state.done();
   }

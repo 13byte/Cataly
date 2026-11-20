@@ -91,7 +91,7 @@ function openDatabase(stateDir: string, create: true): Database;
 function openDatabase(stateDir: string, create: false): Database | undefined;
 function openDatabase(stateDir: string, create: boolean): Database | undefined {
   if (!create && !lstatSync(stateDir, { throwIfNoEntry: false })) return undefined;
-  const uid = process.getuid?.();
+  const uid = process.platform === "win32" ? undefined : process.getuid?.();
   if (uid === undefined) throw new MessengerError("recall ledger requires POSIX file ownership and permissions", 0);
   if (create) mkdirSync(stateDir, { recursive: true, mode: 0o700 });
   const dir = realpathSync(stateDir);
