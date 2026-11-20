@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-import { fill } from "./config.ts";
+import { type DoriConfig, fill } from "./config.ts";
 import type { Reports } from "./reports.ts";
 import type { Clock, Runner } from "./run.ts";
 import {
@@ -11,8 +11,14 @@ import {
   type Usage,
   type UsageSnapshot,
 } from "./supervision-observe.ts";
+import { collectOmpUsage } from "./usage-omp.ts";
 
-type CostDeps = { readonly run: Runner; readonly clock: Pick<Clock, "now">; readonly reports: Reports };
+type CostDeps = {
+  readonly run: Runner;
+  readonly clock: Pick<Clock, "now">;
+  readonly reports: Reports;
+  readonly config?: Pick<DoriConfig, "stateDir" | "sessionsDir" | "defaultCwd">;
+};
 
 export class SupervisionCost {
   constructor(
@@ -21,6 +27,17 @@ export class SupervisionCost {
   ) {}
 
   async usage(lane: SupervisedLane, now: number): Promise<UsageSnapshot> {
+    if (this.options.usage === "omp" && this.deps.config) {
+      const observation = await collectOmpUsage(this.deps.config, lane, now);
+      return {
+        key: lane.key,
+        openedAt: lane.openedAt,
+        at: observation.at,
+        ...observation.total,
+        costBasis: observation.costBasis,
+        issues: observation.issues,
+      };
+    }
     let usage: Usage = { tokens: null, costUsd: null };
     if (this.options.usageArgv?.length) {
       const result = await this.deps.run(

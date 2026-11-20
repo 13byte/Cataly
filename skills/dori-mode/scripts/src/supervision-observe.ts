@@ -22,6 +22,8 @@ export type UsageSnapshot = Usage & {
   readonly at: string;
   readonly openedAt?: string;
   readonly final?: true;
+  readonly costBasis?: string;
+  readonly issues?: readonly string[];
 };
 export type SupervisedLane = Lane & { readonly activityPaths?: readonly string[]; readonly budget?: BudgetLimits };
 export type SupervisionOptions = {
@@ -30,6 +32,7 @@ export type SupervisionOptions = {
   readonly defaults?: BudgetLimits;
   readonly lanes?: Readonly<Record<string, BudgetLimits>>;
   readonly usageArgv?: readonly string[];
+  readonly usage?: "omp";
   readonly recordCostArgv?: readonly string[];
   readonly activityPaths?: readonly string[];
   readonly gitActivity?: boolean;

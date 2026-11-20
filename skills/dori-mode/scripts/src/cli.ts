@@ -5,7 +5,6 @@ import type { Command } from "./cli-context.ts";
 import { USAGE } from "./cli-usage.ts";
 import type { FlowDeps } from "./done-flow.ts";
 import { QueueError, TemplateError } from "./launch-errors.ts";
-
 const [command = "", ...rest] = process.argv.slice(2);
 const renderTablesUsage = "--render-tables requires dori send discord (with or without --edit)";
 // The harness grammar distinguishes a flag from message text and lock argv.
@@ -52,7 +51,8 @@ if (command === "update") process.exit(await (await import("../../../../src/rele
 if (command === "upstream") process.exit(await (await import("../../../../src/update/cli.ts")).runUpdate(rest));
 if (command === "remote") process.exit(await (await import("./cli-remote.ts")).runRemote(rest));
 if (command === "headless") process.exit(await (await import("./cli-headless.ts")).runHeadless(rest));
-
+if (command === "usage") process.exit(await (await import("./cli-usage-report.ts")).runUsageReport(command, rest));
+if (command === "quota") process.exit(await (await import("./cli-usage-report.ts")).runUsageReport(command, rest));
 const { die, makeCli } = await import("./cli-context.ts");
 const { ConfigError, loadConfig } = await import("./config.ts");
 const { Registry } = await import("./registry.ts");

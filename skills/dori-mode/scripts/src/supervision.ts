@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { Checkpoints } from "./checkpoints.ts";
+import type { DoriConfig } from "./config.ts";
 import { runContext } from "./lane-run.ts";
 import type { Registry } from "./registry.ts";
 import { ReportError } from "./report-events.ts";
@@ -28,6 +29,7 @@ import {
 
 export type SupervisionDeps = {
   readonly stateDir: string;
+  readonly config?: Pick<DoriConfig, "stateDir" | "sessionsDir" | "defaultCwd">;
   readonly run: Runner;
   readonly reports?: Reports;
   readonly alert?: (lane: SupervisedLane, message: string) => void | Promise<void>;
@@ -76,7 +78,7 @@ export class Supervision {
   ) {
     this.reports = deps.reports ?? new Reports(deps.stateDir);
     this.checkpoints = new Checkpoints(deps.stateDir);
-    this.cost = new SupervisionCost({ run: deps.run, clock: deps.clock, reports: this.reports }, options);
+    this.cost = new SupervisionCost({ ...deps, reports: this.reports }, options);
   }
 
   private enabled(lane: SupervisedLane): boolean {
@@ -137,7 +139,8 @@ export class Supervision {
     const previous = readObservation(path, lane);
     const progress = this.reports.read(lane.key, scope);
     // Without a usage hook each sweep would append the same unknown reading; close still records its final one.
-    if (this.options.usageArgv?.length) this.cost.record(usage);
+    const usageEnabled = this.options.usage === "omp" || Boolean(this.options.usageArgv?.length);
+    if (usageEnabled) this.cost.record(usage);
     const checkpoint = sample ? this.checkpoints.latest(lane) : null;
     const activity = sample?.signature(progress, checkpoint) ?? null;
     const timer =
@@ -197,7 +200,7 @@ export class Supervision {
         undelivered.set(message, error instanceof Error ? error.message : String(error));
       }
     }
-    const changed = appended || this.options.usageArgv?.length || (freshAlerts.length && this.deps.alert);
+    const changed = appended || usageEnabled || (freshAlerts.length && this.deps.alert);
     const latest = changed ? this.reports.read(lane.key, scope) : progress;
     // Commit the decision before resampling so an advisory probe cannot undo a stall or alert receipt.
     const observation: Observation = {

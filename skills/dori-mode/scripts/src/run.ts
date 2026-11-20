@@ -13,9 +13,34 @@ export type RunOptions = {
   readonly cwd?: string;
   readonly timeoutMs?: number;
   readonly preserveOutput?: boolean;
+  /** When set, each pipe is bounded before decoding. Overflow never returns partial child text. */
+  readonly captureMaxBytes?: number;
   readonly env?: Env;
 };
 export type Runner = (argv: readonly string[], opts?: RunOptions) => Promise<Ran>;
+
+const capture = async (stream: ReadableStream<Uint8Array>, max: number | undefined, stop: () => void) => {
+  if (max === undefined) return await new Response(stream).text();
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = "";
+  try {
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) return text + decoder.decode();
+      if (chunk.value.byteLength > max - bytes) {
+        stop();
+        await reader.cancel();
+        return null;
+      }
+      bytes += chunk.value.byteLength;
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+  } finally {
+    reader.releaseLock();
+  }
+};
 
 export const run: Runner = async (argv, opts = {}) => {
   let p: ReturnType<typeof Bun.spawn>;
@@ -30,11 +55,15 @@ export const run: Runner = async (argv, opts = {}) => {
   } catch (e) {
     return { code: 127, out: "", err: e instanceof Error ? e.message : String(e), spawnFailed: true as const };
   }
+  const stop = () => {
+    if (p.exitCode === null && p.signalCode === null) p.kill("SIGKILL");
+  };
   const [out, err, code] = await Promise.all([
-    new Response(p.stdout as ReadableStream).text(),
-    new Response(p.stderr as ReadableStream).text(),
+    capture(p.stdout as ReadableStream<Uint8Array>, opts.captureMaxBytes, stop),
+    capture(p.stderr as ReadableStream<Uint8Array>, opts.captureMaxBytes, stop),
     p.exited,
   ]);
+  if (out === null || err === null) return { code: 125, out: "", err: "child output exceeded capture limit" };
   return {
     code: p.signalCode ? 124 : code,
     out: opts.preserveOutput ? out : out.trim(),

@@ -34,6 +34,8 @@ export type Lane = {
   readonly session?: string;
   readonly sessionFile?: string;
   readonly sessionVia?: string;
+  /** Prior verified registry bindings, not arbitrary journal ancestors. */
+  readonly priorSessions?: readonly string[];
   /** Terminal intent and operator-defined condition; never an automatic resume trigger. */
   readonly hold?: { readonly reason: string; readonly resumeWhen?: string; readonly outcome?: "parked" | "abandoned" };
   readonly brief: string;
