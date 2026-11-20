@@ -21,7 +21,7 @@ test("legacy purpose maps migrate with their notes and a source receipt in one p
       notes: { ...legacy, "30": entry },
       receipts: { [key]: { source, channel: "30", purpose: "goal", result: entry } },
     });
-    expect(statSync(store.path).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(store.path).mode & 0o777).toBe(0o600);
   } finally {
     state.done();
   }

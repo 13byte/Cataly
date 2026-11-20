@@ -1,7 +1,23 @@
 import { expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { discordInboundOptions } from "../src/messenger/discord-inbound-env.ts";
 import { withState } from "./fakes.ts";
+
+const inboundEnv = {
+  DORI_DISCORD_OWNER_ID: "10",
+  DORI_DISCORD_CHANNEL_ID: " 20, 30,20 ",
+  DORI_DISCORD_CHANNEL_IDS: "30, 20, 30",
+};
+
+test("shared inbound settings deduplicate legacy and plural channel IDs in their original order", () => {
+  expect(discordInboundOptions(inboundEnv)).toEqual({
+    ownerId: "10",
+    channelIds: ["20", "30"],
+    all: false,
+    threads: true,
+  });
+});
 
 test("shared inbound settings preserve the receiver channel set across duplicate singular and plural IDs", async () => {
   const state = withState();
@@ -50,9 +66,7 @@ test("shared inbound settings preserve the receiver channel set across duplicate
           DORI_CONFIG: config,
           DORI_STATE_DIR: state.dir,
           DORI_DISCORD_TOKEN: "synthetic-inbound-token",
-          DORI_DISCORD_OWNER_ID: "10",
-          DORI_DISCORD_CHANNEL_ID: " 20, 30,20 ",
-          DORI_DISCORD_CHANNEL_IDS: "30, 20, 30",
+          ...inboundEnv,
         },
         stdout: "pipe",
         stderr: "pipe",
@@ -64,6 +78,13 @@ test("shared inbound settings preserve the receiver channel set across duplicate
       new Response(child.stderr).text(),
       child.exited,
     ]);
+    if (process.platform === "win32") {
+      expect(code).toBe(1);
+      expect(err).toContain("Discord inbound queue directory must be private (0700) and owned by this user");
+      expect(out).not.toContain("INBOUND_READY");
+      expect(out).not.toContain("DISCORD_ASK_SCOPE_QA");
+      return;
+    }
     expect({ code, err }).toEqual({ code: 0, err: "" });
     expect(out.trim().split("\n")[0]).toBe("INBOUND_READY discord owner=10 channel=20,30 bot=99");
     const prefix = "DISCORD_ASK_SCOPE_QA ";
