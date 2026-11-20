@@ -1,4 +1,4 @@
-import type { DiscordInboundQueue, DiscordInboundRecord } from "../src/messenger/discord-inbound-queue.ts";
+import type { DiscordInboundFifo, DiscordInboundRecord } from "../src/messenger/discord-inbound-queue.ts";
 import type { DiscordInboundStore } from "../src/messenger/discord-inbound-state.ts";
 import { memoryDiscordCursor } from "./discord-inbound-fakes.ts";
 
@@ -10,7 +10,7 @@ type MemoryMessage = {
 };
 
 /** Live scope tests need queue ordering, not the production queue's private disk storage. */
-export const memoryQueue = (): DiscordInboundQueue => {
+export const memoryQueue = (): DiscordInboundFifo => {
   const rows = new Map<number, DiscordInboundRecord>();
   const messages = new Map<number, MemoryMessage>();
   const stores = new Map<string, DiscordInboundStore>();

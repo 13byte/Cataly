@@ -14,7 +14,7 @@ import {
   unavailable,
 } from "./discord-inbound-api.ts";
 import { verifyDiscordInboundIdentity } from "./discord-inbound-identity.ts";
-import type { DiscordInboundQueue } from "./discord-inbound-queue.ts";
+import type { DiscordInboundFifo } from "./discord-inbound-queue.ts";
 import { discordInboundEnv, type DiscordInboundStore, isDiscordSnowflake } from "./discord-inbound-state.ts";
 import { discordThreadPoll } from "./discord-inbound-thread-poll.ts";
 import { discordThreads } from "./discord-inbound-threads.ts";
@@ -187,12 +187,12 @@ export const discordInbound = async (
       return store ? current(store) : storeFor(channel, false).load();
     },
     channels: (): string[] => [...watched.keys()],
-    async poll(emit: Emit, queue?: DiscordInboundQueue, scoped?: () => void): Promise<void> {
+    async poll(emit: Emit, queue?: DiscordInboundFifo, scoped?: () => void): Promise<void> {
       if (opts.all ? ++polls % 100 === 0 : threads && ++polls % 10 === 0) await refresh(false);
       scoped?.();
       for (const [channel, store] of [...watched]) await pollChannel(channel, store, emit, queue);
     },
-    async sync(emit: Emit, queue?: DiscordInboundQueue, scoped?: () => void): Promise<void> {
+    async sync(emit: Emit, queue?: DiscordInboundFifo, scoped?: () => void): Promise<void> {
       await refresh(false);
       scoped?.();
       if (queue) {

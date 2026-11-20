@@ -2,6 +2,7 @@
 import { readFileSync } from "node:fs";
 import type { DoriConfig } from "./config.ts";
 import type { FlowDeps } from "./done-flow.ts";
+import { isDiscordSnowflake } from "./messenger/discord-inbound-state.ts";
 import type { SlackAuth } from "./messenger/slack.ts";
 import { type Lane, statusOf } from "./registry.ts";
 import { runtimesOf } from "./run.ts";
@@ -27,16 +28,34 @@ export const envSlackToken = (): string | undefined => {
   }
 };
 
+/** A receiver must release its local state if its supervising IPC channel goes away. */
+export const exitOnDisconnect = (close: () => void): (() => void) => {
+  const disconnected = () => {
+    try {
+      close();
+    } finally {
+      process.exit(1);
+    }
+  };
+  process.once("disconnect", disconnected);
+  return () => {
+    process.off("disconnect", disconnected);
+  };
+};
+
+/** A retry policy may stop (`false`), keep the polling interval (`true`), or specify a delay in milliseconds. */
 export const every = async (
   minutes: number,
   tick: () => Promise<void>,
-  retryDelay?: (error: unknown, intervalMs: number) => number,
+  retry?: (error: unknown, intervalMs: number) => boolean | number,
 ): Promise<void> => {
   const interval = minutes * 60_000;
   for (;;) {
     let wait = interval;
     await tick().catch((e: unknown) => {
-      wait = retryDelay?.(e, interval) ?? interval;
+      const decision = retry?.(e, interval) ?? interval;
+      if (decision === false) throw e;
+      wait = decision === true ? interval : decision;
       console.log(`WARN ${e instanceof Error ? e.message : String(e)}`.slice(0, 300));
     });
     if (minutes <= 0) return;
@@ -81,6 +100,27 @@ export type Cli = {
 };
 
 export type Command = (cli: Cli) => Promise<void>;
+
+/** Local recovery only: never authenticate to Discord or open a native session. */
+export const abandonDiscordInbound: Command = async ({ key, positionals, strings, config }) => {
+  if (key !== "discord") die("inbound-abandon supports discord only");
+  const identity = positionals[1];
+  const ids = identity?.split(":");
+  if (positionals.length !== 2 || !identity || ids?.length !== 4 || !ids.every(isDiscordSnowflake))
+    return die("inbound-abandon requires the exact bot:owner:channel:message source identity");
+  const reasons = strings("reason");
+  const reason = reasons[0]?.trim();
+  if (reasons.length !== 1 || !reason) return die("--reason needs one explicit operator abandonment reason");
+  // SQLite belongs to the selected recovery command, not shared CLI startup.
+  const { discordInboundQueue } = await import("./messenger/discord-inbound-queue.ts");
+  const queue = discordInboundQueue(config.stateDir);
+  try {
+    const { source: _source, ...decision } = queue.abandon(identity, reason);
+    console.log(`ADMISSION_ABANDONED ${JSON.stringify(decision)}`);
+  } finally {
+    queue.close();
+  }
+};
 
 export const makeCli = (
   command: string,

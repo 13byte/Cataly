@@ -34,6 +34,7 @@ export type FakePi = {
   messages: Array<{ content: string; options: unknown }>;
   userMessages: string[];
   notes: string[];
+  statuses: Map<string, string>;
   session: FakeSession;
   ctx(): DoriContext;
   /** Runs handlers in registration order, chaining before_agent_start prompt replacements as OMP does. */
@@ -54,6 +55,7 @@ export const fakePi = (options: FakeOptions): FakePi => {
     messages: [],
     userMessages: [],
     notes: [],
+    statuses: new Map(),
     session: options.session,
     ctx: () => ({
       cwd: tmpdir(),
@@ -65,8 +67,15 @@ export const fakePi = (options: FakeOptions): FakePi => {
         getSessionId: () => fake.session.id,
         getSessionFile: () => fake.session.file,
         getBranch: () => [...fake.session.entries],
+        getEntries: () => [...fake.session.entries],
       },
-      ui: { notify: (message: string) => void fake.notes.push(message) },
+      ui: {
+        notify: (message: string) => void fake.notes.push(message),
+        setStatus: (key, text) => {
+          if (text === undefined) fake.statuses.delete(key);
+          else fake.statuses.set(key, text);
+        },
+      },
     }),
     emit: async (event, payload = { type: event }) => {
       const results: unknown[] = [];

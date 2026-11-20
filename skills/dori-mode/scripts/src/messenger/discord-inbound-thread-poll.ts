@@ -1,5 +1,5 @@
 import { type Emit, inboundProtocolError, isOwnerMessage, type Message, newer } from "./discord-inbound-api.ts";
-import type { DiscordInboundQueue } from "./discord-inbound-queue.ts";
+import type { DiscordInboundFifo } from "./discord-inbound-queue.ts";
 import type { DiscordInboundStore } from "./discord-inbound-state.ts";
 
 type PollIntake = {
@@ -16,7 +16,7 @@ type PollIntake = {
 /** The existing quiet probe/full-page merge, shared by watched channels and retained archived-thread recovery. */
 export const discordThreadPoll =
   (intake: PollIntake) =>
-  async (channelId: string, store: DiscordInboundStore, emit: Emit, queue?: DiscordInboundQueue): Promise<void> => {
+  async (channelId: string, store: DiscordInboundStore, emit: Emit, queue?: DiscordInboundFifo): Promise<void> => {
     const { current, readPage, ownerId, botId, valid, accepts, accept, deliver } = intake;
     const after = current(store);
     const latest = await readPage(channelId, 1);
