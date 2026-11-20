@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, rmSync } from "node:fs";
-import { requiredSourceRequest } from "../../test/fixtures/omp-native-host/required-source.ts";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { readPaneState } from "../../skills/dori-mode/scripts/src/lane-state.ts";
 import { calls, load, useConfig, type FakeOptions } from "./fake-pi.ts";
@@ -88,41 +88,49 @@ for (const [name, options, status] of [
 }
 
 for (const boundary of ["session", "provider"] as const) {
-  test(`real native ${boundary} sends zero requests for an unavailable exact model`, async () => {
-    const keys = ["HOME", "DORI_CONFIG", "DORI_STATE_DIR", "DORI_OMP_ULW_PATH", "HERDR_PANE_ID", "HC_TERMINAL_ID"];
-    const previous = keys.map((key) => process.env[key]);
-    const home = dirname(useConfig(""));
-    process.env.HOME = home;
-    delete process.env.DORI_OMP_ULW_PATH;
-    delete process.env.HERDR_PANE_ID;
-    delete process.env.HC_TERMINAL_ID;
-    try {
-      for (const [selector, expected] of [
-        ["openai/required-source-local", 1],
-        ["openai/absent", 0],
-      ] as const) {
-        const cwd = join(home, String(expected));
-        mkdirSync(cwd);
-        const result = await requiredSourceRequest(
-          join(import.meta.dir, "../index.ts"),
-          cwd,
-          "lane",
-          boundary,
-          selector,
-        );
-        expect(result.errors.filter((error) => error.event === "session_start")).toEqual([]);
-        expect(result.requests).toBe(expected);
-        if (expected === 0)
-          expect(result.errors.some((error) => error.error.includes("STARTUP_MODEL_HOLD"))).toBe(true);
-      }
-    } finally {
-      keys.forEach((key, index) => {
-        if (previous[index] === undefined) delete process.env[key];
-        else process.env[key] = previous[index];
-      });
-      rmSync(home, { recursive: true, force: true });
-    }
-  });
+  for (const availability of ["available", "unavailable"] as const) {
+    const requests = availability === "available" ? "one request" : "zero requests";
+    const title = `real native ${boundary} sends ${requests} for an ${availability} exact model`;
+    test(
+      title,
+      async () => {
+        const home = mkdtempSync(join(tmpdir(), "dori-native-launch-"));
+        const config = join(home, "config.json");
+        try {
+          writeFileSync(config, JSON.stringify({ stateDir: join(home, "state"), ompUlwPath: "" }));
+          const fixture = join(import.meta.dir, "../../test/fixtures/omp-native-host/launch-model.ts");
+          const child = Bun.spawn([process.execPath, "--no-env-file", fixture, boundary, availability], {
+            cwd: home,
+            env: {
+              PATH: process.env.PATH,
+              SystemRoot: process.env.SystemRoot,
+              HOME: home,
+              USERPROFILE: home,
+              TMPDIR: home,
+              TEMP: home,
+              TMP: home,
+              NO_COLOR: "1",
+              PI_CODING_AGENT_DIR: join(home, "agent"),
+              DORI_CONFIG: config,
+              DORI_TEST_OMP_ROOT: process.env.DORI_TEST_OMP_ROOT,
+            },
+            stdout: "pipe",
+            stderr: "pipe",
+            timeout: 25_000,
+          });
+          const [out, err, code] = await Promise.all([
+            new Response(child.stdout).text(),
+            new Response(child.stderr).text(),
+            child.exited,
+          ]);
+          expect(code, [out, err, child.signalCode].filter(Boolean).join("\n")).toBe(0);
+        } finally {
+          rmSync(home, { recursive: true, force: true });
+        }
+      },
+      30_000,
+    );
+  }
 }
 
 test("the launch lock follows its initial session, not ordinary sessions opened in the same process", async () => {
