@@ -1,10 +1,10 @@
-import type { TerminateIdentity } from "../../../../src/platform/adapter.ts";
-import { platform } from "../../../../src/platform/index.ts";
+import { HeadlessRuntime } from "../../../../src/runtime/headless.ts";
 import type { Probe, SessionRef } from "../../../../src/runtime/types.ts";
 import type { FlowDeps } from "./done-flow.ts";
 import type { LessonInput } from "./lessons.ts";
 import { confirmedLaneState, isBareLaneShell } from "./lifecycle-session.ts";
 import { pendingDiscordLane } from "./messenger/discord-lane-inbox.ts";
+import { type CloseProcess, processHold, processIdentity, sameProcess } from "./native-close-process.ts";
 import { type Lane, sameLaneGeneration, sessionOf, statusOf, withStatus } from "./registry.ts";
 import { iso, runtimesOf } from "./run.ts";
 import type { Check } from "./signals.ts";
@@ -23,7 +23,7 @@ export type NativeCloseIntent = CloseBasis & {
   /** Initial lanes have no reopen epoch; their original registration still binds the close. */
   readonly openedAt?: string;
   /** The kernel incarnation, independent of wall-clock and timezone changes. */
-  readonly process?: TerminateIdentity & { readonly pid: number };
+  readonly process?: CloseProcess;
 };
 
 // A Done decision and a prepared close contend only on the short registry writer lock. Neither waits for pane I/O.
@@ -76,42 +76,11 @@ const recordClosed = async (deps: FlowDeps, lane: Lane, basis: CloseBasis): Prom
   return closed ? { kind: "closed", lane: closed, pane } : { kind: "changed", pane };
 };
 
-const processIdentity = (deps: FlowDeps, pid: number) => {
-  const reader = deps.platform ?? platform;
-  const { startTicks } = reader.procStat(pid);
-  const bootId = reader.bootId();
-  if (!startTicks || !bootId) throw new Error(`native process ${pid} identity is unconfirmed`);
-  return { pid, startTicks, bootId };
-};
-
-const processHold = async (deps: FlowDeps, process: NativeCloseIntent["process"]): Promise<string | undefined> => {
-  if (
-    !process ||
-    !Number.isSafeInteger(process.pid) ||
-    process.pid <= 0 ||
-    typeof process.startTicks !== "string" ||
-    !process.startTicks ||
-    typeof process.bootId !== "string" ||
-    !process.bootId
-  )
-    return "prepared close has no confirmed native process identity";
-  // Only a successful full table or a different kernel incarnation proves exit, never a wall-clock shift.
-  const table = await deps.run(["ps", "-A", "-o", "pid="]);
-  const rows = table.out.split("\n").filter((line) => line.trim());
-  if (table.code !== 0 || rows.length === 0 || rows.some((line) => !/^\s*\d+\s*$/.test(line)))
-    return "native process exit is unconfirmed: process table unavailable";
-  if (rows.some((line) => Number(line.trim()) === process.pid)) {
-    const current = processIdentity(deps, process.pid);
-    if (current.startTicks === process.startTicks && current.bootId === process.bootId)
-      return `native process ${process.pid} is still present`;
-  }
-  return undefined;
-};
-
 /** Keep cleanup behind a fresh busy check and the observed native process's exit, not just pane disappearance. */
 export const commitClose = async (deps: FlowDeps, seen: Lane, basis: CloseBasis): Promise<CloseCommit> => {
   const saved = seen.nativeCloseIntent;
-  const initial = seen.lifecycleEpoch === undefined && !saved;
+  const target = sessionOf(seen);
+  const initial = target?.runtime !== "headless" && seen.lifecycleEpoch === undefined && !saved;
   const hold = (reason: string): CloseCommit => ({ kind: "held", reason });
   const unconfirmed = "native pane identity or approval state is unconfirmed";
   const busy = "main agent is still working";
@@ -121,7 +90,6 @@ export const commitClose = async (deps: FlowDeps, seen: Lane, basis: CloseBasis)
   let lane = seen;
   let intent = saved;
   let session = lane.session;
-  const target = sessionOf(lane);
   const legacyClose = async (ref: SessionRef): Promise<CloseCommit> => {
     try {
       if (mainBusy(await runtimesOf(deps).for(ref).probe(ref, { foregroundOnly: true }))) return hold(busy);
@@ -151,6 +119,8 @@ export const commitClose = async (deps: FlowDeps, seen: Lane, basis: CloseBasis)
       const state = await confirmedLaneState(deps, { ...lane, session }, target);
       if (!state) return initial ? legacyClose(target) : hold(unconfirmed);
       if (state.agentStatus === "working") return hold(busy);
+      if (target.runtime === "headless" && (state.agentStatus !== "idle" || state.sessionFile !== lane.sessionFile))
+        return hold(unconfirmed);
       if (pendingDiscordLane(deps.config.stateDir, lane)) return hold("Discord messages are still pending");
       let process: ReturnType<typeof processIdentity>;
       try {
@@ -179,25 +149,27 @@ export const commitClose = async (deps: FlowDeps, seen: Lane, basis: CloseBasis)
 
     const { ref } = intent;
     const runtime = runtimesOf(deps).for(ref);
+    const headless = ref.runtime === "headless";
+    if (headless && !(runtime instanceof HeadlessRuntime)) return hold(unconfirmed);
+    const isPresent = async () =>
+      headless ? (await runtime.probe(ref)).status !== "gone" : (await runtime.list()).some((s) => s.ref.id === ref.id);
     // An interrupted request may already have removed the target. Only its saved process proof can settle that close.
-    if (!saved || (await runtime.list()).some((s) => s.ref.id === ref.id)) {
+    if (!saved || (await isPresent())) {
       if (saved && pendingDiscordLane(deps.config.stateDir, lane)) return hold("Discord messages are still pending");
       const state = await confirmedLaneState(deps, lane, ref);
       if (!state) {
         const current = await runtime.probe(ref, { foregroundOnly: true });
         if (mainBusy(current)) return hold(busy);
-        if (!observedBareShell(current)) return hold(unconfirmed);
+        if (headless || !observedBareShell(current)) return hold(unconfirmed);
         const refusal = await processHold(deps, intent.process);
         if (refusal) return hold(refusal);
       } else {
         if (state.agentStatus === "working") return hold(busy);
+        if (headless && (state.agentStatus !== "idle" || state.sessionFile !== lane.sessionFile))
+          return hold(unconfirmed);
         const process = processIdentity(deps, state.pid);
         if (intent.process) {
-          if (
-            intent.process.pid !== process.pid ||
-            intent.process.startTicks !== process.startTicks ||
-            intent.process.bootId !== process.bootId
-          )
+          if (!sameProcess(intent.process, process))
             return hold("prepared close belongs to a different native process");
         } else {
           // An older prepared intent can acquire proof while its exact native pane is still live, never after it vanished.
@@ -223,8 +195,22 @@ export const commitClose = async (deps: FlowDeps, seen: Lane, basis: CloseBasis)
           : !observedBareShell(current)
       )
         return hold(unconfirmed);
-      await runtime.close(ref, intent.epoch === undefined && ref.container ? "container" : "session");
-      if ((await runtime.list()).some((s) => s.ref.id === ref.id)) return hold(`pane ${ref.id} is still present`);
+      if (headless) {
+        const process = intent.process;
+        if (
+          !process ||
+          current.agent !== "omp" ||
+          current.status !== "idle" ||
+          current.sessionFile !== lane.sessionFile
+        )
+          return hold(unconfirmed);
+        if (!sameProcess(process, processIdentity(deps, process.pid)))
+          return hold("prepared close belongs to a different native process");
+        await runtime.close(ref, "session", intent.session);
+      } else {
+        await runtime.close(ref, intent.epoch === undefined && ref.container ? "container" : "session");
+      }
+      if (await isPresent()) return hold(`pane ${ref.id} is still present`);
     }
     const refusal = await processHold(deps, intent.process);
     if (refusal) return hold(refusal);

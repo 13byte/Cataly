@@ -1,8 +1,9 @@
+import { headlessArgv } from "../../../../src/runtime/headless.ts";
 import { configPath, fill } from "./config.ts";
 import { renderTemplate } from "./launch-template.ts";
 import { type LaunchInput, validateLaunch } from "./launch-input.ts";
 import type { FlowDeps } from "./done-flow.ts";
-import { withLaunchLock } from "./delivery-lock.ts";
+import { parseOwnershipRef, withLaunchLock, withTerminalAdoptionLock } from "./delivery-lock.ts";
 import { BRIEF_START, footer, originalBrief } from "./launch-footer.ts";
 import { parseRef } from "../../../../src/runtime/types.ts";
 import { selectionFor } from "./launch-selection.ts";
@@ -13,6 +14,7 @@ import { Reports } from "./reports.ts";
 import { Lessons, renderLessons } from "./lessons.ts";
 import { laneLaunchEnv, TokenFileError } from "./slack-token.ts";
 import { lastLines, observeLaunch } from "./launch-finished.ts";
+import { startHeadless } from "./launch-headless.ts";
 
 export class LaunchError extends Error {}
 
@@ -38,8 +40,14 @@ export const adoptLane = async (
   };
   // `hc:t7` or `herdr:w1:p3` names its runtime; any other id is a herdr pane, as before runtimes existed.
   const ref = parseRef(input.pane);
+  if (ref?.runtime === "headless") throw new LaunchError("headless lanes must be launched, not adopted");
   const lane = ref ? { ...base, ...sessionFields(ref) } : upgradeLane({ ...base, pane: input.pane });
-  if (!(await deps.registry.create(lane))) throw new LaunchError(`lane ${input.key} is already registered`);
+  const registered = await withTerminalAdoptionLock(deps, parseOwnershipRef(input.pane), () =>
+    deps.registry.create(lane),
+  );
+  if (!registered.ok)
+    throw new LaunchError(`terminal adoption held for lane ${input.key}; retry after terminal lifecycle work`);
+  if (!registered.value) throw new LaunchError(`lane ${input.key} is already registered`);
   return lane;
 };
 
@@ -107,10 +115,24 @@ export const launchLane = async (
 export const openLaunch = async (deps: FlowDeps, input: LaunchInput, queuedBrief?: string) => {
   const { lane: draft, preamble, warnings } = await prepareLaunch(deps, input, queuedBrief);
   const rts = runtimesOf(deps);
-  const group = deps.config.laneWorkspace || undefined;
+  const runtime = input.runtime ?? (deps.config.laneRuntime === "headless" ? "headless" : undefined);
+  const group = runtime === "headless" ? undefined : deps.config.laneWorkspace || undefined;
+  let argv: readonly string[] | undefined;
+  if (runtime === "headless") {
+    try {
+      argv = headlessArgv(deps.config.agentCommand, input.model ?? deps.config.defaultModel);
+    } catch (error) {
+      throw new LaunchError(error instanceof Error ? error.message : String(error));
+    }
+  }
   let env: Record<string, string>;
   try {
-    env = laneLaunchEnv(process.env, configPath(), deps.config);
+    if (runtime === "headless") {
+      const callerEnv = deps.env ?? process.env;
+      env = laneLaunchEnv(callerEnv, callerEnv["DORI_CONFIG"] ?? configPath(), deps.config);
+    } else {
+      env = laneLaunchEnv(process.env, configPath(), deps.config);
+    }
   } catch (e) {
     throw e instanceof TokenFileError ? new LaunchError(`token file refused: ${e.message}`) : e;
   }
@@ -118,6 +140,7 @@ export const openLaunch = async (deps: FlowDeps, input: LaunchInput, queuedBrief
   const spec = { name: input.key, role: "lane", container: "tab", cwd, env } as const;
   const opened = await openLaneSession(deps.registry, rts, group === undefined ? spec : { ...spec, group }, draft, {
     preamble,
+    ...(runtime === undefined ? {} : { runtime }),
     generated: queuedBrief !== undefined || Boolean(input.template),
   });
   if (opened.kind === "failed") {
@@ -125,7 +148,13 @@ export const openLaunch = async (deps: FlowDeps, input: LaunchInput, queuedBrief
     throw new LaunchError(`${opened.what}: ${why}`);
   }
   if (opened.kind === "taken") throw new LaunchError(`lane ${input.key} is already registered`);
-  return { warnings, start: () => startLane(deps, input, { opened, rts }) };
+  return {
+    warnings,
+    start: () =>
+      argv === undefined
+        ? startLane(deps, input, { opened, rts })
+        : startHeadless(deps, input, { opened, rts, argv, env }),
+  };
 };
 
 const startLane = async (

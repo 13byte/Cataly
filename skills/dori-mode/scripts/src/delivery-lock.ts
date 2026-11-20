@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { formatRef, parseRef, type SessionRef } from "../../../../src/runtime/types.ts";
 import { takeLock } from "./checkpoint-lock.ts";
 import type { FlowDeps } from "./done-flow.ts";
 
@@ -57,3 +59,29 @@ export const withLaunchLock = <T>(
   fn: () => Promise<T>,
   waitMs = DELIVERY_WAIT_MS,
 ): Promise<Held<T>> => withLaneLock(deps, key, fn, waitMs, "launch");
+
+/** Native endpoint metadata uses a bare hc address; adoption also accepts the prefixed address. */
+export const parseOwnershipRef = (pane: string): SessionRef | undefined =>
+  parseRef(pane) ?? (/^t[0-9a-z]+$/.test(pane) ? { runtime: "hc", id: pane } : undefined);
+
+/** A pane-less native endpoint needs the same fence as every adoption, since its physical address is unknown. */
+export const withTerminalOwnershipLock = <T>(
+  deps: Pick<FlowDeps, "registry" | "clock">,
+  ref: SessionRef | undefined,
+  fn: () => Promise<T>,
+): Promise<Held<T>> => {
+  const key = ref ? `@terminal-${createHash("sha256").update(formatRef(ref)).digest("hex")}` : "@terminal-adoption";
+  return withLaunchLock(deps, key, fn, 0);
+};
+
+/** Called inside the per-key launch lock. Never wait on a standalone close while holding it. */
+export const withTerminalAdoptionLock = async <T>(
+  deps: Pick<FlowDeps, "registry" | "clock">,
+  ref: SessionRef | undefined,
+  fn: () => Promise<T>,
+): Promise<Held<T>> => {
+  const fence = await withTerminalOwnershipLock(deps, undefined, async (): Promise<Held<T>> =>
+    ref ? withTerminalOwnershipLock(deps, ref, fn) : { ok: true, value: await fn() },
+  );
+  return fence.ok ? fence.value : fence;
+};

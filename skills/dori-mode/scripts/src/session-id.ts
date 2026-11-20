@@ -6,11 +6,12 @@ import { isOmpProcessCommand, namesOmpProcess } from "../../../../src/runtime/om
 import type { Probe, SessionRef } from "../../../../src/runtime/types.ts";
 import { type PaneState, readPaneState } from "./lane-state.ts";
 import { type ChosenRuntimes, type Runner, runtimesFor } from "./run.ts";
+import { trustedHeadlessState } from "./session-id-headless.ts";
 
 export type Proc = { readonly pid: number; readonly ppid: number; readonly cmd: string };
 export type SessionHit = {
   readonly id: string;
-  readonly via: "extension" | "argv" | "child-env" | "start-time" | "none";
+  readonly via: "extension" | "argv" | "child-env" | "start-time" | "rpc-ui" | "none";
   readonly pid?: number;
   readonly unknownReason?: string;
 };
@@ -165,6 +166,7 @@ export const trustedPaneState = async (
   rts?: ChosenRuntimes,
   requireForeground = false,
 ): Promise<PaneState | null> => {
+  if (ref.runtime === "headless") return trustedHeadlessState(ref, { run, stateDir, rts }, requireForeground);
   if (!readPaneState(stateDir, ref.id)) return null;
   const deps: SessionDeps = { run, stateDir, sessionsDir: "", ...(rts === undefined ? {} : { rts }) };
   const table = await procTable(run);
@@ -182,6 +184,12 @@ export const resolveSession = async (
   table: readonly Proc[] | null,
   deps: SessionDeps,
 ): Promise<SessionHit> => {
+  if (ref.runtime === "headless") {
+    const state = await trustedPaneState(deps.run, deps.stateDir ?? "", ref, deps.rts);
+    return state
+      ? { id: state.sessionId, via: "rpc-ui", pid: state.pid }
+      : unresolved("headless session observation unconfirmed");
+  }
   // The root itself is a candidate when hc or herdr runs OMP directly, without an intervening shell.
   const { candidates, probe, unknownReason } = await sessionProcs(ref, table ?? [], deps);
   if (table === null) return unresolved("process table unavailable");
