@@ -143,7 +143,7 @@ Every module takes its HTTP, clock and timers as arguments. That is how the test
 
 `discordInboundLive` adapters expose `cursorFor(channel)` from their injected store. `storeFor(channel, false)` reads admission state without seeding an unseen channel; wrappers must forward that optional argument. An admission position is not a delivery receipt.
 
-Slack commits a successful poll's own-thread cursors in one ledger transaction, only after all reads and emits finish. `ThreadLedger.markSeen` takes an array of `{ channel, rootTs, ts }` updates and merges them under the existing writer lock; concurrent thread records survive and seen positions never decrease. Empty batches do not take a lock, and batches with no newer known cursor do not rewrite the ledger. This does not reduce Slack requests or stop watching older threads.
+Slack commits a successful poll's own-thread cursors in one ledger transaction, only after all reads and emits finish. `ThreadLedger.markSeen` takes the authenticated `SlackScope` and an array of `{ channel, rootTs, ts }` updates and merges them under the existing writer lock; concurrent thread records survive and seen positions never decrease. Empty batches do not take a lock, and batches with no newer known cursor do not rewrite the ledger. This does not reduce Slack requests or stop watching older threads.
 
 ## Commands
 
@@ -451,13 +451,21 @@ The private `<stateDir>/owes` directory stores inbound previews (up to 500 chara
 
 Writers reuse per-file owner locks, wait asynchronously and publish capped snapshots atomically. A live holder has no automatic wait timeout; a stale lock whose PID has been reused may look live and require operator repair. Session changes abort waiting monitor admissions rather than waking an old session. Aborting the ledger wait for an already durably queued Gateway message retains its payload and cursor for restart; unresolved candidates have the loss boundary above. Unrelated failures remain errors.
 
-### `dori inbound slack [--loop MIN]`
-Prints `INBOUND <source> <channel> <thread> <ts> <user> <text>`. It reads from three places, each message once:
+### `dori inbound slack [--loop MIN] [--qualified-routes] [--adopt-legacy-threads WORKSPACE:ACCOUNT]`
+Authenticates with `auth.test` and by default prints exactly `INBOUND_READY slack`. Each message is `INBOUND <source> <channel> <thread> <ts> <user> <text>`: `<channel>` is the physical Slack channel ID and the final field is full JSON-encoded text. Existing monitors keep this format.
+
+To migrate a consumer to qualified output, first teach it to accept `INBOUND_READY slack workspace=<team_id> account=<user_id>` and to treat `slack:<team_id>:<user_id>:<channel>` in the channel slot as a Dori destination, not a Slack API channel ID. Then start that receiver with `dori inbound slack --qualified-routes` (and its usual `--loop` setting). All other message fields are unchanged.
+
+Copy the qualified destination into `dori send slack --to` (and retain `--thread` for a reply); a different authenticated workspace or account fails before posting, editing or allocating an upload. Bare physical channel IDs still explicitly select the currently configured account. Qualified destinations also work for library calls with `channel` or `channel_id`. Both receiver formats read from three places, each message once:
 - `threads-view`: unread replies in threads the account follows (Slack's own Threads view);
 - `own-thread`: new replies in any thread the Dori posted in, tagged or not;
 - `unread`: DMs, group DMs and channels with unread mentions.
 
-The Dori's own messages and bot messages are skipped. Every message the Dori posts records its thread in `<stateDir>/slack-threads.json`, whichever helper sends it, so a guest's untagged reply under a root posted with a raw API call is still found.
+The Dori's own messages and bot messages are skipped; Slack keeps its existing all-non-self/non-bot policy, not an owner allowlist. Every message the Dori posts records its thread in `<stateDir>/slack-threads.json`, whichever helper sends it, so a guest's untagged reply under a root posted with a raw API call is still found. Version 2 keys each position by authenticated workspace, account, channel and root timestamp, never display name or credential text. Credential rotation for the same identity preserves the position; another account gets separate positions. Reply metadata that disagrees with its enclosing channel or thread stops the poll before any emit or cursor commit. This route identity is not a multi-tenant security boundary.
+
+A nonempty legacy array has no account identity. New posts and inbound polling refuse it without changing it: there is no automatic attribution, reset or resend. Stop old Slack sender/receiver processes first, confirm which workspace/account owns every legacy row, then run `dori inbound slack --loop 0 --adopt-legacy-threads WORKSPACE:ACCOUNT` with that account's credentials. A mismatch is refused. The locked, atomic conversion preserves every position and saves a `SLACK_THREADS_ADOPTED` receipt (scope, time, count); repeating the same decision returns that receipt, and another account cannot reassign it. If ownership is unknown or mixed, preserve the file and resolve ownership before proceeding rather than guessing. Empty legacy arrays need no decision. After conversion, old array-only writers fail closed; do not run an old receiver beside the upgraded one.
+
+Adoption prints only its receipt and exits without polling or advancing positions. Start the normal receiver separately to deliver pending replies; choose `--qualified-routes` only if its consumer has been updated. Output format does not affect account scoping or replace ledger adoption.
 
 ### `dori inbound telegram [--loop MIN]`
 Startup authenticates the configured bot with `getMe` and requires an empty `getWebhookInfo.url` before printing `INBOUND_READY` or calling `getUpdates`. An invalid identity, unavailable or malformed check, or active webhook is a sanitized nonzero startup error: no cursor acknowledgement is sent, and webhook settings are never changed. Pending checks are awaited; stopping the process while they are pending does not start polling. These online checks run only for an explicit Telegram inbound command, not for offline commands such as `inbound-lag`.
