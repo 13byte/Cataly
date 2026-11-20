@@ -228,6 +228,23 @@ This compatibility path does not apply to lanes. Continue to load the token
 only in the receiver child for new setups. No settings file is created or edited.
 Restart the receiver when updating so it reports its current routes.
 
+Eligible single-choice questions show native Discord buttons, with the
+checked option labeled **Recommended**. Only the configured owner can
+select a button. The bot uses an interaction-only Gateway connection;
+apps with an existing interactions webhook or unavailable Gateway keep
+text replies and the terminal dialog.
+
+For a compatible one-field question, ordinary owner text in the exact
+channel can answer while exactly one such ASK is pending. For a radio
+group with **Other**, free-form text is passed to OMP as the answer,
+without selecting the recommendation. Use Discord's **Reply** action
+to target a specific question or when the question has multiple fields.
+
+If a posted Discord ASK has exactly one explicitly recommended choice and
+no answer after three minutes, Cataly submits that choice and marks it as
+a timeout, not an owner reply. Forms without a unique recommendation stay
+open. This does not change OMP's own timeout or approval settings.
+
 - A Dori lead uses the single explicitly configured Discord destination.
   If more than one destination is configured or only discovery is enabled,
   ASK stays in the terminal rather than guessing.

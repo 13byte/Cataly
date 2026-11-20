@@ -14,7 +14,6 @@ const secondary = "109867692300000032";
 const owner = "109867692300000033";
 const bot = "109867692300000034";
 const question = "109867692300000035";
-const reply = "109867692300000036";
 const token = "synthetic-automatic-ask-token";
 const abandoned = "109867692300000037";
 const html = '<form><label>What value? <input name="answer" required></label></form>';
@@ -54,6 +53,8 @@ async function verifyAutomaticAsk(credential: "private file" | "lead environment
   const envBefore = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
   let publish = false;
   let replyNow = false;
+  let reply = "";
+  const patchResponse = Promise.withResolvers<void>();
   let holdPost: Promise<void> | undefined;
   const exposed: string[] = [];
   const requests: string[] = [];
@@ -70,10 +71,12 @@ async function verifyAutomaticAsk(credential: "private file" | "lead environment
         const position = new URL(req.url).searchParams;
         const answer = {
           id: reply,
-          type: 19,
+          type: credential === "lead environment" ? 0 : 19,
           channel_id: primary,
           author: { id: owner },
-          message_reference: { type: 0, channel_id: primary, message_id: question },
+          ...(credential === "private file"
+            ? { message_reference: { type: 0, channel_id: primary, message_id: question } }
+            : {}),
           content: "automatic-reply",
         };
         return Response.json(
@@ -96,6 +99,7 @@ async function verifyAutomaticAsk(credential: "private file" | "lead environment
         exposed.push(path);
         const body = (await req.json()) as { content: string };
         publish = body.content.includes("What value?");
+        if (publish && credential === "lead environment") await patchResponse.promise;
         return Response.json({ id: question });
       }
       return new Response(null, { status: 404 });
@@ -157,9 +161,13 @@ async function verifyAutomaticAsk(credential: "private file" | "lead environment
     await bridge.arm(event, ui, state, "lead", readRoute);
     const result = ui.formDialog(html);
     await until(() => publish);
+    reply = (BigInt(Date.now() - 1420070400000) << 22n).toString();
     replyNow = true;
-    expect(await result).toMatchObject({ data: { answer: "automatic-reply" } });
     const cursorFile = join(state, "discord-inbound", `${primary}.json`);
+    if (credential === "lead environment")
+      await until(() => JSON.parse(readFileSync(cursorFile, "utf8")).cursor === reply);
+    patchResponse.resolve();
+    expect(await result).toMatchObject({ data: { answer: "automatic-reply" } });
     await until(() => JSON.parse(readFileSync(cursorFile, "utf8")).cursor === reply);
     expect(existsSync(join(state, "owes"))).toBe(false);
     expect(requests).toEqual([`/channels/${primary}/messages`]);

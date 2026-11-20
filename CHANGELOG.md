@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Render eligible Discord ASK choices as native buttons, with the checked option labeled as recommended. A single pending text-capable question also accepts ordinary owner text in its exact Discord channel.
+
+- After three minutes with no answer to a posted Discord ASK, submit its single explicit recommendation as a timeout, not an owner reply.
+
 - Restore Discord ASK for Dori leads already using an environment-supplied bot token when the standard private token file is absent. Automatic delivery still requires the same live receiver and a unique explicit channel; lane routing and saved settings do not change.
 
 - Bound native OMP keeps pending custom notices with their original transcript across `/new`, `/clear`, and session switches. An unchanged reload retains eligible notices and passive next-turn payloads without restarting old provider work; a changed transcript drops them. External delivery waits for transition and rollback reconciliation, and CI exercises ownership against the bound native source.
