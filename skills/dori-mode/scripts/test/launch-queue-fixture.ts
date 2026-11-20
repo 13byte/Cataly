@@ -40,7 +40,7 @@ export const queueFixture = async ({ failGoalSample = false } = {}): Promise<Que
   };
   const base = depsFor(world, clock, state.dir, {
     defaultCwd: state.dir,
-    agentCommand: [failGoalSample ? "omp" : "omo", "{prompt}"],
+    agentCommand: failGoalSample ? ["sh", "-c", 'exec omp "$1"', "fixture", "{prompt}"] : ["omo", "{prompt}"],
     goalMarker: failGoalSample ? "Pursuing goal" : "",
   });
   const deps: FlowDeps = {

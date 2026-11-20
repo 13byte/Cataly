@@ -3,6 +3,7 @@ import { basename, join } from "node:path";
 
 import type { SessionRef } from "../../../../src/runtime/types.ts";
 import { withRegistryLock } from "./checkpoint-lock.ts";
+import type { ModelReadback } from "./lane-state.ts";
 import type { NativeCloseIntent } from "./native-close.ts";
 import type { ReportDelivery } from "./request-identity.ts";
 import type { BudgetLimits } from "./supervision-observe.ts";
@@ -39,6 +40,8 @@ export type Lane = {
   readonly done: string;
   readonly cwd?: string;
   readonly model?: string;
+  /** Launch preflight when the selected runtime cannot attest a model; live native evidence stays with the session. */
+  readonly modelReadback?: ModelReadback;
   readonly launchSelection?: import("./launch-selection.ts").LaunchSelection;
   readonly worktrees?: readonly string[];
   readonly status?: LaneStatus;

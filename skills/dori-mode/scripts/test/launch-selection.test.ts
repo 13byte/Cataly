@@ -6,7 +6,17 @@ import { defaultConfig, loadConfig } from "../src/config.ts";
 import type { FlowDeps } from "../src/done-flow.ts";
 import { adoptLane, launchLane, prepareLaunch } from "../src/launch.ts";
 import { footer, quoteForPane } from "../src/launch-footer.ts";
-import { agentIn, depsFor, fakeClock, laneState, newWorld, type TestState, withState, type World } from "./fakes.ts";
+import {
+  agentIn,
+  depsFor,
+  fakeClock,
+  laneState,
+  newWorld,
+  sent,
+  type TestState,
+  withState,
+  type World,
+} from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00.000Z");
 const DEFAULT = "ulw set goal and work";
@@ -122,21 +132,52 @@ test.each(["default", "config"] as const)(
 
 test("launch persists requested metadata but keeps the exact prompt and refuses to infer an active goal", async () => {
   const base = await configured();
-  world.panes = [{ pane_id: "w:p9", workspace_id: "w", agent: "omp", agent_status: "working" }];
+  world.panes = [{ pane_id: "w:p9", workspace_id: "w", agent: "omp", agent_status: "idle" }];
+  world.onEnterStatus = "working";
   agentIn(world, "w:p9");
-  laneState(state.dir, "w:p9", { goal: { status: "paused", objective: "waiting for explicit resume" } });
+  const [provider = "", id = ""] = base.config.defaultModel.split("/", 2);
+  const model = { provider, id };
+  const goal = { status: "paused", objective: "waiting for explicit resume" } as const;
+  laneState(state.dir, "w:p9", {
+    agentStatus: "idle",
+    goal,
+    modelReadback: {
+      requested: model,
+      observed: model,
+      status: "matched",
+      billing: "unknown",
+      checkedAt: new Date(T0).toISOString(),
+      source: "native-extension",
+    },
+  });
   const deps: FlowDeps = {
     ...base,
-    run: async (argv, options) =>
-      argv[0] === "herdr" && argv[1] === "tab" && argv[2] === "create"
-        ? { code: 0, out: JSON.stringify({ result: { root_pane: { pane_id: "w:p9" }, tab_id: "w:t9" } }), err: "" }
-        : base.run(argv, options),
+    run: async (argv, options) => {
+      if (argv[0] === "herdr" && argv[1] === "tab" && argv[2] === "create")
+        return {
+          code: 0,
+          out: JSON.stringify({ result: { root_pane: { pane_id: "w:p9" }, tab_id: "w:t9" } }),
+          err: "",
+        };
+      const response = await base.run(argv, options);
+      if (argv[0] === "herdr" && argv[2] === "send-keys" && argv[4] === "enter" && response.code === 0)
+        laneState(state.dir, "w:p9", { agentStatus: "working", goal });
+      return response;
+    },
   };
   const result = await launchLane(deps, input());
   const prompt = `${DEFAULT}. Read and execute the lane brief at ${input().brief} in full. You are the selection-lane lane; report as the brief's footer says.`;
   expect(world.calls.find((argv) => argv[0] === "herdr" && argv[2] === "run")?.at(-1)).toBe(
-    ["omp", "--dori-role", "lane", "--model", deps.config.defaultModel, prompt].map(quoteForPane).join(" "),
+    [
+      "omp",
+      `--dori-launch-model=${deps.config.defaultModel}`,
+      "--dori-role=lane",
+      `--model=${deps.config.defaultModel}`,
+    ]
+      .map(quoteForPane)
+      .join(" "),
   );
+  expect(sent(world)).toEqual([prompt]);
   expect(result.startup).toStartWith("STARTUP_NO_GOAL selection-lane w:p9:");
   expect(result.lane.launchSelection?.selectedBy).toBe("default");
   expect((await deps.registry.read("selection-lane"))?.launchSelection).toEqual(result.lane.launchSelection);

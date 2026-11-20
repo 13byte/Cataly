@@ -1,16 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { headlessArgv } from "../../../../src/runtime/headless.ts";
-import { configPath, fill } from "./config.ts";
+import { mayRunOmpArgv } from "../../../../src/runtime/omp-argv.ts";
+import { parseRef } from "../../../../src/runtime/types.ts";
+import { configPath } from "./config.ts";
 import { renderTemplate } from "./launch-template.ts";
 import { type LaunchInput, validateLaunch } from "./launch-input.ts";
 import type { FlowDeps } from "./done-flow.ts";
 import { parseOwnershipRef, withDeliveryLock, withLaunchLock, withTerminalAdoptionLock } from "./delivery-lock.ts";
 import { runContext } from "./lane-run.ts";
+import type { ModelReadback } from "./lane-state.ts";
 import { BRIEF_START, footer, originalBrief } from "./launch-footer.ts";
-import { parseRef } from "../../../../src/runtime/types.ts";
+import { deliverModelBrief, modelLaunchCommand, modelLaunchProblem, unavailableLaunchModel } from "./launch-model.ts";
 import { selectionFor } from "./launch-selection.ts";
 import { laneStartCommand, openLaneSession, type OpenedLane, startLaunchRun } from "./launch-session.ts";
-import { type Lane, sessionFields, upgradeLane } from "./registry.ts";
+import { type Lane, sameLaneGeneration, sessionFields, sessionOf, upgradeLane } from "./registry.ts";
 import { type ChosenRuntimes, iso, runtimesOf } from "./run.ts";
 import { Reports } from "./reports.ts";
 import { Lessons, renderLessons } from "./lessons.ts";
@@ -56,6 +59,19 @@ export const adoptLane = async (
 
 export const prepareLaunch = async (deps: FlowDeps, input: LaunchInput, queuedBrief?: string) => {
   await validateLaunch(deps, input, LaunchError);
+  const { agentCommand, requireModelReadback } = deps.config;
+  const model = input.model ?? deps.config.defaultModel;
+  let modelReadback: ModelReadback | undefined;
+  if ((input.runtime ?? deps.config.laneRuntime) === "headless") {
+    // The RPC kickoff route does not attest native catalog availability.
+    modelReadback = unavailableLaunchModel(agentCommand, model, iso(deps.clock), "headless");
+    if (requireModelReadback)
+      throw new LaunchError(`${modelReadback?.reason}\nFix: launch in interactive terminal mode.`);
+  } else {
+    const problem = modelLaunchProblem(agentCommand, model, requireModelReadback);
+    if (problem) throw new LaunchError(problem);
+    modelReadback = unavailableLaunchModel(agentCommand, model, iso(deps.clock));
+  }
   const cwd = input.cwd ?? deps.config.defaultCwd;
   let briefText: string;
   if (queuedBrief !== undefined) {
@@ -75,7 +91,8 @@ export const prepareLaunch = async (deps: FlowDeps, input: LaunchInput, queuedBr
     brief: input.brief,
     done: input.done,
     cwd,
-    model: input.model ?? deps.config.defaultModel,
+    model,
+    ...(modelReadback ? { modelReadback } : {}),
     launchSelection: selectionFor(deps.config),
     openedAt: iso(deps.clock),
     reportProtocol: "jsonl-v1",
@@ -91,6 +108,9 @@ export const prepareLaunch = async (deps: FlowDeps, input: LaunchInput, queuedBr
   const { lessons, problems, omitted } = new Lessons(deps.config.stateDir).forRepo(cwd);
   // A lesson the cap kept out is named too: a brief that silently lacks a standing rule is the bug this catches.
   const warnings = [
+    ...(modelReadback
+      ? [`MODEL_READBACK_WARNING ${modelReadback.reason}; enable requireModelReadback to refuse unverified launches`]
+      : []),
     ...problems.map((problem) => `LESSON_WARNING ${problem}`),
     ...omitted.map(
       (lesson) => `LESSON_OMITTED ${lesson.id} (${lesson.scope === "global" ? "global" : lesson.cwd}) ${lesson.rule}`,
@@ -171,6 +191,8 @@ const startLane = async (
   const model = input.model ?? deps.config.defaultModel;
   const { lane, ref } = opened;
   const pane = ref.id;
+  const prompt = `${deps.config.launchKeywords}. Read and execute the lane brief at ${input.brief} in full. You are the ${input.key} lane; report as the brief's footer says.`;
+  const command = deps.config.agentCommand;
   const start = async (): Promise<{ readonly launchedAt: number } | { readonly startup: string }> => {
     const provenance = lane.requestId === undefined ? undefined : await startLaunchRun(deps, lane);
     if (provenance === null) return { startup: `STARTUP_ERROR ${input.key} ${pane}: lane changed before start` };
@@ -183,11 +205,10 @@ const startLane = async (
       text: `lane launched in ${pane}`,
       ...(provenance ? { provenance } : {}),
     });
-    const prompt = `${deps.config.launchKeywords}. Read and execute the lane brief at ${input.brief} in full. You are the ${input.key} lane; report as the brief's footer says.`;
     // The session can be written while start is still returning; its goal must belong to this invocation.
     const launchedAt = deps.clock.now();
     try {
-      await rts.for(ref).start(ref, laneStartCommand(lane, fill(deps.config.agentCommand, { model, prompt })));
+      await rts.for(ref).start(ref, laneStartCommand(lane, modelLaunchCommand(command, model, prompt)));
       return { launchedAt };
     } catch (error) {
       return { startup: `STARTUP_ERROR ${input.key} ${pane}: start failed: ${lastLines(String(error))}` };
@@ -201,5 +222,27 @@ const startLane = async (
   if (!submitted.ok)
     return { lane, startup: `STARTUP_UNCONFIRMED ${input.key} ${pane}: delivery lock held (${submitted.holder})` };
   if ("startup" in submitted.value) return { lane, startup: submitted.value.startup };
-  return observeLaunch(deps, input, { lane, ref, rts, launchedAt: submitted.value.launchedAt });
+  const { launchedAt } = submitted.value;
+  const deliverBrief =
+    !lane.modelReadback && mayRunOmpArgv(command)
+      ? async (): Promise<string | null> => {
+          const delivery = await withDeliveryLock(deps, lane.key, async () => {
+            const current = await deps.registry.read(lane.key);
+            const live = current && sessionOf(current);
+            if (
+              !current ||
+              current.nativeCloseIntent ||
+              !sameLaneGeneration(lane, current) ||
+              current.requestId !== lane.requestId ||
+              current.runId !== lane.runId ||
+              live?.runtime !== ref.runtime ||
+              live.id !== ref.id
+            )
+              return "lane changed before verified delivery; brief not sent";
+            return deliverModelBrief(deps, ref, model, prompt, launchedAt);
+          });
+          return delivery.ok ? delivery.value : `delivery lock held (${delivery.holder}); brief not sent`;
+        }
+      : undefined;
+  return observeLaunch(deps, input, { lane, ref, rts, launchedAt, ...(deliverBrief ? { deliverBrief } : {}) });
 };

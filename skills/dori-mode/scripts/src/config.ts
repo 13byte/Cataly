@@ -43,6 +43,7 @@ export type DoriConfig = LaunchConfig & {
   readonly defaultCwd: string;
   readonly agentCommand: ArgvTemplate;
   readonly defaultModel: string;
+  readonly requireModelReadback: boolean;
   readonly goalMarker: string;
   /** How long `launch` waits for the agent's ready status and goal after it starts; a slow host is a host property. */
   readonly startupWaitSeconds: number;
@@ -77,6 +78,7 @@ export const defaultConfig = (home = homedir()): DoriConfig => ({
   defaultCwd: home,
   agentCommand: ["omp", "--dori-role", "lane", "--model", "{model}", "{prompt}"],
   defaultModel: "anthropic/claude-opus-5-5",
+  requireModelReadback: false,
   ...launchConfig(),
   goalMarker: "Pursuing goal",
   startupWaitSeconds: 180,
@@ -188,8 +190,10 @@ export const loadConfig = async (path = configPath(), home = homedir(), env = pr
   if (policyError) throw new ConfigError(policyError);
   if (raw.threadDonePolicy !== undefined && !["every-lane", "last-lane"].includes(raw.threadDonePolicy))
     throw new ConfigError("invalid threadDonePolicy: expected every-lane or last-lane");
-  if (raw.prAutoTrack !== undefined && typeof raw.prAutoTrack !== "boolean")
-    throw new ConfigError("invalid prAutoTrack: expected true or false");
+  for (const name of ["prAutoTrack", "requireModelReadback"] as const)
+    if (raw[name] !== undefined && typeof raw[name] !== "boolean")
+      throw new ConfigError(`invalid ${name}: expected true or false`);
+  const wait = raw.startupWaitSeconds;
   const merged: DoriConfig = {
     ...base,
     ...raw,
@@ -200,12 +204,7 @@ export const loadConfig = async (path = configPath(), home = homedir(), env = pr
     repoIdentities: repoIdentities(raw.repoIdentities),
     // Only a string is a marker: null or false would quietly turn the goal check off, and an object would never show.
     goalMarker: typeof raw.goalMarker === "string" ? raw.goalMarker : base.goalMarker,
-    startupWaitSeconds:
-      typeof raw.startupWaitSeconds === "number" &&
-      Number.isFinite(raw.startupWaitSeconds) &&
-      raw.startupWaitSeconds >= 0
-        ? raw.startupWaitSeconds
-        : base.startupWaitSeconds,
+    startupWaitSeconds: typeof wait === "number" && wait >= 0 && wait < Infinity ? wait : base.startupWaitSeconds,
     supervision: {
       ...base.supervision,
       ...raw.supervision,

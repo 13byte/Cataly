@@ -3,20 +3,29 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runContext } from "../src/lane-run.ts";
 import { quoteForPane } from "../src/launch-footer.ts";
-import { laneStartCommand, startLaunchRun } from "../src/launch-session.ts";
+import { laneStartCommand } from "../src/launch-session.ts";
 import { launchLane } from "../src/launch.ts";
-import { type Lane, Registry, statusOf, withStatus } from "../src/registry.ts";
+import { Registry, statusOf, withStatus } from "../src/registry.ts";
 import { type Execution, type LaneEvent, Reports } from "../src/reports.ts";
 import { isRequestId, isRunId } from "../src/request-identity.ts";
 import { sessionDirFor } from "../src/session-id.ts";
-import { agentIn, depsFor, fakeClock, laneState, newWorld, withState, type TestState, type World } from "./fakes.ts";
+import {
+  agentIn,
+  depsFor,
+  fakeClock,
+  laneState,
+  newWorld,
+  sent,
+  withState,
+  type TestState,
+  type World,
+} from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00.000Z");
 const thread = "discord:111111111111111111";
 const requestId = `${thread}:222222222222222222`;
 const otherRequest = `${thread}:333333333333333333`;
 const runA = "00000000-0000-4000-8000-00000000000a";
-const runB = "00000000-0000-4000-8000-00000000000b";
 const isExecution = (event: LaneEvent): event is Execution => event.type === "execution";
 
 let state: TestState;
@@ -42,26 +51,12 @@ const launch = async (
   const sessionId = `01a1b6d8-0000-7000-8000-${String(++n).padStart(12, "0")}`;
   const at = "2026-01-01T12:00:03.000Z";
   const sessionFile = join(dir, `2026-01-01T12-00-03-000Z_${sessionId}.jsonl`);
-  writeFileSync(
-    sessionFile,
-    [
-      { type: "session", id: sessionId, timestamp: at, cwd: "/repo" },
-      {
-        type: "message",
-        message: {
-          role: "user",
-          content: [{ type: "text", text: `You are the ${key} lane; report as the footer says.` }],
-        },
-      },
-    ]
-      .map((entry) => JSON.stringify(entry))
-      .join("\n") + "\n",
-  );
+  const header = { type: "session", id: sessionId, timestamp: at, cwd: "/repo" };
+  writeFileSync(sessionFile, JSON.stringify(header) + "\n");
   world = newWorld();
-  world.screen = "Working (12s)\nprompt\nGoal: ...";
-  world.panes = [{ pane_id: "w:p9", workspace_id: "w", agent: "omp", agent_status: "working" }];
+  world.panes = [{ pane_id: "w:p9", workspace_id: "w", agent: "omp", agent_status: "idle" }];
+  world.onEnterStatus = "working";
   agentIn(world, "w:p9");
-  laneState(state.dir, "w:p9", { sessionId, sessionFile });
   const clock = fakeClock(T0);
   const seen = { command: "", atStart: [] as LaneEvent[] };
   const base = depsFor(
@@ -76,6 +71,22 @@ const launch = async (
     state.dir,
     { sessionsDir },
   );
+  const [provider = "", id = ""] = base.config.defaultModel.split("/", 2);
+  const model = { provider, id };
+  laneState(state.dir, "w:p9", {
+    sessionId,
+    sessionFile,
+    agentStatus: "idle",
+    goal: { status: "none" },
+    modelReadback: {
+      requested: model,
+      observed: model,
+      status: "matched",
+      billing: "unknown",
+      checkedAt: at,
+      source: "native-extension",
+    },
+  });
   const deps = {
     ...base,
     run: async (argv: readonly string[]) => {
@@ -91,7 +102,19 @@ const launch = async (
         seen.command = argv.at(-1) ?? "";
         seen.atStart = new Reports(state.dir).events(key);
       }
-      return base.run(argv);
+      const response = await base.run(argv);
+      if (argv[0] === "herdr" && argv[2] === "send-keys" && argv[4] === "enter" && response.code === 0) {
+        const text = sent(world).at(-1);
+        if (!text) throw new Error("missing typed launch brief");
+        writeFileSync(
+          sessionFile,
+          [header, { type: "message", message: { role: "user", content: [{ type: "text", text }] } }]
+            .map((entry) => JSON.stringify(entry))
+            .join("\n") + "\n",
+        );
+        laneState(state.dir, "w:p9", { sessionId, sessionFile, agentStatus: "working" });
+      }
+      return response;
     },
   };
   const result = await launchLane(deps, { key, title: "fixture", brief, done: "closed acme/app#3", ...input });
@@ -103,7 +126,8 @@ const launch = async (
 test("an unsourced launch keeps its start command, record and launch activity", async () => {
   const r = await launch("legacy-lane", { thread });
   expect(r.startup).toBe("STARTUP_OK legacy-lane w:p9");
-  expect(r.command).toStartWith("CATALY_ASK_LAUNCHED_LANE=legacy-lane omp --dori-role lane ");
+  expect(r.command).toStartWith("CATALY_ASK_LAUNCHED_LANE=legacy-lane omp --dori-launch-model=");
+  expect(sent(world)).toEqual([expect.stringContaining("You are the legacy-lane lane")]);
   expect(r.command).not.toContain("DORI_LANE_RUN");
   expect(["requestId" in r.lane, "runId" in r.lane]).toEqual([false, false]);
   expect(new Reports(state.dir).events("legacy-lane")).toEqual([
@@ -126,7 +150,8 @@ test("a sourced launch records its run before the agent starts and binds the ver
   expect(r.lane.requestId).toBe(requestId);
   expect([isRunId(runId), isRequestId(runId), runId === requestId]).toEqual([true, false, false]);
   // Clear a stale terminal-server run in the shell; only the OMP process gets the new run.
-  expect(r.command).toStartWith(`DORI_LANE_RUN=${runId} omp --dori-role lane `);
+  expect(r.command).toStartWith(`DORI_LANE_RUN=${runId} omp --dori-launch-model=`);
+  expect(sent(world)).toEqual([expect.stringContaining("You are the sourced-lane lane")]);
   const create = world.calls.find((argv) => argv[1] === "tab" && argv[2] === "create") ?? [];
   expect(create.length).toBeGreaterThan(0);
   expect(create).toContain("DORI_LANE_RUN=");
@@ -172,7 +197,7 @@ test("one thread serves different real requests through separate lanes and runs"
   }
 });
 
-test("a lane that changes generation during startup gets no native binding", async () => {
+test("a lane that changes generation during startup receives no brief or native binding", async () => {
   let moved = false;
   const r = await launch("moved-lane", { requestId }, async () => {
     if (moved) return;
@@ -181,29 +206,11 @@ test("a lane that changes generation during startup gets no native binding", asy
       c ? withStatus(c, statusOf(c), "operator note", c.openedAt) : null,
     );
   });
-  expect(r.startup).toBe("STARTUP_OK moved-lane w:p9");
+  expect(r.startup).toStartWith("STARTUP_MODEL_HOLD moved-lane w:p9: lane changed");
+  expect(sent(world)).toEqual([]);
   expect(new Reports(state.dir).events("moved-lane").filter(isExecution)).toEqual([
     expect.objectContaining({ phase: "started", runId: r.lane.runId }),
   ]);
-});
-
-test("a run start is refused for a lane whose run or generation moved on", async () => {
-  const deps = depsFor(world, fakeClock(T0), state.dir);
-  const lane: Lane = {
-    key: "stale-run",
-    title: "t",
-    thread: "none",
-    brief: "/brief",
-    done: "closed acme/app#3",
-    openedAt: new Date(T0).toISOString(),
-    requestId,
-    runId: runA,
-  };
-  await deps.registry.write(lane);
-  expect(await startLaunchRun(deps, { ...lane, runId: runB })).toBeNull();
-  expect(await startLaunchRun(deps, { ...lane, openedAt: new Date(T0 + 1).toISOString() })).toBeNull();
-  expect(new Reports(state.dir).events(lane.key)).toEqual([]);
-  expect(await startLaunchRun(deps, lane)).toEqual({ requestId, runId: runA });
 });
 
 // POSIX-only: the real shell applies the terminal server's inherited environment plus create overrides.

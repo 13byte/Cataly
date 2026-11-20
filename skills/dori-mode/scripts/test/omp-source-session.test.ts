@@ -67,12 +67,41 @@ const setup = (argv: readonly string[], key: string, record = true) => {
   if (record) laneState(state.dir, REF.id, { sessionId: SID, sessionFile, agentStatus: "working" });
   const clock = fakeClock(T0);
   const base = depsFor(world, clock, state.dir, { sessionsDir, startupWaitSeconds: 20 });
+  let onSubmit: (() => void) | undefined;
   const deps = {
     ...base,
-    run: async (cmd: readonly string[]) =>
-      cmd[0] === "herdr" && cmd[1] === "tab" && cmd[2] === "create"
-        ? { code: 0, out: JSON.stringify({ result: { root_pane: { pane_id: REF.id }, tab_id: "w:t9" } }), err: "" }
-        : base.run(cmd),
+    run: async (cmd: readonly string[]) => {
+      if (cmd[0] === "herdr" && cmd[1] === "tab" && cmd[2] === "create")
+        return {
+          code: 0,
+          out: JSON.stringify({ result: { root_pane: { pane_id: REF.id }, tab_id: "w:t9" } }),
+          err: "",
+        };
+      if (record && cmd[0] === "herdr" && cmd[2] === "run" && cmd.at(-1)?.includes("--dori-launch-model=")) {
+        const modelReadback = {
+          requested: { provider: "anthropic", id: "claude-opus-5-5" },
+          observed: { provider: "anthropic", id: "claude-opus-5-5" },
+          status: "matched" as const,
+          billing: "unknown" as const,
+          checkedAt: new Date(T0).toISOString(),
+          source: "native-extension" as const,
+        };
+        // A guarded native start is idle until verified delivery; opaque launches keep the original fixture.
+        world.panes[0]!.agent_status = "idle";
+        laneState(state.dir, REF.id, { sessionId: SID, sessionFile, agentStatus: "idle", modelReadback });
+        onSubmit = () => {
+          world.panes[0]!.agent_status = "working";
+          laneState(state.dir, REF.id, { sessionId: SID, sessionFile, agentStatus: "working", modelReadback });
+        };
+      }
+      const result = await base.run(cmd);
+      if (onSubmit && cmd[0] === "herdr" && cmd[2] === "send-keys" && cmd[4] === "enter" && result.code === 0) {
+        const submit = onSubmit;
+        onSubmit = undefined;
+        submit();
+      }
+      return result;
+    },
   };
   return { deps, rts: runtimesOf(deps), sessionsDir, sessionFile, brief };
 };
