@@ -7,6 +7,7 @@ import type { Checkpoint } from "./checkpoints.ts";
 import { withDeliveryLock } from "./delivery-lock.ts";
 import { type Lane, sameLaneGeneration } from "./registry.ts";
 import type { Progress } from "./reports.ts";
+import type { ReportProvenance } from "./request-identity.ts";
 import { type ActivitySample, laneActivity, writerDir } from "./supervision-activity.ts";
 import type { SupervisionDeps } from "./supervision.ts";
 
@@ -37,6 +38,7 @@ export type SupervisionOptions = {
 export type Observation = {
   readonly openedAt: string;
   readonly generation?: string;
+  readonly provenance?: ReportProvenance;
   readonly at: number;
   readonly timer: number | null;
   readonly timerKind: string | null;
@@ -53,8 +55,16 @@ type Resample = {
   readonly before: ActivitySample;
 };
 
-export const readObservation = (path: string): Observation | null =>
-  existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Observation) : null;
+export const readObservation = (path: string, lane: SupervisedLane): Observation | null => {
+  if (!existsSync(path)) return null;
+  const saved = JSON.parse(readFileSync(path, "utf8")) as Observation | null;
+  return saved?.openedAt === lane.openedAt &&
+    saved.generation === lane.lifecycleEpoch &&
+    saved.provenance?.requestId === lane.requestId &&
+    saved.provenance?.runId === lane.runId
+    ? saved
+    : null;
+};
 
 export const saveObservation = (path: string, observation: Observation): void => {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
@@ -82,8 +92,9 @@ export const withSupervisionWriter = async <T>(
   const directory = writerDir(stateDir);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   // A reopened generation can proceed while the old sweep winds down. Its writes still use the delivery lock.
+  const runIdentity = lane.requestId === undefined ? [] : [lane.requestId, lane.runId];
   const identity = createHash("sha256")
-    .update(JSON.stringify([lane.openedAt, lane.lifecycleEpoch]))
+    .update(JSON.stringify([lane.openedAt, lane.lifecycleEpoch, ...runIdentity]))
     .digest("hex");
   const fail = (message: string) => new Error(`supervision writer lock ${message}`);
   const release = takeLock(resolve(directory, `${lane.key}.${identity}.lock`), now, fail, { keepLiveOwner: true });
@@ -103,7 +114,14 @@ export const withCurrentSupervision = async <T>(
   if (deps.registry === undefined) return action();
   const held = await withDeliveryLock(deps, lane.key, async () => {
     const current = await deps.registry.read(lane.key);
-    if (!current || current.nativeCloseIntent || !sameLaneGeneration(lane, current)) return;
+    if (
+      !current ||
+      current.nativeCloseIntent ||
+      !sameLaneGeneration(lane, current) ||
+      current.requestId !== lane.requestId ||
+      current.runId !== lane.runId
+    )
+      return;
     return action();
   });
   return held.ok ? held.value : undefined;

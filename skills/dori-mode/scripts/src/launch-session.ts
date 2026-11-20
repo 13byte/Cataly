@@ -4,7 +4,9 @@ import { accessSync, constants, readFileSync, realpathSync, rmSync, writeFileSyn
 import { ToolError } from "../../../../src/runtime/exec.ts";
 import { HcError, isReportedKind } from "../../../../src/runtime/hc/exec.ts";
 import { type CreateSpec, formatRef, type RuntimeKind, type SessionRef } from "../../../../src/runtime/types.ts";
-import { quoteForPane } from "./launch-footer.ts";
+import type { FlowDeps } from "./done-flow.ts";
+import { recordExecution, runContext } from "./lane-run.ts";
+import { quoteForPane, runCommandPrefix } from "./launch-footer.ts";
 import {
   discardGeneratedBrief,
   type GeneratedBrief,
@@ -12,8 +14,11 @@ import {
   stageGeneratedBrief,
 } from "./launch-generated.ts";
 import { isDiscordSnowflake } from "./messenger/discord-inbound-state.ts";
-import { type Lane, type Registry, sessionFields } from "./registry.ts";
-import type { ChosenRuntimes } from "./run.ts";
+import { type Lane, type Registry, sameLaneGeneration, sessionFields, sessionOf } from "./registry.ts";
+import { Reports } from "./reports.ts";
+import type { ReportProvenance } from "./request-identity.ts";
+import type { ChosenRuntimes, Runner } from "./run.ts";
+import { trustedPaneState } from "./session-id.ts";
 
 export type OpenedLane =
   | { readonly kind: "opened"; readonly lane: Lane; readonly ref: SessionRef }
@@ -22,13 +27,65 @@ export type OpenedLane =
 
 const why = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-/** Bind the private route only to this launch, not its shell or a later OMP session in the same pane. */
-export const laneStartCommand = (lane: Pick<Lane, "key" | "thread">, argv: readonly string[]): string => {
+/** Bind the route and run to this launch, not the shell or a later OMP session in the same pane. */
+export const laneStartCommand = (lane: Pick<Lane, "key" | "thread" | "runId">, argv: readonly string[]): string => {
   const prefix =
     lane.thread.startsWith("discord:") && isDiscordSnowflake(lane.thread.slice("discord:".length))
       ? `CATALY_ASK_LAUNCHED_LANE=${quoteForPane(lane.key)} `
       : "";
-  return `${prefix}${argv.map(quoteForPane).join(" ")}`;
+  return `${prefix}${runCommandPrefix(lane)}${argv.map(quoteForPane).join(" ")}`;
+};
+
+const ownsLaunchRun = (lane: Lane, current: Lane | null): current is Lane => {
+  if (
+    !current ||
+    current.nativeCloseIntent ||
+    !sameLaneGeneration(lane, current) ||
+    current.requestId !== lane.requestId ||
+    current.runId !== lane.runId
+  )
+    return false;
+  const expected = sessionOf(lane);
+  const actual = sessionOf(current);
+  return actual?.runtime === expected?.runtime && actual?.id === expected?.id;
+};
+
+/**
+ * Records a sourced launch run as started before its agent starts, while the registry still holds this lane and run.
+ * The attribution for the launch activity, or null when the lane moved on (the agent is then not started).
+ */
+export const startLaunchRun = (deps: FlowDeps, lane: Lane): Promise<ReportProvenance | null> =>
+  deps.registry.withCurrent(lane.key, (current) => {
+    if (!ownsLaunchRun(lane, current)) return null;
+    recordExecution(deps.config.stateDir, current, deps.clock.now());
+    return runContext(new Reports(deps.config.stateDir), current, current.runId)?.provenance ?? null;
+  });
+
+type NativeReadback = {
+  readonly run: Runner;
+  readonly rts: ChosenRuntimes;
+  readonly stateDir: string;
+  readonly ref: SessionRef;
+};
+
+/** Bind only if the same trusted live process and session bracket this launch's own goal readback. */
+export const bindLaunchRun = async (
+  deps: FlowDeps,
+  lane: Lane,
+  native: NativeReadback,
+  proven: () => Promise<boolean>,
+): Promise<void> => {
+  const { run, rts, stateDir, ref } = native;
+  const expected = sessionOf(lane);
+  if (expected?.runtime !== ref.runtime || expected.id !== ref.id) return;
+  const before = await trustedPaneState(run, stateDir, ref, rts);
+  if (before?.role !== "lane" || !before.sessionId || !(await proven())) return;
+  const after = await trustedPaneState(run, stateDir, ref, rts);
+  if (after?.role !== "lane" || after.sessionId !== before.sessionId || after.pid !== before.pid) return;
+  await deps.registry.withCurrent(lane.key, (current) => {
+    if (ownsLaunchRun(lane, current) && (current.session ?? before.sessionId) === before.sessionId)
+      recordExecution(stateDir, current, deps.clock.now(), before.sessionId);
+  });
 };
 
 // Each cleanup step is tried on its own: one that fails is reported and never stops the others.

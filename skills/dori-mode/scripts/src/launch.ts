@@ -1,13 +1,15 @@
+import { randomUUID } from "node:crypto";
 import { headlessArgv } from "../../../../src/runtime/headless.ts";
 import { configPath, fill } from "./config.ts";
 import { renderTemplate } from "./launch-template.ts";
 import { type LaunchInput, validateLaunch } from "./launch-input.ts";
 import type { FlowDeps } from "./done-flow.ts";
-import { parseOwnershipRef, withLaunchLock, withTerminalAdoptionLock } from "./delivery-lock.ts";
+import { parseOwnershipRef, withDeliveryLock, withLaunchLock, withTerminalAdoptionLock } from "./delivery-lock.ts";
+import { runContext } from "./lane-run.ts";
 import { BRIEF_START, footer, originalBrief } from "./launch-footer.ts";
 import { parseRef } from "../../../../src/runtime/types.ts";
 import { selectionFor } from "./launch-selection.ts";
-import { laneStartCommand, openLaneSession, type OpenedLane } from "./launch-session.ts";
+import { laneStartCommand, openLaneSession, type OpenedLane, startLaunchRun } from "./launch-session.ts";
 import { type Lane, sessionFields, upgradeLane } from "./registry.ts";
 import { type ChosenRuntimes, iso, runtimesOf } from "./run.ts";
 import { Reports } from "./reports.ts";
@@ -23,6 +25,7 @@ export const adoptLane = async (
   input: LaunchInput & { readonly pane: string },
   locked = false,
 ): Promise<Lane> => {
+  if (input.requestId !== undefined) throw new LaunchError("adopt cannot attach a request to a running process");
   await validateLaunch(deps, input, LaunchError);
   if (!locked) {
     const held = await withLaunchLock(deps, input.key, () => adoptLane(deps, input, true));
@@ -68,6 +71,7 @@ export const prepareLaunch = async (deps: FlowDeps, input: LaunchInput, queuedBr
     key: input.key,
     title: input.title,
     thread: input.thread?.trim() ? input.thread : "none",
+    ...(input.requestId === undefined ? {} : { requestId: input.requestId, runId: randomUUID() }),
     brief: input.brief,
     done: input.done,
     cwd,
@@ -114,6 +118,7 @@ export const launchLane = async (
 /** Caller holds the per-key launch lock; capacity admission only needs to span this phase. */
 export const openLaunch = async (deps: FlowDeps, input: LaunchInput, queuedBrief?: string) => {
   const { lane: draft, preamble, warnings } = await prepareLaunch(deps, input, queuedBrief);
+  runContext(new Reports(deps.config.stateDir), draft, draft.runId);
   const rts = runtimesOf(deps);
   const runtime = input.runtime ?? (deps.config.laneRuntime === "headless" ? "headless" : undefined);
   const group = runtime === "headless" ? undefined : deps.config.laneWorkspace || undefined;
@@ -132,6 +137,7 @@ export const openLaunch = async (deps: FlowDeps, input: LaunchInput, queuedBrief
       env = laneLaunchEnv(callerEnv, callerEnv["DORI_CONFIG"] ?? configPath(), deps.config);
     } else {
       env = laneLaunchEnv(process.env, configPath(), deps.config);
+      if (draft.requestId !== undefined) env["DORI_LANE_RUN"] = "";
     }
   } catch (e) {
     throw e instanceof TokenFileError ? new LaunchError(`token file refused: ${e.message}`) : e;
@@ -165,21 +171,35 @@ const startLane = async (
   const model = input.model ?? deps.config.defaultModel;
   const { lane, ref } = opened;
   const pane = ref.id;
-  // Launch starts the activity journal; it is not a lane report and is never posted to the thread.
-  new Reports(deps.config.stateDir).append({
-    type: "activity",
-    key: lane.key,
-    at: iso(deps.clock),
-    state: "running",
-    text: `lane launched in ${pane}`,
-  });
-  const prompt = `${deps.config.launchKeywords}. Read and execute the lane brief at ${input.brief} in full. You are the ${input.key} lane; report as the brief's footer says.`;
-  // The session can be written while start is still returning; its goal must belong to this invocation.
-  const launchedAt = deps.clock.now();
-  try {
-    await rts.for(ref).start(ref, laneStartCommand(lane, fill(deps.config.agentCommand, { model, prompt })));
-  } catch (e) {
-    return { lane, startup: `STARTUP_ERROR ${input.key} ${pane}: start failed: ${lastLines(String(e))}` };
-  }
-  return observeLaunch(deps, input, { lane, ref, rts, launchedAt });
+  const start = async (): Promise<{ readonly launchedAt: number } | { readonly startup: string }> => {
+    const provenance = lane.requestId === undefined ? undefined : await startLaunchRun(deps, lane);
+    if (provenance === null) return { startup: `STARTUP_ERROR ${input.key} ${pane}: lane changed before start` };
+    // Launch starts the activity journal; it is not a lane report and is never posted to the thread.
+    new Reports(deps.config.stateDir).append({
+      type: "activity",
+      key: lane.key,
+      at: iso(deps.clock),
+      state: "running",
+      text: `lane launched in ${pane}`,
+      ...(provenance ? { provenance } : {}),
+    });
+    const prompt = `${deps.config.launchKeywords}. Read and execute the lane brief at ${input.brief} in full. You are the ${input.key} lane; report as the brief's footer says.`;
+    // The session can be written while start is still returning; its goal must belong to this invocation.
+    const launchedAt = deps.clock.now();
+    try {
+      await rts.for(ref).start(ref, laneStartCommand(lane, fill(deps.config.agentCommand, { model, prompt })));
+      return { launchedAt };
+    } catch (error) {
+      return { startup: `STARTUP_ERROR ${input.key} ${pane}: start failed: ${lastLines(String(error))}` };
+    }
+  };
+  // Serialize sourced admission and submission, not the potentially long startup observation.
+  const submitted =
+    lane.requestId === undefined
+      ? { ok: true as const, value: await start() }
+      : await withDeliveryLock(deps, lane.key, start);
+  if (!submitted.ok)
+    return { lane, startup: `STARTUP_UNCONFIRMED ${input.key} ${pane}: delivery lock held (${submitted.holder})` };
+  if ("startup" in submitted.value) return { lane, startup: submitted.value.startup };
+  return observeLaunch(deps, input, { lane, ref, rts, launchedAt: submitted.value.launchedAt });
 };

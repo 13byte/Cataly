@@ -4,10 +4,11 @@ import { reasonOf, ToolError } from "../../../../src/runtime/herdr/exec.ts";
 import type { SessionRef } from "../../../../src/runtime/types.ts";
 import { finished } from "./boot-monitors.ts";
 import type { FlowDeps } from "./done-flow.ts";
-import { Reports } from "./reports.ts";
+import { Reports, reportScope } from "./reports.ts";
 import { startupFailure, startupScreen } from "./startup-screen.ts";
 import { mayRunOmpArgv } from "../../../../src/runtime/omp-argv.ts";
 import type { LaunchInput } from "./launch-input.ts";
+import { bindLaunchRun } from "./launch-session.ts";
 import type { Lane } from "./registry.ts";
 import { laneGoalActive } from "./goal-record.ts";
 import { ProcessTableUnavailableError } from "./session-id.ts";
@@ -17,10 +18,17 @@ const missingSession = (ref: SessionRef, error: unknown): boolean =>
   isKind(error, "not_found") ||
   (ref.runtime === "herdr" && error instanceof ToolError && /not.?found/i.test(reasonOf(error)));
 
-export const launchFinished = async (deps: FlowDeps, key: string): Promise<boolean> => {
-  const lane = await deps.registry.read(key);
-  if (!lane) return false;
-  const report = new Reports(deps.config.stateDir).read(key, { generation: lane.lifecycleEpoch });
+export const launchFinished = async (deps: FlowDeps, launched: Lane): Promise<boolean> => {
+  const lane = await deps.registry.read(launched.key);
+  if (
+    !lane ||
+    lane.openedAt !== launched.openedAt ||
+    lane.lifecycleEpoch !== launched.lifecycleEpoch ||
+    lane.requestId !== launched.requestId ||
+    lane.runId !== launched.runId
+  )
+    return false;
+  const report = new Reports(deps.config.stateDir).read(lane.key, reportScope(lane));
   return finished({ ...lane, reportState: report?.state });
 };
 
@@ -28,12 +36,12 @@ export const launchScreen = async (
   deps: FlowDeps,
   rts: Runtimes,
   ref: SessionRef,
-  key: string,
+  lane: Lane,
 ): Promise<string | null> => {
   try {
     return await startupScreen(rts, ref);
   } catch (error) {
-    if (missingSession(ref, error) && (await launchFinished(deps, key))) return null;
+    if (missingSession(ref, error) && (await launchFinished(deps, lane))) return null;
     throw error;
   }
 };
@@ -95,7 +103,7 @@ export const observeLaunch = async (
   const pane = ref.id;
   const started = deps.clock.now();
   await deps.clock.sleep(FIRST_CHECK_MS);
-  const screen = await launchScreen(deps, rts, ref, input.key);
+  const screen = await launchScreen(deps, rts, ref, lane);
   if (screen === null) return { lane, startup: `STARTUP_DONE ${input.key}` };
   const ompAgent = mayRunOmpArgv(deps.config.agentCommand);
   const { status, error } = await launchStatus(rts, ref, ompAgent);
@@ -124,8 +132,7 @@ export const observeLaunch = async (
     if (proven === null) return unconfirmedGoal;
     if (!proven) return { lane, startup: `STARTUP_ERROR ${input.key} ${pane}: ${bad}` };
   }
-  if (status === "gone" && (await launchFinished(deps, input.key)))
-    return { lane, startup: `STARTUP_DONE ${input.key}` };
+  if (status === "gone" && (await launchFinished(deps, lane))) return { lane, startup: `STARTUP_DONE ${input.key}` };
   // No status and no lookup error is an agent still starting (a slow host can take minutes, #202): it is waited for in
   // the goal wait. A lookup error, a `shell` or any other status ends the launch below at once.
   if (ready(status) || (unreported(status) && !error)) {
@@ -136,7 +143,17 @@ export const observeLaunch = async (
       if (ready(current)) {
         const goal = marker === "" || (await hasGoal(shown));
         if (goal === null) return unconfirmedGoal;
-        if (goal) return { lane, startup: `STARTUP_OK ${input.key} ${pane}` };
+        if (goal) {
+          if (omp && lane.requestId !== undefined) {
+            try {
+              await bindLaunchRun(deps, lane, omp, async () => (await recordedGoal()) === true);
+            } catch (error) {
+              // Startup was already observed; losing this extra readback leaves the run unbound.
+              if (!(error instanceof ProcessTableUnavailableError)) throw error;
+            }
+          }
+          return { lane, startup: `STARTUP_OK ${input.key} ${pane}` };
+        }
       }
       if (check >= rechecks) {
         const waited = Math.round((deps.clock.now() - started) / 1000);
@@ -148,13 +165,13 @@ export const observeLaunch = async (
         };
       }
       await deps.clock.sleep(RECHECK_MS);
-      const nextScreen = await launchScreen(deps, rts, ref, input.key);
+      const nextScreen = await launchScreen(deps, rts, ref, lane);
       if (nextScreen === null) return { lane, startup: `STARTUP_DONE ${input.key}` };
       shown = nextScreen;
       // The goal is only good news while the agent is still running: re-check the status on every re-read.
       const again = await launchStatus(rts, ref, ompAgent);
       current = again.status;
-      if (current === "gone" && (await launchFinished(deps, input.key)))
+      if (current === "gone" && (await launchFinished(deps, lane)))
         return { lane, startup: `STARTUP_DONE ${input.key}` };
       if (again.error || !(ready(current) || unreported(current))) {
         const lost = again.error

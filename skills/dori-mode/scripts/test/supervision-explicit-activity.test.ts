@@ -116,7 +116,7 @@ for (const scenario of ["without-git", "worktree-edit", "stage-through-alias", "
       reports.report(lane.key, "milestone", "started", T0, lane.lifecycleEpoch);
       const journalPath = reports.path(lane.key);
       const initialJournal = readFileSync(journalPath, "utf8");
-      const observation = () => readObservation(join(dirname(journalPath), "supervision.json"));
+      const observation = () => readObservation(join(dirname(journalPath), "supervision.json"), lane);
       const watchedEntry = () => {
         if (deletion) {
           expect(existsSync(watchPath)).toBe(false);

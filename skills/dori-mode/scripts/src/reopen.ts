@@ -5,7 +5,8 @@ import type { SessionRef } from "../../../../src/runtime/types.ts";
 import { configPath, fill } from "./config.ts";
 import { withDeliveryLock } from "./delivery-lock.ts";
 import { type FlowDeps, movedOn } from "./done-flow.ts";
-import { quoteForPane } from "./launch-footer.ts";
+import { recordExecution, runContext } from "./lane-run.ts";
+import { quoteForPane, runCommandPrefix } from "./launch-footer.ts";
 import { LaunchError } from "./launch.ts";
 import { confirmedLaneState, isBareLaneShell, nativeGoalStatus, resumeFile } from "./lifecycle-session.ts";
 import { resumeLane, type PauseResult } from "./pause.ts";
@@ -30,6 +31,7 @@ export const reopenLane = async (deps: FlowDeps, seen: Lane, note?: string): Pro
     const preparedPark = status === "paused" && lane.hold?.outcome === "parked";
     if (status !== "closed" && !preparedPark)
       return fail(`REFUSED ${lane.key}: not closed; use resume for a paused lane`);
+    runContext(new Reports(deps.config.stateDir), lane, lane.runId);
     const oldRef = sessionOf(lane);
     const headless = oldRef?.runtime === "headless";
     if (preparedPark && !oldRef) return fail(`REOPEN_UNVERIFIED ${lane.key}: previous pane identity missing`);
@@ -71,6 +73,7 @@ export const reopenLane = async (deps: FlowDeps, seen: Lane, note?: string): Pro
         return fail(await movedOn(deps, lane, "reopen"));
       const callerEnv = headless ? (deps.env ?? process.env) : process.env;
       const env = laneLaunchEnv(callerEnv, callerEnv["DORI_CONFIG"] ?? configPath(), deps.config);
+      if (!headless && lane.requestId !== undefined) env["DORI_LANE_RUN"] = "";
       const ref = await (headless ? rts.for(oldRef) : rts.default).create({
         name: lane.key,
         role: "lane",
@@ -93,22 +96,28 @@ export const reopenLane = async (deps: FlowDeps, seen: Lane, note?: string): Pro
           pane: _pane,
           ...rest
         } = current;
-        return withStatus(rest, "paused", `reopening: ${note ?? "explicit operator request"}`, at, {
+        if (current.requestId !== lane.requestId || current.runId !== lane.runId || current.nativeCloseIntent)
+          return null;
+        const next = withStatus(rest, "paused", `reopening: ${note ?? "explicit operator request"}`, at, {
           ...sessionFields(ref),
           sessionFile: file,
           openedAt: at,
           lifecycleEpoch: epoch,
           pausedFrom: "working",
           lastReplyAt: deps.clock.now(),
+          ...(current.requestId === undefined ? {} : { runId: randomUUID() }),
           // A new generation starts with no report receipt or previously observed screen report.
           lastPostedReport: undefined,
           lastPostedReportId: undefined,
           lastPostedReportOwner: undefined,
+          lastPostedReportDelivery: undefined,
           lastSeenReport: undefined,
           lastFreshnessNote: undefined,
           lastNativeHold: undefined,
           pausedSeenWorking: undefined,
         });
+        recordExecution(deps.config.stateDir, next, deps.clock.now());
+        return next;
       });
       return { ref, opened, at, epoch, env };
     });
@@ -120,25 +129,39 @@ export const reopenLane = async (deps: FlowDeps, seen: Lane, note?: string): Pro
       return fail(await movedOn(deps, lane, "reopen"));
     }
     // The new paused generation exists even if startup/readback fails and the operator later uses resume.
-    new Reports(deps.config.stateDir).append({
+    const reports = new Reports(deps.config.stateDir);
+    const context = runContext(reports, opened, opened.runId);
+    if (!context || context.generation !== epoch)
+      return fail(`REOPEN_UNVERIFIED ${lane.key}: execution identity unavailable; inspect before resume`, opened);
+    const { provenance } = context;
+    reports.append({
       type: "reopen",
       key: lane.key,
       at,
       generation: epoch,
       text: `lane reopening in ${ref.id}`,
+      ...(provenance ? { provenance } : {}),
     });
     try {
       const runtime = rts.for(ref);
       if (nativeArgv) {
         if (!(runtime instanceof HeadlessRuntime) || !lane.session)
           throw new Error("headless session identity missing");
-        await runtime.startNative(ref, nativeArgv, env, { file, sessionId: lane.session });
+        await runtime.startNative(
+          ref,
+          nativeArgv,
+          { ...env, DORI_LANE_RUN: provenance?.runId ?? "" },
+          {
+            file,
+            sessionId: lane.session,
+          },
+        );
       } else {
         const argv = [
           ...fill(template.slice(0, -1), { model: lane.model ?? deps.config.defaultModel }),
           `--resume=${file}`,
         ];
-        await runtime.start(ref, argv.map(quoteForPane).join(" "));
+        await runtime.start(ref, `${runCommandPrefix(opened)}${argv.map(quoteForPane).join(" ")}`);
       }
     } catch (error) {
       return fail(
@@ -148,20 +171,48 @@ export const reopenLane = async (deps: FlowDeps, seen: Lane, note?: string): Pro
     }
     // Never resume a foreign/new session or treat an unknown receipt as an idle agent.
     const attempts = Math.max(1, Math.ceil(deps.config.startupWaitSeconds));
-    let ready = false;
+    let confirmed: string | undefined;
     for (let n = 0; n < attempts; n++) {
-      const goal = nativeGoalStatus(await confirmedLaneState(deps, opened, ref));
-      if (goal === "paused" || goal === "none" || goal === "complete" || goal === "dropped") {
-        ready = true;
+      const state = await confirmedLaneState(deps, opened, ref);
+      const goal = nativeGoalStatus(state);
+      if (
+        state &&
+        (!headless || state.sessionFile === file) &&
+        (goal === "paused" || goal === "none" || goal === "complete" || goal === "dropped")
+      ) {
+        confirmed = state.sessionId;
         break;
       }
       await deps.clock.sleep(1000);
     }
-    if (!ready)
+    if (!confirmed)
       return fail(
         `REOPEN_UNVERIFIED ${lane.key}: same paused session not confirmed in ${ref.id}; inspect before resume`,
         opened,
       );
+    // Bind only the proved session in this run's new runtime address, before resuming the goal.
+    const native = confirmed;
+    if (
+      provenance &&
+      !(await deps.registry.withCurrent(lane.key, (current) => {
+        const live = current && sessionOf(current);
+        if (
+          !current ||
+          current.nativeCloseIntent ||
+          !sameLaneGeneration(opened, current) ||
+          current.requestId !== provenance.requestId ||
+          current.runId !== provenance.runId ||
+          current.session !== native ||
+          current.sessionFile !== file ||
+          live?.runtime !== ref.runtime ||
+          live.id !== ref.id
+        )
+          return false;
+        recordExecution(deps.config.stateDir, current, deps.clock.now(), native);
+        return true;
+      }))
+    )
+      return fail(await movedOn(deps, opened, "reopen"), opened);
     const resumed = await resumeLane(deps, opened, note ?? "explicit reopen", true);
     if (resumed.code !== 0) return resumed;
     if (note) {

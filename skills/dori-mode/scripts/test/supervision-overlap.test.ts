@@ -88,7 +88,7 @@ test("overlapping freshness leaves the stall and usage baseline to the same-lane
       journal: initialJournal,
       usageTimes: [iso(T0)],
     });
-    const initialObservation = readObservation(observationPath);
+    const initialObservation = readObservation(observationPath, lane);
     expect(initialObservation).toMatchObject({ activeAt: T0, timer: 21 * 60 });
 
     const entered = Promise.withResolvers<void>();
@@ -152,7 +152,7 @@ test("overlapping freshness leaves the stall and usage baseline to the same-lane
     expect(await tickA).toMatchObject([{ kind: "stalled", lane: lane.key }]);
     expect(progress()).toBe("stalled");
     expect(journal()).toBe(stalledJournal);
-    const settled = readObservation(observationPath);
+    const settled = readObservation(observationPath, lane);
     expect(settled).toMatchObject({ at: clock.at, activeAt: T0, timer: 41 * 60 });
     // The owner absorbs the hook's write in the next baseline without crediting it as progress.
     expect(JSON.parse(settled?.activity ?? "null")).toMatchObject({
@@ -165,7 +165,7 @@ test("overlapping freshness leaves the stall and usage baseline to the same-lane
     expect(await freshnessTick({ ...b, run: runB }, state.dir)).toEqual([]);
     expect(usageB).toBe(1);
     expect(usageTimes()).toEqual([iso(T0), iso(T0 + 20 * MIN), iso(clock.at)]);
-    expect(readObservation(observationPath)).toMatchObject({ at: clock.at, activeAt: T0, timer: 42 * 60 });
+    expect(readObservation(observationPath, lane)).toMatchObject({ at: clock.at, activeAt: T0, timer: 42 * 60 });
     expect(progress()).toBe("stalled");
     expect(journal()).toBe(stalledJournal);
   } finally {

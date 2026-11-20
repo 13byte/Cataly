@@ -218,7 +218,7 @@ test.each(journalStates)("enforces ceilings for an unobserved %s lane", async (j
   reports.report(nativeLane.key, "milestone", "initial evidence", clock.at, ref.id);
   const observation = join(dirname(reports.path(nativeLane.key)), "supervision.json");
   expect(await freshnessTick(deps, state.dir)).toEqual([]);
-  const verified = readObservation(observation);
+  const verified = readObservation(observation, nativeLane);
   if (!verified?.activity) throw new Error("missing verified baseline");
   if (journalState === "stalled") reports.observe(nativeLane.key, "❯ ", T0 + MIN, 0, true, scope);
   const prior = reports.read(nativeLane.key, scope);
@@ -231,7 +231,7 @@ test.each(journalStates)("enforces ceilings for an unobserved %s lane", async (j
     warnings.map((detail) => ({ kind: "warning", lane: nativeLane.key, detail })),
   );
   expect(reports.read(nativeLane.key, scope)).toEqual(prior);
-  expect(readObservation(observation)).toEqual({ ...verified, alerts: warnings });
+  expect(readObservation(observation, nativeLane)).toEqual({ ...verified, alerts: warnings });
   writeFileSync(join(state.dir, "watched.txt"), "new content without verified runtime activity");
   clock.at += MIN;
   const ceilings = ["wallMinutes ceiling reached (2)", "tokens ceiling reached (10)"];
@@ -242,7 +242,7 @@ test.each(journalStates)("enforces ceilings for an unobserved %s lane", async (j
     kind: "blocker",
     text: ceilings.join("; "),
   });
-  expect(readObservation(observation)).toEqual({ ...verified, alerts: ceilings });
+  expect(readObservation(observation, nativeLane)).toEqual({ ...verified, alerts: ceilings });
   clock.at += MIN;
   expect(await freshnessTick(deps, state.dir)).toEqual([]);
   expect(usageReads).toBe(4);

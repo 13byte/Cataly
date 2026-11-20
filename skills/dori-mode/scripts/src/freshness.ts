@@ -6,7 +6,8 @@ import type { FlowDeps } from "./done-flow.ts";
 import { notifyFreshness, rememberFreshness, sampleLegacyReport } from "./freshness-notify.ts";
 import { checkPausedLane } from "./pause.ts";
 import { type Lane, sameLaneGeneration, sessionOf, statusOf } from "./registry.ts";
-import { type Progress, ReportError, Reports } from "./reports.ts";
+import { ReportError } from "./report-events.ts";
+import { type Progress, Reports, reportScope } from "./reports.ts";
 import { runtimesOf } from "./run.ts";
 import { readScreen } from "./sessions.ts";
 import { Supervision, type SupervisionResult } from "./supervision.ts";
@@ -76,7 +77,7 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
     let supervised: SupervisionResult | null = null;
     let supervisionError: string | undefined;
     let incompleteSample = false;
-    const scope = { generation: lane.lifecycleEpoch };
+    const scope = reportScope(lane);
     if (lane.reportProtocol === "jsonl-v1") {
       try {
         previous = reports.read(lane.key, scope);
@@ -130,7 +131,14 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
     await withDeliveryLock(deps, lane.key, async () => {
       // The screen and usage hook can outlive park/reopen; never apply them to the replacement lane.
       const current = await deps.registry.read(lane.key);
-      if (!current || current.nativeCloseIntent || !sameLaneGeneration(lane, current)) return;
+      if (
+        !current ||
+        current.nativeCloseIntent ||
+        !sameLaneGeneration(lane, current) ||
+        current.requestId !== lane.requestId ||
+        current.runId !== lane.runId
+      )
+        return;
       const nativeStatus =
         native?.held === false &&
         native.dialogs.length === 0 &&

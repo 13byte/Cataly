@@ -37,7 +37,7 @@ async function supervisedLane(home: string, cwd: string, stateDir: string, optio
   return {
     state: () => reports.read(key)?.state,
     journal: () => readFileSync(reports.path(key), "utf8"),
-    observation: () => readObservation(join(stateDir, "lanes", key, "supervision.json")),
+    observation: () => readObservation(join(stateDir, "lanes", key, "supervision.json"), lane),
     async tick(minutes: number, runner = native, gitActivity = true) {
       clock.at = T0 + minutes * MIN;
       world.screen = `Working ${21 + minutes}m`;

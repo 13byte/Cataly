@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Bind opted-in lane reports and checkpoints to the original received request and launch run on terminal and headless lanes, retaining attribution across reopen and wake. Exact Discord reply receipts can be linked explicitly; unsupported delivery paths remain unverified. Validate retained execution history before launch or reopen without dropping completed checkpoint effects, and reject valueless delivery options before acknowledging a report.
+
 - Discord purpose commands accept `--source "discord CHANNEL MESSAGE"` to bind the invocation to a verified owner message in its physical conversation. Only that conversation and its actual thread parent are eligible. Notes and source receipts are stored atomically: matching retries return the original result without overwriting later edits, and conflicting reuse is rejected. Manual commands remain available.
 
 - Discord voice documents `gpt-live-1.1` as a `voice.liveModel` (same Live WebSocket protocol as `gpt-live-1`) and records the provider's paused-seconds breakdown as `pausedSeconds` within billed `liveSeconds`; minute limits still count all billed seconds, late paused reports stay on the days that hold the session's billed time, and an inconsistent breakdown ends the session. GPT-Live standby is WebRTC-only, so it is documented as unavailable over Dori's WebSocket transport, where idle close and wake remain.
