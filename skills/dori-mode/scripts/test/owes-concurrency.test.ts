@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -148,6 +149,30 @@ test("a real dead writer's lock is reclaimed before admitting the next owe", asy
   } finally {
     child.kill();
     await child.exited;
+    state.done();
+  }
+});
+
+test("a cancelled owes writer leaves every record untouched while another writer is reserved", async () => {
+  const state = withState();
+  const path = join(state.dir, "owes", "inbound.jsonl.writer.sqlite");
+  mkdirSync(join(state.dir, "owes"), { mode: 0o700 });
+  writeFileSync(path, "", { mode: 0o600, flag: "wx" });
+  const owner = new Database(path, { readwrite: true, create: false });
+  const abort = new AbortController();
+  const reason = new Error("intake generation ended");
+  try {
+    owner.exec("BEGIN IMMEDIATE");
+    const pending = recordOwes(state.dir, line("2000"), 1000, abort.signal);
+    abort.abort(reason);
+    await expect(pending).rejects.toBe(reason);
+    expect(openOwes(state.dir, 1001)).toEqual([]);
+
+    owner.exec("ROLLBACK");
+    expect(await recordOwes(state.dir, line("2000"), 1002)).toBe(1);
+    expect(openOwes(state.dir, 1003).map((owe) => owe.message)).toEqual(["2000"]);
+  } finally {
+    owner.close();
     state.done();
   }
 });
