@@ -7,7 +7,7 @@ import { discordLaneMonitor } from "./discord-lane-monitor.ts";
 import { isDiscordWakePending } from "./discord-lane-wake-pending.ts";
 import type { FlowDeps } from "./done-flow.ts";
 import { Discord } from "./messenger/discord.ts";
-import { DiscordChannels, inboundContext } from "./messenger/discord-channels.ts";
+import { DiscordChannels } from "./messenger/discord-channels.ts";
 import type { GatewayClock, GatewaySocket } from "./messenger/discord-gateway.ts";
 import { routeDiscordAskReply, routeUnreferencedDiscordAskText } from "./messenger/discord-ask-mailbox.ts";
 import { type DiscordAskReceiverPublication, openDiscordAskReceiver } from "./messenger/discord-ask-receiver.ts";
@@ -17,6 +17,7 @@ import {
   formatInboundContext,
   markDiscordInboundSeen,
 } from "./messenger/discord-inbound.ts";
+import { inboundContext } from "./messenger/discord-inbound-context.ts";
 import type { Emit } from "./messenger/discord-inbound-api.ts";
 import { discordInboundLive } from "./messenger/discord-inbound-live.ts";
 import { discordInboundQueue } from "./messenger/discord-inbound-queue.ts";

@@ -25,6 +25,9 @@ type Delivery = { readonly ids: string[]; readonly replyConfirmed: boolean };
 /** Forum and media channels contain posts, each represented by a thread. */
 export const isForumType = (type: number): boolean => type === 15 || type === 16;
 
+/** Only these channel types give parent_id the meaning of a thread parent. */
+export const isThreadType = (type: unknown): boolean => type === 10 || type === 11 || type === 12;
+
 /**
  * An environment-supplied REST API prefix may target only loopback HTTP.
  * Credentials and query/fragment components are not usable API prefixes.

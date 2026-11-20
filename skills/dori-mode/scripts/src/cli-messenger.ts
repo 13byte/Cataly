@@ -2,7 +2,8 @@
 import { existsSync } from "node:fs";
 
 import { type Command, die, envSlackToken, every, messageText, slackAuth } from "./cli-context.ts";
-import { channelDiscord, reactDiscord, sendDiscord, threadDiscord } from "./cli-discord-ops.ts";
+import { reactDiscord, sendDiscord, threadDiscord } from "./cli-discord-ops.ts";
+import { channelDiscord } from "./cli-discord-purpose.ts";
 import { discordClock, discordInboundCommand, openDiscordSocket, untilStopped } from "./cli-discord.ts";
 import { ChannelPurposeError } from "./messenger/discord-channels.ts";
 import { discordPresence } from "./messenger/discord-presence.ts";
@@ -232,10 +233,8 @@ export const messengerCommands: Readonly<Record<string, Command>> = {
       lags.push(lag);
     }
     const summary = summarizeLag(lags);
-    if (summary === undefined) {
-      die(`no lag readings in the last ${limit} records of ${path} (${skipped} unparseable)`);
-      return;
-    }
+    if (summary === undefined)
+      return die(`no lag readings in the last ${limit} records of ${path} (${skipped} unparseable)`);
     console.log(
       `LAG n=${summary.n} p50=${summary.p50}ms p90=${summary.p90}ms p99=${summary.p99}ms max=${summary.max}ms` +
         (skipped === 0 ? "" : ` skipped=${skipped}`),

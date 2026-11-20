@@ -1,7 +1,6 @@
 /** Discord send/thread/react operations. */
 import { type Command, die, messageText } from "./cli-context.ts";
 import { type DcChannel, Discord, isForumType } from "./messenger/discord.ts";
-import { DiscordChannels, purposeText } from "./messenger/discord-channels.ts";
 import { discordInboundEnv, isDiscordSnowflake } from "./messenger/discord-inbound-state.ts";
 import { renderDiscordTables } from "./messenger/discord-markdown.ts";
 import { fetchHttp } from "./messenger/http.ts";
@@ -10,11 +9,11 @@ import { recordMark, recordSent } from "./owes.ts";
 import { realClock, runtimesOf } from "./run.ts";
 import { setThreadStatus } from "./thread-status.ts";
 
-const client = () =>
+export const discordClient = () =>
   new Discord(fetchHttp, realClock, process.env["DORI_DISCORD_TOKEN"] || die("DORI_DISCORD_TOKEN is not set"));
 
 /** An exact channel ID, or a unique channel name in the explicitly selected guild. */
-const channelOf = async (dc: Discord, raw: string): Promise<DcChannel> => {
+export const channelOf = async (dc: Discord, raw: string): Promise<DcChannel> => {
   if (/^\d+$/.test(raw)) return await dc.channel(raw);
   const guild = discordInboundEnv(
     "DORI_DISCORD_GUILD_ID (to look up a channel by name)",
@@ -52,7 +51,7 @@ export const sendDiscord: Command = async (cli) => {
   // An edit replaces one message, so it is never split: over the limit it is refused before the channel lookup.
   if (edit !== undefined && text.length > DISCORD_LIMIT)
     die(`--edit text exceeds ${DISCORD_LIMIT} UTF-16 code units; shorten the text or send without --edit`);
-  const dc = client();
+  const dc = discordClient();
   let target: string;
   if (thread !== undefined) target = discordInboundEnv("--thread", thread);
   else {
@@ -92,13 +91,13 @@ export const threadDiscord: Command = async ({ positionals, need, opt, strings, 
     const open = (await deps.registry.open()).filter((lane) => lane.thread === `discord:${id}` || lane.thread === id);
     if (status === "done" && open.length)
       die(`thread still has open lanes: ${open.map((lane) => lane.key).join(", ")}`);
-    const result = await setThreadStatus(client(), id, status);
+    const result = await setThreadStatus(discordClient(), id, status);
     console.log(
       `THREAD_STATUS ${id} ${status} ${result.changed ? "changed" : "unchanged"} ${JSON.stringify(result.name)}`,
     );
     return;
   }
-  const dc = client();
+  const dc = discordClient();
   if (action === "create") {
     // A thread on an existing message: checked before any request, so a bad id never opens a thread without one.
     const message = values["message"] === undefined ? undefined : discordInboundEnv("--message", opt("message"));
@@ -144,40 +143,12 @@ export const threadDiscord: Command = async ({ positionals, need, opt, strings, 
   } else die("thread discord needs create, set or status");
 };
 
-/** The operator's purpose notes per channel or thread: `set <channel> --purpose T`, `clear <channel>`, `list`. */
-export const channelDiscord: Command = async ({ positionals, opt, config }) => {
-  const action = positionals[1];
-  const store = new DiscordChannels(config.stateDir);
-  if (action === "list") {
-    for (const [id, entry] of Object.entries(store.read()))
-      console.log(
-        `CHANNEL ${id} name=${JSON.stringify(entry.name ?? "")} purpose=${JSON.stringify(entry.purpose)} updated=${entry.updatedAt}`,
-      );
-    return;
-  }
-  if (action !== "set" && action !== "clear") return die("channel discord needs set, clear or list");
-  const raw = positionals[2] ?? die(`channel discord ${action} needs a channel or thread`);
-  if (action === "clear") {
-    // An ID needs no lookup, so a deleted channel's note can still be removed.
-    const id = /^\d+$/.test(raw) ? discordInboundEnv("channel", raw) : (await channelOf(client(), raw)).id;
-    console.log(`${(await store.clear(id)) ? "PURPOSE_CLEARED" : "PURPOSE_NONE"} ${id}`);
-    return;
-  }
-  // Checked before the lookup, so a bad purpose sends no request.
-  const purpose = purposeText(opt("purpose") ?? "");
-  const channel = await channelOf(client(), raw);
-  // A DM or an unnamed channel may answer with a null name: only a string is recorded.
-  const name = typeof channel.name === "string" ? channel.name : undefined;
-  const entry = await store.set(channel.id, purpose, name, Date.now());
-  console.log(`PURPOSE ${channel.id} ${JSON.stringify(entry.purpose)}`);
-};
-
 export const reactDiscord: Command = async ({ need, opt, values, config }) => {
   const thread = opt("thread");
   const channel = thread === undefined ? discordInboundEnv("--to", need("to")) : discordInboundEnv("--thread", thread);
   const message = discordInboundEnv("--message", need("message"));
   const remove = values["remove"] === true;
-  await client().react(channel, message, opt("emoji") || "\u{1f440}", remove);
+  await discordClient().react(channel, message, opt("emoji") || "\u{1f440}", remove);
   // A read receipt on the owner's exact message is half of the answer; the gate reads this to settle the owe.
   if (!remove) await recordMark(config.stateDir, channel, message, Date.now());
   console.log(`REACTED ${channel} ${remove ? "-" : "+"}`);
