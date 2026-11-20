@@ -111,4 +111,8 @@ export const USAGE = `dori <command> [options]
                                        --wake-lanes (Discord, continuous REST) reopens verified lanes and sends threaded replies
   inbound-abandon discord BOT:OWNER:CHANNEL:MESSAGE --reason TEXT
                                        record an explicit decision after the original native head stops; never resend
+  recall --scope PLATFORM:BOT:OWNER --space=ID [--limit N] QUERY
+                                       search one explicitly scoped local conversation space; off by default
+  recall --scope PLATFORM:BOT:OWNER --purge
+                                       logically delete that identity’s scoped rows only; legacy records are untouched
   inbound-lag [--limit N]              receive-lag percentiles from state/telegram-lag.jsonl (the meter behind the INBOUND lines)`;

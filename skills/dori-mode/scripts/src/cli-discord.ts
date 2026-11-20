@@ -28,7 +28,6 @@ import { headUnresolved } from "./messenger/head-admission-state.ts";
 import { fetchHttp, MessengerError } from "./messenger/http.ts";
 import { recordOwes } from "./owes.ts";
 import { realClock } from "./run.ts";
-
 export const openDiscordSocket = (url: string): GatewaySocket => {
   const ws = new WebSocket(url);
   return {
@@ -39,7 +38,6 @@ export const openDiscordSocket = (url: string): GatewaySocket => {
     onError: (cb) => ws.addEventListener("error", () => cb()),
   };
 };
-
 export const discordClock: GatewayClock = {
   now: realClock.now,
   random: Math.random,
@@ -60,7 +58,6 @@ export const untilStopped = async (gateway: { done: Promise<void>; close(): void
     gateway.close();
   }
 };
-
 const idList = (value: string | undefined): string[] =>
   (value ?? "")
     .split(",")
@@ -144,14 +141,19 @@ export const discordInboundCommand = async (
       );
     const watching = all ? "all" : intake.channels().join(",");
     const where = context ? inboundContext(discord, new DiscordChannels(stateDir), realClock.now) : undefined;
-    // Only the existing lead fallback crosses the native admission path.
+    const recall = deps.config.recall?.enabled
+      ? await import("./messenger/recall-discord.ts").then((module) => module.discordOwnerRecall(deps.config, identity))
+      : undefined;
     const emitToHead = headEmitter(queue, intake.botId, ownerId, async (message, signal) => {
       const text = where
         ? `${formatDiscordInbound(message)}\n${formatInboundContext(message, await where(message.channel))}`
         : formatDiscordInbound(message);
       await recordOwes(stateDir, text, Date.now(), signal);
       signal?.throwIfAborted();
-      return text;
+      const recalled = recall?.(message, () =>
+        intake.recallSpaceFor(message.channel, queue.parentFor(message.channel)),
+      );
+      return recalled ? `${text}\n${recalled}` : text;
     });
     const emit: Emit = async (message, signal) => {
       signal?.throwIfAborted();

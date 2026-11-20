@@ -53,6 +53,37 @@ test("a long Discord send is split, replies only with its first part, and prints
   });
 }, 60_000);
 
+test.skipIf(process.platform === "win32")(
+  "recall stores only Discord replies confirmed in a watched conversation",
+  async () => {
+    await withDiscordCli(async (f) => {
+      const args = ["send", "discord", "--thread", ids.thread, "--reply", ids.message, "--text"];
+      const post = `POST /channels/${ids.thread}/messages`;
+      const environment = { DORI_DISCORD_CHANNEL_ID: ids.forum, DORI_DISCORD_OWNER_ID: "10" };
+      const options = { recall: true, environment };
+      const exact = await f.invoke([...args, "confirmed marker"], {
+        ...options,
+        routes: {
+          [post]: {
+            body: { id: "71", type: 19, message_reference: { message_id: ids.message, channel_id: ids.thread } },
+          },
+          "GET /users/@me": { body: { id: "99", bot: true } },
+        },
+      });
+      expect([exact.code, exact.err, exact.out]).toEqual([0, "", "SENT 71"]);
+      expect(exact.keys).toEqual([post, `GET /channels/${ids.thread}`, "GET /users/@me"]);
+      const unconfirmed = await f.invoke([...args, "unconfirmed marker"], options);
+      expect([unconfirmed.code, unconfirmed.keys]).toEqual([0, [post]]);
+      const scope = ["recall", "--scope", "discord:99:10", `--space=${ids.forum}`];
+      const found = await f.invoke([...scope, "confirmed"], options);
+      expect(found.out).toContain('"text":"confirmed marker"');
+      const missing = await f.invoke([...scope, "unconfirmed"], options);
+      expect([missing.code, missing.out]).toEqual([0, "RECALL_NONE"]);
+    });
+  },
+  25_000,
+);
+
 test("a rejected original reply stops the public CLI without posting an unlinked part", async () => {
   await withDiscordCli(async (f) => {
     const r = await f.invoke(["send", "discord", "--thread", ids.thread, "--reply", ids.message, "--text-file", "-"], {

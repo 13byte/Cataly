@@ -45,6 +45,7 @@ type DiscordCli = {
       readonly environment?: Record<string, string | undefined>;
       readonly hook?: readonly string[] | null;
       readonly transcribeMaxBytes?: unknown;
+      readonly recall?: boolean;
       readonly stdin?: string;
     },
   ) => Promise<{
@@ -120,6 +121,7 @@ const discordCli = (): DiscordCli => {
           stateDir: state.dir,
           defaultCwd: state.dir,
           transcribeMaxBytes: options.transcribeMaxBytes,
+          ...(options.recall === true ? { recall: { enabled: true } } : {}),
           hooks: {
             transcribe:
               options.hook === null ? undefined : (options.hook ?? [process.execPath, "-e", audioHook, "{file}"]),

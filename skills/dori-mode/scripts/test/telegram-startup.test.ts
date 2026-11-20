@@ -17,7 +17,8 @@ const startup = async (
   const config = join(state.dir, "config.json");
   writeFileSync(offset, "17");
   writeFileSync(join(state.dir, "telegram-lag.jsonl"), '{"lagMs":12}\n');
-  writeFileSync(config, JSON.stringify({ stateDir: state.dir, defaultCwd: state.dir }));
+  const recall = scenario["recall"] === true;
+  writeFileSync(config, JSON.stringify({ stateDir: state.dir, defaultCwd: state.dir, recall: { enabled: recall } }));
   const child = Bun.spawn(
     [
       process.execPath,
@@ -81,6 +82,7 @@ const startup = async (
       requests,
       methods: requests.map((r) => r.method),
       offset: readFileSync(offset, "utf8"),
+      recallStored: existsSync(join(state.dir, "recall-scoped-v1.sqlite")),
     };
   } finally {
     if (child.exitCode === null) {
@@ -101,6 +103,49 @@ test("Telegram inbound authenticates and checks an empty webhook before READY an
   expect(r.out.indexOf("INBOUND_READY telegram")).toBeLessThan(r.out.indexOf("STARTUP_REQUEST getUpdates"));
   expect(r.offset).toBe("17");
 });
+
+test.skipIf(process.platform === "win32")(
+  "opt-in Telegram recall uses only the authenticated bot and verified owner messages",
+  async () => {
+    const message = (message_id: number, owner: number, text: string) => ({
+      message_id,
+      from: { id: owner, is_bot: false },
+      chat: { id: 7, type: "private" },
+      text,
+    });
+    const updates = [
+      { update_id: 17, message: message(21, 7, "delivery marker earlier") },
+      { update_id: 18, message: message(22, 8, "other owner marker") },
+      { update_id: 19, message: message(23, 7, "what was the delivery marker earlier?") },
+    ];
+    const r = await startup({ recall: true, updates }, ["inbound", "telegram", "--loop", "0"]);
+    expect([r.code, r.err, r.offset]).toEqual([0, "", "20"]);
+    const prefix = "INBOUND_RECALL telegram 7 23 ";
+    const line = r.out.split("\n").find((value) => value.startsWith(prefix));
+    expect(JSON.parse(line?.slice(prefix.length) ?? "null").rows).toMatchObject([
+      { role: "owner", text: "delivery marker earlier" },
+    ]);
+    expect(r.out).not.toContain("other owner marker");
+  },
+);
+
+test.skipIf(process.platform === "win32")(
+  "Telegram sends only record in the configured verified conversation",
+  async () => {
+    const send = (chat: string, recall: boolean) =>
+      startup({ recall, sent: { message_id: 81 } }, ["send", "telegram", "--to", chat, "--text", "reply marker"]);
+    for (const [chat, recall, stored] of [
+      ["7", true, true],
+      ["8", true, false],
+      ["7", false, false],
+    ] as const) {
+      const result = await send(chat, recall);
+      expect([result.code, result.err, result.recallStored]).toEqual([0, "", stored]);
+      expect(result.out).toContain("SENT 81");
+      expect(result.methods).toEqual(stored ? ["sendMessage", "getMe"] : ["sendMessage"]);
+    }
+  },
+);
 
 test("an active webhook exits even in loop mode without polling, ACK, readiness or webhook mutation", async () => {
   const r = await startup({ webhook: { url: "https://private-webhook.invalid/key", pending_update_count: 0 } }, [
