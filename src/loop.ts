@@ -7,6 +7,7 @@ import { tellLead } from "./inbox.ts";
 import { startLane } from "./lanes.ts";
 import { audit, HOUR } from "./loop-audit.ts";
 import { acquire, holds, release } from "./loop-lock.ts";
+import { distillStep } from "./owner-distill.ts";
 import { refText } from "./refs.ts";
 import type { LoopRun } from "./store-types.ts";
 
@@ -145,7 +146,7 @@ function ask(d: Deps, run: LoopRun): void {
   }
 }
 
-export function summary(run: LoopRun): string {
+export function summary(run: LoopRun, includeDistill = true): string {
   if (run.skipped) return `[LOOP ${new Date(run.at).toISOString().slice(0, 16)}Z] skipped: ${run.skipped}`;
   const s = run.status!;
   const lines = [
@@ -156,6 +157,7 @@ export function summary(run: LoopRun): string {
   for (const k of ["synced", "findings", "started", "held"] as const)
     if (run[k].length) lines.push(`${k}: ${run[k].join("; ")}`);
   lines.push(...run.asked);
+  if (includeDistill && run.distill) lines.push(run.distill);
   return lines.join("\n");
 }
 
@@ -179,6 +181,7 @@ export async function loopTick(d: Deps, opts: LoopOpts = {}): Promise<LoopRun> {
     await audit(d, run);
     await pull(d, run, maxLanes, maxStarts, opts.maxLoad, lock.nonce);
     ask(d, run);
+    distillStep(d, run);
     const items = d.store.items();
     const running = new Set(items.filter((i) => i.status === "running").map((i) => i.id));
     const lanes = d.store.lanes().filter((l) => isOpenLane(l.status));
@@ -195,7 +198,8 @@ export async function loopTick(d: Deps, opts: LoopOpts = {}): Promise<LoopRun> {
     };
     const record = d.store.saveRun(run);
     try {
-      await tellLead(d, summary(run), "loop");
+      // The date-bound distill is a separate, deduplicated inbox entry; never include it again in the delivery.
+      await tellLead(d, summary(run, false), "loop");
     } catch (e) {
       run.findings.push(`report to the lead failed: ${e instanceof Error ? e.message : String(e)}`);
       d.store.saveRun(run, record);

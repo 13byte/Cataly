@@ -48,6 +48,8 @@ describe("dori migrate: roles and loops", () => {
 
   test("lead: handoff from its prompt file, roles.json switched, its inbox moved", async () => {
     const { w, d, lines, opts } = rolesWorld();
+    const observation = "- (2026-11-19) Local profile migration marker.";
+    writeFileSync(join(d.store.root, "owner.md"), `${observation}\n`);
     d.store.saveInbox(href("w1:p1"), [{ at: 1, from: "k", text: "[REPORT k] hi" }]);
     expect(await migrate(d, { role: "lead" }, opts())).toBe(0);
     expect(lines).toEqual(["MIGRATED lead w1:p1 -> hc:t1"]);
@@ -55,7 +57,10 @@ describe("dori migrate: roles and loops", () => {
     const start = w.hc.sent[0]!.text;
     expect(start).toStartWith("omo --append-system-prompt ");
     const brief = start.split(" ").at(-1)!.replaceAll("'", "");
-    expect(readFileSync(brief, "utf8")).toContain("## Handoff");
+    const handoff = readFileSync(brief, "utf8");
+    expect(handoff).toContain("## Handoff");
+    expect(handoff).toContain("dori owner show");
+    expect(handoff).not.toContain(observation);
     expect(d.store.queued({ runtime: "hc", id: "t1" }).map((m) => m.text)).toEqual(["[REPORT k] hi"]);
   });
 
