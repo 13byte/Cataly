@@ -74,6 +74,7 @@ export const USAGE = `dori <command> [options]
   send <slack|telegram|discord> --to TARGET (--text TEXT | --text-file PATH|-) [--thread ID] [--edit ID] [--reply ID]
                                        Discord accepts channel names with DORI_DISCORD_GUILD_ID; --thread needs no --to and also targets edits
                                        Discord splits text past 2000 characters (SENT lists every id); --reply and opt-in --render-tables (bounded pipe tables) are Discord only
+                                       Slack accepts slack:WORKSPACE:ACCOUNT:CHANNEL and refuses a different authenticated account
   thread discord create --to CHANNEL --title T [--text T] [--tag NAME]... [--message ID]
                                        --message opens the thread on that message of a text channel
   thread discord set <thread> [--title T] [--tag NAME]... [--archive|--unarchive]
@@ -88,6 +89,9 @@ export const USAGE = `dori <command> [options]
   presence <slack|discord>             keep the account shown as online until stopped
   transcribe <audio-file|url>           run hooks.transcribe and print the text; HTTP(S) downloads are private and temporary
   inbound slack|telegram|discord [--loop MIN] [--gateway] [--context]
+                                       Slack defaults to INBOUND_READY slack and physical channel IDs;
+                                       --qualified-routes opts into account-qualified readiness and destinations
+                                       Slack: --adopt-legacy-threads WORKSPACE:ACCOUNT explicitly binds an old unscoped ledger
                                        print INBOUND lines: Slack unread thread replies / Telegram owner DMs, edits and media + configured topic
                                        the Dori posted in (any helper), DMs and channels with unread mentions
                                        Discord requires DORI_DISCORD_TOKEN, DORI_DISCORD_OWNER_ID and configured channel IDs

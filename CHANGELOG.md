@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Slack thread positions are bound to the authenticated workspace/account rather than shared channel/root IDs. `dori inbound slack` keeps its existing readiness line and physical channel IDs; `--qualified-routes` opts into account-qualified readiness and destinations. Replies reject mismatched parents, qualified destinations reject another account before mutation, and nonempty legacy ledgers require explicit matching operator adoption with a durable receipt; existing non-self/non-bot intake and post-emit cursor semantics remain unchanged.
+
 - `dori park` and `dori reopen` accept saved OMP sessions whose first line is OMP's fixed-width title slot (v1) before the session header; any other leading record, a second title, a missing header, or a different session id or cwd is still refused.
 
 - Discord replies retain their original message ID and copied snapshot, distinguish unresolved, unavailable and observed-empty context, and reject reference or snapshot channel mismatches before owner delivery or checkpoint. Outgoing replies bind to the exact physical channel or thread and require the original target to exist; a deleted or other-channel target no longer silently becomes an unlinked post. Normal `INBOUND` grammar, split-message ordering and non-pinging mentions remain unchanged.
