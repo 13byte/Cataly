@@ -4,6 +4,8 @@
 
 - Supervised Discord lead intake records the original source and native dispatch attempt in the existing SQLite FIFO and requires an on-disk receipt before advancing the cursor. Lost acknowledgements reconcile without redispatch; an unresolved attempt holds intake. Explicit `inbound-abandon` retains the source and operator decision without resending. Native admission is separate from ASK, tool approval, authorization, Discord delivery and completion.
 
+- Serialize owner-obligation snapshot writers during lock recovery, while preserving cancellation, the original JSONL files and compatibility with an existing live writer.
+
 - Verify the exact native provider and model before delivering briefs to readable interactive lane launches; preserve explicit non-interactive and opaque compatibility with unavailable provenance and an opt-in strict gate.
 
 - Bind opted-in lane reports and checkpoints to the original received request and launch run on terminal and headless lanes, retaining attribution across reopen and wake. Exact Discord reply receipts can be linked explicitly; unsupported delivery paths remain unverified. Validate retained execution history before launch or reopen without dropping completed checkpoint effects, and reject valueless delivery options before acknowledging a report.

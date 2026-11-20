@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 import { takeLock } from "./checkpoint-lock.ts";
+import { tryOwesWriter } from "./owes-writer.ts";
 
 const KEEP_LINES = 200;
 const RETRY_MS = 50;
@@ -22,31 +23,32 @@ export const updateLines = async <T>(
 ): Promise<T> => {
   for (;;) {
     signal?.throwIfAborted();
-    const release = takeLock(`${path}.lock`, Date.now(), (message) => new Error(`owes lock ${message}`), {
-      keepLiveOwner: true,
-    });
-    if (typeof release === "string") {
+    const completed = tryOwesWriter(path, () => {
+      const release = takeLock(`${path}.lock`, Date.now(), (message) => new Error(`owes lock ${message}`), {
+        keepLiveOwner: true,
+      });
+      if (typeof release === "string") return undefined;
       try {
-        await delay(RETRY_MS, undefined, { signal });
-      } catch (error) {
-        if (signal?.aborted) throw signal.reason;
-        throw error;
+        signal?.throwIfAborted();
+        const previous = readLines(path);
+        const { lines, value } = update(previous);
+        if (lines !== previous) {
+          const temporary = `${path}.${process.pid}.tmp`;
+          // Join even an unterminated corrupt tail separately from the newly admitted records.
+          writeFileSync(temporary, `${lines.slice(-KEEP_LINES).join("\n")}\n`, { mode: 0o600 });
+          renameSync(temporary, path);
+        }
+        return { value };
+      } finally {
+        release();
       }
-      continue;
-    }
+    });
+    if (completed) return completed.value;
     try {
-      signal?.throwIfAborted();
-      const previous = readLines(path);
-      const { lines, value } = update(previous);
-      if (lines !== previous) {
-        const temporary = `${path}.${process.pid}.tmp`;
-        // Joining frames even an unterminated corrupt tail separately from the newly admitted records.
-        writeFileSync(temporary, `${lines.slice(-KEEP_LINES).join("\n")}\n`, { mode: 0o600 });
-        renameSync(temporary, path);
-      }
-      return value;
-    } finally {
-      release();
+      await delay(RETRY_MS, undefined, { signal });
+    } catch (error) {
+      if (signal?.aborted) throw signal.reason;
+      throw error;
     }
   }
 };
