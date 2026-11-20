@@ -7,6 +7,18 @@ import type { FlowDeps } from "./done-flow.ts";
 import { QueueError, TemplateError } from "./launch-errors.ts";
 
 const [command = "", ...rest] = process.argv.slice(2);
+const renderTablesUsage = "--render-tables requires dori send discord (with or without --edit)";
+// The harness grammar distinguishes a flag from message text and lock argv.
+// The sentinel lets it identify the unsupported flag even as the last token.
+if (
+  rest.includes("--render-tables") &&
+  (command === "--version" ||
+    (command === "harness" &&
+      (await import("../../../../src/cli-args.ts")).parse([...rest, "--"]).flags.has("render-tables")))
+) {
+  console.error(renderTablesUsage);
+  process.exit(1);
+}
 // Command-selected imports keep unrelated graphs out of short-lived CLI processes.
 if (command === "harness") process.exit(await (await import("./cli-harness.ts")).runHarness(rest));
 if (command === "--version") {
@@ -59,6 +71,7 @@ const flags = parseArgs({
     edit: { type: "string" },
     "text-file": { type: "string" },
     reply: { type: "string" },
+    "render-tables": { type: "boolean" },
     tag: { type: "string", multiple: true },
     archive: { type: "boolean" },
     unarchive: { type: "boolean" },
@@ -91,6 +104,11 @@ const flags = parseArgs({
     self: { type: "string" },
   },
 });
+if (flags.values["render-tables"] !== undefined && (command !== "send" || flags.positionals[0] !== "discord")) {
+  if (command === "send" && ["slack", "telegram"].includes(flags.positionals[0] ?? ""))
+    die("--render-tables is supported for discord only");
+  die(renderTablesUsage);
+}
 let commands: Readonly<Record<string, Command>> = {};
 switch (command) {
   case "report":
