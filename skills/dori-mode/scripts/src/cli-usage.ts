@@ -41,11 +41,15 @@ export const USAGE = `dori <command> [options]
   worklog next|note <id> <text>        set the item's next step, or add a note (a decision, an owner)
   worklog close <id> --result TEXT     close the item with what came of it
   worklog list [--open]                items as JSON; <stateDir>/worklog.md holds the same for reading
-  decision ask <question> --source REF [--lane K] [--thread REF] [--option TEXT]... [--recommend N] [--worklog ID] [--message REF]
-                                       record a choice put to the owner (up to 9 numbered options)
+  decision ask <question> --source REF [--lane K] [--thread REF] [--kind owner|routine] [--option TEXT]... [--recommend N] [--worklog ID] [--message REF]
+                                       record a choice put to the owner (up to 9 numbered options); without --kind it is the owner's,
+                                       routine (reversible, in scope, 2+ options, a thread) lets the lead choose too
   decision posted <id> --message REF   record where the question was posted; a reply to that message answers it
   decision answer <id> <answer> --source REF
                                        record the owner's answer: a bare number picks that option, other text stays free text
+  decision choose <id> <N> --reason TEXT --source REF --thread REF
+                                       record the lead's choice of option N of a routine decision, posted with its reason in
+                                       the decision's thread (--source); never an owner answer or a permission grant
   decision withdraw <id> --reason TEXT no longer needed
   decision match <message-ref>         print the open decision posted as that message; exit 1 when there is none
   decision list [--open]               decisions as JSON, oldest first
@@ -69,7 +73,8 @@ export const USAGE = `dori <command> [options]
   can-launch                           exit 0 if the host has room for a new lane, else print why and exit 4
   send <slack|telegram|discord> --to TARGET (--text TEXT | --text-file PATH|-) [--thread ID] [--edit ID] [--reply ID]
                                        Discord accepts channel names with DORI_DISCORD_GUILD_ID; --thread needs no --to and also targets edits
-                                       Discord splits text past 2000 characters (SENT lists every id); --reply is Discord only
+                                       Discord splits text past 2000 characters (SENT lists every id); --reply and opt-in --render-tables (bounded pipe tables) are Discord only
+                                       Slack accepts slack:WORKSPACE:ACCOUNT:CHANNEL and refuses a different authenticated account
   thread discord create --to CHANNEL --title T [--text T] [--tag NAME]... [--message ID]
                                        --message opens the thread on that message of a text channel
   thread discord set <thread> [--title T] [--tag NAME]... [--archive|--unarchive]
@@ -84,6 +89,9 @@ export const USAGE = `dori <command> [options]
   presence <slack|discord>             keep the account shown as online until stopped
   transcribe <audio-file|url>           run hooks.transcribe and print the text; HTTP(S) downloads are private and temporary
   inbound slack|telegram|discord [--loop MIN] [--gateway] [--context]
+                                       Slack defaults to INBOUND_READY slack and physical channel IDs;
+                                       --qualified-routes opts into account-qualified readiness and destinations
+                                       Slack: --adopt-legacy-threads WORKSPACE:ACCOUNT explicitly binds an old unscoped ledger
                                        print INBOUND lines: Slack unread thread replies / Telegram owner DMs, edits and media + configured topic
                                        the Dori posted in (any helper), DMs and channels with unread mentions
                                        Discord requires DORI_DISCORD_TOKEN, DORI_DISCORD_OWNER_ID and configured channel IDs

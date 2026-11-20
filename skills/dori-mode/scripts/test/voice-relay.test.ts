@@ -10,17 +10,7 @@ import { leadRepliesPath } from "../src/voice/relay.ts";
 import type { VoiceSettings } from "../src/voice/settings.ts";
 import { voiceTools } from "../src/voice/tools.ts";
 import type { ToolResult } from "../src/voice/types.ts";
-import {
-  agentIn,
-  depsFor,
-  fakeRunner,
-  laneState,
-  newWorld,
-  sent,
-  type TestState,
-  withState,
-  type World,
-} from "./fakes.ts";
+import { agentIn, depsFor, fakeRunner, laneState, newWorld, sent, withState } from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00.000Z");
 const LEAD = "w1:p1";
@@ -38,8 +28,8 @@ const record = (role: "user" | "assistant", text: string) => ({
 });
 const settings = { textChannelId: "123456789012345678" } as VoiceSettings;
 
-let state: TestState;
-let world: World;
+let state: ReturnType<typeof withState>;
+let world: ReturnType<typeof newWorld>;
 let sleeps: number[];
 let sessionFile: string;
 /** Runs after each call the fake herdr answers, so a test can move the lead on at a chosen step. */
@@ -106,7 +96,10 @@ beforeEach(() => {
 });
 afterEach(() => state.done());
 
-test.each(["previous answer", "approved: all checks passed", "allowed operation finished", "승인 완료", "허용됨"])(
+// A native Windows reply path contains backslashes, so the relay stops before probing or sending.
+const posix = test.skipIf(process.platform === "win32");
+
+posix.each(["previous answer", "approved: all checks passed", "allowed operation finished", "승인 완료", "허용됨"])(
   "ordinary prior output is not an approval prompt: %s",
   async (previous) => {
     world.onEnterStatus = "working";
@@ -130,7 +123,7 @@ test.each(["previous answer", "approved: all checks passed", "allowed operation 
   },
 );
 
-test("a risky request is labelled and still carries the written-confirmation guard", async () => {
+posix("a risky request is labelled and still carries the written-confirmation guard", async () => {
   world.onEnterStatus = "working";
   world.onSendText = (_pane, text) => append(record("user", text));
   expect((await tool()({ message: "배포해", risky: true })).ok).toBe(true);
@@ -138,7 +131,7 @@ test("a risky request is labelled and still carries the written-confirmation gua
   expect(sent(world)[0]).toContain(GUARD);
 });
 
-test.each(["idle", "working"])("a %s lead needs a new request-bound user record", async (status) => {
+posix.each(["idle", "working"])("a %s lead needs a new request-bound user record", async (status) => {
   world.onSendText = (_pane, text) => append(record("user", text));
   const r = await tool({ status })({ message: "레인 정리", risky: false });
   expect(r).toMatchObject({ ok: true });
@@ -147,7 +140,7 @@ test.each(["idle", "working"])("a %s lead needs a new request-bound user record"
   expect(sleeps).toEqual([PASTE_SETTLE_MS]);
 });
 
-test.each(["idle", "working"])("unrelated activity by a %s lead is unconfirmed and never resent", async (status) => {
+posix.each(["idle", "working"])("unrelated activity by a %s lead is unconfirmed and never resent", async (status) => {
   world.onSendText = (_pane, text) => {
     append(record("assistant", text));
     append(record("user", "some other input [voice-request:x]"));
@@ -169,7 +162,7 @@ test.each(["idle", "working"])("unrelated activity by a %s lead is unconfirmed a
   await quietAfter();
 });
 
-test("a session file replaced by another session is not receipt, and the watch stops", async () => {
+posix("a session file replaced by another session is not receipt, and the watch stops", async () => {
   world.onSendText = (_pane, text) => {
     const other = join(state.dir, "other.jsonl");
     writeFileSync(other, `${JSON.stringify(record("user", text))}\n`);
@@ -180,7 +173,7 @@ test("a session file replaced by another session is not receipt, and the watch s
   expect(sleeps).toEqual([PASTE_SETTLE_MS]);
 });
 
-test.each(["sessionId", "pid"])("a new user receipt does not confirm after the lead %s changes", async (identity) => {
+posix.each(["sessionId", "pid"])("a new user receipt does not confirm after the lead %s changes", async (identity) => {
   world.onEnterStatus = "working";
   world.onSendText = (_pane, text) => {
     world.screen = BUSY_SCREEN;
@@ -202,14 +195,14 @@ test.each(["sessionId", "pid"])("a new user receipt does not confirm after the l
   expect(sent(world)).toHaveLength(1);
 });
 
-test.each(["idle", "working"])("a %s lead without a session file is unconfirmed", async (status) => {
+posix.each(["idle", "working"])("a %s lead without a session file is unconfirmed", async (status) => {
   const pane = { sessionFile: join(state.dir, "missing.jsonl") };
   const r = await tool({ status, pane })({ message: "레인 정리", risky: false });
   expect(r.result).toStartWith("sent-but-unconfirmed:");
   expect(sleeps).toEqual([PASTE_SETTLE_MS]);
 });
 
-test("a send that failed partway is sent-but-unconfirmed and is never typed again", async () => {
+posix("a send that failed partway is sent-but-unconfirmed and is never typed again", async () => {
   world.onEnterStatus = "working";
   // A timeout may come after herdr handed the prompt over: ambiguous, so no typed fallback and no second attempt.
   answer = (argv) =>
@@ -224,20 +217,24 @@ test("a send that failed partway is sent-but-unconfirmed and is never typed agai
   await quietAfter();
 });
 
-const refusals: readonly [string, Lead, unknown, string][] = [
-  ["a shell in front", { foreground: "-zsh" }, undefined, "a shell is in front"],
-  ["a pending approval", { pane: { approvalPending: true } }, undefined, "approval is pending"],
-  ["a draft in the input", { screen: `${RULE}\n❯ half typed\n${RULE}\n` }, undefined, "input box is not empty"],
-  ["an open question", { screen: `Do you want to proceed? (y/n)\n${IDLE_SCREEN}` }, undefined, "prompt is open"],
-  ["no live OMP writer", { pane: null }, undefined, "the lead session is unknown"],
+const draftScreen = `${RULE}\n❯ half typed\n${RULE}\n`;
+const questionScreen = `Do you want to proceed? (y/n)\n${IDLE_SCREEN}`;
+const refusals: readonly [string, Lead, unknown, string, platform?: "posix" | "win32"][] = [
+  ["a shell in front", { foreground: "-zsh" }, undefined, "a shell is in front", "posix"],
+  ["a pending approval", { pane: { approvalPending: true } }, undefined, "approval is pending", "posix"],
+  ["a draft in the input", { screen: draftScreen }, undefined, "input box is not empty", "posix"],
+  ["an open question", { screen: questionScreen }, undefined, "prompt is open", "posix"],
+  ["no live OMP writer", { pane: null }, undefined, "the lead session is unknown", "posix"],
   ["no lead pane", { leadPane: "" }, undefined, "no lead session is configured"],
   ["an empty message", {}, { message: " `$\\ ", risky: false }, "the message is empty"],
   ["a non-boolean risky", {}, { message: "배포", risky: "no" }, "invalid forward_to_lead arguments"],
   ["no arguments", {}, "not json", "invalid forward_to_lead arguments"],
+  ["a Windows reply path", {}, undefined, "the lead reply path contains shell metacharacters", "win32"],
 ];
 
-for (const [name, lead, args, why] of refusals)
-  test(`${name}: not-sent, nothing typed, no hidden retry`, async () => {
+for (const [name, lead, args, why, platform] of refusals) {
+  const check = platform === "posix" ? posix : test.skipIf(platform === "win32" && process.platform !== "win32");
+  check(`${name}: not-sent, nothing typed, no hidden retry`, async () => {
     world.onEnterStatus = "working";
     const r = await tool(lead)(args ?? { message: "레인 정리", risky: false });
     expect(r.ok).toBe(false);
@@ -245,5 +242,7 @@ for (const [name, lead, args, why] of refusals)
     expect(r.result).toContain(why);
     expect(r.result).toContain("no retry is scheduled");
     expect(typed()).toHaveLength(0);
+    if (platform === "win32") expect(world.calls).toEqual([]);
     await quietAfter();
   });
+}

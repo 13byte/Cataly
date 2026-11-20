@@ -162,9 +162,9 @@ describe("ledger", () => {
         const path = join(dir, name);
         expect(existsSync(path)).toBe(true);
         expect(readFileSync(path, "utf8").trim()).not.toBe("");
-        expect(statSync(path).mode & 0o777).toBe(0o600);
+        if (process.platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o600);
       }
-      expect(statSync(dir).mode & 0o777).toBe(0o700);
+      if (process.platform !== "win32") expect(statSync(dir).mode & 0o777).toBe(0o700);
     } finally {
       state.done();
     }

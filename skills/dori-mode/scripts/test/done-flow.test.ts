@@ -215,7 +215,10 @@ test("closing directly refuses while a signal is not live and leaves the pane al
   expect(closedVia()).toHaveLength(0);
 });
 
-test("a close waits for accepted Discord work to reach the native lane", async () => {
+// The native Discord inbox requires POSIX ownership and permission checks.
+const posix = test.skipIf(process.platform === "win32");
+
+posix("a close waits for accepted Discord work to reach the native lane", async () => {
   const deps = at(T0);
   const discordLane = { ...lane, thread: "discord:123", session: "bound-omp-session" };
   await deps.registry.write(discordLane);

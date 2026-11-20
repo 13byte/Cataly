@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { appendFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { isDiscordWakePending } from "../src/discord-lane-wake-pending.ts";
@@ -17,6 +17,8 @@ import {
 } from "./discord-lane-wake-fixture.ts";
 import { laneState, sent } from "./fakes.ts";
 
+const linux = test.skipIf(process.platform !== "linux");
+
 let fixture: WakeFixture;
 let lane: Lane;
 let deps: FlowDeps;
@@ -28,7 +30,18 @@ beforeEach(async () => {
 
 afterEach(() => fixture.state.done());
 
-test.each(["legacy", "registered"] as const)(
+test.skipIf(process.platform === "linux")("holds an eligible retired lane before runtime calls off Linux", async () => {
+  const before = await deps.registry.read(lane.key);
+  const run = mock(deps.run);
+
+  const result = await wakeDiscordLane({ ...deps, run }, lane);
+
+  expect(result).toEqual({ kind: "held", reason: "exact OMP lease ownership requires Linux" });
+  expect(run).not.toHaveBeenCalled();
+  expect(await deps.registry.read(lane.key)).toEqual(before);
+});
+
+linux.each(["legacy", "registered"] as const)(
   "wakes the exact %s session once without overriding the saved model",
   async (model) => {
     if (model === "registered") {
@@ -63,7 +76,7 @@ test.each(["legacy", "registered"] as const)(
   },
 );
 
-test.each(["paused", "closed", "goal paused", "goal blocked", "approval"] as const)(
+linux.each(["paused", "closed", "goal paused", "goal blocked", "approval"] as const)(
   "holds a retired lane with %s",
   async (reason) => {
     if (reason === "paused" || reason === "closed") {
@@ -89,7 +102,7 @@ test.each(["paused", "closed", "goal paused", "goal blocked", "approval"] as con
   },
 );
 
-test.each(["other lease owner", "unsafe template", "continuation", "departed transcript"] as const)(
+linux.each(["other lease owner", "unsafe template", "continuation", "departed transcript"] as const)(
   "holds before opening a pane on %s",
   async (reason) => {
     if (reason === "other lease owner") fixture.control.leaseHeld = true;
@@ -116,7 +129,7 @@ test.each(["other lease owner", "unsafe template", "continuation", "departed tra
   },
 );
 
-test("leaves a new pane alone if it is already running a job", async () => {
+linux("leaves a new pane alone if it is already running a job", async () => {
   fixture.control.shellBusy = true;
 
   const result = await wakeDiscordLane(deps, lane);
@@ -126,7 +139,7 @@ test("leaves a new pane alone if it is already running a job", async () => {
   expect(sessionOf((await deps.registry.read(lane.key)) ?? lane)).toEqual(prior);
 });
 
-test.each(["queued input", "lost receipt"] as const)(
+linux.each(["queued input", "lost receipt"] as const)(
   "%s stays pending until a later poll attests startup",
   async (mode) => {
     fixture.control.delayStartup = true;
@@ -148,7 +161,7 @@ test.each(["queued input", "lost receipt"] as const)(
   },
 );
 
-test.each(["foreign session", "foreign file", "foreign cwd", "foreign lease", "free lease"] as const)(
+linux.each(["foreign session", "foreign file", "foreign cwd", "foreign lease", "free lease"] as const)(
   "keeps startup pending with %s despite a live OMP pane",
   async (mismatch) => {
     fixture.control.delayStartup = true;
@@ -173,7 +186,7 @@ test.each(["foreign session", "foreign file", "foreign cwd", "foreign lease", "f
   },
 );
 
-test("wakes in a no-focus workspace root in the same Herdr session after the last tab closes", async () => {
+linux("wakes in a no-focus workspace root in the same Herdr session after the last tab closes", async () => {
   fixture.control.keepWorkspace = false;
   fixture.world.panes = [{ pane_id: "w3:p2", workspace_id: "w3", foreground: "bash" }];
 

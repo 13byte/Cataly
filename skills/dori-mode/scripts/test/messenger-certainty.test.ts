@@ -139,9 +139,10 @@ test("partial sends retain confirmed IDs and stop at the uncertain part", async 
         ? response(200, { id: "71", ok: true, result: { message_id: 71 } })
         : response(503, {});
     };
-    const error = await (platform === "discord"
-      ? new Discord(http, clock().clock, "t").send("42", "x".repeat(5000))
-      : new Telegram(http, clock().clock, "t").send({ chatId: 1 }, "x".repeat(9000))
+    const error = await (
+      platform === "discord"
+        ? new Discord(http, clock().clock, "t").send("42", "x".repeat(5000))
+        : new Telegram(http, clock().clock, "t").send({ chatId: 1 }, "x".repeat(9000))
     ).catch((e: unknown) => e);
     expect(error).toMatchObject({ outcome: "uncertain" });
     expect(String(error)).toContain("already posted: 71");

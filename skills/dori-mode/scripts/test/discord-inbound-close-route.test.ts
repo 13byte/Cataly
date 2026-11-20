@@ -11,7 +11,15 @@ import { reopenLane } from "../src/reopen.ts";
 import { ownerMessage } from "./discord-inbound-fakes.ts";
 import { lifecycleFixture } from "./lifecycle-fixture.ts";
 
-test("public REST intake holds the exact shared lane message until native close recovery", async () => {
+const posix = test.skipIf(process.platform === "win32");
+
+posix(
+  "public REST intake holds the exact shared lane message until native close recovery",
+  verifyCloseRecovery,
+  20_000,
+);
+
+async function verifyCloseRecovery() {
   const f = await lifecycleFixture();
   const { dir } = f.state;
   const message = ownerMessage("101");
@@ -166,4 +174,4 @@ test("public REST intake holds the exact shared lane message until native close 
     server.stop(true);
     f.state.done();
   }
-}, 20_000);
+}

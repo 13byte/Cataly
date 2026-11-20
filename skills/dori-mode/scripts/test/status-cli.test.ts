@@ -5,38 +5,51 @@ import { Registry } from "../src/registry.ts";
 import { Reports } from "../src/reports.ts";
 import { ids, withDiscordCli } from "./discord-fakes.ts";
 
-test("actual CLI shows JSON and text, then posts/edits the same board across subprocesses", async () => {
+// Board writes fsync their directory, which Bun on Windows rejects.
+const posix = test.skipIf(process.platform === "win32");
+const demoLane = {
+  key: "status-demo",
+  title: "Demo",
+  thread: "discord:40",
+  openedAt: "2026-01-01T00:00:00Z",
+  brief: "/brief",
+  done: "file /done",
+};
+
+test("actual status and ETA CLI show read-only JSON and text", async () => {
   await withDiscordCli(async (f) => {
     const stateDir = dirname(f.tmp);
-    const registry = new Registry(stateDir);
-    const lane = {
-      key: "status-demo",
-      title: "Demo",
-      thread: "discord:40",
-      openedAt: "2026-01-01T00:00:00Z",
-      brief: "/brief",
-      done: "file /done",
-    };
-    await registry.write(lane);
-    const reports = new Reports(stateDir);
-    reports.report(lane.key, "milestone", "First increment", Date.parse(lane.openedAt));
+    await new Registry(stateDir).write(demoLane);
+    new Reports(stateDir).report(demoLane.key, "milestone", "First increment", Date.parse(demoLane.openedAt));
     const json = await f.invoke(["status", "--json"]);
     expect([json.code, json.err, json.keys]).toEqual([0, "", []]);
-    expect(JSON.parse(json.out).lanes[0]).toMatchObject({ key: lane.key, runtime: null });
-    const text = await f.invoke(["status", lane.key]);
+    expect(JSON.parse(json.out).lanes[0]).toMatchObject({ key: demoLane.key, runtime: null });
+    const text = await f.invoke(["status", demoLane.key]);
     expect(text.code).toBe(0);
     expect(text.out).toContain("First increment");
     expect(text.out).toContain("(read-only)");
+    const eta = await f.invoke(["eta", "status-", "--json"]);
+    expect(JSON.parse(eta.out)).toMatchObject({ samples: 0, medianMinutes: null });
+  });
+});
+
+posix("actual board CLI posts and edits the same board across subprocesses", async () => {
+  await withDiscordCli(async (f) => {
+    const stateDir = dirname(f.tmp);
+    await new Registry(stateDir).write(demoLane);
+    const reports = new Reports(stateDir);
+    reports.report(demoLane.key, "milestone", "First increment", Date.parse(demoLane.openedAt));
     const args = ["board", "discord", "--thread", ids.thread, "--loop", "0"];
     const first = await f.invoke(args);
-    expect([first.code, first.out, first.keys]).toEqual([
+    expect([first.code, first.err, first.out, first.keys]).toEqual([
       0,
+      "",
       "BOARD discord posted 50",
       [`POST /channels/${ids.thread}/messages`],
     ]);
     const same = await f.invoke(args);
     expect([same.code, same.out, same.keys]).toEqual([0, "BOARD discord unchanged 50", []]);
-    reports.report(lane.key, "question", "Choose next", Date.parse(lane.openedAt) + 60_000);
+    reports.report(demoLane.key, "question", "Choose next", Date.parse(demoLane.openedAt) + 60_000);
     const changed = await f.invoke(args);
     expect([changed.code, changed.out, changed.keys]).toEqual([
       0,
@@ -44,14 +57,12 @@ test("actual CLI shows JSON and text, then posts/edits the same board across sub
       [`PATCH /channels/${ids.thread}/messages/50`],
     ]);
     expect(changed.requests[0]?.body?.["content"]).toContain("blocked");
-    const eta = await f.invoke(["eta", "status-", "--json"]);
-    expect(JSON.parse(eta.out)).toMatchObject({ samples: 0, medianMinutes: null });
   });
 });
 
-test.each(["status", "board", "eta"])(
-  "actual %s CLI exposes incomplete registry without losing healthy data",
-  async (command) => {
+for (const command of ["status", "board", "eta"] as const) {
+  const check = command === "board" ? posix : test;
+  check(`actual ${command} CLI exposes incomplete registry without losing healthy data`, async () => {
     await withDiscordCli(async (f) => {
       const registry = new Registry(dirname(f.tmp));
       const lane = {
@@ -73,7 +84,7 @@ test.each(["status", "board", "eta"])(
             ? [command, "healthy", "--json"]
             : [command, "--json"];
       const result = await f.invoke(args);
-      expect(result.code).toBe(0);
+      expect([result.code, result.err]).toEqual([0, ""]);
       if (command === "board") expect(result.requests[0]?.body?.["content"]).toContain("incomplete");
       else {
         const json = JSON.parse(result.out);
@@ -83,8 +94,8 @@ test.each(["status", "board", "eta"])(
         expect(result.keys).toEqual([]);
       }
     });
-  },
-);
+  });
+}
 
 test("board CLI refuses malformed targets, recovery IDs and loops before any request", async () => {
   await withDiscordCli(async (f) => {
@@ -156,7 +167,7 @@ test("board rejects unsupported arguments before reading credentials", async () 
   });
 });
 
-test("Telegram board keeps signed chat IDs, topic, explicit lane and recovery options", async () => {
+posix("Telegram board keeps signed chat IDs, topic, explicit lane and recovery options", async () => {
   await withDiscordCli(async (f) => {
     const registry = new Registry(dirname(f.tmp));
     const lane = {
@@ -178,7 +189,7 @@ test("Telegram board keeps signed chat IDs, topic, explicit lane and recovery op
       environment,
       routes: { [send]: { body: { ok: true, result: { message_id: 50 } } } },
     });
-    expect([posted.code, posted.out, posted.keys]).toEqual([0, "BOARD telegram posted 50", [send]]);
+    expect([posted.code, posted.err, posted.out, posted.keys]).toEqual([0, "", "BOARD telegram posted 50", [send]]);
     expect(posted.requests[0]?.body).toMatchObject({ chat_id: "-100", message_thread_id: 42 });
 
     new Reports(dirname(f.tmp)).report(lane.key, "milestone", "Now ready", Date.parse("2026-01-01T00:01:00Z"));

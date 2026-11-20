@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { Lane } from "../src/registry.ts";
@@ -10,9 +10,13 @@ import { withState } from "./fakes.ts";
 const observe = (expression: string, env: Record<string, string | undefined>): unknown => {
   const source = `
     import { existsSync } from "node:fs";
-    import { closeLane } from ${JSON.stringify(new URL("../src/done-flow.ts", import.meta.url).href)};
+    import { closeLane, watchTick } from ${JSON.stringify(new URL("../src/done-flow.ts", import.meta.url).href)};
     import { discoverWorktrees, unpushedWork } from ${JSON.stringify(new URL("../src/close-worktrees.ts", import.meta.url).href)};
-    import { run } from ${JSON.stringify(new URL("../src/run.ts", import.meta.url).href)};
+    import { run, type Runner } from ${JSON.stringify(new URL("../src/run.ts", import.meta.url).href)};
+    // Exercise real Git ownership checks without inheriting runner-wide trust.
+    const differentOwner: Runner = (argv, opts) => { const child = opts?.env ?? process.env;
+      return run(argv, { ...opts, env: { ...child, GIT_CONFIG_NOSYSTEM: "1", GIT_TEST_ASSUME_DIFFERENT_OWNER: "1",
+        GIT_CONFIG_GLOBAL: child.GIT_CONFIG_GLOBAL ?? ${JSON.stringify(join(env["HOME"] ?? "", "empty.gitconfig"))} } }); };
     import { depsFor, fakeClock, newWorld } from ${JSON.stringify(new URL("./fakes.ts", import.meta.url).href)};
     console.log(JSON.stringify(${expression}));
   `;
@@ -27,13 +31,17 @@ describe("Dori-owned repository operations", () => {
   let lane: Lane;
   const git = (...args: string[]) => execFileSync("git", args, { cwd: state.dir, env: fixtureEnv, encoding: "utf8" });
   const poisoned = () => ({ ...fixtureEnv, GIT_DIR: join(foreign, ".git"), GIT_WORK_TREE: foreign });
-  const unpushed = (seen: Lane = { ...lane, worktrees: [input] }) =>
+  const unpushed = (
+    seen: Lane = { ...lane, worktrees: [input] },
+    env: Record<string, string | undefined> = poisoned(),
+    runner = "run",
+  ) =>
     observe(
       `await unpushedWork({
         ...depsFor(newWorld(), fakeClock(0), ${JSON.stringify(state.dir)}, { defaultCwd: ${JSON.stringify(input)} }),
-        run, exists: existsSync,
+        run: ${runner}, exists: existsSync,
       }, ${JSON.stringify(seen)})`,
-      poisoned(),
+      env,
     );
 
   beforeEach(() => {
@@ -78,21 +86,23 @@ describe("Dori-owned repository operations", () => {
     };
   });
   afterEach(() => state.done());
-
   test("discovery uses its input repository without changing ordinary Git's environment", () => {
     expect(
       observe(
-        `({
-      discovered: await discoverWorktrees(${JSON.stringify(lane)}, run),
-      gitDir: process.env.GIT_DIR,
-      ordinary: await run(["git", "-C", ${JSON.stringify(input)}, "rev-parse", "--show-toplevel"]),
-    })`,
+        `await (async () => {
+      const discovered = await discoverWorktrees(${JSON.stringify(lane)}, run);
+      const ordinary = await run(["git", "-C", ${JSON.stringify(input)}, "rev-parse", "--show-toplevel"]);
+      return {
+        discovered,
+        gitDir: process.env.GIT_DIR,
+        ordinary,
+      };
+    })()`,
         poisoned(),
       ),
     ).toEqual({
       discovered: [],
       gitDir: join(foreign, ".git"),
-      // Git prints canonical paths, including filesystem links and Windows aliases.
       ordinary: { code: 0, out: git("-C", foreign, "rev-parse", "--show-toplevel").trim(), err: "" },
     });
   });
@@ -123,36 +133,70 @@ describe("Dori-owned repository operations", () => {
     const outside = join(state.dir, "outside");
     mkdirSync(outside);
     expect(unpushed({ ...lane, cwd: outside })).toEqual([]);
+    expect(unpushed({ ...lane, cwd: outside, worktrees: [] })).toEqual([]);
+    expect(unpushed({ ...lane, cwd: join(outside, "absent"), worktrees: [] })).toEqual([]);
   });
 
   test("an unreadable fallback repository is held when Git trust was supplied only by environment", () => {
     const config = join(state.dir, "trusted.gitconfig");
-    const canonical = git("-C", input, "rev-parse", "--show-toplevel").trim();
-    writeFileSync(config, `[safe]\n  directory = ${JSON.stringify(canonical)}\n`);
-    writeFileSync(join(input, "tracked.txt"), "changed\n");
+    const topLevel = git("-C", input, "rev-parse", "--show-toplevel").trim();
+    writeFileSync(config, `[safe]\n  directory = ${JSON.stringify(topLevel)}\n`);
+    const env = {
+      ...fixtureEnv,
+      GIT_CONFIG_GLOBAL: config,
+      LC_ALL: "C",
+    };
     const argv = JSON.stringify(["git", "-C", input, "rev-parse", "--is-inside-work-tree"]);
     expect(
       observe(
-        `await (async () => {
-      // Exercise native Git ownership checks after repoGit strips ambient Git variables.
-      const foreignOwnerGit = (argv, opts = {}) => run(argv, {
-        ...opts, env: { ...(opts.env ?? process.env),
-          GIT_TEST_ASSUME_DIFFERENT_OWNER: "1", GIT_CONFIG_NOSYSTEM: "1",
-        },
-      });
-      const trusted = await foreignOwnerGit(${argv});
-      const refused = await foreignOwnerGit(${argv}, { env: { ...process.env,
+        `({
+      trusted: (await differentOwner(${argv})).code,
+      refused: await differentOwner(${argv}, { env: { ...process.env,
         GIT_CONFIG_GLOBAL: ${JSON.stringify(join(state.dir, "empty.gitconfig"))},
-      } });
-      const reasons = await unpushedWork({
-        ...depsFor(newWorld(), fakeClock(0), ${JSON.stringify(state.dir)}, { defaultCwd: ${JSON.stringify(input)} }),
-        run: foreignOwnerGit, exists: existsSync,
-      }, ${JSON.stringify(lane)});
-      return { trusted: trusted.code, refused: refused.err.includes("detected dubious ownership"), reasons };
-    })()`,
-        { ...fixtureEnv, GIT_CONFIG_GLOBAL: config, LC_ALL: "C" },
+      } }),
+    })`,
+        env,
       ),
-    ).toEqual({ trusted: 0, refused: true, reasons: [`unpushed work in ${input} (git state unreadable)`] });
+    ).toMatchObject({
+      trusted: 0,
+      refused: { code: 128, err: expect.stringContaining("detected dubious ownership") },
+    });
+    writeFileSync(join(input, "tracked.txt"), "changed\n");
+    expect(unpushed(lane, env, "differentOwner")).toEqual([`unpushed work in ${input} (git state unreadable)`]);
+  });
+
+  test("Done holds when discovery in the default repo cannot see a dirty owned worktree", () => {
+    const outside = join(state.dir, "outside");
+    const owned = join(state.dir, "repository-env-owned");
+    mkdirSync(outside);
+    git("-C", input, "worktree", "add", "--quiet", "-b", "repository-env-owned", owned);
+    writeFileSync(join(owned, "tracked.txt"), "changed\n");
+    const reported = git("-C", owned, "rev-parse", "--show-toplevel").trim();
+    const watch = (unreadable: boolean) =>
+      observe(
+        `await (async () => {
+      const lane = ${JSON.stringify({
+        ...lane,
+        cwd: outside,
+        status: "done-claimed",
+        claim: { at: lane.openedAt, evidence: "fixture", emitted: true },
+      })};
+      const root = ${JSON.stringify(input)};
+      const deps = depsFor(newWorld(), fakeClock(360_000), ${JSON.stringify(join(state.dir, String(unreadable)))},
+        { defaultCwd: root, closeAfterMin: 5 });
+      const runGit: Runner = (argv, opts) => {
+        if (argv[0] !== "git") return deps.run(argv, opts);
+        if (argv[3] === "worktree" && argv[4] === "remove") throw new Error("unexpected worktree removal");
+        return (${unreadable} && argv[2] === root ? differentOwner : run)(argv, opts);
+      };
+      await deps.registry.write(lane);
+      return await watchTick({ ...deps, run: runGit, exists: existsSync });
+    })()`,
+        fixtureEnv,
+      );
+    expect(watch(false)).toEqual([`LANE_NOT_DONE ${lane.key} unpushed work in ${reported}`]);
+    expect(watch(true)).toEqual([`LANE_NOT_DONE ${lane.key} unpushed work in ${input} (git state unreadable)`]);
+    expect(existsSync(join(owned, "tracked.txt"))).toBe(true);
   });
 
   test("closing removes only the owned worktree, not a matching foreign worktree", () => {

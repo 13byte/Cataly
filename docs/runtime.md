@@ -1,6 +1,6 @@
 # Session runtimes: herdr and hc
 
-**The OMP port retains herdr and hc (herdr-core) through the complete upstream runtime abstraction. Sessions on both can live in one home, and `dori harness migrate` moves sessions between them.** This document describes the source/runtime contract. The [first public preview](releases.md) supports Linux x64/herdr/Discord; Linux hc CI and manual macOS validation are distinct from live consumer support and exact-release QA evidence.
+**The OMP port retains herdr and hc (herdr-core) through the complete upstream runtime abstraction. Sessions on both can live in one home, and `dori harness migrate` moves sessions between them.** This document describes the source/runtime contract. The [first public preview](releases.md) supports Linux x64/herdr/Discord; Linux hc CI and the cross-OS macOS/Windows CI are distinct from live consumer support and exact-release QA evidence. The hc jobs in the release-gating `ci.yml` run on Linux, while `.github/workflows/cross-os.yml` runs macOS and Windows jobs outside that gate.
 
 A session is one terminal with an agent or a loop in it: the lead, duty, the duty loop, the hourly loop, or a lane. herdr gives Dori workspaces, tabs and panes and detects the agent in a pane. hc gives Dori plain terminals with labels, and the agent in a terminal reports its own status. The harness talks to both through one interface, and nothing above that interface knows which runtime it is using.
 
@@ -174,7 +174,7 @@ Each session ends with one line:
 
 `--dry-run` prints `PLAN <name> <old> -> <runtime>` with the queued-message count and changes nothing. An interrupted run resumes at its journal phase when started again; a second `dori harness migrate` of the same session cannot start concurrently.
 
-`--resume` starts the replacement on the old OMP session file (`omp --dori-role lane --resume=<path>` for a lane, role `dori` for lead/duty) instead of a handoff brief. It requires a live idle/done old agent and a recorded session path; otherwise nothing moves. Explicit custom agent commands retain their upstream `--session <path>` form. OMP role restoration does not imply its native goal resumed: inspect the goal and resume it deliberately when paused.
+`--resume` starts the replacement on the old OMP session file (`omp --dori-role lane --resume=<path>` for a lane, role `dori` for lead/duty) instead of a handoff brief. It requires a live idle/done old agent and a recorded session path; otherwise nothing moves. Explicit custom agent commands retain their upstream `--session <path>` form. OMP role restoration does not imply its native goal resumed: inspect the goal and preserve paused ownership until the user explicitly directs resumption. A migration or monitor recovery event is not that instruction.
 
 The two loops are plain processes with no inbox and no agent, so they skip steps 2, 3, 5 and 6. The duty loop's old session closes before the new one opens, since the lock allows one per home. The hourly loop's new session opens first, and its own lock keeps the two from running the same hour.
 

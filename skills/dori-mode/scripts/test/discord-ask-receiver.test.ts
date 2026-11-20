@@ -15,6 +15,8 @@ import { join } from "node:path";
 import { discordAskReceivers, openDiscordAskReceiver } from "../src/messenger/discord-ask-receiver.ts";
 import { withState } from "./fakes.ts";
 
+// Publication requires a directory whose mode has no group or other bits, which Windows cannot represent.
+const posix = test.skipIf(process.platform === "win32");
 const TOKEN = "synthetic-receiver-secret";
 const receiptPath = (root: string) => {
   const names = readdirSync(root).filter((name) => name.endsWith(".json"));
@@ -22,7 +24,7 @@ const receiptPath = (root: string) => {
   return join(root, names[0]!);
 };
 
-test("receiver discovery binds the exact token, owner and validated channel scope without settings", () => {
+posix("receiver discovery binds the exact token, owner and validated channel scope without settings", () => {
   const state = withState();
   const receiver = openDiscordAskReceiver(state.dir, TOKEN, "10", ["20", "20"], () => ["20", "21", "21"]);
   try {
@@ -39,7 +41,7 @@ test("receiver discovery binds the exact token, owner and validated channel scop
   }
 });
 
-test("scope-all discovery is watched scope, never an implicit Dori destination", () => {
+posix("scope-all discovery is watched scope, never an implicit Dori destination", () => {
   const state = withState();
   let channels = ["20", "21"];
   const receiver = openDiscordAskReceiver(state.dir, TOKEN, "10", [], () => channels);
@@ -55,7 +57,7 @@ test("scope-all discovery is watched scope, never an implicit Dori destination",
   }
 });
 
-test("receipts contain only a SHA-256 token digest and use private files/directories without config rewrites", () => {
+posix("receipts contain only a SHA-256 token digest and use private files/directories without config rewrites", () => {
   const state = withState();
   const config = join(state.dir, "config.json");
   const settings = '{ "hooks": {}, "discordAsk": { "enabled": false } }\n';
@@ -78,7 +80,7 @@ test("receipts contain only a SHA-256 token digest and use private files/directo
   }
 });
 
-test("expiry ignores stale receipts; refresh renews and close/suspend revoke immediately", () => {
+posix("expiry ignores stale receipts; refresh renews and close/suspend revoke immediately", () => {
   const state = withState();
   let now = Date.now();
   const clock = spyOn(Date, "now").mockImplementation(() => now);
@@ -110,7 +112,7 @@ test("expiry ignores stale receipts; refresh renews and close/suspend revoke imm
   }
 });
 
-test("a stalled REST receiver expires even though its process is still alive", () => {
+posix("a stalled REST receiver expires even though its process is still alive", () => {
   const state = withState();
   let now = Date.now();
   const clock = spyOn(Date, "now").mockImplementation(() => now);
@@ -131,7 +133,7 @@ test("a stalled REST receiver expires even though its process is still alive", (
   }
 });
 
-test("PID reuse, exited processes and implausibly future receipts never resolve", () => {
+posix("PID reuse, exited processes and implausibly future receipts never resolve", () => {
   const state = withState();
   const receiver = openDiscordAskReceiver(state.dir, TOKEN, "10", ["20"], () => ["20"]);
   try {
@@ -156,7 +158,7 @@ test("PID reuse, exited processes and implausibly future receipts never resolve"
   }
 });
 
-test("only bounded private regular receipts and a private non-symlink directory are trusted", () => {
+posix("only bounded private regular receipts and a private non-symlink directory are trusted", () => {
   const state = withState();
   const receiver = openDiscordAskReceiver(state.dir, TOKEN, "10", ["20"], () => ["20"]);
   try {
@@ -193,7 +195,7 @@ test("only bounded private regular receipts and a private non-symlink directory 
   }
 });
 
-test("malformed owner/channel receipts are ignored and incomplete explicit scope is not advertised", () => {
+posix("malformed owner/channel receipts are ignored and incomplete explicit scope is not advertised", () => {
   const state = withState();
   let channels = ["20", "21"];
   const receiver = openDiscordAskReceiver(state.dir, TOKEN, "10", ["20", "21"], () => channels);

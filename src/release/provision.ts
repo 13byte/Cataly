@@ -1,5 +1,6 @@
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
+import { platform } from "../platform/index.ts";
 import type { ConsumerPaths } from "./files.ts";
 import { consumerPaths, owned, readJson, realDirectory, regularFile, saveJson } from "./files.ts";
 import { assertSourceBundle, readSourceBundle } from "./source-bundle.ts";
@@ -41,13 +42,8 @@ export function nativeOmp(): string | undefined {
 }
 
 export function prerequisites(runtime: string, tools = true, legacyNative = false, paths = consumerPaths()): void {
-  if (
-    !(
-      (process.platform === "linux" && process.arch === "x64" && runtime === "herdr") ||
-      (process.platform === "darwin" && process.arch === "arm64" && runtime === "hc")
-    )
-  )
-    throw new Error(`Unsupported release host/runtime: ${process.platform}/${process.arch}/${runtime}`);
+  if (!platform.supportsReleaseProfile(platform.os, process.arch, runtime))
+    throw new Error(`Unsupported release host/runtime: ${platform.os}/${process.arch}/${runtime}`);
   if (!tools) return;
   if (!atLeast(Bun.version, [1, 4, 4])) throw new Error("Bun 1.4.4+ is required; install it before OMP-Dori");
   for (const name of ["git", runtime]) {
@@ -121,6 +117,16 @@ async function git(args: readonly string[], cwd: string, home: string): Promise<
   return stdout.trim();
 }
 
+export function dependencyPlan(paths: ConsumerPaths, manifest: ReleaseManifest, source?: string) {
+  const { commit, repository } = manifest.ompUlw;
+  const bundle = manifest.requirements.omp === "18.20.0" ? readSourceBundle(source!, false) : undefined;
+  if (bundle && (bundle.lock.commit !== commit || bundle.lock.repository !== repository))
+    throw new Error("Release overlay differs from its upstream dependency pin");
+  const dependency = join(paths.dependencies, `omp-ulw-${commit}${bundle ? `-${bundle.identity}` : ""}`);
+  const expected = { version: 1, repository, commit, ...(bundle ? { identity: bundle.identity } : {}) };
+  return { bundle, directory: dependency, expected };
+}
+
 /** Existing dependency checkouts are never reset, fetched into, or otherwise modified. */
 export async function provisionDependency(
   paths: ConsumerPaths,
@@ -128,12 +134,8 @@ export async function provisionDependency(
   source?: string,
 ): Promise<string> {
   const { commit, repository } = manifest.ompUlw;
-  const bundle = manifest.requirements.omp === "18.20.0" ? readSourceBundle(source!, false) : undefined;
-  if (bundle && (bundle.lock.commit !== commit || bundle.lock.repository !== repository))
-    throw new Error("Release overlay differs from its upstream dependency pin");
-  const dependency = join(paths.dependencies, `omp-ulw-${commit}${bundle ? `-${bundle.identity}` : ""}`);
+  const { bundle, directory: dependency, expected } = dependencyPlan(paths, manifest, source);
   const receipt = `${dependency}.json`;
-  const expected = { version: 1, repository, commit, ...(bundle ? { identity: bundle.identity } : {}) };
   const verify = async () => {
     realDirectory(dependency);
     owned(dependency);

@@ -8,8 +8,7 @@ import type { PaneState } from "./lane-state.ts";
 import { monitorPresetFor, type monitorPresets } from "./monitor-presets.ts";
 
 type ProbeEvent =
-  | Exclude<(typeof monitorPresets)[number], { name: "freshness" }>["events"][number]
-  | Uppercase<SweepAct["kind"]>;
+  Exclude<(typeof monitorPresets)[number], { name: "freshness" }>["events"][number] | Uppercase<SweepAct["kind"]>;
 
 // Sample the emitted line shape, not a synthetic suffix. An empty payload means the emitter prints just the label.
 const probePayloads: Partial<Record<string, string>> = {

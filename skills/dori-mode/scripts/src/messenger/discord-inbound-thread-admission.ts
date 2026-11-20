@@ -62,7 +62,7 @@ export const discordThreadAdmission = (
     if (!candidates.some((candidate) => candidate.message.channel_id === channel)) return;
     signal.throwIfAborted();
     const floor = parent === undefined ? undefined : intake.adoptThread!(channel, parent);
-    for (let index = 0; index < candidates.length; ) {
+    for (let index = 0; index < candidates.length;) {
       const candidate = candidates[index]!;
       if (candidate.message.channel_id !== channel) {
         index++;
@@ -114,7 +114,7 @@ export const discordThreadAdmission = (
   return {
     flushKnown(): void {
       if (signal.aborted) return;
-      for (let index = 0; index < candidates.length; ) {
+      for (let index = 0; index < candidates.length;) {
         const channel = candidates[index]!.message.channel_id;
         const parent = intake.parentFor?.(channel);
         if (parent === undefined) {

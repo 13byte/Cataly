@@ -1,5 +1,5 @@
 import { readFileSync, realpathSync } from "node:fs";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { configPath } from "./config.ts";
 
 import { TemplateError } from "./launch-errors.ts";
@@ -17,7 +17,7 @@ export const renderTemplate = (
       const path = realpathSync(join(root, `${current}.md`));
       if (stack.includes(path)) throw new TemplateError(`template include cycle: ${current}`);
       const rel = relative(root, path);
-      if (rel === ".." || rel.startsWith("../") || isAbsolute(rel))
+      if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel))
         throw new TemplateError(`template escapes its directory: ${current}`);
       return readFileSync(path, "utf8").replace(/\{\{>\s*([^{}]+?)\s*\}\}/g, (_match, included: string) =>
         render(included.trim(), [...stack, path]),

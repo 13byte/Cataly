@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { consumerPaths, owned, realDirectory, regularFile } from "./files.ts";
@@ -64,6 +64,26 @@ export function resolveConsumerOmpUlwPath(
   }
 }
 
+function managedWindowsAlias(command: string, dori: string, releases: string): boolean {
+  // The same Windows release root can arrive via its short, long or case-variant path.
+  // Identify only the fixed launcher layout; the executable may not exist yet.
+  if (process.platform !== "win32") return false;
+  const path = command.replaceAll("\\", "/");
+  const shim = /^(.+\/)bin\/omp$/.exec(path);
+  const launcher = /^(.+\/)[a-f0-9]{40}-[a-f0-9]{16}\/scripts\/consumer\/omp$/.exec(path);
+  const alias = shim?.[1] ?? launcher?.[1];
+  if (!alias) return false;
+  const root = shim ? dori : releases;
+  try {
+    if (realpathSync(alias) === root) return true;
+    const actual = statSync(alias, { bigint: true });
+    const expected = statSync(root, { bigint: true });
+    return actual.isDirectory() && actual.ino !== 0n && actual.ino === expected.ino && actual.dev === expected.dev;
+  } catch {
+    return false;
+  }
+}
+
 /** Default/previously managed native commands follow this frozen release; absolute custom commands are explicit overrides. */
 export function resolveConsumerOmpCommand(
   configured: readonly string[],
@@ -78,8 +98,12 @@ export function resolveConsumerOmpCommand(
   const paths = consumerPaths(home, doriHome);
   const first = configured[0] ?? "omp";
   const managed =
-    first === join(paths.dori, "bin/omp") ||
-    /^[a-f0-9]{40}-[a-f0-9]{16}\/scripts\/consumer\/omp$/.test(relative(paths.releases, first));
+    isAbsolute(first) &&
+    (first.split("/").join(sep) === join(paths.dori, "bin", "omp") ||
+      /^[a-f0-9]{40}-[a-f0-9]{16}\/scripts\/consumer\/omp$/.test(
+        relative(paths.releases, first).split(sep).join("/"),
+      ) ||
+      managedWindowsAlias(first, paths.dori, paths.releases));
   if (first !== "omp" && !managed) return configured;
   const manifest = JSON.parse(readFileSync(join(paths.manifests, `${basename(source)}.json`), "utf8"));
   if (manifest.requirements.omp !== "18.20.0") return configured;
@@ -102,8 +126,10 @@ export function resolveConsumerOmpCommand(
 }
 
 /** Selected process argv is one command, never shell syntax or a partial executable override. */
-export function processOmpCommand(): readonly string[] | undefined {
-  const raw = process.env["DORI_AGENT_ARGV"];
+export function processOmpCommand(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): readonly string[] | undefined {
+  const raw = env["DORI_AGENT_ARGV"];
   if (raw === undefined) return undefined;
   const selected: unknown = JSON.parse(raw);
   if (
@@ -117,21 +143,29 @@ export function processOmpCommand(): readonly string[] | undefined {
 }
 
 /** Selected argv replaces only literal OMP and the marked installation's lexical/canonical defaults. */
-export function resolveProcessOmpCommand(configured: readonly string[], configFile: string): readonly string[] {
-  const selected = processOmpCommand();
+export function resolveProcessOmpCommand(
+  configured: readonly string[],
+  configFile: string,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): readonly string[] {
+  const selected = processOmpCommand(env);
   const installation = resolve(dirname(configFile));
   const installed =
     selected !== undefined &&
     (existsSync(join(installation, ".omp-dori")) || existsSync(join(installation, "releases/consumer-owner.json"))) &&
     (configured[0] === join(installation, "bin/omp") || configured[0] === join(realpathSync(installation), "bin/omp"));
   if (selected && (configured[0] === "omp" || installed)) return [...selected, ...configured.slice(1)];
-  const legacy = configured[0] === "omp" ? process.env["DORI_AGENT_CMD"] : undefined;
+  const legacy = configured[0] === "omp" ? env["DORI_AGENT_CMD"] : undefined;
   return legacy ? [legacy, ...configured.slice(1)] : configured;
 }
 
 /** A managed process selects its prepared default, while an explicit external dependency remains a user choice. */
-export function resolveProcessOmpUlwPath(configured: string, home: string): string {
-  const selected = process.env["DORI_OMP_ULW_PATH"];
+export function resolveProcessOmpUlwPath(
+  configured: string,
+  home: string,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  const selected = env["DORI_OMP_ULW_PATH"];
   if (!selected) return configured;
   const managed = /^omp-ulw-[a-f0-9]{40}(?:-[a-f0-9]{64})?(?:\/index\.ts)?$/.test(
     relative(consumerPaths(home).dependencies, configured),

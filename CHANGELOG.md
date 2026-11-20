@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Slack thread positions are bound to the authenticated workspace/account rather than shared channel/root IDs. `dori inbound slack` keeps its existing readiness line and physical channel IDs; `--qualified-routes` opts into account-qualified readiness and destinations. Replies reject mismatched parents, qualified destinations reject another account before mutation, and nonempty legacy ledgers require explicit matching operator adoption with a durable receipt; existing non-self/non-bot intake and post-emit cursor semantics remain unchanged.
+
+- `dori park` and `dori reopen` accept saved OMP sessions whose first line is OMP's fixed-width title slot (v1) before the session header; any other leading record, a second title, a missing header, or a different session id or cwd is still refused.
+
+- Discord replies retain their original message ID and copied snapshot, distinguish unresolved, unavailable and observed-empty context, and reject reference or snapshot channel mismatches before owner delivery or checkpoint. Outgoing replies bind to the exact physical channel or thread and require the original target to exist; a deleted or other-channel target no longer silently becomes an unlinked post. Normal `INBOUND` grammar, split-message ordering and non-pinging mentions remain unchanged.
+
+- `dori decision` records who may settle each choice: `ask --kind routine` (reversible, in scope, at least two options, in the work's thread) lets the lead record `decision choose <id> <N> --reason TEXT --source REF --thread REF` after posting its choice and reason in that thread, while unmarked and pre-existing decisions stay owner-only; `list` shows `kind` and the answer's `authority`, `digest` shows `kind`, the same rules hold for hand-written or raced records, and no decision answer or choice grants a native execution approval.
+
+- Require per-PR copied/adapted source provenance, concept-only attribution, and component-specific license/notice preservation.
+
+- Record observed source/native/ULW identities, environment, commands, receipts and unverified surfaces together in PR and release evidence.
+
+- The scripts reference documents what Discord, Slack and Telegram inbound intake can recover on first install, for threads created while offline, after edits behind the saved position, and when platform retention or rate limits interrupt intake. Runtime behavior is unchanged.
+
+- Unreleased (source only): Telegram inbound now verifies bot identity and an empty webhook before readiness or polling; startup rejection and interruption leave the cursor and existing webhook untouched.
+
 - Exercise native prompt rendering across role, ULW, workflow, profile, child-tool, and compaction boundaries in an isolated offline composition matrix.
 
 - Lane final reports separate the outcome, changes or findings, verified evidence, unrun checks and handoff. Done claims cite the saved report and live Done receipts without treating partial or blocked work as done.
@@ -77,9 +93,17 @@
 
 - The skill CLI loads command implementations on demand, avoiding updater, messenger and lane graphs for successful journal commands and all configuration/command graphs for `--version`. Ordinary commands retain configuration and consumer-native admission before execution; usage, exit codes and original error classes remain unchanged.
 
-- Managed release preparation installs only production dependencies for the root and skill packages, leaving out development-only gate tools. The extension keeps its full frozen host install; private HOME/cache, lifecycle-script rejection, source admission and existing prepared releases are unchanged.
+- Platform behaviour now sits behind one `PlatformAdapter` in `src/platform/`, with a single implementation per host (darwin, linux, win32) in place of scattered `process.platform` checks. Answers, messages and failure modes are unchanged.
 
-- Automatic CI now runs only the Linux `check`, `e2e-herdr` and `e2e-hc` jobs; the automatic macOS job is removed. Exact-commit release validation and contributor requirements use the same three required jobs. Existing macOS tests and consumer verification scripts remain available for manual QA.
+- `src/release/files.ts` flushes a directory only through the adapter's `syncDirectory` instead of testing `directoryFsync` first; on Windows that release path no longer opens and fsyncs a directory, and it is unreachable there because `provision.ts` prerequisites reject win32. A manifest `cwd` carrying `..` behind either separator is rejected again on every host, as it was before the adapter named a separator set.
+
+- Biome is replaced by oxlint for linting, Prettier for formatting and a husky `pre-commit` hook that runs both. `bun run check` now runs `lint` (`oxlint --deny-warnings`) then `format:check`, `bun run format` replaces `bun run fmt`, and the formatter options, rule severities and ignore patterns carry over unchanged. Biome's optional-chain correction (the default fix behind `useOptionalChain`) has no oxlint equivalent, so code it had already fixed stays as it is.
+
+- Automatic CI keeps its release gate in `.github/workflows/ci.yml`: the Linux `check`, `e2e-herdr` and `e2e-hc` jobs on `ubuntu-24.04`, and exact-commit release validation and contributor requirements still require exactly those three. A separate `.github/workflows/cross-os.yml` now runs on each pull request and `main` push outside that gate: `test-macos` on a GitHub-hosted `macos-15` arm64 runner runs the full root, skill and extension suites against prepared fixtures, allowing the slower runner `--timeout=30000` for the root suite, and its genuine Darwin arm64 hc consumer release smoke runs only on `main` pushes and manual runs; `test-windows` on a GitHub-hosted `windows-2025` runner runs the static checks and the three test suites. Windows CI is not product support, and the supported release scope stays Linux x64/herdr plus the documented isolated macOS arm64/hc profile. Windows coverage gates POSIX-only cases individually, or by their whole `describe` suite when every case in it needs the POSIX runtime, with `skipIf(process.platform === "win32")` and a reason comment, never by excluding files or relaxing a security check, and Windows path handling was fixed where it was wrong — `realDirectory` stops at the root, directory fsync is skipped on win32, local Git paths are recognized on Windows, and the bound ULW overlay and the skill monitor, supervision and OMP argv matching handle Windows path separators. The workflows now pin their runner versions and per-job `timeout-minutes` and use Node 24 action releases; the Linux and cross-OS jobs share one composite setup action and a Bun install cache, and the release workflows use the same pinned Node 24 checkout and artifact actions.
+
+- The GitHub repository is now `vntrevx/Cataly`, renamed from `vntrevx/omp-dori`; GitHub redirects the old URLs. The release gate, workflows, installers and documentation links follow the new name, while product and CLI names such as `omp-dori`, `dori`, `~/.omp-dori` and `LICENSE.omp-dori` are unchanged.
+
+- Managed release preparation installs only production dependencies for the root and skill packages, leaving out development-only gate tools. The extension keeps its full frozen host install; private HOME/cache, lifecycle-script rejection, source admission and existing prepared releases are unchanged.
 
 - Monitor stdout/stderr use bounded incremental line framing and 64 KiB delivery batches. Oversized lines or rendered messages are preserved in private temporary files with explicit path/size notices instead of being truncated or accumulated in memory; storage/read failures stop the child and report potentially incomplete output. Normal filters, UTF-8, EOF, stop and session ownership behavior remain intact.
 
@@ -251,3 +275,13 @@ The Sustainable Use License, OMP attribution in `LICENSE.omp-dori`, `NOTICE`, pu
 - Unreleased: Extend the Telegram transport regression matrix for cross-field route spoofing and message/edit identity ordering alongside existing delivery and recovery coverage.
 
 - Unreleased: Isolate automated worktree discovery, completion checks and non-forced cleanup from inherited `GIT_*` overrides. Ordinary commands retain their environment; a foreign Git context can no longer hide local work or redirect worktree cleanup. Other Git probe failures hold completion instead of being treated as a missing checkout.
+
+- Unreleased: Stream URL transcription within configurable `transcribeMaxBytes` (default 25 MiB), abort overflow immediately, and check audio format against MIME before invoking the hook. Ogg requires Opus or Vorbis, M4A/MP4 requires an audio track, and MP3 accepts free-format frames with a confirmed cadence. Raw PCM, unsupported URL formats, and MIME mismatches get a one-line remedy; local file paths remain unchanged.
+
+## Unreleased addendum
+
+- Unreleased (source only): `dori send discord --render-tables` optionally aligns pipe tables in bounded code fences using Unicode display width. The default body, existing escapes/code, split-send replies and receipts remain intact; rendering over 80 columns or a 64 KiB message budget keeps the original text, and oversized edits still fail before any request. The adapted renderer retains its full upstream MIT notice in `NOTICE`.
+
+- Unreleased (source only): Reuse the existing native goal or durable workflow owner before creating an objective. Preserve paused ownership until the user explicitly directs resumption, and keep questions, external waits and availability monitoring from creating duplicate goals.
+
+Setup now offers configuration-only previews, preserves owner JSON/YAML values outside the existing managed keys, rejects observed concurrent edits, and atomically publishes owned configuration with permission/group preservation and redacted effective-reader readback. Shared-writable targets and linked configuration files now hold with repair guidance; source directory aliases retain physical-target checks; invalid UTF-8 source rewrites are refused, while unchanged configuration bytes are retained. Consumer reader unavailability is reported without blocking recovery. Source and consumer setup do not activate models, accounts or services; saved bytes are reported separately from inherited overrides and unstarted native settings (omp-superagent comparison F64).

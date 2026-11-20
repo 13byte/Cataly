@@ -6,6 +6,9 @@ import type { Lane } from "./registry.ts";
 import type { Progress } from "./reports.ts";
 import type { Runner } from "./run.ts";
 
+// path.relative() writes the platform's separators; a POSIX name may hold a literal backslash, so only Windows splits it.
+const PATH_SEPARATOR = process.platform === "win32" ? /[\\/]/ : "/";
+
 export type BudgetLimits = {
   readonly wallMinutes?: number | null | undefined;
   readonly tokens?: number | null | undefined;
@@ -79,8 +82,9 @@ export const laneActivity = async (
         const name = entry.slice(3);
         const path = resolve(lane.cwd, name);
         const rel = relative(resolve(lane.cwd), path);
+        const parts = rel.split(PATH_SEPARATOR);
         // Dependency churn and paths outside the lane's cwd are not the lane's progress.
-        if (!isAbsolute(rel) && rel !== ".." && !rel.startsWith("../") && !rel.split("/").includes("node_modules")) {
+        if (!isAbsolute(rel) && parts[0] !== ".." && !parts.includes("node_modules")) {
           paths.add(path);
           changes.push(entry);
         }

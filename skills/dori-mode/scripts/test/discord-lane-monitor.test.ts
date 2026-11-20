@@ -11,8 +11,9 @@ import { ownerMessage } from "./discord-inbound-fakes.ts";
 import { lifecycleFixture } from "./lifecycle-fixture.ts";
 
 const identity = { bot: "721", owner: "941" };
+const posix = test.skipIf(process.platform === "win32");
 
-test("a restarted shared monitor posts only its own saved reply as a Discord reply, once", async () => {
+posix("a restarted shared monitor posts only its own saved reply as a Discord reply, once", async () => {
   const f = await lifecycleFixture();
   const message = ownerMessage("301");
   const channel = message.channel_id;
@@ -66,7 +67,7 @@ test("a restarted shared monitor posts only its own saved reply as a Discord rep
   }
 });
 
-test("a deleted Discord original drops all of its reply parts without blocking the next request", async () => {
+posix("a deleted Discord original drops all of its reply parts without blocking the next request", async () => {
   const f = await lifecycleFixture();
   const channel = ownerMessage("301").channel_id;
   await f.deps.registry.write({ ...f.lane, thread: `discord:${channel}` });
@@ -107,7 +108,7 @@ test("a deleted Discord original drops all of its reply parts without blocking t
   }
 });
 
-test.each([false, true])("owner ingress queues a paused lane with auto-reply opt-in %s", async (enabled) => {
+posix.each([false, true])("owner ingress queues a paused lane with auto-reply opt-in %s", async (enabled) => {
   const f = await lifecycleFixture();
   const { dir } = f.state;
   const message = ownerMessage("301");

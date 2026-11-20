@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { FlowDeps } from "../src/done-flow.ts";
 import { launchLane } from "../src/launch.ts";
 import type { Runner } from "../src/run.ts";
+import { withState } from "./fakes.ts";
 import { queueFixture, type QueueFixture } from "./launch-queue-fixture.ts";
 
 let f: QueueFixture;
@@ -31,8 +32,9 @@ const retainedBrief = (): string => {
   return join(attempts, attempt, "brief.md");
 };
 
-test.each([0, 1])("a staging write over a %i-block file limit does not hold a same-key launch", async (blocks) => {
-  const module = join(import.meta.dir, "../src/launch-generated.ts");
+const rlimit = test.skipIf(process.platform === "win32" || !existsSync("/bin/sh"));
+rlimit.each([0, 1])("a staging write over a %i-block file limit does not hold a same-key launch", async (blocks) => {
+  const module = new URL("../src/launch-generated.ts", import.meta.url).href;
   const script = `import { stageGeneratedBrief } from ${JSON.stringify(module)};
 try {
   stageGeneratedBrief(${JSON.stringify(brief)}, "oversized brief".repeat(2048));
@@ -93,7 +95,12 @@ test("a CLI failure to spawn the runtime releases the generated brief", async ()
   // PATH is isolated, so no real runtime can start and process creation itself fails.
   const child = Bun.spawn([process.execPath, cli, ...args], {
     cwd: f.state.dir,
-    env: { PATH: f.state.dir, HOME: f.state.dir, DORI_CONFIG: config },
+    env: {
+      PATH: f.state.dir,
+      HOME: f.state.dir,
+      DORI_CONFIG: config,
+      ...(process.platform === "win32" ? { SystemRoot: process.env["SystemRoot"], USERPROFILE: f.state.dir } : {}),
+    },
     stdout: "ignore",
     stderr: "pipe",
   });
@@ -140,21 +147,40 @@ test("a known terminal refusal leaves an independently created public brief unto
   expect(await deps.registry.read(input.key)).toBeNull();
 });
 
-test("a link inserted during terminal creation is not overwritten or removed", async () => {
-  const original = readFileSync(f.input.brief, "utf8");
-  const input = { ...f.input, brief, template: "task" };
-  const deps = withCreateReply(async (argv, options) => {
-    symlinkSync(f.input.brief, brief);
-    return f.deps.run(argv, options);
-  });
+const fileSymlinksAvailable = (() => {
+  if (process.platform !== "win32") return true;
+  const state = withState();
+  try {
+    const target = join(state.dir, "target");
+    writeFileSync(target, "");
+    symlinkSync(target, join(state.dir, "link"), "file");
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) return false;
+    throw error;
+  } finally {
+    state.done();
+  }
+})();
 
-  await expect(launchLane(deps, input)).rejects.toThrow("generated brief not published");
-  expect(lstatSync(brief).isSymbolicLink()).toBe(true);
-  expect(readFileSync(f.input.brief, "utf8")).toBe(original);
-  expect(readFileSync(retainedBrief(), "utf8")).toContain("Preserve the rendered instructions.");
-  expect(await deps.registry.read(input.key)).toBeNull();
-  expect(f.world.calls).toContainEqual(["herdr", "tab", "close", "w1:t9"]);
-});
+test.skipIf(!fileSymlinksAvailable)(
+  "a link inserted during terminal creation is not overwritten or removed",
+  async () => {
+    const original = readFileSync(f.input.brief, "utf8");
+    const input = { ...f.input, brief, template: "task" };
+    const deps = withCreateReply(async (argv, options) => {
+      symlinkSync(f.input.brief, brief);
+      return f.deps.run(argv, options);
+    });
+
+    await expect(launchLane(deps, input)).rejects.toThrow("generated brief not published");
+    expect(lstatSync(brief).isSymbolicLink()).toBe(true);
+    expect(readFileSync(f.input.brief, "utf8")).toBe(original);
+    expect(readFileSync(retainedBrief(), "utf8")).toContain("Preserve the rendered instructions.");
+    expect(await deps.registry.read(input.key)).toBeNull();
+    expect(f.world.calls).toContainEqual(["herdr", "tab", "close", "w1:t9"]);
+  },
+);
 
 test.each([
   { label: "unstructured usage exit", code: 2, err: "child exited without a structured reply", rejected: false },

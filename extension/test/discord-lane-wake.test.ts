@@ -10,6 +10,8 @@ import {
 import { Registry } from "../../skills/dori-mode/scripts/src/registry.ts";
 import { type FakePi, load, until, useConfig } from "./fake-pi.ts";
 
+const posix = test.skipIf(process.platform === "win32");
+
 const pane = "w1:p2";
 const session = "exact-discord-wake";
 const channel = "900000000000000101";
@@ -108,7 +110,7 @@ async function withWakeLane(
   }
 }
 
-test.each([false, true])(
+posix.each([false, true])(
   "a cold native pause admits only the opted-in snowflake (native rejection: %s)",
   async (reject) => {
     await withWakeLane({}, async (dori, inbox, stateDir) => {
@@ -143,7 +145,7 @@ test.each([false, true])(
   },
 );
 
-test.each([
+posix.each([
   ["the wake reservation is pending", { pending: true }],
   ["the lane registry is paused", { registryPaused: true }],
   ["the native model differs", { model: { ...model, id: "unattested-model" } }],

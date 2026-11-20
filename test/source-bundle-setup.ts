@@ -10,27 +10,18 @@ import { digest } from "../src/update/source.ts";
 const NATIVE_VIEWER_FIXTURE = "isolated viewer admission bytes, not an application viewer\n";
 
 export function fixtureGit(cwd: string, ...argv: string[]): string {
+  const windows = process.platform === "win32";
+  const devNull = windows ? "NUL" : "/dev/null";
+  // No automatic gc or maintenance: a detached one would outlive the call with its working directory in the fixture.
+  const git = ["git", "-c", `core.hooksPath=${devNull}`, "-c", "gc.auto=0", "-c", "maintenance.auto=false", ...argv];
   const result = Bun.spawnSync(
-    // No automatic gc or maintenance: a detached one would outlive the call with its working directory in the fixture.
-    [
-      "/bin/sh",
-      "-c",
-      'umask 077; exec "$@"',
-      "dori-source-fixture",
-      "git",
-      "-c",
-      "core.hooksPath=/dev/null",
-      "-c",
-      "gc.auto=0",
-      "-c",
-      "maintenance.auto=false",
-      ...argv,
-    ],
+    // umask keeps the fixture private on POSIX; the Windows shell has neither command.
+    windows ? git : ["/bin/sh", "-c", 'umask 077; exec "$@"', "dori-source-fixture", ...git],
     {
       cwd,
       env: {
         PATH: process.env["PATH"],
-        GIT_CONFIG_GLOBAL: "/dev/null",
+        GIT_CONFIG_GLOBAL: devNull,
         GIT_CONFIG_NOSYSTEM: "1",
         GIT_AUTHOR_NAME: "Source bundle fixture",
         GIT_AUTHOR_EMAIL: "fixture@example.test",
