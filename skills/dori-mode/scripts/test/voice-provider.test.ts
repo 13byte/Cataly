@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { backendInstructions, liveInstructions } from "../src/voice/prompts.ts";
 import { parseLiveEvent, parseSummary, parseUsage } from "../src/voice/provider.ts";
 import { voiceSettings } from "../src/voice/settings.ts";
-import { VoiceUsage } from "../src/voice/usage.ts";
+import { LiveMeter, VoiceUsage } from "../src/voice/usage.ts";
 import { settings, temporaryVoice } from "./voice-fixture.ts";
 
 test("voice is explicitly enabled with operator models, valid IDs and prices", () => {
@@ -70,6 +70,33 @@ test("documented lifecycle events parse without output arrays or granular respon
   expect(() => parseSummary({ output: [] })).toThrow("Empty");
 });
 
+test("usage breakdown rejects mismatches beyond representational rounding without discarding a valid total", () => {
+  expect(
+    parseLiveEvent({ type: "session.usage.updated", usage: { seconds: 9, active_seconds: 6, paused_seconds: 3 } }),
+  ).toEqual({ type: "session.usage.updated", usage: { seconds: 9, active_seconds: 6, paused_seconds: 3 } });
+  // Each breakdown field is optional on its own.
+  for (const usage of [{ seconds: 9 }, { seconds: 9, active_seconds: 6 }, { seconds: 9, paused_seconds: 3 }])
+    expect(parseLiveEvent({ type: "session.usage.updated", usage }).usage).toEqual(usage);
+  for (const usage of [
+    { seconds: 9, active_seconds: 6, paused_seconds: 4 },
+    { seconds: 9, paused_seconds: 10 },
+    { seconds: 9, active_seconds: 10 },
+    { seconds: 9, paused_seconds: -1 },
+    { seconds: 0.30000000000001, active_seconds: 0.1, paused_seconds: 0.2 },
+    { seconds: Number.MAX_VALUE, active_seconds: Number.MAX_VALUE, paused_seconds: Number.MAX_VALUE },
+  ])
+    expect(parseLiveEvent({ type: "session.usage.updated", usage }).usage).toEqual({
+      seconds: usage.seconds,
+      breakdownInvalid: true,
+    });
+  for (const usage of [
+    { active_seconds: 6, paused_seconds: 3 },
+    { seconds: -1, paused_seconds: 0 },
+    { seconds: Infinity, paused_seconds: 0 },
+  ])
+    expect(() => parseLiveEvent({ type: "session.usage.updated", usage })).toThrow();
+});
+
 test("usage survives restart, counts cached/written tokens and daily boundaries, never resets corrupt data", () => {
   const tmp = temporaryVoice();
   try {
@@ -77,7 +104,7 @@ test("usage survives restart, counts cached/written tokens and daily boundaries,
     const cfg = settings({ dailyMinuteCap: 1, backendUsdCap: 1 });
     const usage = new VoiceUsage(tmp.directory, cfg, () => now);
     usage.started();
-    usage.live(60);
+    usage.live(usage.today(), 60);
     expect(usage.capReason()).toContain("Daily");
     now += 2000;
     expect(usage.capReason()).toBeUndefined();
@@ -100,6 +127,27 @@ test("usage survives restart, counts cached/written tokens and daily boundaries,
     expect(() => new VoiceUsage(tmp.directory, cfg, () => now)).toThrow("Invalid");
   } finally {
     tmp.cleanup();
+  }
+});
+
+test("separately rounded billed and paused increments keep the saved ledger readable", () => {
+  const temp = temporaryVoice();
+  try {
+    const cfg = settings();
+    const now = () => Date.parse("2026-11-20T00:00:00Z");
+    const usage = new VoiceUsage(temp.directory, cfg, now);
+    new LiveMeter(usage).record(1, 1);
+    const meter = new LiveMeter(usage);
+    // Two half-ULP billed increments round away at 1; a single full-ULP reclassification does not.
+    meter.record(Number.EPSILON / 2);
+    meter.record(Number.EPSILON);
+    meter.record(Number.EPSILON, Number.EPSILON);
+    expect(JSON.parse(readFileSync(join(temp.directory, "usage.json"), "utf8"))).toMatchObject({
+      days: { "2026-11-20": { liveSeconds: 1, pausedSeconds: 1 } },
+    });
+    expect(() => new VoiceUsage(temp.directory, cfg, now)).not.toThrow();
+  } finally {
+    temp.cleanup();
   }
 });
 
