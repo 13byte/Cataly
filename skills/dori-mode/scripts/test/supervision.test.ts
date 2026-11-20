@@ -10,6 +10,8 @@ import type { SupervisionOptions } from "../src/supervision-observe.ts";
 import { fakeClock, withState } from "./fakes.ts";
 
 const start = Date.parse("2026-10-29T00:00:00Z");
+// These sweeps use a synthetic clock but still fsync real writer locks and persist observations.
+const filesystemSweepTimeoutMs = process.platform === "win32" ? 15_000 : 5_000;
 
 const lane: Lane = {
   key: "demo-lane",
@@ -114,52 +116,60 @@ describe("supervision", () => {
     }
   });
 
-  test("report and checkpoint progress suppress hung detection until stale", async () => {
-    const f = fixture();
-    try {
-      const reports = new Reports(f.dir);
-      reports.report(lane.key, "milestone", "starting", f.clock.now());
-      await f.supervisor.sweep({ ...lane, reportProtocol: undefined }, "Working 21m");
-      f.clock.at += 20 * 60_000;
-      reports.report(lane.key, "milestone", "progress", f.clock.now());
-      expect((await f.supervisor.sweep(lane, "Working 41m")).state).toBe("running");
-      f.clock.at += 20 * 60_000;
-      new Checkpoints(f.dir).write(
-        lane.key,
-        { step: "build", result: "ok", evidence: [], remoteEffects: [] },
-        f.clock.now(),
-      );
-      expect((await f.supervisor.sweep(lane, "Working 61m")).state).toBe("running");
-      f.clock.at += 20 * 60_000;
-      expect((await f.supervisor.sweep(lane, "Working 81m")).state).toBe("stalled");
-    } finally {
-      f.done();
-    }
-  });
+  test(
+    "report and checkpoint progress suppress hung detection until stale",
+    async () => {
+      const f = fixture();
+      try {
+        const reports = new Reports(f.dir);
+        reports.report(lane.key, "milestone", "starting", f.clock.now());
+        await f.supervisor.sweep({ ...lane, reportProtocol: undefined }, "Working 21m");
+        f.clock.at += 20 * 60_000;
+        reports.report(lane.key, "milestone", "progress", f.clock.now());
+        expect((await f.supervisor.sweep(lane, "Working 41m")).state).toBe("running");
+        f.clock.at += 20 * 60_000;
+        new Checkpoints(f.dir).write(
+          lane.key,
+          { step: "build", result: "ok", evidence: [], remoteEffects: [] },
+          f.clock.now(),
+        );
+        expect((await f.supervisor.sweep(lane, "Working 61m")).state).toBe("running");
+        f.clock.at += 20 * 60_000;
+        expect((await f.supervisor.sweep(lane, "Working 81m")).state).toBe("stalled");
+      } finally {
+        f.done();
+      }
+    },
+    filesystemSweepTimeoutMs,
+  );
 
-  test("explicit file and git changed-file activity suppress stalls without scanning", async () => {
-    const f = fixture();
-    try {
-      const path = join(f.dir, "source.ts");
-      writeFileSync(path, "first");
-      const activeLane = { ...lane, cwd: f.dir, activityPaths: [path] };
-      await f.supervisor.sweep(activeLane, "Running 21m");
-      f.clock.at += 20 * 60_000;
-      utimesSync(path, new Date(f.clock.at), new Date(f.clock.at));
-      expect((await f.supervisor.sweep(activeLane, "Running 41m")).state).toBe("running");
-      f.clock.at += 20 * 60_000;
-      f.setDirty(" M source.ts\0?? node_modules/\0");
-      expect((await f.supervisor.sweep(activeLane, "Running 61m")).state).toBe("running");
-      f.clock.at += 20 * 60_000;
-      expect((await f.supervisor.sweep(activeLane, "Running 81m")).state).toBe("stalled");
-      f.clock.at += 60_000;
-      utimesSync(path, new Date(f.clock.at), new Date(f.clock.at));
-      expect((await f.supervisor.sweep(activeLane, "Running 82m")).state).toBe("running");
-      expect(f.calls.every((args) => args[0] === "git")).toBe(true);
-    } finally {
-      f.done();
-    }
-  });
+  test(
+    "explicit file and git changed-file activity suppress stalls without scanning",
+    async () => {
+      const f = fixture();
+      try {
+        const path = join(f.dir, "source.ts");
+        writeFileSync(path, "first");
+        const activeLane = { ...lane, cwd: f.dir, activityPaths: [path] };
+        await f.supervisor.sweep(activeLane, "Running 21m");
+        f.clock.at += 20 * 60_000;
+        utimesSync(path, new Date(f.clock.at), new Date(f.clock.at));
+        expect((await f.supervisor.sweep(activeLane, "Running 41m")).state).toBe("running");
+        f.clock.at += 20 * 60_000;
+        f.setDirty(" M source.ts\0?? node_modules/\0");
+        expect((await f.supervisor.sweep(activeLane, "Running 61m")).state).toBe("running");
+        f.clock.at += 20 * 60_000;
+        expect((await f.supervisor.sweep(activeLane, "Running 81m")).state).toBe("stalled");
+        f.clock.at += 60_000;
+        utimesSync(path, new Date(f.clock.at), new Date(f.clock.at));
+        expect((await f.supervisor.sweep(activeLane, "Running 82m")).state).toBe("running");
+        expect(f.calls.every((args) => args[0] === "git")).toBe(true);
+      } finally {
+        f.done();
+      }
+    },
+    filesystemSweepTimeoutMs,
+  );
 
   test("a file the usage hook writes in the lane's cwd is not the lane's progress", async () => {
     const f = fixture({ usageArgv: ["usage"] });

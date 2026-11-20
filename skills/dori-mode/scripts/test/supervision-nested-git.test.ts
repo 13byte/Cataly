@@ -1,69 +1,24 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { freshnessTick } from "../src/freshness.ts";
 import type { Lane } from "../src/registry.ts";
 import { Reports } from "../src/reports.ts";
-import { run, type Runner } from "../src/run.ts";
+import type { Runner } from "../src/run.ts";
 import type { Observation } from "../src/supervision-observe.ts";
 import { depsFor, fakeClock, newWorld, withState } from "./fakes.ts";
+import { key, lanes, nestedWorktreeFixture, userFile, writer } from "./supervision-git-fixtures.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00Z");
 const MIN = 60_000;
-const key = "git-lock-lane";
-const lanes = "dori-state/lanes";
-const writer = `${lanes}/.supervision-writers`;
-const userFile = `${lanes}/.SUPERVISION-WRITERS/work.txt`;
 const status = ["status", "--porcelain=v1", "-z", "--untracked-files=normal"];
 
 const setup = async (home: string, nested: boolean, ignoreWriter: boolean, icase: boolean, mode?: "post" | "usage") => {
-  const repo = join(home, "worktree");
-  const stateDir = join(repo, "dori-state");
-  const cwd = nested ? join(repo, "app") : repo;
-  const tracked = nested ? `${lanes}/tracked.txt` : userFile;
-  mkdirSync(cwd, { recursive: true });
-  mkdirSync(dirname(join(repo, tracked)), { recursive: true });
-  const native: Runner = async (argv, opts) => {
-    // Model a caller's inherited mode without changing this test process's environment.
-    const overrides = opts as { readonly env?: Readonly<Record<string, string>> } | undefined;
-    const childEnv = { GIT_ICASE_PATHSPECS: icase ? "1" : "0", ...overrides?.env };
-    const assignments = Object.entries(childEnv).map(([name, value]) => `${name}=${value}`);
-    const result = await run(["env", ...assignments, ...argv], { ...opts, preserveOutput: true });
-    if (result.code !== 0) throw new Error(`${argv.join(" ")}: ${result.err}`);
-    return result;
-  };
-  const git = (...args: string[]) => native(["git", "-C", repo, ...args]);
-  await git("init", "--quiet");
-  await git("config", "core.excludesFile", "/dev/null");
-  await git("config", "core.ignoreCase", "false");
-  const setWriterIgnored = (ignored: boolean) => {
-    writeFileSync(
-      join(repo, ".git", "info", "exclude"),
-      [
-        `/${lanes}/${key}.json`,
-        `/${lanes}/${key}/reports.jsonl`,
-        `/${lanes}/${key}/supervision.json`,
-        ...(ignored ? [`/${writer}/`] : []),
-        "",
-      ].join("\n"),
-    );
-  };
-  setWriterIgnored(ignoreWriter);
-  writeFileSync(join(repo, tracked), "initial\n");
-  await git("add", "--", tracked);
-  await git(
-    "-c",
-    "user.name=Dori Fixture",
-    "-c",
-    "user.email=dori@example.invalid",
-    "-c",
-    "commit.gpgSign=false",
-    "-c",
-    "core.hooksPath=/dev/null",
-    "commit",
-    "--quiet",
-    "-m",
-    "Seed lane",
+  const { repo, cwd, stateDir, native, setWriterIgnored } = await nestedWorktreeFixture(
+    home,
+    nested,
+    ignoreWriter,
+    icase,
   );
 
   const clock = fakeClock(T0);
@@ -94,7 +49,8 @@ const setup = async (home: string, nested: boolean, ignoreWriter: boolean, icase
   await deps.registry.write(lane);
   reports.report(key, "milestone", "started", T0);
   const journal = reports.path(key);
-  const rawStatus = async () => (await native(["git", "-C", cwd, ...status])).out.split("\0").filter(Boolean);
+  const rawStatus = async (...pathspec: string[]) =>
+    (await native(["git", "-C", cwd, ...status, ...pathspec])).out.split("\0").filter(Boolean);
   const nestedSamples: string[][] = [];
   let failNextRoot = false;
   const sample: Runner = async (argv, opts) => {
@@ -174,6 +130,7 @@ test("freshness counts a case-distinct tracked edit with inherited Git icase pat
     expect(await f.rawStatus()).toEqual([]);
     writeFileSync(join(f.repo, userFile), "real lane work\n");
     expect(await f.rawStatus()).toEqual([` M ${userFile}`]);
+    expect(await f.rawStatus("--", `:(exclude,literal)${writer}`)).toEqual([]);
 
     expect(await f.tick(20)).toEqual([]);
     expect(f.state()).toBe("running");

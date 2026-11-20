@@ -1,5 +1,5 @@
-import { lstatSync, realpathSync } from "node:fs";
-import { relative, resolve, sep } from "node:path";
+import { lstatSync, realpathSync, statSync } from "node:fs";
+import { dirname, relative, resolve, sep } from "node:path";
 import type { Checkpoint } from "./checkpoints.ts";
 import type { Progress } from "./reports.ts";
 import { gitStatus, IncompleteGitObservation, inDirectory, noWorktree } from "./supervision-git.ts";
@@ -23,12 +23,34 @@ const canonicalIfPresent = (path: string): string => {
     return resolve(path);
   }
 };
+const isMissingPath = (error: unknown): boolean => error instanceof Error && "code" in error && error.code === "ENOENT";
+
+class ActivityPathAncestorError extends Error {
+  constructor(cause: unknown) {
+    super("activity path ancestor is not a directory", { cause });
+  }
+}
+
+const checkWindowsMissingAncestors = (path: string, error: unknown): void => {
+  // Windows can report ENOENT for a path through a file. Find the first existing ancestor before accepting absence.
+  for (let parent = dirname(path); ; parent = dirname(parent)) {
+    try {
+      if (!statSync(parent).isDirectory()) throw new ActivityPathAncestorError(error);
+      return;
+    } catch (ancestorError) {
+      if (!isMissingPath(ancestorError)) throw ancestorError;
+      if (parent === dirname(parent)) return;
+    }
+  }
+};
+
 const statPath = (path: string): FileSample => {
   try {
     const stat = lstatSync(path);
     return [path, stat.mtimeMs, stat.ctimeMs, stat.size];
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    if (!isMissingPath(error)) throw error;
+    if (process.platform === "win32") checkWindowsMissingAncestors(path, error);
     return [path, null];
   }
 };

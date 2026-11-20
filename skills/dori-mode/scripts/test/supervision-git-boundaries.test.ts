@@ -1,46 +1,18 @@
 import { expect, test } from "bun:test";
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { join, normalize } from "node:path";
+import { join } from "node:path";
 import { freshnessTick } from "../src/freshness.ts";
 import type { Lane } from "../src/registry.ts";
 import { Reports } from "../src/reports.ts";
-import { run, type Runner } from "../src/run.ts";
+import type { Runner } from "../src/run.ts";
 import { readObservation, type SupervisionOptions } from "../src/supervision-observe.ts";
 import { depsFor, fakeClock, newWorld, withState } from "./fakes.ts";
+import { commit, git, native, submoduleFixture, tracked } from "./supervision-git-fixtures.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00Z");
 const MIN = 60_000;
 const key = "git-boundary-lane";
 const porcelain = ["status", "--porcelain=v1", "-z", "--untracked-files=normal"];
-const native: Runner = (argv, opts) =>
-  run(argv, {
-    ...opts,
-    preserveOutput: true,
-    env: { GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", LC_ALL: "C", ...opts?.env },
-  });
-
-const git = async (cwd: string, ...args: string[]) => {
-  const result = await native(["git", "-C", cwd, ...args]);
-  expect(result.code, `git ${args.join(" ")}: ${result.err}`).toBe(0);
-  return result.out;
-};
-
-const commit = (cwd: string) =>
-  git(
-    cwd,
-    "-c",
-    "user.name=Dori Fixture",
-    "-c",
-    "user.email=dori@example.invalid",
-    "-c",
-    "core.hooksPath=/dev/null",
-    "-c",
-    "commit.gpgSign=false",
-    "commit",
-    "--quiet",
-    "-m",
-    "Seed boundary fixture",
-  );
 
 async function supervisedLane(home: string, cwd: string, stateDir: string, options: SupervisionOptions = {}) {
   const clock = fakeClock(T0);
@@ -81,7 +53,7 @@ const stalled = [["stalled", key]];
 test.each(["ceiling", "bare"])("freshness credits file activity without a Git worktree (%s)", async (mode) => {
   const fixture = withState();
   try {
-    const repo = join(realpathSync(fixture.dir), "repo");
+    const repo = join(realpathSync.native(fixture.dir), "repo");
     const ceiling = join(repo, "boundary");
     const cwd = join(ceiling, "lane");
     const watched = join(cwd, "watched.txt");
@@ -94,7 +66,11 @@ test.each(["ceiling", "bare"])("freshness credits file activity without a Git wo
         ? native
         : (argv, opts) => native(argv, { ...opts, env: { ...opts?.env, GIT_CEILING_DIRECTORIES: ceiling } });
     const discover = ["git", "-C", cwd, "rev-parse", "--show-toplevel"];
-    if (mode === "ceiling") expect(normalize((await native(discover)).out.trimEnd())).toBe(normalize(repo));
+    if (mode === "ceiling") {
+      const unrestricted = await native(discover);
+      expect(unrestricted.code, unrestricted.err).toBe(0);
+      expect(realpathSync.native(unrestricted.out.replace(/\r?\n$/, ""))).toBe(realpathSync.native(repo));
+    }
     expect(await limited(discover)).toMatchObject({
       code: 128,
       err: expect.stringContaining(mode === "bare" ? "must be run in a work tree" : "not a git repository"),
@@ -113,35 +89,12 @@ test.each(["ceiling", "bare"])("freshness credits file activity without a Git wo
   }
 });
 
-const tracked = "work/tracked.txt";
-
-async function submoduleFixture(dir: string) {
-  const source = join(dir, "local-source");
-  const root = join(dir, "superproject");
-  const module = join(root, "module");
-  mkdirSync(join(source, "work"), { recursive: true });
-  mkdirSync(root);
-  await git(source, "init", "--quiet");
-  writeFileSync(join(source, tracked), "seed\n");
-  // Ignore known state files only, never the sibling writer directory created during a sweep.
-  writeFileSync(
-    join(source, ".gitignore"),
-    `/dori-state/lanes/${key}.json\n/dori-state/lanes/${key}/reports.jsonl\n/dori-state/lanes/${key}/supervision.json\n`,
-  );
-  await git(source, "add", "--", ".gitignore", tracked);
-  await commit(source);
-  await git(root, "init", "--quiet");
-  await git(root, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", "--", source, "module");
-  await commit(root);
-  return { root, module };
-}
-
 test.each(["clean", "untracked", "unstaged", "staged", "new-head"] as const)(
   "freshness distinguishes supervisor state from real submodule work (%s)",
   async (change) => {
     const fixture = withState();
     try {
-      const { root, module } = await submoduleFixture(fixture.dir);
+      const { root, module } = await submoduleFixture(fixture.dir, key);
 
       const lane = await supervisedLane(fixture.dir, root, join(module, "dori-state"));
       // The clean control starts from a durable clean stall. The work cases already have native Git enabled at baseline.
@@ -186,7 +139,7 @@ test.each(["writer-only", "unstaged", "staged", "writer-then-unstaged"] as const
   async (change) => {
     const fixture = withState();
     try {
-      const { root, module } = await submoduleFixture(fixture.dir);
+      const { root, module } = await submoduleFixture(fixture.dir, key);
       writeFileSync(join(module, tracked), "staged gitlink target\n");
       await git(module, "add", "--", tracked);
       await commit(module);

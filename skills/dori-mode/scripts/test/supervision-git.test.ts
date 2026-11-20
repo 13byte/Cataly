@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { freshnessTick } from "../src/freshness.ts";
 import type { Lane } from "../src/registry.ts";
@@ -21,12 +21,17 @@ test.each(layouts)("freshness preserves tracked Git activity but not its writer 
     const alias = join(fixture.dir, "alias");
     if (layout === "cwd symlink") symlinkSync(repo, alias, "dir");
     if (layout === "state symlink") symlinkSync(actualState, alias, "dir");
-    const link = join(fixture.dir, "link");
+    // Win32 applies `..` before following the link; Unix follows the link first. Keep the raw spelling on both.
+    const lexicalParentOnWindows = throughParent && process.platform === "win32";
+    // Keep the Windows cwd below the worktree root but beside the writer subtree, so it must probe the Git root.
+    const linkParent = lexicalParentOnWindows ? join(repo, "lane-cwd") : fixture.dir;
+    const link = join(linkParent, "link");
     if (throughParent) {
-      const subdir = join(repo, "subdir");
+      const subdir = join(lexicalParentOnWindows ? fixture.dir : repo, "subdir");
+      if (lexicalParentOnWindows) mkdirSync(linkParent);
       mkdirSync(subdir);
       symlinkSync(subdir, link, "dir");
-      symlinkSync(actualState, join(fixture.dir, "dori-state"), "dir");
+      if (!lexicalParentOnWindows) symlinkSync(actualState, join(fixture.dir, "dori-state"), "dir");
     }
     const stateDir = layout === "state symlink" ? alias : actualState;
     const key = "git-lock-lane";
@@ -37,13 +42,21 @@ test.each(layouts)("freshness preserves tracked Git activity but not its writer 
       if (result.code !== 0) throw new Error(`git ${args.join(" ")}: ${result.err}`);
     };
     await git("init", "--quiet");
-    await git("config", "core.excludesFile", "/dev/null");
+    const emptyExcludes = join(fixture.dir, "empty-excludes");
+    writeFileSync(emptyExcludes, "");
+    await git("config", "core.excludesFile", emptyExcludes);
     mkdirSync(join(repo, lanePath), { recursive: true });
     // A tracked file here keeps Git from collapsing this lane's lock into an untracked directory entry.
     writeFileSync(join(repo, trackedPath), "initial\n");
     writeFileSync(
       join(repo, ".gitignore"),
-      [`/dori-state/lanes/${key}.json`, `/${lanePath}/reports.jsonl`, `/${lanePath}/supervision.json`, ""].join("\n"),
+      [
+        `/dori-state/lanes/${key}.json`,
+        `/${lanePath}/reports.jsonl`,
+        `/${lanePath}/supervision.json`,
+        ...(lexicalParentOnWindows ? ["/lane-cwd/link"] : []),
+        "",
+      ].join("\n"),
     );
     await git("add", "--", ".gitignore", trackedPath);
     await git(
@@ -63,6 +76,7 @@ test.each(layouts)("freshness preserves tracked Git activity but not its writer 
 
     const clock = fakeClock(T0);
     const world = newWorld();
+    const cwd = throughParent ? `${link}/..` : layout === "cwd symlink" ? alias : repo;
     const lane: Lane = {
       key,
       title: "Git writer lock",
@@ -72,8 +86,13 @@ test.each(layouts)("freshness preserves tracked Git activity but not its writer 
       done: "",
       openedAt: new Date(T0).toISOString(),
       reportProtocol: "jsonl-v1",
-      cwd: throughParent ? `${link}/..` : layout === "cwd symlink" ? alias : repo,
+      cwd,
     };
+    if (throughParent) {
+      const root = await run(["git", "-C", cwd, "rev-parse", "--show-toplevel"], { preserveOutput: true });
+      expect(root.code, root.err).toBe(0);
+      expect(realpathSync.native(root.out.replace(/\r?\n$/, ""))).toBe(realpathSync.native(repo));
+    }
     world.panes = [{ pane_id: "w:p1", workspace_id: "w", agent: "omo", agent_status: "working" }];
     const deps = depsFor(world, clock, stateDir, {
       nudgeAfterMin: 999,
@@ -86,11 +105,20 @@ test.each(layouts)("freshness preserves tracked Git activity but not its writer 
 
     const statuses: string[][] = [];
     const sample: Runner = async (argv, opts) => {
-      if (argv[0] !== "git" || !argv.includes("status")) return deps.run(argv, opts);
+      if (argv[0] !== "git") return deps.run(argv, opts);
       const env = layout === "literal mode" ? { GIT_LITERAL_PATHSPECS: "1", ...opts?.env } : opts?.env;
       const result = await run(argv, env ? { ...opts, env } : opts);
+      if (!argv.includes("status")) return result;
       if (result.code !== 0) throw new Error(`git status: ${result.err}`);
       const entries = result.out.split("\0");
+      if (throughParent) {
+        // Sample the same native worktree with no pathspec while the sweep owns its writer lock.
+        const unfiltered = await run(argv.slice(0, 7), opts);
+        const writer = "?? dori-state/lanes/.supervision-writers/";
+        expect(unfiltered.code, unfiltered.err).toBe(0);
+        expect(unfiltered.out.split("\0")).toContain(writer);
+        expect(entries).not.toContain(writer);
+      }
       statuses.push(entries);
       for (const entry of entries) {
         const path = entry.slice(3);

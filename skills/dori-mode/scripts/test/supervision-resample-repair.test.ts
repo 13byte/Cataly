@@ -3,60 +3,13 @@ import { lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSy
 import { join } from "node:path";
 import { Checkpoints } from "../src/checkpoints.ts";
 import { withDeliveryLock } from "../src/delivery-lock.ts";
-import { freshnessTick } from "../src/freshness.ts";
 import { pauseLane } from "../src/pause.ts";
-import type { Lane } from "../src/registry.ts";
-import { Reports } from "../src/reports.ts";
 import type { Runner } from "../src/run.ts";
-import type { SupervisionOptions } from "../src/supervision-observe.ts";
-import { depsFor, fakeClock, newWorld, sent, withState } from "./fakes.ts";
+import { sent } from "./fakes.ts";
+import { fixture, MIN, T0, usage, usageCommand } from "./supervision-resample-fixture.ts";
 
-const T0 = Date.parse("2026-01-01T12:00:00Z");
-const MIN = 60_000;
-const usageCommand = "fixture-usage";
-const usage = { code: 0, out: '{"tokens":1,"costUsd":0}', err: "" };
-
-const fixture = (supervision: SupervisionOptions) => {
-  const state = withState();
-  const world = newWorld();
-  const clock = fakeClock(T0);
-  const lane: Lane = {
-    key: "resample-lane",
-    title: "Supervision resample",
-    thread: "none",
-    pane: "w:p1",
-    brief: "/b.md",
-    done: "",
-    openedAt: new Date(T0).toISOString(),
-    reportProtocol: "jsonl-v1",
-    cwd: state.dir,
-  };
-  world.panes = [{ pane_id: "w:p1", workspace_id: "w", agent: "omo", agent_status: "working" }];
-  const deps = depsFor(world, clock, state.dir, {
-    agentCommand: ["omo", "--model", "{model}", "{prompt}"],
-    nudgeAfterMin: 999,
-    postAfterMin: 999,
-    supervision,
-  });
-  const reports = new Reports(state.dir);
-  return {
-    state,
-    world,
-    clock,
-    lane,
-    deps,
-    reports,
-    journal: () => readFileSync(reports.path(lane.key), "utf8"),
-    seed: async () => {
-      await deps.registry.write(lane);
-      reports.report(lane.key, "milestone", "started", T0);
-    },
-    tick: (screen: string, run = deps.run) => {
-      world.screen = screen;
-      return freshnessTick({ ...deps, run }, state.dir);
-    },
-  };
-};
+const rejectedFileAncestor =
+  /post-effect activity sample failed: (?:ENOTDIR\b|activity path ancestor is not a directory\b)/;
 
 test("the second Git status after usage does not hold the delivery lock against pause", async () => {
   const f = fixture({ usageArgv: [usageCommand] });
@@ -194,11 +147,12 @@ test.each([2, 3])("post-usage lstat failure on tick %s preserves the committed s
 
     const acts = await f.tick(failureOn === 2 ? "Working 41m" : "Working 42m", run);
     expect(usageCalls).toBe(failureOn);
-    expect(() => lstatSync(path)).toThrow("ENOTDIR");
+    expect(lstatSync(parent).isFile()).toBe(true);
+    expect(() => lstatSync(path)).toThrow();
     expect(acts.map((act) => act.kind)).toEqual(
       failureOn === 2 ? ["supervision-error", "stalled"] : ["supervision-error"],
     );
-    expect(acts[0]).toMatchObject({ lane: f.lane.key, detail: expect.stringContaining("ENOTDIR") });
+    expect(acts[0]).toMatchObject({ lane: f.lane.key, detail: expect.stringMatching(rejectedFileAncestor) });
     expect(f.reports.read(f.lane.key)?.state).toBe("stalled");
     if (failureOn === 2) {
       const added = f.journal().slice(before.length).trim().split("\n");
@@ -212,7 +166,28 @@ test.each([2, 3])("post-usage lstat failure on tick %s preserves the committed s
     f.clock.at += MIN;
     expect(await f.tick(failureOn === 2 ? "Working 42m" : "Working 43m", run)).toEqual([]);
     expect(f.journal()).toBe(stalled);
-    expect((await f.deps.registry.read(f.lane.key))?.lastSupervisionError).toContain("ENOTDIR");
+    expect((await f.deps.registry.read(f.lane.key))?.lastSupervisionError).toMatch(rejectedFileAncestor);
+  } finally {
+    f.state.done();
+  }
+});
+
+test("an absent ancestor remains a valid watched-path sample until the file is created", async () => {
+  const f = fixture({ gitActivity: false, activityPaths: ["missing/nested/work.txt"] });
+  try {
+    await f.seed();
+    expect(await f.tick("Working 21m")).toEqual([]);
+    const observation = join(f.state.dir, "lanes", f.lane.key, "supervision.json");
+    const parent = join(f.state.dir, "missing", "nested");
+    const initial = JSON.parse(readFileSync(observation, "utf8"));
+    expect(JSON.parse(initial.activity).files).toEqual([[join(parent, "work.txt"), null]]);
+
+    mkdirSync(parent, { recursive: true });
+    writeFileSync(join(parent, "work.txt"), "new lane work");
+    f.clock.at = T0 + 20 * MIN;
+    expect(await f.tick("Working 41m")).toEqual([]);
+    expect(f.reports.read(f.lane.key)?.state).toBe("running");
+    expect(JSON.parse(readFileSync(observation, "utf8")).activeAt).toBe(T0 + 20 * MIN);
   } finally {
     f.state.done();
   }

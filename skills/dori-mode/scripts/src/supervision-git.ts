@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import type { Ran, Runner, RunOptions } from "./run.ts";
 
@@ -83,12 +83,19 @@ async function status(
     });
     // A definitive discovery boundary is the ordinary no-Git case; an uncertain probe cannot admit unfiltered status.
     if (noWorktree(root)) return root;
-    const path = root.out.endsWith("\n") ? root.out.slice(0, -1) : root.out;
+    // Git's line-oriented output may use the Windows CRT's CRLF delimiter. Preserve every other path byte.
+    const lineEnding = process.platform === "win32" ? /\r?\n$/ : /\n$/;
+    const path = root.out.replace(lineEnding, "");
     // Without the root, status could report the writer lock as lane work.
     if (root.code !== 0) throw new IncompleteGitObservation(`git rev-parse exited ${root.code}`);
     if (!isAbsolute(path)) throw new IncompleteGitObservation("git rev-parse did not return an absolute worktree root");
-    actualRoot = path;
-    const fromRoot = relative(path, writers);
+    try {
+      // Compare against the same Win32 filesystem spelling as cwd and writers, including 8.3 aliases.
+      actualRoot = process.platform === "win32" ? realpathSync.native(path) : path;
+    } catch (cause) {
+      throw new IncompleteGitObservation("git rev-parse worktree root could not be resolved", { cause });
+    }
+    const fromRoot = relative(actualRoot, writers);
     if (!exclude && fromRoot && inDirectory(fromRoot)) exclude = `:(top,exclude,literal)${gitPath(fromRoot)}`;
   }
   if (exclude) argv.push("--", exclude);
