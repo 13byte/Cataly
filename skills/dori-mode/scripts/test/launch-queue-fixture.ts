@@ -4,7 +4,7 @@ import type { FlowDeps } from "../src/done-flow.ts";
 import type { HostSample } from "../src/host-guard.ts";
 import type { LaunchInput } from "../src/launch-input.ts";
 import type { Lane } from "../src/registry.ts";
-import { depsFor, newWorld, withState, type TestState, type World } from "./fakes.ts";
+import { agentIn, depsFor, laneState, newWorld, withState, type TestState, type World } from "./fakes.ts";
 
 export type QueueFixture = {
   state: TestState;
@@ -24,12 +24,13 @@ export const roomy = async (): Promise<HostSample> => ({
   panes: 0,
 });
 
-export const queueFixture = async (): Promise<QueueFixture> => {
+export const queueFixture = async ({ failGoalSample = false } = {}): Promise<QueueFixture> => {
   const state = withState();
   const world = newWorld();
   let at = Date.parse("2026-01-01T12:00:00Z");
   let creates = 0;
   let startFails = false;
+  let processSamples = 0;
   const clock = {
     now: () => at,
     sleep: async (ms: number) => {
@@ -39,8 +40,8 @@ export const queueFixture = async (): Promise<QueueFixture> => {
   };
   const base = depsFor(world, clock, state.dir, {
     defaultCwd: state.dir,
-    agentCommand: ["omo", "{prompt}"],
-    goalMarker: "",
+    agentCommand: [failGoalSample ? "omp" : "omo", "{prompt}"],
+    goalMarker: failGoalSample ? "Pursuing goal" : "",
   });
   const deps: FlowDeps = {
     ...base,
@@ -49,7 +50,12 @@ export const queueFixture = async (): Promise<QueueFixture> => {
       if (argv[0] === "herdr" && argv[1] === "tab" && argv[2] === "create") {
         creates++;
         world.calls.push([...argv]);
-        world.panes.push({ pane_id: "w1:p9", workspace_id: "w1", agent: "pi", agent_status: "idle" });
+        world.panes.push({
+          pane_id: "w1:p9",
+          workspace_id: "w1",
+          agent: failGoalSample ? "omp" : "pi",
+          agent_status: "idle",
+        });
         return {
           code: 0,
           out: JSON.stringify({ result: { root_pane: { pane_id: "w1:p9" }, tab_id: "w1:t9" } }),
@@ -58,6 +64,16 @@ export const queueFixture = async (): Promise<QueueFixture> => {
       }
       if (startFails && argv[0] === "herdr" && argv[1] === "pane" && argv[2] === "run")
         return { code: 1, out: "", err: "start failed" };
+      if (failGoalSample && argv[0] === "herdr" && argv[1] === "pane" && argv[2] === "run") {
+        agentIn(world, "w1:p9");
+        laneState(state.dir, "w1:p9", { cwd: state.dir });
+      }
+      if (failGoalSample && argv[0] === "ps" && argv[3] === "pid=,ppid=,command=") {
+        const sample = await base.run(argv, options);
+        // The live readiness probe gets valid evidence; only the separate goal verification sample fails.
+        if (++processSamples === 2) return { ...sample, code: 1, err: "synthetic sample diagnostic" };
+        return sample;
+      }
       return base.run(argv, options);
     },
   };

@@ -100,6 +100,27 @@ test("a failed agent start keeps its registered lane and cannot be automatically
   expect(f.creates()).toBe(1);
 });
 
+test("an unavailable goal sample keeps the queue start receipt and never starts the pane twice", async () => {
+  const native = await queueFixture({ failGoalSample: true });
+  try {
+    const { deps, input, prior, state, world } = native;
+    await enqueueLaunch(deps, input, [prior.key]);
+    const result = await startQueued(deps, input.key, roomy);
+    expect(result.code).toBe(3);
+    expect(result.lines).toContain(`QUEUE_STARTED ${input.key} pane=w1:p9`);
+    expect(result.lines).toContain(
+      `STARTUP_UNCONFIRMED ${input.key} w1:p9: process table unavailable while verifying its goal`,
+    );
+    expect(result.lines.join("\n")).not.toContain("synthetic sample diagnostic");
+    expect(new LaunchQueue(state.dir).read(input.key)?.status).toBe("started");
+    await expect(startQueued(deps, input.key, roomy)).rejects.toThrow("is started; no launch retried");
+    expect(native.creates()).toBe(1);
+    expect(world.calls.filter((argv) => argv.slice(0, 3).join(" ") === "herdr pane run")).toHaveLength(1);
+  } finally {
+    native.state.done();
+  }
+});
+
 test("a pending reservation cannot be bypassed by ordinary launch", async () => {
   await enqueue();
   await expect(launchLane(f.deps, f.input)).rejects.toThrow("is queued");
