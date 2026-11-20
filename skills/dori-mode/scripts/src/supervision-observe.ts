@@ -1,13 +1,14 @@
-import { lstatSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 
-import type { Checkpoints } from "./checkpoints.ts";
-import type { Lane } from "./registry.ts";
+import { takeLock } from "./checkpoint-lock.ts";
+import type { Checkpoint } from "./checkpoints.ts";
+import { withDeliveryLock } from "./delivery-lock.ts";
+import { type Lane, sameLaneGeneration } from "./registry.ts";
 import type { Progress } from "./reports.ts";
-import type { Runner } from "./run.ts";
-
-// path.relative() writes the platform's separators; a POSIX name may hold a literal backslash, so only Windows splits it.
-const PATH_SEPARATOR = process.platform === "win32" ? /[\\/]/ : "/";
+import { type ActivitySample, laneActivity, writerDir } from "./supervision-activity.ts";
+import type { SupervisionDeps } from "./supervision.ts";
 
 export type BudgetLimits = {
   readonly wallMinutes?: number | null | undefined;
@@ -32,9 +33,105 @@ export type SupervisionOptions = {
   readonly activityPaths?: readonly string[];
   readonly gitActivity?: boolean;
 };
+
+export type Observation = {
+  readonly openedAt: string;
+  readonly generation?: string;
+  readonly at: number;
+  readonly timer: number | null;
+  readonly timerKind: string | null;
+  readonly activity: string | null;
+  readonly activeAt: number;
+  readonly alerts: readonly string[];
+};
+
+type Resample = {
+  readonly path: string;
+  readonly observation: Observation;
+  readonly progress: Progress | null;
+  readonly checkpoint: Checkpoint | null;
+  readonly before: ActivitySample;
+};
+
+export const readObservation = (path: string): Observation | null =>
+  existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Observation) : null;
+
+export const saveObservation = (path: string, observation: Observation): void => {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const temporary = `${path}.${process.pid}.tmp`;
+  writeFileSync(temporary, JSON.stringify(observation), { mode: 0o600 });
+  renameSync(temporary, path);
+};
+
+// A failed initial activity sample can still settle budget alerts without advancing the last verified baseline.
+export const retainObservationAlerts = (path: string, previous: Observation | null, current: Observation): void => {
+  const { alerts } = current;
+  if (alerts.length === (previous?.alerts.length ?? 0) && alerts.every((alert, i) => alert === previous?.alerts[i])) {
+    return;
+  }
+  saveObservation(path, previous ? { ...previous, alerts } : current);
+};
+
+/** Serialize the provisional and final baselines without blocking lane delivery or pause. */
+export const withSupervisionWriter = async <T>(
+  stateDir: string,
+  lane: SupervisedLane,
+  now: number,
+  action: () => Promise<T>,
+): Promise<T | undefined> => {
+  const directory = writerDir(stateDir);
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  // A reopened generation can proceed while the old sweep winds down. Its writes still use the delivery lock.
+  const identity = createHash("sha256")
+    .update(JSON.stringify([lane.openedAt, lane.lifecycleEpoch]))
+    .digest("hex");
+  const fail = (message: string) => new Error(`supervision writer lock ${message}`);
+  const release = takeLock(resolve(directory, `${lane.key}.${identity}.lock`), now, fail, { keepLiveOwner: true });
+  if (typeof release === "string") return;
+  try {
+    return await action();
+  } finally {
+    release();
+  }
+};
+
+export const withCurrentSupervision = async <T>(
+  deps: SupervisionDeps,
+  lane: SupervisedLane,
+  action: () => T | Promise<T>,
+): Promise<T | undefined> => {
+  if (deps.registry === undefined) return action();
+  const held = await withDeliveryLock(deps, lane.key, async () => {
+    const current = await deps.registry.read(lane.key);
+    if (!current || current.nativeCloseIntent || !sameLaneGeneration(lane, current)) return;
+    return action();
+  });
+  return held.ok ? held.value : undefined;
+};
+
+/** Refresh only the observation written by the current serialized sweep, and only if its lane is still current. */
+export const resampleActivity = async (
+  deps: SupervisionDeps,
+  options: SupervisionOptions,
+  lane: SupervisedLane,
+  refresh: Resample,
+): Promise<string | undefined> => {
+  try {
+    const sample = await laneActivity(deps, options, lane, refresh.before);
+    await withCurrentSupervision(deps, lane, () => {
+      const activity = sample.signature(refresh.progress, refresh.checkpoint);
+      saveObservation(refresh.path, { ...refresh.observation, activity });
+    });
+  } catch (error) {
+    return `post-effect activity sample failed: ${error instanceof Error ? error.message : String(error)}`;
+  }
+};
+
+type WorkingTimer = { kind: string; seconds: number; step: number };
+
 // Match only an explicit duration on a visible Working/Running line. step is the smallest unit shown, in seconds:
 // "25m" is rounded to the minute, so two readings can place the same call's start up to a minute apart.
-export const workingTimer = (screen: string): { kind: string; seconds: number; step: number } | null => {
+export const workingTimer = (screen: string): WorkingTimer | null => {
   for (const line of Bun.stripANSI(screen).split("\n")) {
     const kind = /^\s*[^\w\n]*(Working|Running)\b/i.exec(line)?.[1]?.toLowerCase();
     if (!kind) continue;
@@ -58,52 +155,37 @@ export const workingTimer = (screen: string): { kind: string; seconds: number; s
   return null;
 };
 
-/** Sample files and checkpoints before taking the delivery lock; fold in the current report when committing. */
-export const laneActivity = async (
-  run: Runner,
+export const isHungTimer = (
   options: SupervisionOptions,
-  checkpoints: Checkpoints,
-  lane: SupervisedLane,
-): Promise<(progress: Progress | null) => string> => {
-  const paths = new Set(
-    [...(options.activityPaths ?? []), ...(lane.activityPaths ?? [])].map((path) => resolve(lane.cwd ?? ".", path)),
-  );
-  const changes: string[] = [];
-  if (options.gitActivity !== false && lane.cwd) {
-    const result = await run(["git", "-C", lane.cwd, "status", "--porcelain=v1", "-z", "--untracked-files=normal"], {
-      timeoutMs: 10_000,
-      preserveOutput: true,
-    });
-    if (result.code === 0) {
-      const entries = result.out.split("\0");
-      for (let index = 0; index < entries.length; index++) {
-        const entry = entries[index];
-        if (!entry) continue;
-        const name = entry.slice(3);
-        const path = resolve(lane.cwd, name);
-        const rel = relative(resolve(lane.cwd), path);
-        const parts = rel.split(PATH_SEPARATOR);
-        // Dependency churn and paths outside the lane's cwd are not the lane's progress.
-        if (!isAbsolute(rel) && parts[0] !== ".." && !parts.includes("node_modules")) {
-          paths.add(path);
-          changes.push(entry);
-        }
-        if (entry[0] === "R" || entry[0] === "C" || entry[1] === "R" || entry[1] === "C") index++;
-      }
-    }
+  previous: Observation | null,
+  timer: WorkingTimer | null,
+  now: number,
+  activeAt: number,
+): boolean =>
+  previous !== null &&
+  timer !== null &&
+  previous.timer !== null &&
+  timer.kind === previous.timerKind &&
+  timer.seconds > previous.timer &&
+  // The rounded timer origin distinguishes a continuing call from a new Working/Running call.
+  Math.abs(now - timer.seconds * 1000 - (previous.at - previous.timer * 1000)) <= timer.step * 1000 + 2000 &&
+  timer.seconds >= (options.hungAfterMinutes ?? 20) * 60 &&
+  now - activeAt >= (options.staleAfterMinutes ?? 20) * 60_000;
+
+export const parseUsage = (output: string): Usage => {
+  try {
+    const value: unknown = JSON.parse(output);
+    const metric = (name: keyof Usage): number | null => {
+      const n =
+        typeof value === "object" && value !== null && name in value ? (value as Record<string, unknown>)[name] : null;
+      return typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : null;
+    };
+    return { tokens: metric("tokens"), costUsd: metric("costUsd") };
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    // Malformed external JSON remains unknown, never zero.
+    return { tokens: null, costUsd: null };
   }
-  const files = [...paths].sort().map((path) => {
-    try {
-      const stat = lstatSync(path);
-      return [path, stat.mtimeMs, stat.ctimeMs, stat.size];
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      return [path, null];
-    }
-  });
-  const checkpoint = checkpoints.read(lane.key).at(-1) ?? null;
-  changes.sort();
-  return (progress) => JSON.stringify({ report: progress?.lastReport ?? null, checkpoint, files, changes });
 };
 
 export const observeBudget = (options: SupervisionOptions, lane: SupervisedLane, now: number, usage: Usage) => {
