@@ -1,5 +1,5 @@
 import type { Discord } from "./discord.ts";
-import type { InboundContext } from "./discord-channels.ts";
+import type { InboundContext } from "./discord-inbound-context.ts";
 import {
   type DiscordInbound,
   discoverChannels,
@@ -13,6 +13,7 @@ import {
   toInbound,
   unavailable,
 } from "./discord-inbound-api.ts";
+import { verifyDiscordInboundIdentity } from "./discord-inbound-identity.ts";
 import type { DiscordInboundQueue } from "./discord-inbound-queue.ts";
 import { discordInboundEnv, type DiscordInboundStore, isDiscordSnowflake } from "./discord-inbound-state.ts";
 import { discordThreadPoll } from "./discord-inbound-thread-poll.ts";
@@ -65,21 +66,7 @@ export const discordInbound = async (
   const ownerId = discordInboundEnv("DORI_DISCORD_OWNER_ID", opts.ownerId);
   const explicit = opts.channelIds.map((id) => discordInboundEnv("DORI_DISCORD_CHANNEL_IDS", id));
   const request = inboundRequest(discord);
-  const me = await request<{ id?: string; bot?: boolean }>("/users/@me");
-  if (me?.bot !== true || !isDiscordSnowflake(me.id)) {
-    throw new MessengerError("Discord inbound requires an authenticated bot identity; use a bot token", 401);
-  }
-  const botId = me.id;
-  if (botId === ownerId)
-    throw new MessengerError("DORI_DISCORD_OWNER_ID must identify the human owner, not the bot", 0);
-  const application = await request<{ flags?: number }>("/applications/@me");
-  const flags = application?.flags;
-  if (typeof flags !== "number" || !Number.isSafeInteger(flags) || (flags & ((1 << 18) | (1 << 19))) === 0) {
-    throw new MessengerError(
-      "Discord inbound needs Message Content Intent enabled for this bot in the Developer Portal",
-      403,
-    );
-  }
+  const botId = await verifyDiscordInboundIdentity(request, ownerId);
   const watched = new Map<string, DiscordInboundStore>();
   const parents = new Map<string, string>();
   const threads = opts.threads !== false && !opts.all;
