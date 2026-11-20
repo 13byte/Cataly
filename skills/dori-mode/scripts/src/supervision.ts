@@ -2,8 +2,10 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { Checkpoints } from "./checkpoints.ts";
+import { runContext } from "./lane-run.ts";
 import type { Registry } from "./registry.ts";
-import { Reports } from "./reports.ts";
+import { ReportError } from "./report-events.ts";
+import { Reports, reportScope } from "./reports.ts";
 import type { Clock, Runner } from "./run.ts";
 import { type ActivitySample, laneActivity } from "./supervision-activity.ts";
 import { SupervisionCost } from "./supervision-cost.ts";
@@ -126,14 +128,17 @@ export class Supervision {
     { screen, nativeActiveSince, now, path }: SweepInput,
     { usage, sample }: { readonly usage: UsageSnapshot; readonly sample: ActivitySample | null },
   ) {
-    const scope = { generation: lane.lifecycleEpoch };
-    const tag = scope.generation === undefined ? {} : { generation: scope.generation };
-    const saved = readObservation(path);
-    const previous = saved?.openedAt === lane.openedAt && saved.generation === scope.generation ? saved : null;
+    const scope = reportScope(lane);
+    const context = runContext(this.reports, lane, lane.runId);
+    if (!context || context.generation !== scope.generation)
+      throw new ReportError(`supervision: execution identity unavailable for ${lane.key}`);
+    const { generation, provenance } = context;
+    const tag = { ...(generation === undefined ? {} : { generation }), ...(provenance ? { provenance } : {}) };
+    const previous = readObservation(path, lane);
     const progress = this.reports.read(lane.key, scope);
     // Without a usage hook each sweep would append the same unknown reading; close still records its final one.
     if (this.options.usageArgv?.length) this.cost.record(usage);
-    const checkpoint = sample ? (this.checkpoints.read(lane.key).at(-1) ?? null) : null;
+    const checkpoint = sample ? this.checkpoints.latest(lane) : null;
     const activity = sample?.signature(progress, checkpoint) ?? null;
     const timer =
       sample &&
@@ -163,7 +168,7 @@ export class Supervision {
     const reported = progress?.lastReport?.kind === "blocker" && progress.lastReport.text === blocker;
     let appended = true;
     if (!terminal && violations.length && !reported) {
-      this.reports.report(lane.key, "blocker", blocker, now, scope.generation);
+      this.reports.report(lane.key, "blocker", blocker, now, generation, undefined, provenance);
     } else if (!terminal && hung && (!progress || progress.state === "running")) {
       this.reports.append({
         type: "activity",
