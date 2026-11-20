@@ -11,12 +11,16 @@ const inboundCli = async (
   args: string[],
   environment: Record<string, string> = {},
   prepare: (stateDir: string) => void = () => {},
+  recall = false,
 ) => {
   const state = withState();
   try {
     prepare(state.dir);
     const config = join(state.dir, "config.json");
-    writeFileSync(config, JSON.stringify({ stateDir: state.dir, runtime: "herdr", hooks: {} }));
+    writeFileSync(
+      config,
+      JSON.stringify({ stateDir: state.dir, runtime: "herdr", hooks: {}, recall: { enabled: recall } }),
+    );
     const child = Bun.spawn(
       [
         process.execPath,
@@ -99,6 +103,22 @@ posix("explicit --loop 0 performs one poll and exits with its cursor persisted",
     "INBOUND_READY discord owner=10 channel=20 bot=99",
     'INBOUND discord 20 101 from=owner ref=- "first owner text"',
   ]);
+});
+
+posix("opt-in Discord recall appends only the same verified conversation’s owner history", async () => {
+  const scenario = { DORI_TEST_DISCORD_CASE: "recall" };
+  const { out, err, code, cursor } = await inboundCli([], scenario, undefined, true);
+  expect({ code, err, cursor }).toEqual({ code: 0, err: "", cursor: "104" });
+  const rows = out.split("\n").filter((line) => line.startsWith("INBOUND_RECALL "));
+  expect(rows).toHaveLength(1);
+  const prefix = "INBOUND_RECALL discord 20 103 ";
+  expect(rows[0]).toStartWith(prefix);
+  expect(JSON.parse(rows[0]!.slice(prefix.length)).rows).toMatchObject([{ role: "owner", text: "first owner text" }]);
+  const off = await inboundCli([], scenario);
+  expect(off.out).not.toContain("INBOUND_RECALL ");
+  const unbound = await inboundCli([], { ...scenario, DORI_DISCORD_THREADS: "off" }, undefined, true);
+  expect(unbound.out).not.toContain("INBOUND_RECALL ");
+  expect(unbound.cursor).toBe("104");
 });
 
 posix("invalid owner, authentication, permission and content-intent setup never announce readiness", async () => {

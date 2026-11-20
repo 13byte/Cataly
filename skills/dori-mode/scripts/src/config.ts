@@ -14,6 +14,7 @@ import { type LaunchConfig, launchConfig } from "./launch-selection.ts";
 import type { SupervisionOptions } from "./supervision-observe.ts";
 import type { CommitIdentity } from "./verify-pr-check.ts";
 import type { VoiceSettings } from "./voice/settings.ts";
+import { recallSettingsError, type RecallSettings } from "./messenger/recall-text.ts";
 
 export type ArgvTemplate = readonly string[];
 
@@ -66,6 +67,7 @@ export type DoriConfig = LaunchConfig & {
   readonly repoIdentities: Readonly<Record<string, CommitIdentity>>;
   readonly supervision: SupervisionOptions;
   readonly prAutoTrack: boolean; // opt-in: claim and checkpoint PR links are tracked for `dori pr watch`
+  readonly recall?: RecallSettings;
   readonly doctor?: DoctorOptions;
 };
 
@@ -186,7 +188,7 @@ export const loadConfig = async (path = configPath(), home = homedir(), env = pr
   checkSupervision(raw.supervision);
   if (raw.doctor !== undefined && !validDoctorOptions(raw.doctor))
     throw new ConfigError("invalid doctor: expected an object with an optional ignore array of known check IDs");
-  const policyError = freshnessError(raw.freshness);
+  const policyError = freshnessError(raw.freshness) ?? recallSettingsError(raw.recall);
   if (policyError) throw new ConfigError(policyError);
   if (raw.threadDonePolicy !== undefined && !["every-lane", "last-lane"].includes(raw.threadDonePolicy))
     throw new ConfigError("invalid threadDonePolicy: expected every-lane or last-lane");
@@ -244,6 +246,5 @@ export const loadConfig = async (path = configPath(), home = homedir(), env = pr
   if (merged.defaultCwd.startsWith("~/")) queueCwds.set(config, `${home}${sep}${merged.defaultCwd.slice(2)}`);
   return config;
 };
-
 export const fill = (template: ArgvTemplate, values: Readonly<Record<string, string>>): string[] =>
   template.map((part) => part.replace(/\{(\w+)\}/g, (whole, name: string) => values[name] ?? whole));

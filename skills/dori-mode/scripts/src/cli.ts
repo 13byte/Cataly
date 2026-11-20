@@ -214,19 +214,21 @@ switch (command) {
   case "pr":
     commands = (await import("./cli-pr.ts")).prCommands;
     break;
+  case "recall":
+    commands = { recall: (await import("./cli-recall.ts")).recallCommand };
+    break;
   case "voice":
     // Keep the opt-in voice graph out of unrelated command startup paths.
     commands = { voice: (await import("./cli-voice.ts")).voiceCommand };
     break;
 }
 const handler = Object.hasOwn(commands, command) ? commands[command] : undefined;
-
 try {
-  if (handler) await handler(makeCli(command, rest, flags, config, deps));
-  else {
+  if (!handler) {
     console.log(USAGE);
     process.exit(command ? 1 : 0);
   }
+  await handler(makeCli(command, rest, flags, config, deps));
 } catch (e) {
   // Import the original classes only on failure; cross-group errors keep their existing identity and formatting.
   const { LaunchError } = await import("./launch.ts");

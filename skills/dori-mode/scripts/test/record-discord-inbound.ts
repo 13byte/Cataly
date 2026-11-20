@@ -30,6 +30,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   else if (url.pathname === "/api/v10/channels/20") {
     channelReads++;
     if (scenario === "context") body = { id: "20", type: 11, name: "task thread", parent_id: "30" };
+    else if (scenario === "recall") body = { id: "20", type: 0, name: "task channel" };
     else if (
       scenario === "context-denied" &&
       (channelReads > 1 || process.env["DORI_DISCORD_THREADS"]?.trim().toLowerCase() === "off")
@@ -49,7 +50,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
         history.push(message("101", "10", "first owner text"), message("102", "11", "private other user"));
       if (polls === 2) {
         history.push(
-          { ...message("103", "10", "owner reply"), type: 19, message_reference: { message_id: "101" } },
+          {
+            ...message("103", "10", scenario === "recall" ? "what was the owner text earlier?" : "owner reply"),
+            type: 19,
+            message_reference: { message_id: "101" },
+          },
           message("104", "99", "private self bot", true),
         );
       }

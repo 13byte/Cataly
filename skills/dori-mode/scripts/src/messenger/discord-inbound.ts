@@ -116,6 +116,12 @@ export const discordInbound = async (
     !!message && isDiscordSnowflake(message.id) && isDiscordSnowflake(message.channel_id);
   const parentFor = (channel: string): string | undefined =>
     threads ? (following.cached(channel) ?? undefined) : undefined;
+  const recallSpaceFor = (channel: string, admittedParent?: string): string | undefined => {
+    const knownParent = parentFor(channel);
+    if (admittedParent !== undefined && knownParent !== undefined && admittedParent !== knownParent) return undefined;
+    if (admittedParent !== undefined && threads && parents.has(admittedParent)) return admittedParent;
+    return knownParent ?? (parents.has(channel) ? channel : undefined);
+  };
   const accepts = (message: Message, parent?: string | null): boolean =>
     valid(message) &&
     (opts.all === true || watched.has(message.channel_id) || (threads && parent != null && parents.has(parent)));
@@ -171,6 +177,7 @@ export const discordInbound = async (
     botId,
     accepts,
     parentFor,
+    recallSpaceFor,
     adoptThread,
     needsThread(message: Message): boolean {
       return (

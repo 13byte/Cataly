@@ -37,6 +37,7 @@ export const DORI_COMMANDS: Record<string, true> = {
   presence: true,
   queue: true,
   react: true,
+  recall: true,
   relayed: true,
   remote: true,
   reopen: true,

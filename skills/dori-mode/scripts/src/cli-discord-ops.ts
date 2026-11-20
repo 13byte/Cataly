@@ -73,6 +73,8 @@ export const sendDiscord: Command = async (cli) => {
       if (replyConfirmed) await recordSent(config.stateDir, target, reply, ids, Date.now());
     }
     console.log(`SENT ${ids.join(" ")}`);
+    if (reply !== undefined && replyConfirmed && config.recall?.enabled)
+      await (await import("./messenger/recall-discord.ts")).discordLeadRecall(config, dc, target, ids, rawText);
   }
 };
 

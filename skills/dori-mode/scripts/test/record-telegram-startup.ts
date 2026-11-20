@@ -34,7 +34,9 @@ globalThis.fetch = Object.assign(
     let result: unknown;
     if (method === "getMe") result = scenario["identity"];
     else if (method === "getWebhookInfo") result = scenario["webhook"];
-    else if (method === "getUpdates") result = [];
+    else if (method === "getUpdates") result = scenario["updates"] ?? [];
+    else if (method === "setMessageReaction" && Array.isArray(scenario["updates"])) result = true;
+    else if (method === "sendMessage" && scenario["sent"] !== undefined) result = scenario["sent"];
     else throw new Error("Unexpected Telegram startup method");
     console.log(`STARTUP_RESPONSE ${method}`);
     return new Response(JSON.stringify({ ok: true, result }));

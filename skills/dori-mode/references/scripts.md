@@ -510,6 +510,16 @@ The private `<stateDir>/owes` directory stores inbound previews (up to 500 chara
 
 Writers reuse per-file owner locks, wait asynchronously and publish capped snapshots atomically. A live holder has no automatic wait timeout; a stale lock whose PID has been reused may look live and require operator repair. Session changes abort waiting monitor admissions rather than waking an old session. Aborting the ledger wait for an already durably queued Gateway message retains its payload and cursor for restart; unresolved candidates have the loss boundary above. Unrelated failures remain errors.
 
+### Opt-in conversation recall
+
+Set `"recall": {"enabled": true, "retentionDays": 30}` in `config.json` to retain bounded excerpts in the POSIX-only `<stateDir>/recall-scoped-v1.sqlite` ledger. Recall is off by default. The current user must own the ledger and state directory. Untrusted ancestor directories are rejected; Windows does not open the store. This does not import, change or delete an older `recall.sqlite`. Detected credential-shaped strings are masked, not a guarantee that all secrets are detected. Do not opt in for conversations that should not be retained.
+
+Rows are partitioned by transport, authenticated bot, configured owner and conversation space. Discord uses explicitly watched channels and their verified threads with parent following enabled; global or unverified scope is skipped. ASK and lane-routed input do not enter recall. A Discord CLI send is stored only after a confirmed reply in a verified watched conversation. Telegram uses its existing owner and chat/topic gates. On send, only new deliveries into that configured owner DM or group/topic are eligible. Edits and Slack are not recorded.
+
+When owner text refers to an earlier conversation, `INBOUND_RECALL` contains up to four bounded, JSON-encoded excerpts from that same space, or an empty result. Discord threads share a verified parent space; Telegram topics share their chat space. Excerpts provide context only, never current instruction, authorization or an ASK response. A lookup or storage failure does not change the original message or its delivery receipt.
+
+Use `dori recall --scope PLATFORM:BOT:OWNER --space=ID [--limit N] QUERY` with the exact IDs and Discord parent/channel ID or Telegram chat ID. `dori recall --scope PLATFORM:BOT:OWNER --purge` logically deletes only that exact identity’s rows, even if recall is off. Expiry is applied when that identity opens its ledger. Neither expiry nor purge is secure erasure; other identities, legacy files and backups are untouched.
+
 ### `dori inbound slack [--loop MIN] [--qualified-routes] [--adopt-legacy-threads WORKSPACE:ACCOUNT]`
 Authenticates with `auth.test` and by default prints exactly `INBOUND_READY slack`. Each message is `INBOUND <source> <channel> <thread> <ts> <user> <text>`: `<channel>` is the physical Slack channel ID and the final field is full JSON-encoded text. Existing monitors keep this format.
 
