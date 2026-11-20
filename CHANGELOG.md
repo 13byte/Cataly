@@ -4,6 +4,8 @@
 
 - Supervised Discord lead intake records the original source and native dispatch attempt in the existing SQLite FIFO and requires an on-disk receipt before advancing the cursor. Lost acknowledgements reconcile without redispatch; an unresolved attempt holds intake. Explicit `inbound-abandon` retains the source and operator decision without resending. Native admission is separate from ASK, tool approval, authorization, Discord delivery and completion.
 
+- Verify the exact native provider and model before delivering briefs to readable interactive lane launches; preserve explicit non-interactive and opaque compatibility with unavailable provenance and an opt-in strict gate.
+
 - Bind opted-in lane reports and checkpoints to the original received request and launch run on terminal and headless lanes, retaining attribution across reopen and wake. Exact Discord reply receipts can be linked explicitly; unsupported delivery paths remain unverified. Validate retained execution history before launch or reopen without dropping completed checkpoint effects, and reject valueless delivery options before acknowledging a report.
 
 - Persist a private local dispatch record before telling or nudging a lane or sending a Done notice. An uncertain delivery holds later tells, nudges and Done notices across restarts. `dori tell <key> --status` inspects the latest record; `--resolve ID --note WHY` releases only that exact hold without confirming, cancelling or replaying the original action. These IDs are not native submission, report or run receipts. Direct native owner input, ASK replies, pause/resume and explicit reopen notes retain their existing admission rules and do not clear the hold.

@@ -14,6 +14,26 @@ import { laneGoalActive } from "./goal-record.ts";
 import { ProcessTableUnavailableError } from "./session-id.ts";
 import type { ChosenRuntimes } from "./run.ts";
 
+export const lastLines = (screen: string): string =>
+  screen
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(-3)
+    .join(" / ")
+    .replace(/\/(Users|home|Volumes|private)\/\S+/g, "(local path)")
+    .slice(0, 240) || "(blank)";
+
+// OMP goals come from its trusted current-session record, never quoted screen text. Custom agents may use their
+// footer marker or omo goal record. An empty marker opts out of the goal check, not the ready-status check.
+export const goalShown = (screen: string, marker: string): boolean =>
+  screen
+    .split("\n")
+    .filter((s) => s.trim())
+    .slice(-3)
+    .join("\n")
+    .includes(marker);
+
 const missingSession = (ref: SessionRef, error: unknown): boolean =>
   isKind(error, "not_found") ||
   (ref.runtime === "herdr" && error instanceof ToolError && /not.?found/i.test(reasonOf(error)));
@@ -78,15 +98,6 @@ const FIRST_CHECK_MS = 20_000;
 const RECHECK_MS = 10_000;
 const ready = (s: string | undefined): boolean => s === "idle" || s === "working";
 const unreported = (s: string | undefined): boolean => s === undefined || s === "unknown";
-// OMP goals come from its trusted current-session record, never quoted screen text. Custom agents may use their
-// footer marker or omo goal record. An empty marker opts out of the goal check, not the ready-status check.
-const goalShown = (screen: string, marker: string): boolean =>
-  screen
-    .split("\n")
-    .filter((s) => s.trim())
-    .slice(-3)
-    .join("\n")
-    .includes(marker);
 
 export const observeLaunch = async (
   deps: FlowDeps,
@@ -96,6 +107,7 @@ export const observeLaunch = async (
     readonly ref: SessionRef;
     readonly rts: ChosenRuntimes;
     readonly launchedAt: number;
+    readonly deliverBrief?: () => Promise<string | null>;
   },
 ): Promise<{ readonly lane: Lane; readonly startup: string }> => {
   const { lane, ref, rts, launchedAt } = launch;
@@ -139,8 +151,14 @@ export const observeLaunch = async (
     const rechecks = Math.max(0, Math.ceil((deps.config.startupWaitSeconds * 1000 - FIRST_CHECK_MS) / RECHECK_MS));
     let shown = screen;
     let current = status;
+    let deliverBrief = launch.deliverBrief;
     for (let check = 0; ; check++) {
-      if (ready(current)) {
+      if (ready(current) && (!deliverBrief || current === "idle")) {
+        if (deliverBrief) {
+          const hold = await deliverBrief();
+          if (hold !== null) return { lane, startup: `STARTUP_MODEL_HOLD ${input.key} ${pane}: ${hold}` };
+          deliverBrief = undefined;
+        }
         const goal = marker === "" || (await hasGoal(shown));
         if (goal === null) return unconfirmedGoal;
         if (goal) {
@@ -156,6 +174,8 @@ export const observeLaunch = async (
         }
       }
       if (check >= rechecks) {
+        if (deliverBrief && ready(current))
+          return { lane, startup: `STARTUP_MODEL_HOLD ${input.key} ${pane}: no idle native session; brief not sent` };
         const waited = Math.round((deps.clock.now() - started) / 1000);
         return {
           lane,
@@ -195,13 +215,3 @@ export const observeLaunch = async (
   const why = error ? `status lookup failed: ${error}` : `no ready agent status (${status ?? "none"})`;
   return { lane, startup: `STARTUP_UNCONFIRMED ${input.key} ${pane}: ${why}; last lines: ${lastLines(screen)}` };
 };
-
-export const lastLines = (screen: string): string =>
-  screen
-    .split("\n")
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .slice(-3)
-    .join(" / ")
-    .replace(/\/(Users|home|Volumes|private)\/\S+/g, "(local path)")
-    .slice(0, 240) || "(blank)";
