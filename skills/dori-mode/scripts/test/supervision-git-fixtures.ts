@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { run, type Runner } from "../src/run.ts";
 
@@ -67,10 +67,10 @@ export async function nestedWorktreeFixture(home: string, nested: boolean, ignor
   const stateDir = join(repo, "dori-state");
   const cwd = nested ? join(repo, "app") : repo;
   const tracked = nested ? `${lanes}/tracked.txt` : userFile;
-  const windowsCaseFixture = icase && process.platform === "win32";
   mkdirSync(cwd, { recursive: true });
-  // Keep the writer's actual on-disk spelling lowercase, even when NTFS aliases the two directory names.
-  if (windowsCaseFixture) mkdirSync(join(repo, writer), { recursive: true });
+  // Seed the writer spelling before the tracked file on case-insensitive filesystems.
+  if (icase) mkdirSync(join(repo, writer), { recursive: true });
+  const aliasesCase = icase && existsSync(join(repo, userDir));
   mkdirSync(dirname(join(repo, tracked)), { recursive: true });
   const native: Runner = async (argv, opts) => {
     // Model a caller's inherited mode without changing this test process's environment.
@@ -94,17 +94,17 @@ export async function nestedWorktreeFixture(home: string, nested: boolean, ignor
         `/${lanes}/${key}/supervision.json`,
         ...(ignored ? [`/${writer}/`] : []),
         // Git tracks the uppercase index entry below. Do not report its lowercase filesystem alias as untracked.
-        ...(windowsCaseFixture ? [`/${writer}/work.txt`] : []),
+        ...(aliasesCase ? [`/${writer}/work.txt`] : []),
         "",
       ].join("\n"),
     );
   };
   setWriterIgnored(ignoreWriter);
   writeFileSync(join(repo, tracked), "initial\n");
-  if (windowsCaseFixture) {
+  if (aliasesCase) {
     expect(basename(realpathSync.native(join(repo, writer)))).toBe(basename(writer));
     const { out: blob } = await git("hash-object", "-w", "--", tracked);
-    // git add could use NTFS's directory spelling; pin the distinctly cased name in Git's index.
+    // git add could use the filesystem's directory spelling; pin the distinct name in the index.
     await git("update-index", "--add", "--cacheinfo", `100644,${blob.replace(/\r?\n$/, "")},${tracked}`);
     expect((await git("ls-files", "-z")).out).toBe(`${tracked}\0`);
   } else {
