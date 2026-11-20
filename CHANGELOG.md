@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Discord voice documents `gpt-live-1.1` as a `voice.liveModel` (same Live WebSocket protocol as `gpt-live-1`) and records the provider's paused-seconds breakdown as `pausedSeconds` within billed `liveSeconds`; minute limits still count all billed seconds, late paused reports stay on the days that hold the session's billed time, and an inconsistent breakdown ends the session. GPT-Live standby is WebRTC-only, so it is documented as unavailable over Dori's WebSocket transport, where idle close and wake remain.
+
 - Honor scoped work approvals from Cataly's authenticated Discord owner intake without requiring a duplicate terminal message. Native OMP approvals and spending rules are unchanged.
 
 - Render eligible Discord ASK choices as native buttons, with the checked option labeled as recommended. A single pending text-capable question also accepts ordinary owner text in its exact Discord channel.
