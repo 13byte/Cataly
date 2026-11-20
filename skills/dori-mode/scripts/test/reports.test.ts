@@ -1,5 +1,16 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
-import { appendFileSync, chmodSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import * as fs from "node:fs";
+import {
+  appendFileSync,
+  chmodSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { freshnessTick } from "../src/freshness.ts";
 import { parseEvent, ReportError, Reports, reportLine } from "../src/reports.ts";
@@ -115,6 +126,84 @@ test("one corrupt journal is reported once and does not stop the sweep for other
   ]);
   expect(first.find((act) => act.kind === "journal-error")?.detail).toContain("reports.jsonl:2:");
   expect((await freshnessTick(deps, "/home/test")).map((act) => act.kind)).toEqual([]);
+});
+
+test.each([false, true])("an inaccessible journal ancestor stays absent (memo=%s)", (memo) => {
+  const lanes = join(state.dir, "lanes");
+  mkdirSync(lanes, { recursive: true });
+  const ancestor = join(lanes, lane.key);
+  // Use a directory loop on POSIX; a file in place of the directory doesn't require symlink privileges on Windows.
+  if (process.platform === "win32") writeFileSync(ancestor, "");
+  else symlinkSync(lane.key, ancestor);
+  expect(new Reports(state.dir, { memo }).read(lane.key)).toBeNull();
+});
+
+test("a memoizing reader shares unchanged reads but sees external appends and repeats corrupt-line errors", () => {
+  const tick = new Reports(state.dir, { memo: true });
+  expect(tick.read(lane.key)).toBeNull();
+  reports.report(lane.key, "milestone", "one", T0);
+  const reads = spyOn(fs, "readFileSync");
+  const journalReads = () => reads.mock.calls.filter((call) => call[0] === reports.path(lane.key)).length;
+  try {
+    expect(tick.read(lane.key)?.lastReport?.text).toBe("one");
+    expect(tick.read(lane.key)?.lastReport?.text).toBe("one");
+    expect(journalReads()).toBe(1);
+    new Reports(state.dir).report(lane.key, "question", "two", T0 + 1);
+    expect(tick.read(lane.key)?.state).toBe("blocked");
+    expect(journalReads()).toBe(2);
+    appendFileSync(reports.path(lane.key), "{partial\n");
+    expect(() => tick.read(lane.key)).toThrow("reports.jsonl:3:");
+    expect(() => tick.read(lane.key)).toThrow("reports.jsonl:3:");
+    expect(journalReads()).toBe(4);
+  } finally {
+    reads.mockRestore();
+  }
+});
+
+test("memoized progress sees an atomic same-size replacement even with the old mtime", () => {
+  reports.report(lane.key, "milestone", "one", T0);
+  const tick = new Reports(state.dir, { memo: true });
+  expect(tick.read(lane.key)?.lastReport?.text).toBe("one");
+  const path = reports.path(lane.key);
+  const original = statSync(path);
+  const replacement = `${path}.replacement`;
+  writeFileSync(replacement, readFileSync(path, "utf8").replace('"one"', '"two"'));
+  utimesSync(replacement, original.atime, original.mtime);
+  renameSync(replacement, path);
+  expect(tick.read(lane.key)?.lastReport?.text).toBe("two");
+});
+
+test("unchanged journal reads keep raw, legacy, and reopened progress separate", () => {
+  const tick = new Reports(state.dir, { memo: true });
+  const legacy = { generation: undefined };
+  const current = { generation: "current" };
+  reports.report(lane.key, "done", "legacy done", T0);
+  reports.report(lane.key, "milestone", "reopened", T0 + 1, current.generation);
+  const result = (scope?: { generation: string | undefined }) => tick.read(lane.key, scope)?.lastReport?.text;
+  expect([result(), result(legacy), result(current), result(legacy)]).toEqual([
+    "reopened",
+    "legacy done",
+    "reopened",
+    "legacy done",
+  ]);
+});
+
+test("a quiet freshness tick reads the lane journal once and runs git status once", async () => {
+  const world = newWorld();
+  world.screen = "Working (1m)\n❯ ";
+  const deps = depsFor(world, fakeClock(T0 + MIN), state.dir);
+  await deps.registry.write({ ...lane, cwd: "/repo", lastReplyAt: T0 + MIN });
+  reports.report(lane.key, "milestone", "started", T0);
+  await freshnessTick(deps, "/home/test");
+  const reads = spyOn(fs, "readFileSync");
+  try {
+    world.calls = [];
+    expect(await freshnessTick(deps, "/home/test")).toEqual([]);
+    expect(reads.mock.calls.filter((call) => call[0] === reports.path(lane.key))).toHaveLength(1);
+    expect(world.calls.filter((call) => call[0] === "git" && call.includes("status"))).toHaveLength(1);
+  } finally {
+    reads.mockRestore();
+  }
 });
 
 // POSIX-only: permission bits (0700/0600) have no meaning on Windows.

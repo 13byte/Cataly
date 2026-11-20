@@ -105,6 +105,8 @@
 
 - The skill CLI loads command implementations on demand, avoiding updater, messenger and lane graphs for successful journal commands and all configuration/command graphs for `--version`. Ordinary commands retain configuration and consumer-native admission before execution; usage, exit codes and original error classes remain unchanged.
 
+- A freshness tick parses each unchanged lane report journal once and reuses a quiet supervision activity observation. Journal changes invalidate the per-tick memo. A post-effect sample absorbs incidental hook writes without consuming activity on explicitly watched files.
+
 - Platform behaviour now sits behind one `PlatformAdapter` in `src/platform/`, with a single implementation per host (darwin, linux, win32) in place of scattered `process.platform` checks. Answers, messages and failure modes are unchanged.
 
 - `src/release/files.ts` flushes a directory only through the adapter's `syncDirectory` instead of testing `directoryFsync` first; on Windows that release path no longer opens and fsyncs a directory, and it is unreachable there because `provision.ts` prerequisites reject win32. A manifest `cwd` carrying `..` behind either separator is rejected again on every host, as it was before the adapter named a separator set.

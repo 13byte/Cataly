@@ -1,0 +1,160 @@
+import { expect, test } from "bun:test";
+import { mkdirSync, readFileSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { freshnessTick } from "../src/freshness.ts";
+import type { Lane } from "../src/registry.ts";
+import { Reports } from "../src/reports.ts";
+import { run, type Runner } from "../src/run.ts";
+import type { Observation, SupervisionOptions } from "../src/supervision-observe.ts";
+import { depsFor, fakeClock, newWorld, withState } from "./fakes.ts";
+
+const T0 = Date.parse("2026-01-01T12:00:00Z");
+const MIN = 60_000;
+
+type Activity = { files: [path: string, ...stat: (number | null)[]][]; changes: string[] };
+const activityOf = (observation: Observation): Activity => {
+  if (observation.activity === null) throw new Error("missing verified activity sample");
+  return JSON.parse(observation.activity);
+};
+
+const seedLane = async (home: string, stateDir: string, cwd: string, options: SupervisionOptions = {}) => {
+  const clock = fakeClock(T0);
+  const world = newWorld();
+  const lane: Lane = {
+    key: "path-identity-lane",
+    title: "Path identity",
+    thread: "none",
+    pane: "w:p1",
+    brief: "/b.md",
+    done: "",
+    openedAt: new Date(T0).toISOString(),
+    reportProtocol: "jsonl-v1",
+    cwd,
+  };
+  world.panes = [{ pane_id: "w:p1", workspace_id: "w", agent: "omo", agent_status: "working" }];
+  const deps = depsFor(world, clock, stateDir, {
+    nudgeAfterMin: 999,
+    postAfterMin: 999,
+    supervision: { hungAfterMinutes: 20, staleAfterMinutes: 20, ...options },
+  });
+  const reports = new Reports(stateDir);
+  await deps.registry.write(lane);
+  reports.report(lane.key, "milestone", "started", T0);
+
+  const journalPath = reports.path(lane.key);
+  const observationPath = join(dirname(journalPath), "supervision.json");
+  return {
+    observationPath,
+    observation: (): Observation => JSON.parse(readFileSync(observationPath, "utf8")),
+    journal: () => readFileSync(journalPath, "utf8"),
+    state: () => reports.read(lane.key)?.state,
+    tick: (minutes: number, runner: Runner = deps.run) => {
+      clock.at = T0 + minutes * MIN;
+      world.screen = `Working ${21 + minutes}m`;
+      return freshnessTick({ ...deps, run: runner }, home);
+    },
+    run: deps.run,
+  };
+};
+
+test("freshness preserves a stalled Git baseline saved with the lane's symlink spelling", async () => {
+  const fixture = withState();
+  try {
+    const repo = join(fixture.dir, "worktree");
+    const alias = join(fixture.dir, "worktree-alias");
+    const stateDir = join(fixture.dir, "dori-state");
+    mkdirSync(repo);
+    symlinkSync(repo, alias, "dir");
+    const git = async (...args: string[]) => {
+      const result = await run(["git", "-C", alias, ...args]);
+      if (result.code !== 0) throw new Error(`git ${args.join(" ")}: ${result.err}`);
+    };
+    await git("init", "--quiet", "--separate-git-dir", join(fixture.dir, "git-state"));
+    await git("config", "core.excludesFile", "/dev/null");
+    const tracked = "tracked.txt";
+    const aliasFile = join(alias, tracked);
+    writeFileSync(aliasFile, "initial\n");
+    await git("add", "--", tracked);
+    await git(
+      "-c",
+      "user.name=Dori Fixture",
+      "-c",
+      "user.email=dori@example.invalid",
+      "-c",
+      "commit.gpgSign=false",
+      "-c",
+      "core.hooksPath=/dev/null",
+      "commit",
+      "--quiet",
+      "-m",
+      "Seed lane",
+    );
+    writeFileSync(aliasFile, "dirty lane work\n");
+    const f = await seedLane(fixture.dir, stateDir, alias);
+    const sample: Runner = async (argv, opts) => {
+      if (argv[0] !== "git" || !argv.includes("status")) return f.run(argv, opts);
+      const result = await run(argv, opts);
+      if (result.code !== 0) throw new Error(`git status: ${result.err}`);
+      return result;
+    };
+
+    expect(await f.tick(0, sample)).toEqual([]);
+    expect((await f.tick(20, sample)).map((act) => act.kind)).toEqual(["stalled"]);
+    expect(f.state()).toBe("stalled");
+    const stalledJournal = f.journal();
+    const saved = f.observation();
+    const activity = activityOf(saved);
+    expect(activity.changes).toEqual([` M ${tracked}`]);
+    const { mtimeMs, ctimeMs, size } = statSync(aliasFile);
+    expect(activity.files).toHaveLength(1);
+    const [file] = activity.files;
+    if (!file) throw new Error("expected actual tracked file in activity");
+    expect([aliasFile, join(repo, tracked)]).toContain(file[0]);
+    expect(file.slice(1)).toEqual([mtimeMs, ctimeMs, size]);
+    // Model an upgrade from the old spelling without changing any stat, Git, or journal data.
+    file[0] = aliasFile;
+    const stalledActivity = JSON.stringify(activity);
+    if (stalledActivity !== saved.activity) {
+      writeFileSync(f.observationPath, JSON.stringify({ ...saved, activity: stalledActivity }));
+    }
+
+    expect(await f.tick(40, sample)).toEqual([]);
+    expect(f.state()).toBe("stalled");
+    expect(f.journal()).toBe(stalledJournal);
+    expect(f.observation()).toMatchObject({ at: T0 + 40 * MIN, activeAt: saved.activeAt, activity: stalledActivity });
+  } finally {
+    fixture.done();
+  }
+});
+
+test("an explicit writer directory through a state symlink does not count as activity", async () => {
+  const fixture = withState();
+  try {
+    const stateDir = join(fixture.dir, "dori-state");
+    const alias = join(fixture.dir, "state-alias");
+    mkdirSync(stateDir);
+    symlinkSync(stateDir, alias, "dir");
+    const realWriter = join(stateDir, "lanes", ".supervision-writers");
+    const f = await seedLane(fixture.dir, alias, fixture.dir, {
+      gitActivity: false,
+      activityPaths: [join(alias, "lanes", ".supervision-writers")],
+    });
+
+    expect(await f.tick(0)).toEqual([]);
+    expect(f.state()).toBe("running");
+    const first = f.observation();
+    const before = statSync(realWriter).mtimeMs;
+    const stamp = new Date(before - MIN);
+    utimesSync(realWriter, stamp, stamp);
+    expect(statSync(realWriter).mtimeMs).not.toBe(before);
+
+    expect((await f.tick(20)).map((act) => act.kind)).toEqual(["stalled"]);
+    expect(f.state()).toBe("stalled");
+    const stalled = f.observation();
+    expect(stalled).toMatchObject({ at: T0 + 20 * MIN, activeAt: first.activeAt, activity: first.activity });
+    // Prove exclusion even if lock acquisition itself stamps the directory within the same filesystem clock tick.
+    expect(activityOf(stalled).files).toEqual([]);
+  } finally {
+    fixture.done();
+  }
+});

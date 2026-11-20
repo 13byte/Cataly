@@ -42,7 +42,7 @@ const journalProblem = async (deps: FlowDeps, lane: Lane, acts: SweepAct[], erro
 export const freshnessTick = async (deps: FlowDeps, home: string): Promise<SweepAct[]> => {
   const acts: SweepAct[] = [];
   const now = deps.clock.now();
-  const reports = new Reports(deps.config.stateDir);
+  const reports = new Reports(deps.config.stateDir, { memo: true });
   const supervision = new Supervision({ ...deps, stateDir: deps.config.stateDir, reports }, deps.config.supervision);
   for (const lane of await deps.registry.open()) {
     if (lane.nativeCloseIntent) continue;
@@ -73,6 +73,7 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
     let legacyReport: string | null | undefined;
     let supervised: SupervisionResult | null = null;
     let supervisionError: string | undefined;
+    let incompleteSample = false;
     const scope = { generation: lane.lifecycleEpoch };
     if (lane.reportProtocol === "jsonl-v1") {
       try {
@@ -85,6 +86,10 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
       try {
         // A launched lane is supervised once its journal exists; without one there is no progress to judge.
         if (existsSync(reports.path(lane.key))) supervised = await supervision.sweep(lane, screen);
+        // Another sweep owns this lane through its effect baseline; don't replace its result with screen inference.
+        if (supervised?.busy) continue;
+        supervisionError = supervised?.observationError;
+        incompleteSample = supervised?.observationIncomplete === true;
       } catch (error) {
         supervisionError = error instanceof Error ? error.message : String(error);
       }
@@ -99,7 +104,7 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
       if (supervisionError !== undefined && supervisionError !== current.lastSupervisionError) {
         if (!(await rememberFreshness(deps, current, { lastSupervisionError: supervisionError }))) return;
         acts.push({ kind: "supervision-error", lane: lane.key, detail: supervisionError });
-      } else if (supervised?.enabled && current.lastSupervisionError) {
+      } else if (supervisionError === undefined && supervised?.enabled && current.lastSupervisionError) {
         if (!(await rememberFreshness(deps, current, { lastSupervisionError: undefined }))) return;
       }
       for (const detail of supervised?.alerts ?? []) {
@@ -110,8 +115,10 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
         });
       }
       let progress: Progress | null = null;
-      if (screen !== null) {
-        try {
+      try {
+        // Deliver durable reports even when this sample cannot support a screen-derived transition.
+        if (incompleteSample) progress = reports.read(lane.key, scope);
+        else if (screen !== null) {
           progress = reports.observe(
             lane.key,
             screen,
@@ -120,14 +127,14 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
             !supervised?.hung,
             scope,
           );
-        } catch (error) {
-          await journalProblem(deps, current, acts, error);
-          return;
         }
+      } catch (error) {
+        await journalProblem(deps, current, acts, error);
+        return;
       }
       if (progress?.state === "stalled") {
         // Only supervision's own hung result replaces the stall line; a usage warning is not a stall.
-        if (previous?.state !== "stalled" && !supervised?.hung) {
+        if (!incompleteSample && previous?.state !== "stalled" && !supervised?.hung) {
           acts.push({ kind: "stalled", lane: lane.key, detail: progress.lastEvent.text });
         }
         return;
