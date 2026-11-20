@@ -276,6 +276,8 @@ The Sustainable Use License, OMP attribution in `LICENSE.omp-dori`, `NOTICE`, pu
 
 - Unreleased: Isolate automated worktree discovery, completion checks and non-forced cleanup from inherited `GIT_*` overrides. Ordinary commands retain their environment; a foreign Git context can no longer hide local work or redirect worktree cleanup. Other Git probe failures hold completion instead of being treated as a missing checkout.
 
+- Unreleased: Stream URL transcription within configurable `transcribeMaxBytes` (default 25 MiB), abort overflow immediately, and check audio format against MIME before invoking the hook. Ogg requires Opus or Vorbis, M4A/MP4 requires an audio track, and MP3 accepts free-format frames with a confirmed cadence. Raw PCM, unsupported URL formats, and MIME mismatches get a one-line remedy; local file paths remain unchanged.
+
 ## Unreleased addendum
 
 - Unreleased (source only): `dori send discord --render-tables` optionally aligns pipe tables in bounded code fences using Unicode display width. The default body, existing escapes/code, split-send replies and receipts remain intact; rendering over 80 columns or a 64 KiB message budget keeps the original text, and oversized edits still fail before any request. The adapted renderer retains its full upstream MIT notice in `NOTICE`.
