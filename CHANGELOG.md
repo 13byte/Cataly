@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Honor scoped work approvals from Cataly's authenticated Discord owner intake without requiring a duplicate terminal message. Native OMP approvals and spending rules are unchanged.
+
 - Render eligible Discord ASK choices as native buttons, with the checked option labeled as recommended. A single pending text-capable question also accepts ordinary owner text in its exact Discord channel.
 
 - After three minutes with no answer to a posted Discord ASK, submit its single explicit recommendation as a timeout, not an owner reply.
