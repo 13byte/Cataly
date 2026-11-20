@@ -16,7 +16,7 @@ Record the report once with `report --json`, regardless of whether you can forwa
 
 ## What happens next
 
-1. The Dori gets a `LANE_DONE_CLAIMED` event, and you get a `[LEAD]` line saying when the lane closes.
+1. The Dori gets a `LANE_DONE_CLAIMED` event. A `[LEAD]` notice is attempted; the event itself does not prove delivery.
 2. Stay idle and start no new work.
 3. If the Dori does not object within 5 minutes, the watcher closes the lane. Before closing, it reads back every `Done =` signal live. It refuses to close if any of your worktrees still has uncommitted tracked changes, or commits that are on no remote.
 4. Closing marks your thread done (when a thread hook is configured), closes your tab, and removes your worktrees.
@@ -27,10 +27,12 @@ Worktree discovery, pre-close Git checks and non-forced worktree cleanup discard
 
 ## If the Dori objects, or a check fails
 
-You get `[LEAD] not done: <reasons>; keep working, claim again when fixed` in your pane, and the lane goes back to not-done. This happens when:
+The lane goes back to not-done and a `[LEAD] not done: <reasons>; keep working, claim again when fixed` notice is attempted. This happens when:
 
 - the Dori objects;
 - a `Done =` signal does not read back live;
 - there is unpushed work (the reason names the path).
+
+An uncertain claim or objection notice holds later ordinary tells, nudges and Done notices. `LANE_NOTIFY_HELD` means the current notice was not sent; `LANE_NOTIFY_UNCONFIRMED` means it may have arrived. `LANE_WATCH_ERROR` directs the Dori to inspect the lane and its delivery record. `LANE_NOT_DONE` reports only the state change. Inspect `dori tell <key> --status` and the original session; use `--resolve ID --note WHY` only to release the exact hold after the operator decides. Resolution never replays delivery or makes the earlier action known. Explicit `reopen --note` and direct native owner input keep their own admission rules; neither creates nor clears the automation hold.
 
 Treat the rejection as noncompletion even if the preceding report said `done`. Append a `milestone` when work can continue or a `blocker` when it cannot, recording the reason, remaining checks and next action. Preserve the original report as history. After resolving every reason, read back every Done signal again. Save a new `done` report with the newly observed evidence and cite its new report ID and fresh shareable receipts in the next claim. A new claim starts a fresh 5-minute window; the watcher still verifies Done independently.

@@ -97,6 +97,8 @@ const flags = parseArgs({
     purpose: { type: "string" },
     to: { type: "string" },
     text: { type: "string" },
+    status: { type: "boolean" },
+    resolve: { type: "string" },
     edit: { type: "string" },
     "text-file": { type: "string" },
     reply: { type: "string" },

@@ -7,10 +7,11 @@ import { Lessons } from "./lessons.ts";
 import { pendingDiscordLane } from "./messenger/discord-lane-inbox.ts";
 import { type CloseLesson, commitClose, recordDoneDecision } from "./native-close.ts";
 import { type Lane, type Registry, sameLaneGeneration, sessionOf, statusOf, withStatus } from "./registry.ts";
-import { type ChosenRuntimes, type Clock, iso, repoGit, type Runner, runtimesOf } from "./run.ts";
-import { closeSession, sendVerified } from "./sessions.ts";
+import { type ChosenRuntimes, type Clock, iso, repoGit, type Runner } from "./run.ts";
+import { closeSession } from "./sessions.ts";
 import { type Check, checkDone, type SignalIo } from "./signals.ts";
 import { Supervision } from "./supervision.ts";
+import { notifyLane } from "./tell.ts";
 import { finishThread, recordThreadHold, ThreadElectionError, withThreadClose } from "./thread-groups.ts";
 export type FlowDeps = {
   readonly run: Runner;
@@ -49,38 +50,33 @@ export const claimDone = async (
   if (claimed === "closing") return `LANE_CHANGED ${lane.key} native close is in progress; done claim not recorded`;
   if (!claimed) return movedOn(deps, lane, "done claim");
   onRecorded?.();
-  const ref = sessionOf(lane);
-  if (ref && (ref.runtime !== "headless" || lane.session)) {
-    const closesAt = new Date(deps.clock.now() + windowMs(deps)).toISOString().slice(11, 16);
-    await sendVerified(
-      runtimesOf(deps),
-      deps.clock,
-      ref,
-      `[LEAD] done claim recorded for ${lane.key}: this lane closes automatically at ${closesAt}Z (${deps.config.closeAfterMin} minutes) unless the lead objects with reasons. Stay idle until then; an objection arrives here as [LEAD] not done.`,
-      undefined,
-      ref.runtime === "headless" ? lane.session : undefined,
-    );
-  }
+  const closesAt = new Date(deps.clock.now() + windowMs(deps)).toISOString().slice(11, 16);
+  await notifyLane(
+    deps,
+    claimed,
+    `[LEAD] done claim recorded for ${lane.key}: this lane closes automatically at ${closesAt}Z (${deps.config.closeAfterMin} minutes) unless the lead objects with reasons. Stay idle until then; the lead reconciles any held objection before sending further instructions.`,
+  );
   return `LANE_DONE_CLAIMED ${lane.key} ${lane.pane ?? "-"} ${evidence}`;
 };
 
-export const objectDone = async (deps: FlowDeps, lane: Lane, reasons: readonly string[]): Promise<string> => {
+export const objectDone = async (
+  deps: FlowDeps,
+  lane: Lane,
+  reasons: readonly string[],
+  deliveryLocked = false,
+): Promise<string> => {
   const at = iso(deps.clock);
   const objected = await recordDoneDecision(deps, lane, (current) =>
     withStatus(current, "not-done", reasons.join("; "), at, { objection: { at, reasons } }),
   );
   if (objected === "closing") return `LANE_CHANGED ${lane.key} native close is in progress; objection not recorded`;
   if (!objected) return movedOn(deps, lane, "objection");
-  const ref = sessionOf(lane);
-  if (ref && (ref.runtime !== "headless" || lane.session))
-    await sendVerified(
-      runtimesOf(deps),
-      deps.clock,
-      ref,
-      `[LEAD] not done: ${reasons.join("; ")}; keep working, claim again when fixed`,
-      undefined,
-      ref.runtime === "headless" ? lane.session : undefined,
-    );
+  await notifyLane(
+    deps,
+    objected,
+    `[LEAD] not done: ${reasons.join("; ")}; keep working, claim again when fixed`,
+    deliveryLocked,
+  );
   return `LANE_NOT_DONE ${lane.key} ${reasons.join("; ")}`;
 };
 type CloseResult = { readonly closed: boolean; readonly lines: string[] };
@@ -123,7 +119,7 @@ const closeHeld = async (
     if (settlingClaim && !(await recordThreadHold(deps, lane))) return fail(await movedOn(deps, lane, "verification"));
     return fail(`HELD ${lane.key} thread close in flight (${thread.holder})`);
   }
-  if (!thread.value) return fail(blocked.length ? await objectDone(deps, lane, blocked) : refusal);
+  if (!thread.value) return fail(blocked.length ? await objectDone(deps, lane, blocked, true) : refusal);
   const { result, remaining } = thread.value;
   if (result.kind === "held") return fail(`HELD ${lane.key}: ${result.reason}`);
   const ref = sessionOf(lane);
@@ -179,25 +175,29 @@ export const closeLane = async (
 };
 
 const settle = async (deps: FlowDeps, lane: Lane, note: string): Promise<string> => {
-  if (!lane.nativeCloseIntent) {
-    const blocked = await unpushedWork(deps, lane);
-    if (blocked.length) return objectDone(deps, lane, blocked);
-  }
-  const held = await withDeliveryLock(deps, lane.key, async () => {
-    const result = await closeHeld(deps, lane, note, undefined, true).catch((error: unknown) => {
-      if (!(error instanceof ThreadElectionError)) throw error;
-      return { closed: false, lines: [`HELD ${lane.key}: ${error.message}`] };
+  try {
+    if (!lane.nativeCloseIntent) {
+      const blocked = await unpushedWork(deps, lane);
+      if (blocked.length) return await objectDone(deps, lane, blocked);
+    }
+    const held = await withDeliveryLock(deps, lane.key, async () => {
+      const result = await closeHeld(deps, lane, note, undefined, true).catch((error: unknown) => {
+        if (!(error instanceof ThreadElectionError)) throw error;
+        return { closed: false, lines: [`HELD ${lane.key}: ${error.message}`] };
+      });
+      if (result.closed) return `LANE_${result.lines.at(-1)}`;
+      const line = result.lines.at(-1) ?? "";
+      if (line.startsWith("HELD ")) return `LANE_${line}; retried next tick`;
+      const prefix = "SIGNAL NOT ";
+      const failures = result.lines.filter((l) => l.startsWith(prefix)).map((l) => l.slice(prefix.length));
+      return failures.length ? objectDone(deps, lane, failures, true) : line;
     });
-    if (result.closed) return `LANE_${result.lines.at(-1)}`;
-    const line = result.lines.at(-1) ?? "";
-    if (line.startsWith("HELD ")) return `LANE_${line}; retried next tick`;
-    const prefix = "SIGNAL NOT ";
-    const failures = result.lines.filter((l) => l.startsWith(prefix)).map((l) => l.slice(prefix.length));
-    return failures.length ? objectDone(deps, lane, failures) : line;
-  });
-  return held.ok
-    ? held.value
-    : `LANE_HELD ${lane.key} a message to the lane is in flight (${held.holder}); retried next tick`;
+    return held.ok
+      ? held.value
+      : `LANE_HELD ${lane.key} a message to the lane is in flight (${held.holder}); retried next tick`;
+  } catch (error) {
+    return `LANE_WATCH_ERROR ${lane.key} ${error instanceof Error ? error.message : String(error)}; inspect the lane lifecycle, dori tell ${lane.key} --status and the original session; do not resend`;
+  }
 };
 
 export const watchTick = async (deps: FlowDeps): Promise<string[]> => {

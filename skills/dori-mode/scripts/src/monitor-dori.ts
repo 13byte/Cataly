@@ -71,6 +71,7 @@ export const DORI_VALUE_OPTIONS: Record<string, true> = {
   pane: true,
   evidence: true,
   reason: true,
+  resolve: true,
   note: true,
   repo: true,
   "resume-when": true,

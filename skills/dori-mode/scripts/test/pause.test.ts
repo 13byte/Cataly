@@ -120,6 +120,7 @@ test("resume of a working lane restarts the quiet clock: no nudge until nudgeAft
   await resumeLane(deps(T0 + 90 * MIN), paused, "go");
   expect(statusOf((await stored()) as Lane)).toBe("working");
   world.screens = [];
+  world.onEnterStatus = "working";
   expect(await freshnessTick(deps(T0 + 95 * MIN), "/home/test")).toEqual([]);
   expect((await freshnessTick(deps(T0 + 106 * MIN), "/home/test")).map((a) => a.kind)).toEqual(["nudged"]);
 });
