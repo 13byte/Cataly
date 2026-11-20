@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { discordInboundOptions } from "../src/messenger/discord-inbound-env.ts";
 import { withState } from "./fakes.ts";
@@ -83,6 +83,7 @@ test("shared inbound settings preserve the receiver channel set across duplicate
       expect(err).toContain("Discord inbound queue directory must be private (0700) and owned by this user");
       expect(out).not.toContain("INBOUND_READY");
       expect(out).not.toContain("DISCORD_ASK_SCOPE_QA");
+      expect(existsSync(join(state.dir, "discord-inbound"))).toBe(false);
       return;
     }
     expect({ code, err }).toEqual({ code: 0, err: "" });

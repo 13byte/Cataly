@@ -10,10 +10,13 @@ const privateFile = (stat: Stats) => {
 };
 
 export const openDiscordQueue = (stateDir: string): Database => {
+  const uid = process.getuid?.();
+  if (uid === undefined)
+    throw new MessengerError("Discord inbound queue directory must be private (0700) and owned by this user", 0);
   const dir = join(stateDir, "discord-inbound");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const stat = lstatSync(dir);
-  if (!stat.isDirectory() || stat.uid !== process.getuid?.() || (stat.mode & 0o077) !== 0) {
+  if (!stat.isDirectory() || stat.uid !== uid || (stat.mode & 0o077) !== 0) {
     throw new MessengerError("Discord inbound queue directory must be private (0700) and owned by this user", 0);
   }
   const path = join(dir, "gateway.sqlite");

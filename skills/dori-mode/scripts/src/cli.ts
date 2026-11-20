@@ -53,7 +53,7 @@ if (command === "upstream") process.exit(await (await import("../../../../src/up
 if (command === "remote") process.exit(await (await import("./cli-remote.ts")).runRemote(rest));
 if (command === "headless") process.exit(await (await import("./cli-headless.ts")).runHeadless(rest));
 
-const { abandonDiscordInbound, die, makeCli } = await import("./cli-context.ts");
+const { die, makeCli } = await import("./cli-context.ts");
 const { ConfigError, loadConfig } = await import("./config.ts");
 const { Registry } = await import("./registry.ts");
 const { realClock, run } = await import("./run.ts");
@@ -206,7 +206,7 @@ switch (command) {
     commands = (await import("./cli-messenger.ts")).messengerCommands;
     break;
   case "inbound-abandon":
-    commands = { "inbound-abandon": abandonDiscordInbound };
+    commands = { "inbound-abandon": (await import("./cli-discord-recovery.ts")).abandonDiscordInbound };
     break;
   case "decision":
     commands = (await import("./cli-decisions.ts")).decisionCommands;

@@ -98,8 +98,6 @@ export const discordInboundCommand = async (
   const token = env["DORI_DISCORD_TOKEN"] || die("DORI_DISCORD_TOKEN is not set");
   const mode = env["DORI_MONITOR_ADMISSION"];
   const native = mode === "1";
-  if (typeof process.getuid !== "function")
-    throw new MessengerError("Discord intake requires Unix ownership checks for the queue and native transcript", 0);
   if (mode !== undefined && (!native || !process.send || !process.connected)) throw headUnresolved();
   const queue = discordInboundQueue(stateDir, native);
   const delivery = { registry: deps.registry, clock: realClock };

@@ -2,7 +2,6 @@
 import { readFileSync } from "node:fs";
 import type { DoriConfig } from "./config.ts";
 import type { FlowDeps } from "./done-flow.ts";
-import { isDiscordSnowflake } from "./messenger/discord-inbound-state.ts";
 import type { SlackAuth } from "./messenger/slack.ts";
 import { type Lane, statusOf } from "./registry.ts";
 import { runtimesOf } from "./run.ts";
@@ -100,27 +99,6 @@ export type Cli = {
 };
 
 export type Command = (cli: Cli) => Promise<void>;
-
-/** Local recovery only: never authenticate to Discord or open a native session. */
-export const abandonDiscordInbound: Command = async ({ key, positionals, strings, config }) => {
-  if (key !== "discord") die("inbound-abandon supports discord only");
-  const identity = positionals[1];
-  const ids = identity?.split(":");
-  if (positionals.length !== 2 || !identity || ids?.length !== 4 || !ids.every(isDiscordSnowflake))
-    return die("inbound-abandon requires the exact bot:owner:channel:message source identity");
-  const reasons = strings("reason");
-  const reason = reasons[0]?.trim();
-  if (reasons.length !== 1 || !reason) return die("--reason needs one explicit operator abandonment reason");
-  // SQLite belongs to the selected recovery command, not shared CLI startup.
-  const { discordInboundQueue } = await import("./messenger/discord-inbound-queue.ts");
-  const queue = discordInboundQueue(config.stateDir);
-  try {
-    const { source: _source, ...decision } = queue.abandon(identity, reason);
-    console.log(`ADMISSION_ABANDONED ${JSON.stringify(decision)}`);
-  } finally {
-    queue.close();
-  }
-};
 
 export const makeCli = (
   command: string,
