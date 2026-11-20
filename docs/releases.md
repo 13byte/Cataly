@@ -221,8 +221,11 @@ so it uses the new routing logic.
 
 On a supported Discord connection, ASK is enabled automatically once
 `dori inbound discord` is running and has verified the bot, owner and
-channels. It uses that installation's private `$DORI_HOME/discord-token`
-and its existing state directory. No settings file is created or edited.
+channels. It prefers that installation's private `$DORI_HOME/discord-token`.
+If the file is absent and a Dori lead already has `DORI_DISCORD_TOKEN`, ASK
+can use it only with a live receiver authenticated with the same credential.
+This compatibility path does not apply to lanes. Continue to load the token
+only in the receiver child for new setups. No settings file is created or edited.
 Restart the receiver when updating so it reports its current routes.
 
 - A Dori lead uses the single explicitly configured Discord destination.

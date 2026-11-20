@@ -30,16 +30,27 @@ test("only the launched lane's exact native session can reuse its recorded bindi
 
 // The live receiver writes a POSIX-private cursor and receiver lease.
 const posix = test.skipIf(process.platform === "win32");
-posix("live Discord accepts an owner ASK reply without settings", verifyAutomaticAsk, 12_000);
+posix.each(["private file", "lead environment"] as const)(
+  "live Discord accepts an owner ASK reply using %s credentials",
+  verifyAutomaticAsk,
+  12_000,
+);
 
-async function verifyAutomaticAsk() {
+async function verifyAutomaticAsk(credential: "private file" | "lead environment") {
   const home = mkdtempSync(join(tmpdir(), "cataly-ask-auto-"));
   const state = join(home, "state");
   const config = join(home, "config.json");
   const tokenFile = join(home, "discord-token");
   const override = join(state, "discord-ask.json");
   const settings = JSON.stringify({ stateDir: state, ompUlwPath: "" });
-  const envKeys = ["DORI_HOME", "DORI_CONFIG", "DORI_DISCORD_API_BASE", "HC_TERMINAL_ID", "HERDR_PANE_ID"] as const;
+  const envKeys = [
+    "DORI_HOME",
+    "DORI_CONFIG",
+    "DORI_DISCORD_API_BASE",
+    "DORI_DISCORD_TOKEN",
+    "HC_TERMINAL_ID",
+    "HERDR_PANE_ID",
+  ] as const;
   const envBefore = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
   let publish = false;
   let replyNow = false;
@@ -96,10 +107,11 @@ async function verifyAutomaticAsk() {
     DORI_CONFIG: config,
     DORI_HOME: home,
     DORI_DISCORD_API_BASE: base,
+    DORI_DISCORD_TOKEN: credential === "lead environment" ? token : "nonmatching-fixture-token",
     HERDR_PANE_ID: "w1:p2",
   });
   mkdirSync(state, { mode: 0o700 });
-  writeFileSync(tokenFile, `${token}\n`, { mode: 0o600 });
+  if (credential === "private file") writeFileSync(tokenFile, `${token}\n`, { mode: 0o600 });
   writeFileSync(config, settings, { mode: 0o600 });
   const inbound = (channels: string) =>
     Bun.spawn([process.execPath, cli, "inbound", "discord", "--loop", "0.001"], {
@@ -136,6 +148,11 @@ async function verifyAutomaticAsk() {
       route = await readRoute();
     }
     expect(route).toMatchObject({ channel: primary, owner });
+    if (credential === "lead environment") {
+      process.env.DORI_DISCORD_TOKEN = "nonmatching-fixture-token";
+      expect(await readRoute()).toBeUndefined();
+      process.env.DORI_DISCORD_TOKEN = token;
+    }
     expect(existsSync(override)).toBe(false);
     await bridge.arm(event, ui, state, "lead", readRoute);
     const result = ui.formDialog(html);
@@ -148,7 +165,8 @@ async function verifyAutomaticAsk() {
     expect(requests).toEqual([`/channels/${primary}/messages`]);
     expect(existsSync(override)).toBe(false);
     expect(readFileSync(config, "utf8")).toBe(settings);
-    expect(readFileSync(tokenFile, "utf8")).toBe(`${token}\n`);
+    if (credential === "private file") expect(readFileSync(tokenFile, "utf8")).toBe(`${token}\n`);
+    else expect(existsSync(tokenFile)).toBe(false);
 
     const localDialog = ui.formDialog;
     writeFileSync(override, JSON.stringify({ sessions: { lead: false } }), { mode: 0o600 });
@@ -179,6 +197,12 @@ async function verifyAutomaticAsk() {
     };
     await registry.write(lane);
     expect(await automaticDiscordAskRoute(state, "lane", session)).toBeUndefined();
+    if (credential === "lead environment") {
+      expect(
+        await automaticDiscordAskRoute(state, "lane", session, { key: lane.key, sessionId: session }),
+      ).toBeUndefined();
+      writeFileSync(tokenFile, `${token}\n`, { mode: 0o600 });
+    }
     expect(await automaticDiscordAskRoute(state, "lane", session, { key: lane.key, sessionId: session })).toMatchObject(
       { channel: primary },
     );

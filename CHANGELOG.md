@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Restore Discord ASK for Dori leads already using an environment-supplied bot token when the standard private token file is absent. Automatic delivery still requires the same live receiver and a unique explicit channel; lane routing and saved settings do not change.
+
 - Bound native OMP keeps pending custom notices with their original transcript across `/new`, `/clear`, and session switches. An unchanged reload retains eligible notices and passive next-turn payloads without restarting old provider work; a changed transcript drops them. External delivery waits for transition and rollback reconciliation, and CI exercises ownership against the bound native source.
 
 - Append compact role guidance once per root Dori/lane prompt, preserving existing host and ULW composition. Plain and child sessions are unchanged, and lane bookkeeping remains Sol-only.
