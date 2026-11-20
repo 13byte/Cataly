@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { launchLane } from "../src/launch.ts";
 import * as goals from "../src/goal-record.ts";
 import { depsFor, fakeClock, newWorld, withState } from "./fakes.ts";
+import { queueFixture } from "./launch-queue-fixture.ts";
 
 test("a working agent quoting a failure checks its recorded goal once before rejection", async () => {
   const state = withState();
@@ -48,5 +49,21 @@ test("a working agent quoting a failure checks its recorded goal once before rej
   } finally {
     goal.mockRestore();
     state.done();
+  }
+});
+
+test("direct launch retains its registered pane and an unconfirmed receipt when the goal sample fails", async () => {
+  const f = await queueFixture({ failGoalSample: true });
+  try {
+    const result = await launchLane(f.deps, f.input);
+    expect(result.lane).toMatchObject({ key: f.input.key, pane: "w1:p9" });
+    expect(result.startup).toBe(
+      `STARTUP_UNCONFIRMED ${f.input.key} w1:p9: process table unavailable while verifying its goal`,
+    );
+    expect(await f.deps.registry.read(f.input.key)).toMatchObject({ pane: "w1:p9" });
+    expect(f.creates()).toBe(1);
+    expect(f.world.calls.filter((argv) => argv.slice(0, 3).join(" ") === "herdr pane run")).toHaveLength(1);
+  } finally {
+    f.state.done();
   }
 });
