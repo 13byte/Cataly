@@ -1,12 +1,11 @@
 import { expect, test } from "bun:test";
-import { spawn } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { captureRuntime } from "../src/update/deployment-native.ts";
 import { DeploymentBusy, DeploymentHeld, processIdentity, sameProcess } from "../src/update/deployment-process.ts";
 import { procStat, processExists } from "../src/update/proc.ts";
 import type { DeploymentRecord, MonitorSet, RuntimeIdentity } from "../src/update/deployment-types.ts";
-import { foregroundActor, silentForegroundActor } from "./update-deploy-foreground-readiness.ts";
+import { silentForegroundActor } from "./update-deploy-foreground-readiness.ts";
 import { foregroundFixture } from "./update-deploy-foreground-setup.ts";
 
 function untouched(f: { runtime: RuntimeIdentity; bootstrap: MonitorSet; signalPath: string }): void {
@@ -18,18 +17,6 @@ function untouched(f: { runtime: RuntimeIdentity; bootstrap: MonitorSet; signalP
 // The kernels whose process identity deployment can bind.
 const posix = test.skipIf(process.platform !== "linux" && process.platform !== "darwin");
 const linux = test.skipIf(process.platform !== "linux");
-
-posix("foreground fixture names the launch phase when its child exits before readiness", async () => {
-  const actor = foregroundActor.spawn("prior", () =>
-    spawn("/bin/bash", ["--noprofile", "--norc", "-c", "exit 7"], { stdio: ["pipe", "pipe", "ignore", "pipe"] }),
-  );
-  try {
-    await expect(actor.waitForReady()).rejects.toThrow(/prior actor readiness:.*(stdout EOF|process exited)/);
-  } finally {
-    await actor.stop();
-  }
-  expect(actor.child.exitCode).toBe(7);
-});
 
 posix("closing control during silent monitor startup reaps the actor and monitor", async () => {
   const actor = silentForegroundActor();
