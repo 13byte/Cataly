@@ -12,7 +12,6 @@ import { foregroundCli } from "./update-deploy-foreground-cli.ts";
 import { foregroundActor } from "./update-deploy-foreground-readiness.ts";
 import { processName } from "./proc-name.ts";
 import { deploymentConfig } from "./update-deploy-setup.ts";
-
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
   const errors: unknown[] = [];
@@ -36,6 +35,7 @@ export async function foregroundFixture(
     stoppable?: boolean;
     subshell?: boolean;
     transient?: boolean;
+    bunOnly?: boolean;
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "dori-foreground-"));
@@ -61,22 +61,23 @@ export async function foregroundFixture(
       ]
     : [];
   const signalPath = join(root, "signals");
-  const script = join(root, "known.sh");
+  const script = join(root, options.bunOnly ? "known.ts" : "known.sh");
   const dori = join(root, "dori");
   const presence = join(root, "presence.sh");
   const unknown = join(root, "unknown.sh");
   const nested = options.subshell ? "(while IFS= read -r line; do :; done) <&0 &\n" : "";
   const shell = `#!/bin/bash\ntrap 'printf signal >> ${signalPath}' TERM INT HUP\n${nested}printf 'ready\\n'\nwhile IFS= read -r line; do :; done\nwait\n`;
-  writeFileSync(script, shell, { mode: 0o700 });
+  writeFileSync(script, options.bunOnly ? 'console.log("ready"); await Bun.stdin.text();\n' : shell, { mode: 0o700 });
   writeFileSync(unknown, shell, { mode: 0o700 });
   writeFileSync(dori, `#!${process.execPath}\nconsole.log("ready"); await Bun.stdin.text();\n`, { mode: 0o700 });
   writeFileSync(presence, `#!/bin/bash\nexec ${JSON.stringify(dori)} "$@"\n`, { mode: 0o700 });
   const specs = [
-    { name: "intake", argv: [script], filter: ".", cwd: root },
+    { name: "intake", argv: options.bunOnly ? [process.execPath, script] : [script], filter: ".", cwd: root },
     { name: "dori-watch", argv: [presence], filter: ".", cwd: root },
   ];
   // Direct shebang exec names /proc/comm after the script; explicit Bash reproduces the production foreground.
-  const commands = [["/bin/bash", script], [presence], ...(options.unknown ? [["/bin/bash", unknown]] : [])];
+  const commands = [[options.bunOnly ? process.execPath : "/bin/bash", script], [presence]];
+  if (options.unknown) commands.push(["/bin/bash", unknown]);
   writeFileSync(
     config.omp,
     foregroundActor.source({ root, signalPath, commands, stoppable: options.stoppable, transient: options.transient }),

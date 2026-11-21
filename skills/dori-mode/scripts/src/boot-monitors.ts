@@ -9,6 +9,7 @@ import type { ProgressState } from "./reports.ts";
 export type Monitor = {
   /** OMP's desired monitor spec; argv stays structured so a quoted argument is never split into lane keys. */
   readonly name?: string;
+  readonly mode?: "persistent" | "once";
   readonly argv?: readonly string[];
   readonly cwd?: string;
   readonly filter?: string;
@@ -183,7 +184,12 @@ export const readMonitorManifests = (
       const path = join(dir, entry.name);
       try {
         const data = JSON.parse(readFileSync(path, "utf8")) as Manifest["data"];
-        if (data.version !== 1 || !Array.isArray(data.monitors) || typeof data.sessionId !== "string")
+        const omp = dir === ompDir;
+        if (
+          (data.version !== 1 && !(omp && data.version === 2)) ||
+          !Array.isArray(data.monitors) ||
+          typeof data.sessionId !== "string"
+        )
           throw new Error("invalid monitor metadata");
         // Shared status/cleanup fields must be typed. Legacy argv retains command-based matching when unusable.
         if (
@@ -211,13 +217,15 @@ export const readMonitorManifests = (
           })
         )
           throw new Error("invalid monitor entry");
-        const omp = dir === ompDir;
         if (
           omp &&
           !data.monitors.every(
             (monitor) =>
               typeof monitor.name === "string" &&
               monitor.name.length > 0 &&
+              (monitor.mode === undefined ||
+                monitor.mode === "persistent" ||
+                (data.version === 2 && monitor.mode === "once")) &&
               Array.isArray(monitor.argv) &&
               monitor.argv.length > 0 &&
               monitor.argv.every((arg: unknown) => typeof arg === "string") &&

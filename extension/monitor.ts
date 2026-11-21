@@ -14,6 +14,17 @@ export const BATCH_MS = 300;
 const BATCH_MAX_LINES = 100;
 const BATCH_MAX_BYTES = 64 * 1024;
 
+export type MonitorExit = {
+  readonly code: number | null;
+  readonly signal: string | null;
+  readonly at: string;
+  readonly error?: string;
+};
+type MonitorOptions = Pick<MonitorSpec, "mode" | "restart"> & {
+  readonly recordId?: string;
+  readonly onExit?: (result: MonitorExit) => unknown;
+};
+
 type Running = {
   readonly name: string;
   readonly argv: readonly string[];
@@ -24,6 +35,7 @@ type Running = {
   readonly session: string;
   readonly signal: AbortSignal;
   readonly restart?: MonitorSpec["restart"];
+  readonly options: MonitorOptions;
   stopped: boolean;
   admitting: boolean;
   prepared?: {
@@ -42,6 +54,8 @@ export type MonitorInfo = {
   readonly pid: number;
   readonly cwd: string;
   readonly restart?: MonitorSpec["restart"];
+  readonly mode?: MonitorSpec["mode"];
+  readonly recordId?: string;
 };
 
 export type MonitorDelivery = {
@@ -86,15 +100,26 @@ export class Monitors {
     filter: string,
     cwd: string,
     session: string,
-    restart?: MonitorSpec["restart"],
+    options: MonitorOptions | MonitorSpec["restart"] = {},
   ): MonitorInfo {
     if (!name) throw new Error("monitor name is required");
     if (this.#running.has(name) || this.#restarts.has(name))
       throw new Error(`monitor "${name}" is already running or waiting to restart; stop it first`);
-    return this.#spawn({ name, argv, filter, cwd, ...(restart ? { restart } : {}) }, session, 0);
+    return this.#spawn(
+      { name, argv, filter, cwd },
+      session,
+      0,
+      typeof options === "string" ? { restart: options } : options,
+    );
   }
 
-  #spawn({ name, argv, filter, cwd, restart }: MonitorSpec, session: string, attempt: number): MonitorInfo {
+  #spawn(
+    { name, argv, filter, cwd }: MonitorSpec,
+    session: string,
+    attempt: number,
+    options: MonitorOptions,
+  ): MonitorInfo {
+    const { restart, mode, recordId } = options;
     if (argv.length === 0) throw new Error("argv must name the command to run");
     const pattern = new RegExp(filter);
     let entry: Running;
@@ -122,6 +147,7 @@ export class Monitors {
       stopped: false,
       admitting: false,
       restart,
+      options,
     };
     this.#running.set(name, entry);
     const finish = proc.exited.then((code) => {
@@ -142,13 +168,15 @@ export class Monitors {
       .then(async ([, , code]) => {
         if (this.#running.get(name) !== entry) return;
         const retryable = restart === "on-failure" && (code !== 0 || Boolean(proc.signalCode));
-        if (retryable && !entry.stopped && this.#current(entry)) {
-          // Do not replace the child while delivery from this incarnation can still fail.
+        if ((mode === "once" || retryable) && !entry.stopped && this.#current(entry)) {
+          // Do not seal or replace the child until the output from this incarnation has drained.
           await this.#flush();
           if (this.#running.get(name) !== entry) return;
         }
-        this.#running.delete(name);
         if (entry.stopped || !this.#current(entry)) return;
+        await this.#recordExit(entry, code);
+        if (entry.stopped || !this.#current(entry) || this.#running.get(name) !== entry) return;
+        this.#running.delete(name);
         if (retryable && this.#scheduleRestart(entry, previous)) return;
         await this.#queue(
           entry,
@@ -161,13 +189,39 @@ export class Monitors {
         this.#admissions?.stop(proc.pid);
         entry.proc.kill();
         if (this.#running.get(name) === entry) this.#running.delete(name);
+        await this.#recordExit(entry, proc.exitCode, String(error));
         await this.#queue(
           entry,
           `[monitor] output failed for name=${JSON.stringify(name.slice(0, 256))}${name.length > 256 ? "..." : ""} pid=${proc.pid}; stopped; raw output may be incomplete: ${String(error).slice(0, 2048)}`,
         );
       })
       .catch((error: unknown) => console.error("monitor failure reporting failed", error));
-    return { name, argv: entry.argv, filter, cwd, pid: proc.pid, ...(restart ? { restart } : {}) };
+    return {
+      name,
+      argv: entry.argv,
+      filter,
+      cwd,
+      pid: proc.pid,
+      ...(restart ? { restart } : {}),
+      ...(mode ? { mode } : {}),
+      ...(recordId ? { recordId } : {}),
+    };
+  }
+
+  async #recordExit(entry: Running, code: number | null, error?: string): Promise<void> {
+    try {
+      await entry.options.onExit?.({
+        code,
+        signal: entry.proc.signalCode === null ? null : String(entry.proc.signalCode),
+        at: new Date().toISOString(),
+        ...(error === undefined ? {} : { error }),
+      });
+    } catch (cause) {
+      await this.#queue(
+        entry,
+        `[monitor] exit state was not recorded for name=${JSON.stringify(entry.name.slice(0, 256))}; a future resume may restart it: ${String(cause).slice(0, 2048)}`,
+      );
+    }
   }
 
   #scheduleRestart(entry: Running, previous: number): boolean {
@@ -177,8 +231,8 @@ export class Monitors {
       this.#restarts.delete(entry.name);
       if (entry.stopped || !this.#current(entry)) return;
       try {
-        const { name, argv, filter, cwd, restart, session } = entry;
-        this.#spawn({ name, argv, filter: filter.source, cwd, ...(restart ? { restart } : {}) }, session, previous + 1);
+        const { name, argv, filter, cwd, options, session } = entry;
+        this.#spawn({ name, argv, filter: filter.source, cwd }, session, previous + 1, options);
       } catch (error) {
         void this.#queue(entry, `[${entry.name}] monitor restart failed: ${String(error).slice(0, 1024)}`).catch(
           (reportError: unknown) => console.error("monitor restart reporting failed", reportError),
@@ -190,14 +244,16 @@ export class Monitors {
   }
 
   /** Live and scheduled specifications, without mistaking a scheduled retry for a live child. */
-  specs(): MonitorSpec[] {
+  specs(): Array<MonitorSpec & { readonly recordId?: string }> {
     return [...this.#running.values(), ...Array.from(this.#restarts.values(), ({ entry }) => entry)].map(
-      ({ name, argv, filter, cwd, restart }) => ({
+      ({ name, argv, filter, cwd, restart, options }) => ({
         name,
         argv,
         filter: filter.source,
         cwd,
         ...(restart ? { restart } : {}),
+        ...(options.mode ? { mode: options.mode } : {}),
+        ...(options.recordId ? { recordId: options.recordId } : {}),
       }),
     );
   }
@@ -220,14 +276,18 @@ export class Monitors {
   }
 
   list(): MonitorInfo[] {
-    return [...this.#running.values()].map((entry) => ({
-      name: entry.name,
-      argv: entry.argv,
-      filter: entry.filter.source,
-      pid: entry.proc.pid,
-      cwd: entry.cwd,
-      ...(entry.restart ? { restart: entry.restart } : {}),
-    }));
+    return [...this.#running.values()]
+      .filter(({ proc }) => proc.exitCode === null && proc.signalCode === null)
+      .map((entry) => ({
+        name: entry.name,
+        argv: entry.argv,
+        filter: entry.filter.source,
+        pid: entry.proc.pid,
+        cwd: entry.cwd,
+        ...(entry.restart ? { restart: entry.restart } : {}),
+        ...(entry.options.mode ? { mode: entry.options.mode } : {}),
+        ...(entry.options.recordId ? { recordId: entry.options.recordId } : {}),
+      }));
   }
 
   /** Session end: kill every monitor and drop undelivered lines, which belong to the session that is going away. */
@@ -480,6 +540,7 @@ export class Monitors {
 
 export const MONITOR_DESCRIPTION = [
   "Persistent background monitors for this Dori session.",
+  'mode "once" retains restore intent until the job exits cleanly, output is delivered, and completion is recorded. Managed restarts wait for unfinished once work.',
   'op "start" runs `argv` (an argument array, never a shell string) in the session cwd and reads its stdout and stderr line by line. Matching `filter` lines wake this session as a message `[name] line`; lines arriving together are delivered in one message. Exits are reported unless an explicit `restart: "on-failure"` schedules a retry. That option retries nonzero exits or signals up to three times in a failure streak, after five seconds each. Clean exits are never retried.',
   "Lines over 64 KiB are streamed to a private temporary file instead of filtered or truncated. An immediate warning gives its path; completion gives its raw byte count. Batches are limited to 64 KiB including prefixes and separators; an oversized rendered message is preserved in a file too. Read those files for the complete output. They survive monitor stop; remove them only when no longer needed. Storage/read failure stops the monitor and reports potentially incomplete output.",
   'op "stop" kills the monitor `name` and forgets it. op "list" shows running monitors. Names are unique: starting a running name fails.',

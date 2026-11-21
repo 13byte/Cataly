@@ -145,7 +145,7 @@ posix("a consumed bootstrap never resurrects an explicitly stopped monitor", asy
   await dori.emit("session_start");
   await run(dori, { op: "stop", name: "inbound" });
   await dori.emit("session_start");
-  expect((await run(dori, { op: "list" })).content[0]?.text).toBe("no monitors running");
+  expect((await run(dori, { op: "list" })).content[0]?.text).toBe("no monitors running or recorded");
   expect(JSON.parse(readFileSync(join(f.stateDir, "monitors", "legacy-session.json"), "utf8")).monitors).toEqual([]);
 });
 
