@@ -101,7 +101,8 @@ Here is the workflow on current `main`:
 - Installation starts no agent, messenger receiver, or service. Enable only the
   monitors and integrations you want.
 - Keep credentials and private transcripts out of public reports.
-- Optional telemetry can be disabled with `CATALY_TELEMETRY=0` or `DO_NOT_TRACK=1`.
+- Optional telemetry is off by default. Set `CATALY_TELEMETRY=1` to opt in;
+  `DO_NOT_TRACK=1` overrides it.
 
 ## Get started
 

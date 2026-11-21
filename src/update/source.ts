@@ -2,63 +2,15 @@ import { createHash } from "node:crypto";
 import { chmodSync, copyFileSync, lstatSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { UpdateError } from "./config.ts";
+import { excludesSourcePath, isLocalNativeOutput, ULW_LIBRARY } from "./source-omissions.ts";
 import { catalyPin } from "./source-pin.ts";
 import type { SourceEntry, SourceManifest, UpdateInputs, UpdateJob } from "./types.ts";
 
 export const digest = (value: string | Uint8Array): string => createHash("sha256").update(value).digest("hex");
 
-/** Excluded metadata/secrets are never copied; admission separately holds excluded code before it can execute. */
-const OMIT: Readonly<Record<string, true>> = {
-  ".git": true,
-  node_modules: true,
-  ".cataly": true,
-  ".omp-cataly": true,
-  ".dori": true,
-  ".omp-dori": true,
-  ".omp": true,
-  ".omo": true,
-  ".cache": true,
-  ".DS_Store": true,
-  ".env": true,
-  "auth.json": true,
-  "credentials.json": true,
-};
-const ROOT_RUNTIME: Readonly<Record<string, true>> = {
-  "config.json": true,
-  state: true,
-  sessions: true,
-  auth: true,
-  bin: true,
-  cache: true,
-  tmp: true,
-  globalextensions: true,
-  ref: true,
-  ".qa-home": true,
-  evidence: true,
-};
-const NATIVE_OUTPUT: Readonly<Record<string, true>> = { target: true, ".cataly-native": true };
-const ULW_LIBRARY = "ref/omp-ulw";
-const excluded = (path: string): boolean => {
-  const parts = path.split("/");
-  const library = path === ULW_LIBRARY || path.startsWith(`${ULW_LIBRARY}/`);
-  if (parts[0] === "ref" && path !== "ref" && !library) return true;
-  const relative = library ? parts.slice(2) : parts;
-  return (
-    NATIVE_OUTPUT[path] === true ||
-    (path !== "ref" && ROOT_RUNTIME[relative[0] ?? ""] === true) ||
-    parts.some(
-      (part) =>
-        OMIT[part] === true ||
-        (library && (part === "auth" || part === "credentials")) ||
-        /^\.env\.(?!example$|sample$)/.test(part) ||
-        /\.(?:pem|key|p12|pfx|tmp)$/.test(part),
-    )
-  );
-};
-
 type SourceKind = "upstream" | "local" | "candidate";
 
-/** Only explicit local credential metadata may be omitted in addition to Git and installed dependencies. */
+/** Local credential metadata and native output may be omitted in addition to admitted Git and dependency directories. */
 export function assertSourceAdmission(manifest: SourceManifest, kind: SourceKind): void {
   const omitted = manifest.excluded.filter((path) => {
     const name = path.split("/").at(-1)!;
@@ -67,7 +19,7 @@ export function assertSourceAdmission(manifest: SourceManifest, kind: SourceKind
       kind !== "local" ||
       !(
         path === "config.json" ||
-        NATIVE_OUTPUT[path] === true ||
+        isLocalNativeOutput(path) ||
         [".DS_Store", ".env", "auth.json", "credentials.json"].includes(name) ||
         /^\.env\.(?!example$|sample$)/.test(name) ||
         /\.(?:pem|key|p12|pfx)$/.test(name) ||
@@ -89,8 +41,8 @@ export function sourceManifest(root: string): SourceManifest {
       const path = dir ? `${dir}/${name}` : name;
       const full = join(root, path);
       const stat = lstatSync(full);
-      if (excluded(path)) {
-        if ((name === ".git" || name === "node_modules" || NATIVE_OUTPUT[path] === true) && !stat.isDirectory())
+      if (excludesSourcePath(path)) {
+        if ((name === ".git" || name === "node_modules" || isLocalNativeOutput(path)) && !stat.isDirectory())
           throw new UpdateError(`source metadata must be a real directory: ${path}`);
         omitted.push(path);
         continue;

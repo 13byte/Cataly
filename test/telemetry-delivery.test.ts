@@ -8,7 +8,7 @@ import { rejectedRecords } from "../src/telemetry-otlp.ts";
 type Sent = { url: string; body: string; headers: Record<string, string> };
 
 function rig(
-  env: Record<string, string> = {},
+  env: Record<string, string> = { CATALY_TELEMETRY: "1" },
   logsStatus: () => number = () => 200,
   registerStatus: () => number = () => 200,
   logsText: () => string = () => "",
@@ -57,7 +57,7 @@ describe("telemetry", () => {
   test("records refused inside a 200 response (partialSuccess.rejectedLogRecords) are counted, not treated as delivered", async () => {
     let reply = JSON.stringify({ partialSuccess: { rejectedLogRecords: "2", errorMessage: "invalid_scope" } });
     const r = rig(
-      {},
+      undefined,
       () => 200,
       () => 200,
       () => reply,
@@ -77,7 +77,7 @@ describe("telemetry", () => {
   test("an offline first run keeps cataly.installed and daily_active pending until a send succeeds", async () => {
     let online = false;
     const r = rig(
-      {},
+      undefined,
       () => 200,
       () => (online ? 200 : 503),
     );
@@ -108,7 +108,7 @@ describe("telemetry", () => {
     const home = mkdtempSync(join(tmpdir(), "cataly-tel-"));
     const hung = new Telemetry(
       home,
-      {},
+      { CATALY_TELEMETRY: "1" },
       () => new Promise(() => {}),
       Date.now,
       () => {},
@@ -124,7 +124,7 @@ describe("telemetry", () => {
     const home = mkdtempSync(join(tmpdir(), "cataly-tel-"));
     const script = `const { Telemetry } = await import(${JSON.stringify(join(import.meta.dir, "../src/telemetry.ts"))});
       const hashes = [];
-      const t = new Telemetry(process.argv[1], {}, async (url, body) => { if (url.endsWith("/v1/logs")) hashes.push(JSON.parse(body).resourceLogs[0].resource.attributes.find((a) => a.key === "cataly.install.hash").value.stringValue); return { status: 200, text: JSON.stringify({ key: "k" }) }; }, Date.now, () => {});
+      const t = new Telemetry(process.argv[1], { CATALY_TELEMETRY: "1" }, async (url, body) => { if (url.endsWith("/v1/logs")) hashes.push(JSON.parse(body).resourceLogs[0].resource.attributes.find((a) => a.key === "cataly.install.hash").value.stringValue); return { status: 200, text: JSON.stringify({ key: "k" }) }; }, Date.now, () => {});
       t.record({ name: "cataly.lane_started", open_lanes: 1 }); await t.flush(5000); console.log(hashes[0] ?? "none");`;
     const runs = Array.from({ length: 6 }, () =>
       Bun.spawn(["bun", "-e", script, home], { stdout: "pipe", stderr: "pipe" }),

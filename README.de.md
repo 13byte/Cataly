@@ -107,8 +107,8 @@ Signal, keine Garantie für sämtliche Ergebnisse. Berichte sollten beobachtete
 Ergebnisse, verbleibende Unsicherheit und nicht ausgeführte Arbeiten unterscheiden.
 
 Halte Zugangsdaten, private Unterhaltungen und Kontodaten aus öffentlichen Patches
-und Berichten heraus. Die optionale Telemetrie lässt sich mit `CATALY_TELEMETRY=0`
-oder `DO_NOT_TRACK=1` deaktivieren.
+und Berichten heraus. Telemetrie ist standardmäßig aus. `CATALY_TELEMETRY=1`
+aktiviert sie; `DO_NOT_TRACK=1` hat Vorrang.
 
 ## Erste Schritte
 

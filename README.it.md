@@ -107,8 +107,8 @@ di quel segnale, non una garanzia su ogni risultato. I rapporti dovrebbero
 distinguere i risultati osservati, l'incertezza residua e il lavoro non svolto.
 
 Tieni credenziali, conversazioni private e dati degli account fuori da patch
-e rapporti pubblici. La telemetria facoltativa può essere disabilitata con
-`CATALY_TELEMETRY=0` o `DO_NOT_TRACK=1`.
+e rapporti pubblici. La telemetria è disattivata per impostazione predefinita.
+`CATALY_TELEMETRY=1` la attiva; `DO_NOT_TRACK=1` ha la precedenza.
 
 ## Per iniziare
 

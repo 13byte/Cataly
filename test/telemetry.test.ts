@@ -2,13 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Telemetry, telemetryEnabled } from "../src/telemetry.ts";
+import { Telemetry } from "../src/telemetry.ts";
 import { VERSION } from "../src/telemetry-otlp.ts";
 
 type Sent = { url: string; body: string; headers: Record<string, string> };
 
 function rig(
-  env: Record<string, string> = {},
+  env: NodeJS.ProcessEnv = { CATALY_TELEMETRY: "1" },
   logsStatus: () => number = () => 200,
   registerStatus: () => number = () => 200,
   logsText: () => string = () => "",
@@ -51,19 +51,19 @@ function rig(
 }
 
 describe("telemetry", () => {
-  test("CATALY_TELEMETRY=0 and DO_NOT_TRACK=1 turn it off completely: nothing sent, nothing written", async () => {
-    expect(telemetryEnabled({ CATALY_TELEMETRY: "0" })).toBe(false);
-    expect(telemetryEnabled({ DO_NOT_TRACK: "1" })).toBe(false);
-    expect(telemetryEnabled({})).toBe(true);
-    const r = rig({ CATALY_TELEMETRY: "0" });
-    r.t.touch();
-    await r.t.flush(5000);
-    r.t.record({ name: "cataly.lane_started", open_lanes: 1 });
-    await r.t.flush(5000);
-    expect(r.sent).toEqual([]);
-    expect(r.notices).toEqual([]);
-    expect(existsSync(join(r.home, "telemetry.json"))).toBe(false);
-  });
+  test.each([{}, { CATALY_TELEMETRY: "0" }, { CATALY_TELEMETRY: "1", DO_NOT_TRACK: "1" }])(
+    "telemetry sends and writes nothing without consent or with Do Not Track: %j",
+    async (env) => {
+      const r = rig(env);
+      r.t.touch();
+      await r.t.flush(5000);
+      r.t.record({ name: "cataly.lane_started", open_lanes: 1 });
+      await r.t.flush(5000);
+      expect(r.sent).toEqual([]);
+      expect(r.notices).toEqual([]);
+      expect(existsSync(join(r.home, "telemetry.json"))).toBe(false);
+    },
+  );
 
   test("first run: one notice, installed + daily_active; later runs the same day send nothing; the next day sends daily_active again", async () => {
     const r = rig();
@@ -84,7 +84,7 @@ describe("telemetry", () => {
 
   test("the key is minted once per install from the hash, cached, and re-minted after a 401", async () => {
     let status = 200;
-    const r = rig({}, () => status);
+    const r = rig(undefined, () => status);
     r.t.touch();
     await r.t.flush(5000);
     r.t.record({ name: "cataly.lane_started", open_lanes: 1 });
@@ -163,7 +163,7 @@ describe("telemetry", () => {
     const home = mkdtempSync(join(tmpdir(), "cataly-tel-"));
     const offline = new Telemetry(
       home,
-      {},
+      { CATALY_TELEMETRY: "1" },
       async () => {
         throw new Error("offline");
       },
@@ -173,7 +173,7 @@ describe("telemetry", () => {
     offline.touch();
     await offline.flush(5000);
     const r = rig(
-      {},
+      undefined,
       () => 200,
       () => 503,
     );
