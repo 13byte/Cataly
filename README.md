@@ -114,6 +114,26 @@ and `omp`; existing install paths and release asset names are unchanged.
 
 </td></tr></table>
 
+### Install the npm package
+
+With Bun 1.4.4 or newer available on `PATH`, run one of these in your project
+directory:
+
+```bash
+npm install cataly
+# Or, with Bun:
+bun add cataly
+```
+
+The installed command is still `dori-harness`:
+
+```bash
+./node_modules/.bin/dori-harness --help
+```
+
+This installs the harness CLI, not the full OMP and messenger setup. For that
+setup, use one of the options below.
+
 |                | [Published preview](#try-the-published-preview) | [Current source](#work-from-current-source)          |
 | -------------- | ----------------------------------------------- | ---------------------------------------------------- |
 | **Build**      | v0.1.2 prerelease                               | current `main`                                       |
