@@ -202,18 +202,16 @@ const loadNative = () => {
     flush(handle: bigint) {
       requireNative(kernel.FlushFileBuffers(handle) !== 0, "file could not be flushed");
     },
-    rename(handle: bigint, root: bigint, basename: string, replace: boolean) {
+    rename(handle: bigint, basename: string, replace: boolean) {
       requireNative(basenameOnly(basename), "replacement name is invalid");
       const name = Buffer.from(basename, "utf16le");
       const input = Buffer.alloc(24 + name.length); // sizeof(FILE_RENAME_INFO) plus FileNameLength
       input.writeUInt32LE(replace ? 3 : 0); // REPLACE_IF_EXISTS | POSIX_SEMANTICS
-      input.writeBigUInt64LE(root, 8);
+      // A simple name and null RootDirectory rename relative to the staged handle’s own directory.
       input.writeUInt32LE(name.length, 16);
       name.copy(input, 20);
-      requireNative(
-        kernel.SetFileInformationByHandle(handle, 22, input, input.length) !== 0,
-        "same-directory handle rename failed",
-      );
+      const status = nt.NtSetInformationFile(handle, Buffer.alloc(16), input, input.length, 65);
+      if (status !== 0) throw winCursorError(`same-directory handle rename failed (0x${status.toString(16)})`);
     },
     remove(handle: bigint) {
       const input = Buffer.from([1, 0, 0, 0]);

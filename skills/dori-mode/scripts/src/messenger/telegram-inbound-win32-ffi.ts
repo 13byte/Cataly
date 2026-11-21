@@ -82,6 +82,7 @@ export const loadWindowsCursorFfi = () => {
       args: ["ptr", "u32", "ptr", "ptr", "ptr", "u32", "u32", "u32", "u32", "ptr", "u32"],
       returns: "u32",
     },
+    NtSetInformationFile: { args: ["u64", "ptr", "ptr", "u32", "u32"], returns: "u32" },
   }).symbols;
 
   return { ffi, kernel, security, nt };

@@ -178,7 +178,7 @@ export const windowsTelegramCursor = (stateDir: string, bot: string) => {
         // Even an uncertain rename may have published this particular probe object.
         if (probeIds) probeIds.push(id);
         renameAttempted = true;
-        native.rename(staged, backend.root, name, previous !== undefined);
+        native.rename(staged, name, previous !== undefined);
         // File flushing covers file metadata, not proven power-loss parity for the NTFS namespace.
         native.flush(staged);
         const final = native.open({
