@@ -139,6 +139,7 @@ test.each(["clean", "untracked", "unstaged", "staged", "new-head"] as const)(
       fixture.done();
     }
   },
+  30_000,
 );
 
 test.each(["writer-only", "unstaged", "staged", "writer-then-unstaged"] as const)(

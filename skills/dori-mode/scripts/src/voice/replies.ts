@@ -11,6 +11,7 @@ export class Replies {
   private readOffset = 0;
   private partial = Buffer.alloc(0);
   private identity: string | undefined;
+  private scannedIdentity = false;
   private readonly queue: LeadReply[] = [];
 
   constructor(
@@ -44,16 +45,22 @@ export class Replies {
       throw error;
     }
     try {
-      const info = fstatSync(fd);
-      const identity = `${info.dev}:${info.ino}`;
-      if ((this.identity && this.identity !== identity) || info.size < this.readOffset) {
+      const info = fstatSync(fd, { bigint: true });
+      // NTFS file IDs can exceed Number.MAX_SAFE_INTEGER. Preserve all bits across scans and persisted receipts.
+      const exact = `v2:${info.dev}:${info.ino}`;
+      const identity = info.ino === 0n ? `${exact}:${info.birthtimeNs}` : exact;
+      const oldIdentity = `${Number(info.dev)}:${Number(info.ino)}`;
+      const compatibleLegacy = !this.scannedIdentity && this.identity === oldIdentity;
+      const sizeOnDisk = Number(info.size);
+      if ((this.identity && this.identity !== identity && !compatibleLegacy) || sizeOnDisk < this.readOffset) {
         this.scanned = this.readOffset = 0;
         this.partial = Buffer.alloc(0);
         this.queue.length = 0;
       }
       this.identity = identity;
-      if (info.size === this.readOffset) return;
-      const bytes = Buffer.alloc(info.size - this.readOffset);
+      this.scannedIdentity = true;
+      if (sizeOnDisk === this.readOffset) return;
+      const bytes = Buffer.alloc(sizeOnDisk - this.readOffset);
       let size = 0;
       while (size < bytes.length) {
         const count = readSync(fd, bytes, size, bytes.length - size, this.readOffset + size);

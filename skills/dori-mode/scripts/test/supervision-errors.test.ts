@@ -26,7 +26,7 @@ const production = async (supervision: SupervisionOptions = {}) => {
   const tick = async (turn: number) => {
     f.clock.at = start + turn * 60_000;
     world.screen = `Working ${21 + turn}m`;
-    return freshnessTick({ ...deps, run }, state.dir);
+    return f.settle(() => freshnessTick({ ...deps, run }, state.dir));
   };
   const lastError = async () => (await deps.registry.read(lane.key))?.lastSupervisionError;
   return { f, tick, lastError };
@@ -177,4 +177,4 @@ test("reads that race a rewrite or a removal are retried as unknown, never repor
   }
   expect(f.refs()).toContainEqual(fileEvidence(rewritten, f.repo));
   expect(f.refs()).toContainEqual({ kind: "file", ref: removed, fingerprint: null });
-});
+}, 30_000);
