@@ -63,12 +63,12 @@ export const prepareLaunch = async (deps: FlowDeps, input: LaunchInput, queuedBr
   const { agentCommand, requireModelReadback } = deps.config;
   requirePolicyLaneCommand(agentCommand, deps.config.lanePolicy, LaunchError);
   const model = input.model ?? deps.config.defaultModel;
-  const runtime = runtimeForLaunch(deps, input);
-  const problem = modelLaunchProblem(agentCommand, model, runtime === "headless" || requireModelReadback);
+  // Preparing a brief (including --dry-run) needs the execution mode, not an installed terminal adapter.
+  const mode = input.runtime ?? deps.config.laneRuntime ?? runtimesOf(deps).choice?.kind;
+  const problem = modelLaunchProblem(agentCommand, model, mode === "headless" || requireModelReadback);
   if (problem) throw new LaunchError(problem);
   // The broker verifies the native model before kickoff; only terminal templates can launch without readback.
-  const modelReadback =
-    runtime === "headless" ? undefined : unavailableLaunchModel(agentCommand, model, iso(deps.clock));
+  const modelReadback = mode === "headless" ? undefined : unavailableLaunchModel(agentCommand, model, iso(deps.clock));
   const cwd = input.cwd ?? deps.config.defaultCwd;
   let briefText: string;
   if (queuedBrief !== undefined) {
@@ -115,7 +115,7 @@ export const prepareLaunch = async (deps: FlowDeps, input: LaunchInput, queuedBr
   ];
   const laneFooter = await laneFooterFor(deps, draft);
   const preamble = `${renderLessons(lessons)}${BRIEF_START}\n${briefText}\n${laneFooter}`;
-  return { lane: draft, briefText, preamble, warnings, runtime } as const;
+  return { lane: draft, briefText, preamble, warnings } as const;
 };
 
 export const launchLane = async (
@@ -133,7 +133,8 @@ export const launchLane = async (
 
 /** Caller holds the per-key launch lock; capacity admission only needs to span this phase. */
 export const openLaunch = async (deps: FlowDeps, input: LaunchInput, queuedBrief?: string) => {
-  const { lane: draft, preamble, warnings, runtime } = await prepareLaunch(deps, input, queuedBrief);
+  const runtime = runtimeForLaunch(deps, input);
+  const { lane: draft, preamble, warnings } = await prepareLaunch(deps, input, queuedBrief);
   runContext(new Reports(deps.config.stateDir), draft, draft.runId);
   const rts = runtimesOf(deps);
   const group = runtime === "headless" ? undefined : deps.config.laneWorkspace || undefined;

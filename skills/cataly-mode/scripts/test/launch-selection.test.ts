@@ -6,6 +6,7 @@ import { defaultConfig, loadConfig } from "../src/config.ts";
 import type { FlowDeps } from "../src/done-flow.ts";
 import { adoptLane, launchLane, prepareLaunch } from "../src/launch.ts";
 import { footer, quoteForPane } from "../src/launch-footer.ts";
+import { ChosenRuntimes } from "../src/run.ts";
 import {
   agentIn,
   depsFor,
@@ -50,6 +51,23 @@ const configured = async (raw: Record<string, unknown> = {}): Promise<FlowDeps> 
   writeFileSync(path, JSON.stringify({ sessionRuntime: "herdr", defaultCwd: "/repo", startupWaitSeconds: 0, ...raw }));
   return { ...depsFor(world, fakeClock(T0), state.dir), config: await loadConfig(path, state.dir) };
 };
+
+test("a preview works without an installed backend while a real launch still holds", async () => {
+  const missing = new Error("no terminal backend installed");
+  const rts = new ChosenRuntimes(
+    () => {
+      throw missing;
+    },
+    () => {
+      throw new Error("unexpected adapter construction");
+    },
+  );
+  const deps = { ...(await configured()), rts };
+  expect((await prepareLaunch(deps, input())).lane.key).toBe(input().key);
+  await expect(launchLane(deps, input())).rejects.toThrow(missing.message);
+  expect(await deps.registry.read(input().key)).toBeNull();
+  expect(world.calls).toEqual([]);
+});
 
 test("the built-in request is recorded without selecting workflows mentioned in the brief or path", async () => {
   const deps = await configured();

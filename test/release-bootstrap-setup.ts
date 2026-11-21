@@ -100,7 +100,7 @@ writeFileSync(process.env.BOOTSTRAP_RESULT, JSON.stringify({ home, runtime: "her
   const result = join(root, "result.json");
   const run = (args: string[] = [], extra: Record<string, string> = {}) =>
     Bun.spawnSync(["bash", join(import.meta.dir, "../install.sh"), "--from", dist, ...args], {
-      env: { PATH: `${bin}:${process.env["PATH"]}`, HOME: home, BOOTSTRAP_RESULT: result, ...extra },
+      env: { PATH: `${bin}:${process.env["PATH"]}`, HOME: home, USERPROFILE: home, BOOTSTRAP_RESULT: result, ...extra },
       stdout: "pipe",
       stderr: "pipe",
     });

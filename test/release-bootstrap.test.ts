@@ -65,15 +65,16 @@ posix("an explicit primary home overrides the Darwin side default", () => {
   expect(f.selected()).toEqual(f.expected(selected, "hc"));
 });
 
-test("side home resolving under primary is rejected before assets are read", () => {
+test.each([".dori", ".cataly"])("side home resolving under %s is rejected before assets are read", (name) => {
   const f = fixture(linux);
-  mkdirSync(join(f.home, ".dori"));
-  symlinkSync(join(f.home, ".dori"), join(f.root, "alias"));
+  const primary = join(f.home, name);
+  mkdirSync(primary);
+  symlinkSync(primary, join(f.root, "alias"));
   rmSync(f.dist, { recursive: true });
   const result = f.run(["--home", join(f.root, "alias", "nested")], { DORI_INSTALL_MODE: "side" });
   expect(result.exitCode).not.toBe(0);
-  expect(result.stderr.toString()).toMatch(/outside .*\.dori/);
-  expect(existsSync(join(f.home, ".dori", "nested"))).toBe(false);
+  expect(result.stderr.toString()).toContain(`outside ${primary}`);
+  expect(existsSync(join(primary, "nested"))).toBe(false);
 });
 
 test.each(["home", "parent"] as const)("side %s containing primary is rejected before assets are read", (selection) => {

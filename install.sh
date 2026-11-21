@@ -6,7 +6,7 @@ bun run - "$@" <<'BUN'
 import { createHash } from "node:crypto";
 import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { parseArgs } from "node:util";
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -64,9 +64,8 @@ try {
       const actualPrimary = physical(protectedHome);
       const withinPrimary = relative(actualPrimary, actualHome);
       const containsPrimary = relative(actualHome, actualPrimary);
-      if ((installMode === "side" || home !== protectedHome) &&
-        (withinPrimary === "" || (!withinPrimary.startsWith("../") && withinPrimary !== "..") ||
-          containsPrimary === "" || (!containsPrimary.startsWith("../") && containsPrimary !== "..")))
+      const inside = (rel) => !isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`);
+      if ((installMode === "side" || home !== protectedHome) && (inside(withinPrimary) || inside(containsPrimary)))
         fail(`Side installation home must be outside ${protectedHome} and must not contain it`);
     }
     const isPrimary = home === currentPrimary || home === historicalPrimary;
