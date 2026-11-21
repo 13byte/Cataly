@@ -145,19 +145,25 @@ test("active once work holds managed restart and successful completion restores 
     });
     expect(await text(pi)).toContain("[mode=once status=running]");
     expect(JSON.parse(readFileSync(manifest, "utf8")).version).toBe(2);
-    expect(() => readMonitorSet(manifest, session.id, true)).toThrow('waits for once monitor "ci"');
+    if (process.platform !== "win32")
+      expect(() => readMonitorSet(manifest, session.id, true)).toThrow('waits for once monitor "ci"');
     writeFileSync(release, "go");
     await exited(pi);
-    const wanted = readMonitorSet(manifest, session.id, true);
-    expect(wanted.version).toBe(1);
-    expect(wanted.monitors.map((monitor) => monitor.name)).toEqual(["inbound"]);
+    expect(JSON.parse(readFileSync(manifest, "utf8"))).toMatchObject({
+      version: 1,
+      monitors: [{ name: "inbound" }],
+    });
+    if (process.platform !== "win32") {
+      const wanted = readMonitorSet(manifest, session.id, true);
+      expect(wanted.monitors.map((monitor) => monitor.name)).toEqual(["inbound"]);
+    }
     expect(await text(pi)).toContain("ci [mode=once status=exited code=0");
   } finally {
     await pi.emit("session_shutdown");
   }
 });
 
-test("a signal exit stays visible and does not masquerade as successful once completion", async () => {
+test("process termination remains visible and does not complete once work", async () => {
   const stateDir = useConfig(join(import.meta.dir, "fake-ulw.ts"));
   const pi = await load({ session: { id: "signal-once", entries: [] }, flags: { "dori-role": "dori" } });
   try {
@@ -170,7 +176,8 @@ test("a signal exit stays visible and does not masquerade as successful once com
       filter: ".",
     });
     await exited(pi);
-    expect(await text(pi)).toContain("signal=SIGTERM at=");
+    const expected = process.platform === "win32" ? "code=1 signal=none at=" : "signal=SIGTERM at=";
+    expect(await text(pi)).toContain(expected);
     expect(await text(pi)).not.toContain("pid ");
     expect(JSON.parse(readFileSync(join(stateDir, "monitors", "signal-once.json"), "utf8"))).toMatchObject({
       version: 2,

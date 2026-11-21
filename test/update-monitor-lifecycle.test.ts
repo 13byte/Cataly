@@ -11,6 +11,8 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 const spec = { name: "inbound", argv: ["sleep", "30"], cwd: tmpdir(), filter: "." };
+// The managed deployment reader enforces POSIX ownership and mode bits; boot is portable.
+const posix = test.skipIf(process.platform === "win32");
 const fixture = (version: number, mode?: string) => {
   const root = mkdtempSync(join(tmpdir(), "dori-monitor-lifecycle-"));
   roots.push(root);
@@ -30,16 +32,29 @@ const fixture = (version: number, mode?: string) => {
   return { root, omp, path };
 };
 
-test.each([1, 2])("managed replacement does not normalize once work into persistent work in version %s", (version) => {
-  const { path } = fixture(version, "once");
-  expect(() => readMonitorSet(path, "session", true)).toThrow('waits for once monitor "inbound"');
-  expect(() => readMonitorSet(path, "session", true)).toThrow(DeploymentHeld);
-});
+for (const version of [1, 2]) {
+  posix(`managed replacement does not normalize once work into persistent work in version ${version}`, () => {
+    const { path } = fixture(version, "once");
+    expect(() => readMonitorSet(path, "session", true)).toThrow('waits for once monitor "inbound"');
+    expect(() => readMonitorSet(path, "session", true)).toThrow(DeploymentHeld);
+  });
+}
 
-test.each([undefined, "persistent"])("default persistent monitor manifests remain compatible: %s", (mode) => {
-  const { path } = fixture(1, mode);
-  expect(readMonitorSet(path, "session", true).monitors).toEqual([spec]);
-});
+for (const mode of [undefined, "persistent"]) {
+  posix(`default persistent monitor manifests remain compatible: ${mode}`, () => {
+    const { path } = fixture(1, mode);
+    expect(readMonitorSet(path, "session", true).monitors).toEqual([spec]);
+  });
+}
+
+test.skipIf(process.platform !== "win32")(
+  "boot reads the Windows manifest without treating it as POSIX-trusted",
+  () => {
+    const { root, omp, path } = fixture(2, "once");
+    expect(readMonitorManifests(join(root, "sessions"), [], omp).manifests).toHaveLength(1);
+    expect(() => readMonitorSet(path, "session", true)).toThrow(/monitor metadata ownership differs|must be private/);
+  },
+);
 
 test("mode is part of monitor identity while equivalent regex spelling is not", () => {
   expect(sameMonitorSpecs([spec], [{ ...spec, filter: new RegExp(spec.filter).source }])).toBe(true);
@@ -57,7 +72,8 @@ test("boot reads lifecycle metadata without treating terminal manifests as the n
 
 test.each(["future", "daemon"])("unsupported modes are rejected rather than ignored: %s", (mode) => {
   const { root, omp, path } = fixture(2, mode);
-  expect(() => readMonitorSet(path, "session", true)).toThrow("invalid specification");
+  if (process.platform !== "win32")
+    expect(() => readMonitorSet(path, "session", true)).toThrow("invalid specification");
   expect(readMonitorManifests(join(root, "sessions"), [], omp)).toEqual({ manifests: [], errors: [path] });
 });
 

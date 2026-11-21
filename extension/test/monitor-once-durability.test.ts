@@ -7,7 +7,9 @@ import { type FakePi, load, until, useConfig } from "./fake-pi.ts";
 const run = (pi: FakePi, params: Record<string, unknown>) =>
   pi.tools.get("monitor")!.execute("call", params, undefined, undefined, pi.ctx());
 
-test("a successful once child reports an actual native journal failure", async () => {
+// Windows will not move the open native journal directory; this fixture exercises POSIX write failure.
+const posix = test.skipIf(process.platform === "win32");
+posix("a successful once child reports an actual native journal failure", async () => {
   await assertNativeHost();
   // Bind the public entry point of the installed pinned host, not an optional extension peer.
   const { SessionManager } = await import(join(process.env["DORI_TEST_OMP_ROOT"]!, "src/index.ts"));
@@ -60,7 +62,7 @@ test("a successful once child reports an actual native journal failure", async (
       rmSync(journal);
       renameSync(saved, journal);
     }
-    if (failures.length) await expect(manager.close()).rejects.toThrow("ENOTDIR");
+    if (failures.length) await expect(manager.close()).rejects.toThrow(/ENOTDIR|Not a directory/);
     else await manager.close();
     unsubscribe();
     rmSync(root, { recursive: true, force: true });
