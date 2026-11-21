@@ -15,7 +15,7 @@ export const git: Runner = async (argv) => {
 };
 
 export const coverageFixture = (state: TestState, alert?: SupervisionDeps["alert"]) => {
-  const repo = join(state.dir, "repo");
+  const repo = join(fs.realpathSync(state.dir), "repo");
   expect(Bun.spawnSync(["git", "init", "--quiet", repo]).exitCode).toBe(0);
   const scaffold = join(repo, "scaffold");
   fs.mkdirSync(scaffold);

@@ -9,6 +9,7 @@ import { toolEvidence } from "../src/tool-evidence.ts";
 // its certainty. The scripts directory is where `bun src/cli.ts` is the Dori CLI; the repo root and a work directory
 // are where it is not.
 const SCRIPTS = join(import.meta.dir, "..");
+const SHELL_SCRIPTS = `"${SCRIPTS.replaceAll("\\", "/")}"`;
 const ROOT = join(SCRIPTS, "../../..");
 const WORK = "/work/app";
 const CHECKPOINT = "bun src/cli.ts checkpoint lane --step s1 --result ok --evidence proof";
@@ -63,14 +64,14 @@ describe("a cd that may fail keeps the directory the call ran in", () => {
 
   test("a pipeline may also move its last command into the CLI directory", () => {
     for (const after of ["&&", ";"]) {
-      const command = `bash -O lastpipe -c 'true | cd ${SCRIPTS} ${after} ${CHECKPOINT}'`;
+      const command = `bash -O lastpipe -c 'true | cd ${SHELL_SCRIPTS} ${after} ${CHECKPOINT}'`;
       expect(hasDoriCommand(command, ROOT, true)).toBe(true);
       refuses(command, ROOT, "coordinates");
     }
   });
 
   test("the default reading still takes a cd that starts a list as moved", () => {
-    const command = `cd ${SCRIPTS}; ${CHECKPOINT}`;
+    const command = `cd ${SHELL_SCRIPTS}; ${CHECKPOINT}`;
     expect(hasDoriCommand(command, "/other")).toBe(true);
     expect(hasDoriCommand(`cd /other; ${CHECKPOINT}`, SCRIPTS)).toBe(false);
     refuses(command, "/other", "coordinates");

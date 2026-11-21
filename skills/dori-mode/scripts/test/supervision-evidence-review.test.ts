@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
-import { mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Checkpoints } from "../src/checkpoints.ts";
 import { fileEvidence, novelEvidence } from "../src/evidence.ts";
@@ -23,6 +23,7 @@ const observedClock = () => {
 };
 beforeEach(() => {
   state = withState();
+  state.dir = realpathSync(state.dir);
 });
 afterEach(() => {
   restoreClock?.();

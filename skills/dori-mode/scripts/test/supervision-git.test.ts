@@ -36,7 +36,7 @@ test.each(layouts)("freshness preserves tracked Git activity but not its writer 
     const stateDir = layout === "state symlink" ? alias : actualState;
     const key = "git-lock-lane";
     const lanePath = `dori-state/lanes/${key}`;
-    const trackedPath = `${lanePath}/tracked.txt`;
+    const trackedPath = lexicalParentOnWindows ? "lane-cwd/tracked.txt" : `${lanePath}/tracked.txt`;
     const git = async (...args: string[]) => {
       const result = await run(["git", "-C", repo, ...args]);
       if (result.code !== 0) throw new Error(`git ${args.join(" ")}: ${result.err}`);
@@ -46,7 +46,7 @@ test.each(layouts)("freshness preserves tracked Git activity but not its writer 
     writeFileSync(emptyExcludes, "");
     await git("config", "core.excludesFile", emptyExcludes);
     mkdirSync(join(repo, lanePath), { recursive: true });
-    // A tracked file here keeps Git from collapsing this lane's lock into an untracked directory entry.
+    // Keep the user change in the lane cwd even when Windows resolves the alias parent beside the state directory.
     writeFileSync(join(repo, trackedPath), "initial\n");
     writeFileSync(
       join(repo, ".gitignore"),

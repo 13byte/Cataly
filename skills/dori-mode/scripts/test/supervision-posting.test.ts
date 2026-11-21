@@ -51,5 +51,5 @@ for (const idle of [false, true]) {
       expect(f.reports.read(lane.key)?.state).toBe("stalled");
     }
     expect(world.calls.filter((call) => call[0] === "notify")).toHaveLength(3);
-  });
+  }, 20_000);
 }

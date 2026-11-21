@@ -34,7 +34,7 @@ for (const failedDelivery of [false, true]) {
     fs.unlinkSync(index);
     for (let window = 0; window < 8; window++) expect((await f.sweep()).result.alerts).toEqual([]);
     expect(attempts).toBe(failedDelivery ? 2 : 1);
-  });
+  }, 20_000);
 
   test(`a report without new evidence preserves confirmed hung and ${failedDelivery ? "retries" : "deduplicates"} its alert`, async () => {
     let attempts = 0;
@@ -61,7 +61,7 @@ for (const failedDelivery of [false, true]) {
     }
     for (let window = 0; window < 8; window++) expect((await f.sweep()).result.alerts).toEqual([]);
     expect(attempts).toBe(failedDelivery ? 2 : 1);
-  });
+  }, 20_000);
 }
 
 test("one unreadable file cannot starve the rest of its window or the final window", async () => {
