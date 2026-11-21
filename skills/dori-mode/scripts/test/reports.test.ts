@@ -57,7 +57,7 @@ test("report transitions survive restarting the reader without changing done pro
     ["milestone", "running"],
     ["done", "done"],
   ] as const) {
-    reports.report(lane.key, kind, `state ${expected}`, T0);
+    await reports.report(lane.key, kind, `state ${expected}`, T0);
     // Then fresh readers recover the persisted state, not a memory cache.
     expect(new Reports(state.dir).read(lane.key)?.state).toBe(expected);
   }
@@ -65,21 +65,21 @@ test("report transitions survive restarting the reader without changing done pro
   expect(readFileSync(reports.path(lane.key), "utf8").trim().split("\n")).toHaveLength(6);
 });
 
-test("report text round trips quotes and newlines but prints one human line", () => {
+test("report text round trips quotes and newlines but prints one human line", async () => {
   // Given untrusted text that must remain data.
   const text = 'tests passed\npush "abc123"; $(not a command)';
   // When recorded and rendered.
-  const report = reports.report(lane.key, "milestone", text, T0);
+  const report = await reports.report(lane.key, "milestone", text, T0);
   // Then JSON preserves text while terminal output stays a single line.
   expect(new Reports(state.dir).read(lane.key)?.lastReport?.text).toBe(text);
   expect(reportLine(report)).toBe(`[REPORT] ${lane.key} | milestone | tests passed push "abc123"; $(not a command)`);
 });
 
-test("the printed line carries no terminal controls, while the journal keeps the raw text", () => {
+test("the printed line carries no terminal controls, while the journal keeps the raw text", async () => {
   // Given text with a carriage return, a CSI erase, an OSC title and a bell.
   const text = "tests passed\r\u001b[2Kall green\u001b]0;owned\u0007 done\u0008";
   // When recorded and rendered.
-  const report = reports.report(lane.key, "milestone", text, T0);
+  const report = await reports.report(lane.key, "milestone", text, T0);
   // Then only printable text reaches the terminal, and the record is unchanged.
   expect(reportLine(report)).toBe(`[REPORT] ${lane.key} | milestone | tests passed all green done`);
   expect(new Reports(state.dir).read(lane.key)?.lastReport?.text).toBe(text);
@@ -100,9 +100,9 @@ test.each([
   expect(() => parseEvent(line, lane.key)).toThrow(ReportError);
 });
 
-test("a corrupt journal fails with its line number instead of hiding a lost report", () => {
+test("a corrupt journal fails with its line number instead of hiding a lost report", async () => {
   // Given a valid report followed by corruption.
-  reports.report(lane.key, "milestone", "first", T0);
+  await reports.report(lane.key, "milestone", "first", T0);
   appendFileSync(reports.path(lane.key), "{partial\n");
   // When the journal is read; then corruption is explicit.
   expect(() => reports.read(lane.key)).toThrow("reports.jsonl:2:");
@@ -117,9 +117,9 @@ test("one corrupt journal is reported once and does not stop the sweep for other
   const deps = depsFor(world, fakeClock(T0 + 30 * MIN), state.dir);
   await deps.registry.write({ ...lane, key: "bad-lane", pane: "w:p8" });
   await deps.registry.write(lane);
-  reports.report("bad-lane", "milestone", "first", T0);
+  await reports.report("bad-lane", "milestone", "first", T0);
   appendFileSync(reports.path("bad-lane"), "{partial\n");
-  reports.report(lane.key, "milestone", "started", T0);
+  await reports.report(lane.key, "milestone", "started", T0);
   // When freshness runs twice.
   const first = await freshnessTick(deps, "/home/test");
   // Then the healthy lane is still nudged, and the error is printed once with its line number.

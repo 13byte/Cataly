@@ -118,7 +118,7 @@ test.each([true, false])(
         },
       };
       await deps.registry.write(lane("adopted", { reportProtocol: undefined }));
-      new Reports(state.dir).report("adopted", "milestone", "a journal does not opt an adopted lane in", now);
+      await new Reports(state.dir).report("adopted", "milestone", "a journal does not opt an adopted lane in", now);
       const result = await doctorCheck({ ...deps, config });
       expect(result.findings.filter((finding) => finding.check === "supervision")).toEqual([
         {
@@ -154,7 +154,7 @@ test("doctor and boot both warn when only a completed journal's lane has configu
     };
     for (const key of ["open", "complete"]) await deps.registry.write(lane(key, { reportProtocol: "jsonl-v1" }));
     const reports = new Reports(state.dir);
-    reports.report("complete", "done", "complete", now);
+    await reports.report("complete", "done", "complete", now);
     const result = await doctorCheck({ ...deps, config });
     expect(result.findings.filter((finding) => finding.check === "supervision")).toEqual([
       { check: "supervision", severity: "WARN", detail: "no configured ceilings for active lanes: open" },

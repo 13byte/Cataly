@@ -20,7 +20,7 @@ test.each(["done", "halted", "blocker", "question"] as const)(
   "reopen resets old %s progress without dropping report history",
   async (kind) => {
     const reports = new Reports(f.state.dir);
-    reports.report(f.lane.key, kind, "previous lifecycle", f.deps.clock.now());
+    await reports.report(f.lane.key, kind, "previous lifecycle", f.deps.clock.now());
     const parked = await parkLane(f.deps, f.lane, "wait");
     const reopened = await reopenLane(f.deps, parked.lane);
     expect(reopened.code).toBe(0);
@@ -34,7 +34,7 @@ test.each(["done", "halted", "blocker", "question"] as const)(
 
 test("a reopened lifecycle records a new final cost exactly once", async () => {
   const reports = new Reports(f.state.dir);
-  reports.report(f.lane.key, "done", "old completion", f.deps.clock.now());
+  await reports.report(f.lane.key, "done", "old completion", f.deps.clock.now());
   let measurements = 0;
   let receipts = 0;
   const supervisor = new Supervision(
@@ -143,7 +143,7 @@ test("an unavailable identity cwd holds pause before sending input", async () =>
 
 test("ordinary resume after failed reopen readback still resets old terminal reports once", async () => {
   const reports = new Reports(f.state.dir);
-  reports.report(f.lane.key, "done", "previous completion", f.deps.clock.now());
+  await reports.report(f.lane.key, "done", "previous completion", f.deps.clock.now());
   const parked = await parkLane(f.deps, f.lane, "wait");
   const state = { cwd: f.lane.cwd!, pid: 4250, sessionId: f.session, goal: { status: "paused" as const } };
   const failed = await reopenLane(

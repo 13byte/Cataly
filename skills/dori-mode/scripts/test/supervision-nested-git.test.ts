@@ -1,6 +1,7 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileEvidence } from "../src/evidence.ts";
 import { freshnessTick } from "../src/freshness.ts";
 import type { Lane } from "../src/registry.ts";
 import { Reports } from "../src/reports.ts";
@@ -42,13 +43,14 @@ const setup = async (home: string, nested: boolean, ignoreWriter: boolean, icase
     supervision: {
       hungAfterMinutes: 20,
       staleAfterMinutes: 20,
-      ...(mode === "usage" ? { usageArgv: ["fixture-usage"] } : {}),
+      ...(mode === "usage" ? { usageArgv: ["fixture-usage"], activityPaths: [join(repo, lanes, "tracked.txt")] } : {}),
     },
   });
   const reports = new Reports(stateDir);
   await deps.registry.write(lane);
   reports.report(key, "milestone", "started", T0);
   const journal = reports.path(key);
+  const wall = Date.now();
   const rawStatus = async (...pathspec: string[]) =>
     (await native(["git", "-C", cwd, ...status, ...pathspec])).out.split("\0").filter(Boolean);
   const nestedSamples: string[][] = [];
@@ -74,7 +76,7 @@ const setup = async (home: string, nested: boolean, ignoreWriter: boolean, icase
     state: () => reports.read(key)?.state,
     journal: () => readFileSync(journal, "utf8"),
     observation: (): Observation => JSON.parse(readFileSync(join(dirname(journal), "supervision.json"), "utf8")),
-    tick: (minutes: number, failure?: 1 | 2 | "status") => {
+    tick: async (minutes: number, failure?: 1 | 2 | "status") => {
       let reads = 0;
       const runner: Runner = (argv, opts) => {
         if (failure === "status" && argv.includes("status") && ++reads === 1) {
@@ -85,7 +87,12 @@ const setup = async (home: string, nested: boolean, ignoreWriter: boolean, icase
       };
       clock.at = T0 + minutes * MIN;
       world.screen = `Working ${21 + minutes}m`;
-      return freshnessTick({ ...deps, run: runner }, home);
+      const now = spyOn(Date, "now").mockImplementation(() => wall + minutes * MIN);
+      try {
+        return await freshnessTick({ ...deps, run: runner }, home);
+      } finally {
+        now.mockRestore();
+      }
     },
   };
 };
@@ -136,8 +143,9 @@ test("freshness counts a case-distinct tracked edit with inherited Git icase pat
     expect(f.state()).toBe("running");
     const observed = f.observation();
     expect(observed.activeAt).toBe(T0 + 20 * MIN);
-    if (observed.activity === null) throw new Error("missing verified activity sample");
-    expect(JSON.parse(observed.activity)).toMatchObject({ changes: [` M ${userFile}`] });
+    const path = join(f.repo, userFile);
+    expect(observed.files?.[path]?.[1]).toBe(fileEvidence(path, f.repo).fingerprint);
+    expect(observed.lastEvidenceAt).toBe(new Date(T0 + 20 * MIN).toISOString());
     expect((await f.tick(40)).map((act) => act.kind)).toEqual(["stalled"]);
     expect(f.state()).toBe("stalled");
   } finally {

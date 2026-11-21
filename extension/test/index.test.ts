@@ -115,7 +115,11 @@ describe("role", () => {
   test("subagents inherit their parent's role; children of normal sessions stay plain", async () => {
     const parent = await load({ session: session("lane-parent"), flags: { "dori-role": "lane" } });
     await parent.emit("session_start");
-    const child = await load({ session: session("child"), agent: { kind: "sub", id: "0-Explore", parentId: "Main" } });
+    const child = await load({
+      session: session("child"),
+      agent: { kind: "sub", id: "0-Explore", parentId: "Main" },
+      active: ["read", "bash", "dori_report"],
+    });
     await child.emit("session_start");
     expect(await child.emit("before_agent_start", agentStart)).toContainEqual({
       systemPrompt: ["base prompt", "<fake-ulw-policy>"],
@@ -129,7 +133,7 @@ describe("role", () => {
     expect(await grandchild.emit("before_agent_start", agentStart)).toContainEqual({
       systemPrompt: ["base prompt", "<fake-ulw-policy>"],
     });
-    // children never touch the pane file or the tool set
+    // A child never owns the pane or the explicitly selected lane-only report tool.
     expect(readPaneState(stateDir, PANE)?.sessionId).toBe("lane-parent");
     expect(child.active).toEqual(["read", "bash"]);
 
@@ -176,7 +180,7 @@ describe("goal tool", () => {
   test("is activated only for lanes that have no goal yet", async () => {
     const lane = await load({ session: session("lane"), flags: { "dori-role": "lane" } });
     await lane.emit("session_start");
-    expect(lane.active).toEqual(["read", "bash", "goal"]);
+    expect(lane.active).toEqual(["read", "bash", "dori_report", "goal"]);
 
     const goalEntry = {
       type: "mode_change",
@@ -185,7 +189,7 @@ describe("goal tool", () => {
     };
     const laneWithGoal = await load({ session: session("lane-goal", [roleEntry("lane"), goalEntry]) });
     await laneWithGoal.emit("session_start");
-    expect(laneWithGoal.active).toEqual(["read", "bash"]);
+    expect(laneWithGoal.active).toEqual(["read", "bash", "dori_report"]);
 
     const dori = await load({ session: session("dori"), flags: { "dori-role": "dori" } });
     await dori.emit("session_start");
@@ -516,7 +520,7 @@ describe("pane state", () => {
     });
     await pi.emit("session_start");
     expect(readPaneState(stateDir, PANE)?.goal).toEqual({ status: "none" });
-    expect(pi.active).toEqual(["read", "bash", "goal"]);
+    expect(pi.active).toEqual(["read", "bash", "dori_report", "goal"]);
   });
 
   test("is retired to a pid-less tombstone at session shutdown, unless another process has taken the pane since", async () => {

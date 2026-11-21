@@ -1,3 +1,4 @@
+import { isEvidenceRefs, isEvidenceSequence } from "./evidence.ts";
 import type { LaneEvent, ReportKind } from "./reports.ts";
 import { isNativeReference, isProvenance, isRequestId, isRunId } from "./request-identity.ts";
 
@@ -32,6 +33,11 @@ export const parseEvent = (line: string, key: string): LaneEvent => {
     ...("generation" in value && typeof value.generation === "string" ? { generation: value.generation } : {}),
     ...("provenance" in value && isProvenance(value.provenance) ? { provenance: value.provenance } : {}),
   };
+  const refs = "evidenceRefs" in value ? value.evidenceRefs : undefined;
+  const sequence = "evidenceSequence" in value ? value.evidenceSequence : undefined;
+  if (refs !== undefined && !isEvidenceRefs(refs)) throw new ReportError(`invalid report evidenceRefs for ${key}`);
+  if (sequence !== undefined && (!isEvidenceSequence(sequence) || !refs?.length))
+    throw new ReportError(`invalid report evidenceSequence for ${key}`);
   if (value.type === "execution") {
     if (
       !("requestId" in value) ||
@@ -39,7 +45,9 @@ export const parseEvent = (line: string, key: string): LaneEvent => {
       !("runId" in value) ||
       !isRunId(value.runId) ||
       !("phase" in value) ||
-      "provenance" in value
+      "provenance" in value ||
+      "evidenceRefs" in value ||
+      "evidenceSequence" in value
     )
       throw new ReportError(`invalid execution record for ${key}`);
     const execution = { ...common, type: "execution" as const, requestId: value.requestId, runId: value.runId };
@@ -48,19 +56,24 @@ export const parseEvent = (line: string, key: string): LaneEvent => {
       return { ...execution, phase: "bound", nativeRef: value.nativeRef };
     throw new ReportError(`invalid execution binding for ${key}`);
   }
-  if (value.type === "reopen") return { ...common, type: "reopen" };
+  const progress = {
+    ...common,
+    ...(refs === undefined ? {} : { evidenceRefs: refs }),
+    ...(sequence === undefined ? {} : { evidenceSequence: sequence }),
+  };
+  if (value.type === "reopen") return { ...progress, type: "reopen" };
   if (value.type === "report" && "kind" in value && isReportKind(value.kind)) {
     if ("owner" in value && (typeof value.owner !== "string" || !value.owner.trim()))
       throw new ReportError(`invalid owner summary for ${key}`);
     return {
-      ...common,
+      ...progress,
       type: "report",
       kind: value.kind,
       ...("owner" in value ? { owner: value.owner as string } : {}),
     };
   }
   if (value.type === "activity" && "state" in value && (value.state === "running" || value.state === "stalled")) {
-    return { ...common, type: "activity", state: value.state };
+    return { ...progress, type: "activity", state: value.state };
   }
   throw new ReportError(`invalid report kind or activity state for ${key}`);
 };

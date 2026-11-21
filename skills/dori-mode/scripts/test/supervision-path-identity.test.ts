@@ -1,6 +1,7 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { mkdirSync, readFileSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileEvidence } from "../src/evidence.ts";
 import { freshnessTick } from "../src/freshness.ts";
 import type { Lane } from "../src/registry.ts";
 import { Reports } from "../src/reports.ts";
@@ -10,12 +11,6 @@ import { depsFor, fakeClock, newWorld, withState } from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00Z");
 const MIN = 60_000;
-
-type Activity = { files: [path: string, ...stat: (number | null)[]][]; changes: string[] };
-const activityOf = (observation: Observation): Activity => {
-  if (observation.activity === null) throw new Error("missing verified activity sample");
-  return JSON.parse(observation.activity);
-};
 
 const seedLane = async (home: string, stateDir: string, cwd: string, options: SupervisionOptions = {}) => {
   const clock = fakeClock(T0);
@@ -43,15 +38,21 @@ const seedLane = async (home: string, stateDir: string, cwd: string, options: Su
 
   const journalPath = reports.path(lane.key);
   const observationPath = join(dirname(journalPath), "supervision.json");
+  const wall = Date.now();
   return {
     observationPath,
     observation: (): Observation => JSON.parse(readFileSync(observationPath, "utf8")),
     journal: () => readFileSync(journalPath, "utf8"),
     state: () => reports.read(lane.key)?.state,
-    tick: (minutes: number, runner: Runner = deps.run) => {
+    tick: async (minutes: number, runner: Runner = deps.run) => {
       clock.at = T0 + minutes * MIN;
       world.screen = `Working ${21 + minutes}m`;
-      return freshnessTick({ ...deps, run: runner }, home);
+      const now = spyOn(Date, "now").mockImplementation(() => wall + minutes * MIN);
+      try {
+        return await freshnessTick({ ...deps, run: runner }, home);
+      } finally {
+        now.mockRestore();
+      }
     },
     run: deps.run,
   };
@@ -103,25 +104,18 @@ test("freshness preserves a stalled Git baseline saved with the lane's symlink s
     expect(f.state()).toBe("stalled");
     const stalledJournal = f.journal();
     const saved = f.observation();
-    const activity = activityOf(saved);
-    expect(activity.changes).toEqual([` M ${tracked}`]);
+    const trackedMark = saved.files?.[aliasFile];
+    expect(trackedMark?.[1]).toBe(fileEvidence(aliasFile, repo).fingerprint);
     const { mtimeMs, ctimeMs, size } = statSync(aliasFile);
-    expect(activity.files).toHaveLength(1);
-    const [file] = activity.files;
-    if (!file) throw new Error("expected actual tracked file in activity");
-    expect([aliasFile, join(repo, tracked)]).toContain(file[0]);
-    expect(file.slice(1)).toEqual([mtimeMs, ctimeMs, size]);
-    // Model an upgrade from the old spelling without changing any stat, Git, or journal data.
-    file[0] = aliasFile;
-    const stalledActivity = JSON.stringify(activity);
-    if (stalledActivity !== saved.activity) {
-      writeFileSync(f.observationPath, JSON.stringify({ ...saved, activity: stalledActivity }));
-    }
+    // Replace the new observer state with the previous release's persisted shape, including its lexical alias.
+    const { files: _files, coverage: _coverage, hung: _hung, lastEvidenceAt: _at, ...legacy } = saved;
+    const activity = JSON.stringify({ changes: [` M ${tracked}`], files: [[aliasFile, mtimeMs, ctimeMs, size]] });
+    writeFileSync(f.observationPath, JSON.stringify({ ...legacy, activity }));
 
     expect(await f.tick(40, sample)).toEqual([]);
     expect(f.state()).toBe("stalled");
     expect(f.journal()).toBe(stalledJournal);
-    expect(f.observation()).toMatchObject({ at: T0 + 40 * MIN, activeAt: saved.activeAt, activity: stalledActivity });
+    expect(f.observation()).toMatchObject({ at: T0 + 40 * MIN, activeAt: saved.activeAt, activity: saved.activity });
   } finally {
     fixture.done();
   }
@@ -153,7 +147,7 @@ test("an explicit writer directory through a state symlink does not count as act
     const stalled = f.observation();
     expect(stalled).toMatchObject({ at: T0 + 20 * MIN, activeAt: first.activeAt, activity: first.activity });
     // Prove exclusion even if lock acquisition itself stamps the directory within the same filesystem clock tick.
-    expect(activityOf(stalled).files).toEqual([]);
+    expect(stalled.files).toEqual({});
   } finally {
     fixture.done();
   }

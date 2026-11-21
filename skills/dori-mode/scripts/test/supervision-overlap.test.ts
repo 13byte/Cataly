@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileEvidence } from "../src/evidence.ts";
 import { freshnessTick } from "../src/freshness.ts";
 import type { Lane } from "../src/registry.ts";
 import { Reports } from "../src/reports.ts";
@@ -155,10 +156,10 @@ test("overlapping freshness leaves the stall and usage baseline to the same-lane
     const settled = readObservation(observationPath, lane);
     expect(settled).toMatchObject({ at: clock.at, activeAt: T0, timer: 41 * 60 });
     // The owner absorbs the hook's write in the next baseline without crediting it as progress.
-    expect(JSON.parse(settled?.activity ?? "null")).toMatchObject({
-      changes: [dirty],
-      files: [[marker, expect.any(Number), expect.any(Number), provisional.length]],
-    });
+    const ref = fileEvidence(marker, state.dir);
+    expect(settled?.files?.[marker]?.[1]).toBe(ref.fingerprint);
+    expect(settled?.incidental?.[ref.ref]).toBe(ref.fingerprint);
+    expect(settled?.lastEvidenceAt).toBeNull();
 
     clock.at += MIN;
     worldB.screen = "Working 42m";

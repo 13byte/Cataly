@@ -1,6 +1,7 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileEvidence } from "../src/evidence.ts";
 import { freshnessTick } from "../src/freshness.ts";
 import type { Lane } from "../src/registry.ts";
 import { Reports } from "../src/reports.ts";
@@ -34,6 +35,7 @@ async function supervisedLane(home: string, cwd: string, stateDir: string, optio
   const reports = new Reports(stateDir);
   await deps.registry.write(lane);
   reports.report(key, "milestone", "started", T0);
+  const wall = Date.now();
   return {
     state: () => reports.read(key)?.state,
     journal: () => readFileSync(reports.path(key), "utf8"),
@@ -43,7 +45,12 @@ async function supervisedLane(home: string, cwd: string, stateDir: string, optio
       world.screen = `Working ${21 + minutes}m`;
       const config = { ...deps.config, supervision: { ...supervision, gitActivity } };
       const dispatch: Runner = (argv, opts) => (argv[0] === "git" ? runner(argv, opts) : deps.run(argv, opts));
-      return (await freshnessTick({ ...deps, config, run: dispatch }, home)).map(({ kind, lane }) => [kind, lane]);
+      const now = spyOn(Date, "now").mockImplementation(() => wall + minutes * MIN);
+      try {
+        return (await freshnessTick({ ...deps, config, run: dispatch }, home)).map(({ kind, lane }) => [kind, lane]);
+      } finally {
+        now.mockRestore();
+      }
     },
   };
 }
@@ -170,7 +177,7 @@ test.each(["writer-only", "unstaged", "staged", "writer-then-unstaged"] as const
       expect(await lane.tick(0)).toEqual([]);
       expect(await sweep(20, "M  module\0", [])).toEqual(stalled);
       const baseline = lane.observation();
-      expect(JSON.parse(baseline?.activity ?? "{}")).toMatchObject({ changes: ["M  module"] });
+      expect(Object.keys(baseline?.files ?? {})).toEqual([module]);
       const journal = lane.journal();
       await git(module, "config", "--local", "--unset", "core.excludesFile");
       const writer = /^\?\? dori-state\/lanes\/\.supervision-writers\/[^/]+\.lock$/;
@@ -192,7 +199,8 @@ test.each(["writer-only", "unstaged", "staged", "writer-then-unstaged"] as const
       expect(await sweep(minute, "MM module\0", [innerStatus, writer])).toEqual([]);
       expect(lane.state()).toBe("running");
       expect(lane.observation()?.activeAt).toBe(T0 + minute * MIN);
-      expect(JSON.parse(lane.observation()?.activity ?? "{}")).toMatchObject({ changes: ["MM module"] });
+      const path = join(module, tracked);
+      expect(lane.observation()?.files?.[path]?.[1]).toBe(fileEvidence(path, module).fingerprint);
       expect(await git(root, "rev-parse", ":module")).toBe(stagedTarget);
       expect(await git(module, "rev-parse", "HEAD")).toBe(stagedTarget);
     } finally {

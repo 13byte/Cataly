@@ -2,7 +2,9 @@ import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, wr
 import { dirname, join } from "node:path";
 
 import { takeLock } from "./checkpoint-lock.ts";
-import { type Lane, LANE_KEY } from "./registry.ts";
+import { nextEvidenceSequence } from "./evidence-sequence.ts";
+import { type EvidenceRef, isEvidenceRefs, isEvidenceSequence } from "./evidence.ts";
+import { type Lane, LANE_KEY, Registry } from "./registry.ts";
 import { type ReportProvenance, isProvenance } from "./request-identity.ts";
 
 export type CheckpointInput = {
@@ -10,10 +12,16 @@ export type CheckpointInput = {
   readonly result: string;
   readonly evidence: readonly string[];
   readonly remoteEffects: readonly string[];
+  /**
+   * Fingerprinted evidence (evidence.ts), as observed by the first write of the step. Not part of the step's identity:
+   * a retry returns the recorded step whatever the files hold now.
+   */
+  readonly evidenceRefs?: readonly EvidenceRef[];
 };
 export type Checkpoint = CheckpointInput & {
   readonly key: string;
   readonly at: string;
+  readonly evidenceSequence?: number;
   readonly provenance?: ReportProvenance;
 };
 export class CheckpointError extends Error {}
@@ -31,6 +39,8 @@ const validate = (input: CheckpointInput): void => {
   ) {
     throw new CheckpointError("checkpoint requires step, result, evidence[], and completed remoteEffects[]");
   }
+  if (input.evidenceRefs !== undefined && !isEvidenceRefs(input.evidenceRefs))
+    throw new CheckpointError("invalid checkpoint evidenceRefs");
 };
 const payload = (value: CheckpointInput): string =>
   JSON.stringify({
@@ -65,6 +75,8 @@ export class Checkpoints {
             typeof value.at !== "string" ||
             !Number.isFinite(Date.parse(value.at)) ||
             steps.has(value.step) ||
+            (value.evidenceSequence !== undefined &&
+              (!isEvidenceSequence(value.evidenceSequence) || !value.evidenceRefs?.length)) ||
             ("provenance" in value && !isProvenance(value.provenance))
           ) {
             throw new CheckpointError("invalid key, timestamp, or duplicate step");
@@ -100,12 +112,13 @@ export class Checkpoints {
     return held;
   }
 
-  write(
+  async write(
     key: string,
     input: CheckpointInput,
     now: number,
+    capture?: () => readonly EvidenceRef[],
     provenance?: ReportProvenance,
-  ): { checkpoint: Checkpoint; unchanged: boolean } {
+  ): Promise<{ checkpoint: Checkpoint; unchanged: boolean }> {
     validate(input);
     if (provenance !== undefined && !isProvenance(provenance))
       throw new CheckpointError("invalid checkpoint provenance");
@@ -127,25 +140,44 @@ export class Checkpoints {
         if (repeated !== undefined)
           throw new CheckpointError(`remote effect ${repeated} already recorded by step ${entry.step}`);
       }
-      const checkpoint: Checkpoint = { key, at, ...JSON.parse(payload(input)), ...(provenance ? { provenance } : {}) };
-      const created = !existsSync(path);
-      const fd = openSync(path, "a", 0o600);
-      try {
-        writeSync(fd, `${JSON.stringify(checkpoint)}\n`);
-        fsyncSync(fd);
-      } finally {
-        closeSync(fd);
-      }
-      // A new journal's directory entry must be durable too, or a crash could lose the first checkpoint after it was acknowledged.
-      if (created && process.platform !== "win32") {
-        const dir = openSync(dirname(path), "r");
+      // Retrying a recorded step never rereads evidence or replaces the original receipt.
+      const captured = capture ? { ...input, evidenceRefs: capture() } : input;
+      if (capture) validate(captured);
+      const commit = (): { checkpoint: Checkpoint; unchanged: boolean } => {
+        const checkpoint: Checkpoint = {
+          key,
+          at,
+          step: input.step,
+          result: input.result,
+          evidence: input.evidence,
+          remoteEffects: input.remoteEffects,
+          ...(provenance === undefined ? {} : { provenance }),
+          ...(captured.evidenceRefs?.length
+            ? { evidenceRefs: captured.evidenceRefs, evidenceSequence: nextEvidenceSequence(this.stateDir, key) }
+            : {}),
+        };
+        const created = !existsSync(path);
+        const fd = openSync(path, "a", 0o600);
         try {
-          fsyncSync(dir);
+          writeSync(fd, `${JSON.stringify(checkpoint)}\n`);
+          fsyncSync(fd);
         } finally {
-          closeSync(dir);
+          closeSync(fd);
         }
-      }
-      return { checkpoint, unchanged: false };
+        // A new journal's directory entry must be durable too, or a crash could lose the first checkpoint after it was acknowledged.
+        if (created && process.platform !== "win32") {
+          const dir = openSync(dirname(path), "r");
+          try {
+            fsyncSync(dir);
+          } finally {
+            closeSync(dir);
+          }
+        }
+        return { checkpoint, unchanged: false };
+      };
+      // Own lock is acquired first (and still refuses immediately); only evidence waits on the unchanged registry lock.
+      // No path takes these locks in reverse: report sequencing reads checkpoints without acquiring their writer lock.
+      return captured.evidenceRefs?.length ? await new Registry(this.stateDir).withCurrent(key, commit) : commit();
     } finally {
       release();
     }

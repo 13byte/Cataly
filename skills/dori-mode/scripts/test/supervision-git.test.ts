@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { mkdirSync, realpathSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { freshnessTick } from "../src/freshness.ts";
@@ -113,7 +113,7 @@ test.each(layouts)("freshness preserves tracked Git activity but not its writer 
       const entries = result.out.split("\0");
       if (throughParent) {
         // Sample the same native worktree with no pathspec while the sweep owns its writer lock.
-        const unfiltered = await run(argv.slice(0, 7), opts);
+        const unfiltered = await run([...argv.slice(0, 6), "--untracked-files=normal"], opts);
         const writer = "?? dori-state/lanes/.supervision-writers/";
         expect(unfiltered.code, unfiltered.err).toBe(0);
         expect(unfiltered.out.split("\0")).toContain(writer);
@@ -133,10 +133,16 @@ test.each(layouts)("freshness preserves tracked Git activity but not its writer 
       }
       return result;
     };
-    const tick = (minutes: number) => {
+    const wall = Date.now();
+    const tick = async (minutes: number) => {
       clock.at = T0 + minutes * MIN;
       world.screen = `Working ${21 + minutes}m`;
-      return freshnessTick({ ...deps, run: sample }, fixture.dir);
+      const now = spyOn(Date, "now").mockImplementation(() => wall + minutes * MIN);
+      try {
+        return await freshnessTick({ ...deps, run: sample }, fixture.dir);
+      } finally {
+        now.mockRestore();
+      }
     };
 
     expect(await tick(0)).toEqual([]);

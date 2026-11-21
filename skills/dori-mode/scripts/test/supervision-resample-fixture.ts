@@ -1,3 +1,4 @@
+import { spyOn } from "bun:test";
 import { readFileSync } from "node:fs";
 import { freshnessTick } from "../src/freshness.ts";
 import type { Lane } from "../src/registry.ts";
@@ -33,6 +34,7 @@ export const fixture = (supervision: SupervisionOptions) => {
     supervision,
   });
   const reports = new Reports(state.dir);
+  const wall = Date.now();
   return {
     state,
     world,
@@ -45,9 +47,14 @@ export const fixture = (supervision: SupervisionOptions) => {
       await deps.registry.write(lane);
       reports.report(lane.key, "milestone", "started", T0);
     },
-    tick: (screen: string, run = deps.run) => {
+    tick: async (screen: string, run = deps.run) => {
       world.screen = screen;
-      return freshnessTick({ ...deps, run }, state.dir);
+      const now = spyOn(Date, "now").mockImplementation(() => wall + clock.at - T0);
+      try {
+        return await freshnessTick({ ...deps, run }, state.dir);
+      } finally {
+        now.mockRestore();
+      }
     },
   };
 };

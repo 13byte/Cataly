@@ -3,23 +3,9 @@ import { doriOwnWords } from "./monitor-dori.ts";
 import { bunEntryAt, envCommandAt, LAUNCHERS, launcherCommandAt } from "./monitor-launchers.ts";
 import { quotedSubstitutions, shellWords, splitString, unquote } from "./monitor-syntax.ts";
 
-// Which words of a watch's own command may name a lane. A command string is cut into commands at operators and line
-// breaks outside quotes (monitor-syntax.ts), at a shell's or `flock LOCK -c`'s script, and at a command substitution
-// inside double quotes. Each command's program is its first word after reserved words (`do`, `then`, `if`, `!`, ...
-// only where the command starts), assignments, `exec`, `command` and `builtin`, and after a known launcher's own
-// options and operands (monitor-launchers.ts: `env -u NAME`, `env -S STRING` runs STRING's words, `timeout -vk 5 60`,
-// `sudo -u USER`, `flock LOCK`): it is never a lane (`env tail -F` is not lane `tail`). A dori program is `dori`,
-// `omp-dori` or the skill's `dori-mode/scripts/src/cli.ts`, also behind bun's options (`bun --cwd DIR src/cli.ts`); a
-// relative one is read in the directory it runs in: the watch's cwd, as a `cd` before it or `env -C`/`--chdir` for
-// its own command leaves it, never another program's `-C`. Its command and, after a messenger command, the platform
-// are its own words (monitor-dori.ts), an option's value never (`dori send --text slack discord`). Every other word may
-// name a lane, as before: an argument (`dori checkpoints --cwd X dori`), a path (`ls /x/dori freshness`) or another
-// program's word (`env rg -c dori freshness`). A legacy record's non-string argv word holds a program's place.
-// A `cd` holds for the commands after it in its own subshell or command substitution only, and replaces the directory
-// only where it surely runs in that shell; elsewhere it adds a possible one, and a relative entry must be the skill CLI
-// in every possible directory (`false && cd SKILL; bun src/cli.ts` may run elsewhere).
-// Known limits: a `#` comment is read as words; behind an `env` option this does not know, no program is read, so
-// every word after it may name a lane as before.
+// Find the Dori entry point and its own arguments through shell commands, substitutions and known launchers.
+// A relative entry comes from the cwd or a prior cd/env directory, and must resolve in every possible directory
+// unless the caller asks whether it may coordinate. Unowned words, including comments, can still name lanes.
 const DORI_NAMES: Record<string, true> = { dori: true, "omp-dori": true };
 // A POSIX path is cut at `/` only; a backslash is an ordinary name character there, so only Windows reads it as one.
 const SKILL_SOURCE =
@@ -78,10 +64,14 @@ const OPENS_BODY: Record<string, true> = { if: true, while: true, until: true, f
 const CLOSES_BODY: Record<string, true> = { fi: true, done: true, esac: true };
 
 /**
- * The words of a watch's argv (exact) or command string (split at whitespace, quotes trimmed) that may name a lane:
- * every word except its own command words. Anything else gives no words.
+ * Read command identity and the words that may name a lane from the same parse. Lane words retain the existing
+ * argv/whitespace view except for the command's own words; Dori identity comes only from executable position.
  */
-export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] => {
+const commandWords = (
+  command: unknown,
+  cwd: unknown,
+  possible = false,
+): { lanes: readonly unknown[]; dori: boolean } => {
   const line = typeof command === "string" ? command : undefined;
   const raw: readonly unknown[] = line?.split(/\s+/).filter(Boolean) ?? (Array.isArray(command) ? command : []);
   // The whitespace-split word each character of the line is in.
@@ -99,10 +89,22 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
         quotedSubstitutions(word).map((s) => read(word.slice(s.from, s.to), (i) => baseAt(from + s.from + i)));
       return { word: passed.text, baseAt: at, after, scope, script: () => read(passed.text, at), substitutions };
     });
-  // A relative entry is the skill CLI only when it is in every directory the command may run in.
+  // Monitor ownership needs certainty; evidence's possible reading refuses a CLI in any possible directory (at most 16
+  // known), keeps the one before a `cd`, which may fail, and never guesses `pushd`, `popd` or an expanded word (`$D`,
+  // `~`): a relative `cli.ts` may be the CLI where it lost a known start (an unknown one is the caller's to refuse).
+  const expand = (dirs: Dirs, path: string): Dirs =>
+    possible && /[$`*?[{]|^~/.test(path) ? [undefined] : within(dirs, path);
+  const merge = (a: Dirs, b: Dirs): Dirs => {
+    const all = [...new Set([...a, ...b])];
+    return possible && all.length > 16 ? [undefined] : all;
+  };
   const isDori = (word: string, dirs: Dirs): boolean =>
-    DORI_NAMES[basename(word)] === true || within(dirs, word).every((path) => SKILL_SOURCE.test(path ?? word));
+    DORI_NAMES[basename(word)] === true ||
+    expand(dirs, word)[possible ? "some" : "every"]((path) =>
+      (path === undefined && possible && typeof cwd === "string" ? /(^|\/)cli\.ts$/ : SKILL_SOURCE).test(path ?? word),
+    );
   const own = new Set<number>();
+  let dori = false;
 
   // One command run in `dir`; for a `cd`, the directories it moves to.
   const commandOf = (ws: readonly Word[], dir: Dirs): Dirs | undefined => {
@@ -127,12 +129,12 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
       const name = basename(words[at] ?? "");
       const launcher = LAUNCHERS[name];
       if (isDori(words[at] ?? "", here)) program = at;
-      else if (name === "cd") {
-        const target = words.slice(at + 1).find((word) => !word.startsWith("-"));
-        return target === undefined ? [undefined] : within(dir, target);
+      else if (name === "cd" || (possible && (name === "pushd" || name === "popd"))) {
+        const target = name === "cd" ? words.slice(at + 1).find((word) => !word.startsWith("-")) : undefined;
+        return target === undefined ? [undefined] : expand(dir, target);
       } else if (name === "env") {
         const env = envCommandAt(words, at + 1);
-        if (env?.chdir !== undefined) here = within(here, env.chdir);
+        if (env?.chdir !== undefined) here = expand(here, env.chdir);
         if (env?.split === undefined) next = env?.at;
         else {
           // `-S STRING`: env reads STRING's words, its own options included, then the words after it.
@@ -153,7 +155,7 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
         }
       } else if (name === "bun") {
         const entry = bunEntryAt(words, at + 1);
-        const runs = entry?.cwd === undefined ? here : within(here, entry.cwd);
+        const runs = entry?.cwd === undefined ? here : expand(here, entry.cwd);
         if (entry === undefined || !isDori(words[entry.at] ?? "", runs)) break;
         for (let i = at; i < entry.at; i++) mine(i);
         program = entry.at;
@@ -162,17 +164,19 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
         if (script) run(script(), here);
       }
     }
-    if (program !== undefined) for (const i of doriOwnWords(words, program)) mine(i);
+    if (program !== undefined) {
+      dori = true;
+      for (const i of doriOwnWords(words, program)) mine(i);
+    }
     return undefined;
   };
 
-  // Each command of a run of words, cut where a new command starts. A `cd` moves the commands after it in its own
-  // subshell or substitution, a new one starting where the one around it is. Only a `cd` that surely runs in this
-  // shell replaces the directory: one starting a list, outside a condition or loop body, and not in a pipeline or the
-  // background. One after `&&` or `||` or in a body adds its directory as possible; one in a pipeline changes nothing.
-  // The commands after a `cd` joined to it by `&&` run where it moved (`cd X && true && B`), unless the `cd` itself
-  // follows an `||` (`true || cd X && B` may run where it was); one after a later `||` in either directory, as anything
-  // before it may have failed (`cd X && false || B`).
+  // Commands inherit their subshell's directory. Certainty replaces it only for a `cd` starting a list outside a
+  // condition, loop, pipeline or background; a conditional or loop `cd` adds a possible directory instead.
+  // An `&&` chain uses the moved directory (`cd X && true && B`), unless its `cd` follows `||`: `true || cd X && B`
+  // may stay where it began. A later `||` may also run there because any prefix may fail (`cd X && false || B`).
+  // A pipeline gives no certain new parent cwd. Possible mode keeps original and target in the `&&` chain and outer
+  // scope: the last `cd` may run in a subshell, or in the parent under shell options such as Bash lastpipe.
   const run = (ws: readonly Word[], dirs: Dirs): void => {
     const scopes = new Map<string, Dirs>([["", dirs]]);
     const dirOf = (scope: readonly number[]): Dirs => {
@@ -199,7 +203,7 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
       if (CLOSES_BODY[first] === true) bodies = Math.max(0, bodies - 1);
       const chain = chains.get(key);
       // An `||` is reached when anything before it failed, the `cd` or a command after it: from either directory.
-      const either: Dirs | undefined = chain && [...new Set([...chain.from, ...chain.to])];
+      const either: Dirs | undefined = chain && merge(chain.from, chain.to);
       if (either && after === "||") chains.set(key, { to: either, from: either });
       else if (after !== "&&") chains.delete(key);
       const here = chain && after === "&&" ? chain.to : either && after === "||" ? either : dirOf(scope);
@@ -207,10 +211,12 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
       const to = commandOf(command, here);
       const next = commands[index + 1]?.[0]?.after;
       // An `&&` after this `cd` runs where it moved only if every way to that `&&` ran the `cd`: not after an `||`.
-      if (to !== undefined) chains.set(key, { to: after === "||" ? [...new Set([...here, ...to])] : to, from: here });
-      if (to === undefined || after === "|" || next === "|" || next === "&") return;
-      const sure = OPENS_LIST[after] === true && bodies === 0;
-      scopes.set(key, sure ? to : [...new Set([...dirOf(scope), ...to])]);
+      const from = possible && after === "&&" && either ? either : here;
+      if (to !== undefined)
+        chains.set(key, { to: after === "||" || (possible && after === "|") ? merge(here, to) : to, from });
+      if (to === undefined || next === "|" || next === "&" || (!possible && after === "|")) return;
+      const sure = OPENS_LIST[after] === true && bodies === 0 && !possible;
+      scopes.set(key, sure ? to : merge(dirOf(scope), to));
     });
   };
   run(
@@ -219,7 +225,17 @@ export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] =>
       : read(line, (at) => baseOf[at] ?? -1),
     [typeof cwd === "string" ? cwd : undefined],
   );
-  return line === undefined
-    ? raw.filter((_, at) => !own.has(at))
-    : raw.map((word) => String(word).replace(/^['"]+|['"]+$/g, "")).filter((word, at) => word && !own.has(at));
+  return {
+    dori,
+    lanes:
+      line === undefined
+        ? raw.filter((_, at) => !own.has(at))
+        : raw.map((word) => String(word).replace(/^['"]+|['"]+$/g, "")).filter((word, at) => word && !own.has(at)),
+  };
 };
+
+export const laneWords = (command: unknown, cwd: unknown): readonly unknown[] => commandWords(command, cwd).lanes;
+
+/** Whether a command invokes Dori, or may invoke it when possible is true, after shell/launcher interpretation. */
+export const hasDoriCommand = (command: unknown, cwd: unknown, possible = false): boolean =>
+  commandWords(command, cwd, possible).dori;

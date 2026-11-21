@@ -2,7 +2,10 @@ import { createHash } from "node:crypto";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+import { nextEvidenceSequence } from "./evidence-sequence.ts";
+import type { EvidenceRef } from "./evidence.ts";
 import { type Lane, LANE_KEY } from "./registry.ts";
+import { reportActivity } from "./report-activity.ts";
 import { parseEvent, ReportError } from "./report-events.ts";
 import { type NativeReference, type ReportProvenance, provenanceIdentity } from "./request-identity.ts";
 
@@ -14,6 +17,8 @@ type EventFields = {
   readonly text: string;
   readonly generation?: string;
   readonly provenance?: ReportProvenance;
+  readonly evidenceRefs?: readonly EvidenceRef[];
+  readonly evidenceSequence?: number;
 };
 export type Report = EventFields & {
   readonly type: "report";
@@ -25,7 +30,7 @@ export type Activity = EventFields & {
   readonly state: "running" | "stalled";
 };
 type ProgressEvent = Report | Activity | (EventFields & { readonly type: "reopen" });
-export type Execution = Omit<EventFields, "provenance"> & {
+export type Execution = Omit<EventFields, "provenance" | "evidenceRefs" | "evidenceSequence"> & {
   readonly type: "execution";
   readonly requestId: string;
   readonly runId: string;
@@ -41,6 +46,8 @@ export type Progress = {
   readonly state: ProgressState;
   readonly lastReport: Report | null;
   readonly lastEvent: ProgressEvent;
+  /** Evidence from the exact same scope as this progress view. */
+  readonly evidenced: readonly ProgressEvent[];
 };
 
 // A question waits on the owner's answer, so it is blocked like a blocker: posted, never nudged.
@@ -78,6 +85,7 @@ export const reportId = (report: Report): string =>
         report.owner ?? null,
         report.generation ?? null,
         ...(report.provenance ? [provenanceIdentity(report.provenance)] : []),
+        ...(report.evidenceRefs?.length ? [[report.evidenceSequence, report.evidenceRefs]] : []),
       ]),
     )
     .digest("hex");
@@ -142,6 +150,7 @@ export class Reports {
     if (journal.lastRead?.scopeKey === scopeKey) return journal.lastRead.progress;
     let progress: Progress | null = null;
     let lastReport: Report | null = null;
+    const evidenced: ProgressEvent[] = [];
     for (const event of journal.events) {
       if (event.type === "execution") continue;
       if (
@@ -151,28 +160,48 @@ export class Reports {
           event.provenance?.runId !== scope.runId)
       )
         continue;
+      if (event.evidenceRefs?.length) evidenced.push(event);
       if (event.type === "reopen") {
         lastReport = null;
-        progress = { state: "running", lastReport, lastEvent: event };
+        progress = { state: "running", lastReport, lastEvent: event, evidenced };
       } else if (event.type === "report") {
         lastReport = event;
-        progress = { state: reportState(event.kind), lastReport: event, lastEvent: event };
+        progress = { state: reportState(event.kind), lastReport: event, lastEvent: event, evidenced };
       } else if (!progress || progress.state === "running" || progress.state === "stalled") {
-        progress = { state: event.state, lastReport, lastEvent: event };
+        progress = { state: event.state, lastReport, lastEvent: event, evidenced };
       }
     }
     if (this.memo) journal.lastRead = { scopeKey, progress };
     return progress;
   }
 
-  append(event: LaneEvent): void {
+  append<Event extends LaneEvent>(event: Event): Event {
+    if ("evidenceRefs" in event || "evidenceSequence" in event)
+      throw new ReportError("evidence append must hold the lane writer lock");
+    return this.persist(event);
+  }
+
+  /** The caller owns Registry.withCurrent for this lane and has rechecked the generation and execution binding. */
+  appendEvidenceLocked<Event extends ProgressEvent>(event: Event, refs: readonly EvidenceRef[]): Event {
+    if (refs.length === 0) return this.append(event);
+    this.path(event.key);
+    return this.persist({
+      ...event,
+      evidenceRefs: refs,
+      evidenceSequence: nextEvidenceSequence(this.stateDir, event.key),
+    });
+  }
+
+  private persist<Event extends LaneEvent>(event: Event): Event {
     const path = this.path(event.key);
-    parseEvent(JSON.stringify(event), event.key);
+    const line = JSON.stringify(event);
+    parseEvent(line, event.key);
     const dir = join(this.stateDir, "lanes", event.key);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     // mkdir's mode applies only on creation; a directory made earlier with wider permissions is narrowed here.
     chmodSync(dir, 0o700);
-    appendFileSync(path, `${JSON.stringify(event)}\n`, { encoding: "utf8", mode: 0o600 });
+    appendFileSync(path, `${line}\n`, { encoding: "utf8", mode: 0o600 });
+    return event;
   }
 
   report(
@@ -183,6 +212,7 @@ export class Reports {
     generation?: string,
     owner?: string,
     provenance?: ReportProvenance,
+    evidenceLocked: readonly EvidenceRef[] = [],
   ): Report {
     const report: Report = {
       type: "report",
@@ -194,8 +224,7 @@ export class Reports {
       ...(owner === undefined ? {} : { owner: owner.trim() }),
       ...(provenance === undefined ? {} : { provenance }),
     };
-    this.append(report);
-    return report;
+    return this.appendEvidenceLocked(report, evidenceLocked);
   }
 
   observe(
@@ -208,41 +237,9 @@ export class Reports {
     nativeStatus?: import("../../../../src/runtime/types.ts").AgentStatus,
   ): Progress | null {
     const progress = this.read(key, scope);
-    if (!progress || (progress.state !== "running" && progress.state !== "stalled")) return progress;
-    const visible = Bun.stripANSI(screen);
-    const lastAt = (pattern: RegExp): number => {
-      let at = -1;
-      for (const match of visible.matchAll(pattern)) at = match.index;
-      return at;
-    };
-    const workingAt = lastAt(/^\s*[^\w\n]*(?:Working|Running)\b/gim);
-    const working = nativeStatus === undefined ? workingAt >= 0 : nativeStatus === "working";
-    // A failure counts only when no Working line follows it: an old error left on screen above a recovered lane is history.
-    const failed =
-      nativeStatus === undefined &&
-      lastAt(
-        /compaction (?:failed|failure|error)|failed to compact|error (?:during|in) compaction|auto-?compaction failed/gi,
-      ) > workingAt;
-    // A headless idle session is still deliverable; unlike a terminal prompt it does not imply a stalled lane.
-    const idle = nativeStatus === undefined && /^\s*[❯>]\s*$/m.test(visible);
-    const stale = now - Date.parse(progress.lastReport?.at ?? progress.lastEvent.at) >= staleAfterMs;
-    const state =
-      failed || (idle && !working && stale) ? "stalled" : working && resumeOnWorking ? "running" : progress.state;
-    if (state === progress.state) return progress;
-    const { generation, provenance } = progress.lastEvent;
-    const event: Activity = {
-      type: "activity",
-      key,
-      at: new Date(now).toISOString(),
-      state,
-      ...(generation === undefined ? {} : { generation }),
-      ...(provenance === undefined ? {} : { provenance }),
-      text: failed
-        ? "compaction failed"
-        : state === "stalled"
-          ? "idle prompt without Working or a fresh report"
-          : "Working activity resumed",
-    };
+    if (!progress) return null;
+    const event = reportActivity(key, progress, screen, now, staleAfterMs, resumeOnWorking, nativeStatus);
+    if (!event) return progress;
     this.append(event);
     return this.read(key, scope);
   }

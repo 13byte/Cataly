@@ -192,7 +192,7 @@ posix("Telegram board keeps signed chat IDs, topic, explicit lane and recovery o
     expect([posted.code, posted.err, posted.out, posted.keys]).toEqual([0, "", "BOARD telegram posted 50", [send]]);
     expect(posted.requests[0]?.body).toMatchObject({ chat_id: "-100", message_thread_id: 42 });
 
-    new Reports(dirname(f.tmp)).report(lane.key, "milestone", "Now ready", Date.parse("2026-01-01T00:01:00Z"));
+    await new Reports(dirname(f.tmp)).report(lane.key, "milestone", "Now ready", Date.parse("2026-01-01T00:01:00Z"));
     const route = `POST /bot${token}/editMessageText`;
     const result = await f.invoke([...args, "--message", "50"], {
       environment,

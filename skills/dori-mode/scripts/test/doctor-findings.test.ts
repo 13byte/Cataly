@@ -232,7 +232,7 @@ test("done journals do not imply missing adoption and boot names its ignored che
       reportProtocol: "jsonl-v1",
     });
     const reports = new Reports(state.dir);
-    reports.report("complete", "done", "local output complete", now);
+    await reports.report("complete", "done", "local output complete", now);
     const result = await doctorCheck(deps);
     expect(result.findings.some((finding) => ["supervision", "worklog"].includes(finding.check))).toBe(false);
     expect(result.exitCode).toBe(0);

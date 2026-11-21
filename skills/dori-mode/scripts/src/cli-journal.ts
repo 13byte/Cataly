@@ -2,6 +2,7 @@
 import { CheckpointError, Checkpoints } from "./checkpoints.ts";
 import { type Cli, type Command, die } from "./cli-context.ts";
 import { autoTrackLinks } from "./cli-pr.ts";
+import { EvidenceError, type EvidenceRef, fileEvidence } from "./evidence.ts";
 import { isLessonOutcome, LessonError, Lessons } from "./lessons.ts";
 import { isReportKind, ReportError } from "./report-events.ts";
 import { Reports, reportLine, reportId, reportScope } from "./reports.ts";
@@ -12,29 +13,34 @@ import { realClock, runtimesOf } from "./run.ts";
 import { Worklog, WorklogError } from "./worklog.ts";
 
 /** Journal errors are the user's input refused: one line, never a stack. */
-export const journalErrors = [CheckpointError, LessonError, ReportError, WorklogError] as const;
+export const journalErrors = [CheckpointError, EvidenceError, LessonError, ReportError, WorklogError] as const;
 
-const report: Command = async ({ key, need, opt, values, lane, config, deps }) => {
+/** `--evidence-file PATH` fingerprints the selected bytes rather than the report text. */
+const evidenceFiles = (strings: Cli["strings"]): EvidenceRef[] =>
+  strings("evidence-file").map((path) => fileEvidence(path, process.cwd()));
+
+const report: Command = async ({ key, need, opt, strings, values, lane, config, deps }) => {
   const target = await lane(key ?? die("report needs a lane key"));
   const kind = need("kind");
-  if (isReportKind(kind)) {
-    const text = need("text");
-    const owner = opt("owner");
-    const reports = new Reports(config.stateDir);
-    const entry = await deps.registry.withCurrent(target.key, (current) => {
-      if (!current) throw new ReportError(`no registered lane "${target.key}"`);
-      const context = runContext(reports, current, process.env["DORI_LANE_RUN"]);
-      if (!context)
-        throw new ReportError("report: unknown or missing run (DORI_LANE_RUN); no matching execution recorded");
-      return reports.report(target.key, kind, text, realClock.now(), context.generation, owner, context.provenance);
-    });
-    const receipt = {
-      ...entry,
-      id: reportId(entry),
-      ...(entry.provenance ? { delivery: reportDelivery(config.stateDir, entry) } : {}),
-    };
-    console.log(values["json"] ? JSON.stringify(receipt) : reportLine(entry));
-  } else die("--kind must be milestone, blocker, question, halted or done");
+  if (!isReportKind(kind)) return die("--kind must be milestone, blocker, question, halted or done");
+  const text = need("text");
+  const owner = opt("owner");
+  const reports = new Reports(config.stateDir);
+  const evidence = evidenceFiles(strings);
+  const entry = await deps.registry.withCurrent(target.key, (current) => {
+    if (!current) throw new ReportError(`no registered lane "${target.key}"`);
+    const context = runContext(reports, current, process.env["DORI_LANE_RUN"]);
+    if (!context)
+      throw new ReportError("report: unknown or missing run (DORI_LANE_RUN); no matching execution recorded");
+    const { generation, provenance } = context;
+    return reports.report(target.key, kind, text, realClock.now(), generation, owner, provenance, evidence);
+  });
+  const receipt = {
+    ...entry,
+    id: reportId(entry),
+    ...(entry.provenance ? { delivery: reportDelivery(config.stateDir, entry) } : {}),
+  };
+  console.log(values["json"] ? JSON.stringify(receipt) : reportLine(entry));
 };
 
 const relayed: Command = async ({ key, need, values, lane, deps, config }) => {
@@ -200,7 +206,7 @@ const checkpoint: Command = async (cli) => {
     if (!(error instanceof ReportError)) throw error;
     attributionReason = `Execution journal invalid: ${error.message}; remote effects retained without source attribution`;
   }
-  const result = new Checkpoints(config.stateDir).write(
+  const result = await new Checkpoints(config.stateDir).write(
     target.key,
     {
       step: need("step"),
@@ -209,6 +215,7 @@ const checkpoint: Command = async (cli) => {
       remoteEffects: strings("remote-effect"),
     },
     realClock.now(),
+    () => evidenceFiles(strings),
     provenance,
   );
   const receipt =
