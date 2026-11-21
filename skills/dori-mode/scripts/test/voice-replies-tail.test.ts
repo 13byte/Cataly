@@ -136,3 +136,36 @@ test("short positional reads are completed without losing or duplicating a reply
     tmp.cleanup();
   }
 });
+
+test("file replacement retains distinct 64-bit IDs even if their Number forms collide", () => {
+  const tmp = temporaryVoice();
+  const replies = new Replies(tmp.directory, () => {});
+  const stat = fs.fstatSync;
+  let ino = 1n << 60n;
+  function observeStat(fd: number, options?: fs.StatOptions & { bigint?: false | undefined }): fs.Stats;
+  function observeStat(fd: number, options: fs.StatOptions & { bigint: true }): fs.BigIntStats;
+  function observeStat(fd: number, options?: fs.StatOptions): fs.Stats | fs.BigIntStats;
+  function observeStat(fd: number, options?: fs.StatOptions): fs.Stats | fs.BigIntStats {
+    if (options?.bigint) return Object.assign(stat(fd, { bigint: true }), { ino });
+    return Object.assign(stat(fd), { ino: Number(ino) });
+  }
+  const observed = spyOn(fs, "fstatSync").mockImplementation(observeStat);
+  try {
+    fs.writeFileSync(replies.file, line("original"));
+    replies.scan();
+    const old = replies.first()!;
+    const previous = Number(ino++);
+    expect(Number(ino)).toBe(previous);
+    fs.writeFileSync(replies.file, line("replacement is longer"));
+    replies.scan();
+    replies.spoken(old);
+    expect(replies.first()).toMatchObject({ text: "replacement is longer", start: 0 });
+    replies.spoken(replies.first()!);
+    const reopened = new Replies(tmp.directory, () => {});
+    reopened.scan();
+    expect(reopened.first()).toBeUndefined();
+  } finally {
+    observed.mockRestore();
+    tmp.cleanup();
+  }
+});
