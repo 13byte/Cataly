@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { artifactCommands } from "../src/cli-artifacts.ts";
 import { decisionCommands } from "../src/cli-decisions.ts";
 import { journalCommands } from "../src/cli-journal.ts";
 import { laneCommands } from "../src/cli-lanes.ts";
@@ -21,6 +22,7 @@ afterEach(() => state.done());
 
 test("the dori command vocabulary is every command the CLI dispatches", () => {
   const tables = [
+    ["cli-artifacts.ts", artifactCommands],
     ["cli-journal.ts", journalCommands],
     ["cli-lanes.ts", laneCommands],
     ["cli-ops.ts", opsCommands],
