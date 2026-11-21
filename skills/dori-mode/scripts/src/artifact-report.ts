@@ -1,6 +1,6 @@
 import { existsSync, realpathSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { artifactWithin } from "./artifact-files.ts";
+import { resolve } from "node:path";
+import { worktreeContainsArtifact } from "./artifact-files.ts";
 import type { Artifact } from "./artifact-records.ts";
 import type { Artifacts } from "./artifacts.ts";
 import { Checkpoints } from "./checkpoints.ts";
@@ -66,25 +66,14 @@ export const artifactKeepsWorktree = (entries: readonly Artifact[] | null, workt
   if (entries === null) return true;
   if (!entries.length) return false;
   const root = resolve(worktree);
-  let realRoot: string;
   try {
-    realRoot = realpathSync(root);
+    const realRoot = realpathSync.native(root);
+    return entries.some((entry) =>
+      [entry.path, ...entry.versions.map((version) => version.realPath)].some((path) =>
+        worktreeContainsArtifact(root, realRoot, path),
+      ),
+    );
   } catch {
     return true;
   }
-  return entries.some((entry) =>
-    [entry.path, ...entry.versions.map((version) => version.realPath)].some((path) => {
-      if (artifactWithin(root, path) || artifactWithin(realRoot, path)) return true;
-      // Git for Windows, the registry and realpath can spell the same directory differently, including DOS aliases.
-      if (process.platform !== "win32") return false;
-      for (let parent = dirname(path); ; parent = dirname(parent)) {
-        try {
-          if (artifactWithin(realRoot, realpathSync(parent))) return true;
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "ENOENT") return true;
-        }
-        if (parent === dirname(parent)) return false;
-      }
-    }),
-  );
 };

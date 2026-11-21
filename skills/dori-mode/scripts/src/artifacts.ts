@@ -15,7 +15,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { platform } from "../../../../src/platform/index.ts";
-import { ArtifactError, artifactWithin, inspectArtifact, type ArtifactFile } from "./artifact-files.ts";
+import { ArtifactError, inspectArtifact, worktreeContainsArtifact, type ArtifactFile } from "./artifact-files.ts";
 import {
   type Artifact,
   type ArtifactVersion,
@@ -119,14 +119,12 @@ export class Artifacts {
         if (other.key === key) continue;
         for (const tree of await discoverWorktrees(other, run, [this.config.defaultCwd])) {
           if (lstatSync(tree, { throwIfNoEntry: false }))
-            foreign.push({ key: other.key, path: resolve(tree), realPath: realpathSync(tree) });
+            foreign.push({ key: other.key, path: resolve(tree), realPath: realpathSync.native(tree) });
         }
       }
       const file = await inspectArtifact(this.config.artifactRoots ?? [], path, visibility);
       const owner = foreign.find((tree) =>
-        [file.path, file.realPath].some(
-          (target) => artifactWithin(tree.path, target) || artifactWithin(tree.realPath, target),
-        ),
+        [file.path, file.realPath].some((target) => worktreeContainsArtifact(tree.path, tree.realPath, target)),
       );
       if (owner)
         throw new ArtifactError(

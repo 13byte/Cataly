@@ -9,7 +9,7 @@ import {
   realpathSync,
   statSync,
 } from "node:fs";
-import { extname, isAbsolute, relative, resolve, sep } from "node:path";
+import { extname, isAbsolute, relative, resolve, sep, win32 } from "node:path";
 import type { ArtifactRoot } from "./artifact-config.ts";
 
 export class ArtifactError extends Error {}
@@ -25,6 +25,24 @@ export const artifactWithin = (root: string, path: string): boolean => {
   const child = relative(root, path);
   return child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child);
 };
+/** Ownership uses both spelling and physical ancestry, without changing artifact-root admission rules. */
+export const worktreeContainsArtifact = (root: string, realRoot: string, path: string): boolean => {
+  if (artifactWithin(root, path) || artifactWithin(realRoot, path)) return true;
+  if (process.platform !== "win32") return false;
+  const worktree = statSync(realRoot, { bigint: true });
+  for (let parent = win32.dirname(path); ; parent = win32.dirname(parent)) {
+    try {
+      const physical = realpathSync.native(parent);
+      if (artifactWithin(realRoot, physical)) return true;
+      const candidate = statSync(physical, { bigint: true });
+      if (worktree.ino !== 0n && candidate.ino === worktree.ino && candidate.dev === worktree.dev) return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    if (parent === win32.dirname(parent)) return false;
+  }
+};
+
 const extensions = new Set(
   "html css js json png jpg jpeg gif webp avif svg ico woff woff2 ttf otf md txt csv pdf wav mp3 ogg m4a flac mp4 webm mov".split(
     " ",

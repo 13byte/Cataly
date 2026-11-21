@@ -12,7 +12,12 @@ const findWorktrees = async (
   extraRoots: readonly string[],
   onUnreadable?: (root: string) => void,
 ): Promise<string[]> => {
-  const found = new Set<string>(lane.worktrees ?? []);
+  const found = new Map<string, string>();
+  const remember = (path: string) => {
+    const key = resolve(path);
+    if (!found.has(key)) found.set(key, path);
+  };
+  for (const path of lane.worktrees ?? []) remember(path);
   const ours = (name: string) => name === lane.key || name.startsWith(`${lane.key}-`);
   for (const root of new Set([lane.cwd ?? "", ...extraRoots].filter(Boolean))) {
     const r = await repoGit(run, root, ["worktree", "list", "--porcelain"]);
@@ -22,17 +27,18 @@ const findWorktrees = async (
     }
     let path = "";
     for (const line of r.out.split(/\r?\n/)) {
-      if (line.startsWith("worktree ")) path = resolve(line.slice(9));
+      if (line.startsWith("worktree ")) path = line.slice(9);
+      else if (!line) path = "";
       else if (
         line.startsWith("branch ") &&
         path &&
-        path !== resolve(root) &&
+        resolve(path) !== resolve(root) &&
         (ours(line.split("/").pop() ?? "") || ours(basename(path)))
       )
-        found.add(path);
+        remember(path);
     }
   }
-  return [...found];
+  return [...found.values()];
 };
 
 // Cleanup remains best effort; only preflight needs to hold on incomplete discovery.

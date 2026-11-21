@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { artifactClose, artifactNote } from "../src/artifact-report.ts";
 import { Artifacts } from "../src/artifacts.ts";
 import { discoverWorktrees } from "../src/close-worktrees.ts";
@@ -59,23 +59,15 @@ test("worktree discovery handles CRLF porcelain and normalizes Git path spelling
   const repo = join(f.state.dir, "repo");
   const owned = join(f.state.dir, "tree with spaces");
   const print = (path: string) => (process.platform === "win32" ? path.replaceAll("\\", "/") : path);
-  const result = [
-    `worktree ${print(repo)}`,
-    "HEAD abc",
-    "branch refs/heads/artifact-lane",
-    "",
-    `worktree ${print(owned)}`,
-    "HEAD abc",
-    "branch refs/heads/artifact-lane-two",
-    "",
-    "",
-  ].join("\r\n");
+  const result =
+    `worktree ${print(repo)}\r\nHEAD abc\r\nbranch refs/heads/artifact-lane\r\n\r\n` +
+    `worktree ${print(owned)}\r\nHEAD abc\r\nbranch refs/heads/artifact-lane-two\r\n\r\n`;
   const trees = await discoverWorktrees({ ...f.lane, cwd: repo, worktrees: [] }, async () => ({
     code: 0,
     out: result,
     err: "",
   }));
-  expect(trees).toEqual([owned]);
+  expect(trees.map((path) => resolve(path))).toEqual([owned]);
 });
 
 test("real git cleanup preserves a clean committed artifact and final hook receives the current URL/hash", async () => {
@@ -83,7 +75,7 @@ test("real git cleanup preserves a clean committed artifact and final hook recei
   const entry = (await w.artifacts.add(w.lane.key, join(w.tree, "report.txt"), "Evidence", "public", now)).artifact;
   const result = await closeLane(w.deps, w.lane, "Complete");
   expect(result.closed).toBe(true);
-  expect(existsSync(join(w.tree, "report.txt"))).toBe(true);
+  expect(existsSync(join(w.tree, "report.txt")), result.lines.join("\n")).toBe(true);
   const after = await f.registry.read(w.lane.key);
   expect(after && statusOf(after)).toBe("closed");
   const text = readFileSync(w.notification, "utf8");
@@ -115,6 +107,12 @@ test.each([
   else delete other.cwd;
   git(w.repo, "worktree", "add", "-q", "-b", ownership === "recorded" ? "unrelated" : other.key, otherTree);
   await f.registry.write(other);
+  const listing = await run(["git", "-C", w.repo, "worktree", "list", "--porcelain"]);
+  const discovered = await discoverWorktrees(other, run, [w.repo]);
+  expect(
+    discovered.map((path) => resolve(path)),
+    JSON.stringify(listing),
+  ).toContain(resolve(otherTree));
   const config = { ...w.deps.config, artifactRoots: [{ path: f.state.dir }] };
   const artifacts = new Artifacts(config, f.registry);
   const own = (await artifacts.add(w.lane.key, join(w.tree, "report.txt"), "Own", "private", now)).artifact;
