@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Telegram intake binds a private atomic cursor to the authenticated bot and omits offsets after 24 hours without observed updates, missing/invalid timestamps, or clock rollback. Bounded message/revision receipts prevent replay across epoch resets without treating a reused update ID as sufficient identity. Empty polls do not renew the epoch; legacy unscoped numeric cursors are preserved but not trusted. Windows uses a private owner ACL and an exclusive per-bot lease.
+
 - Add opt-in cron schedules with durable claims, explicit delivery, and read-only systemd observation. Stale ownership markers hold scheduled work for operator reconciliation.
 
 - Register lane artifacts by content hash, bind checkpoints and operator-reported delivery receipts to versions, and preserve worktrees that contain registered evidence.
