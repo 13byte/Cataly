@@ -61,6 +61,34 @@ const inboundCli = async (
   }
 };
 
+posix("the native Discord CLI takes over before the legacy monitor opens a connection", async () => {
+  const state = withState();
+  try {
+    const binary = join(state.dir, "native-monitor");
+    writeFileSync(
+      binary,
+      '#!/bin/sh\n[ "$CATALY_DISCORD_OWNER_ID" = 10 ] || exit 9\nprintf "NATIVE_ARG %s\\n" "$@"\n',
+      { mode: 0o700 },
+    );
+    const result = await inboundCli(["--gateway"], {
+      CATALY_DISCORD_NATIVE_BIN: binary,
+      CATALY_DISCORD_NATIVE_WORKSPACE: state.dir,
+      CATALY_MESSENGER_PROFILE_DEFAULTS: "off",
+    });
+    expect({ code: result.code, cursor: result.cursor, err: result.err }).toEqual({
+      code: 0,
+      cursor: undefined,
+      err: "",
+    });
+    expect(result.out).toContain("NATIVE_ARG discord\n");
+    expect(result.out).toContain("NATIVE_ARG --channel\nNATIVE_ARG 20\n");
+    expect(result.out).toContain("NATIVE_ARG --gateway\n");
+    expect(result.out).not.toContain("INBOUND_READY");
+  } finally {
+    state.done();
+  }
+});
+
 posix("public Discord intake defaults to three seconds and honors --loop in minutes", async () => {
   for (const [args, milliseconds] of [
     [[], 3_000],
@@ -103,6 +131,24 @@ posix("explicit --loop 0 performs one poll and exits with its cursor persisted",
     "INBOUND_READY discord owner=10 channel=20 bot=99",
     'INBOUND discord 20 101 from=owner ref=- "first owner text"',
   ]);
+});
+
+posix("Discord fills only an absent bot avatar and keeps intake available if the update fails", async () => {
+  for (const [scenario, disabled, expectedWrites, warning] of [
+    ["avatar-unset", false, 1, ""],
+    ["avatar-denied", false, 1, "Discord default bot avatar could not be set"],
+    ["profile-configured", false, 0, ""],
+    ["avatar-unset", true, 0, ""],
+  ] as const) {
+    const { out, err, code, cursor } = await inboundCli(["--loop", "0"], {
+      CATALY_TEST_DISCORD_CASE: scenario,
+      ...(disabled ? { CATALY_MESSENGER_PROFILE_DEFAULTS: "off" } : {}),
+    });
+    expect({ code, cursor }).toEqual({ code: 0, cursor: "102" });
+    expect(out.split("\n").filter((line) => line === "PROFILE_WRITE discord")).toHaveLength(expectedWrites);
+    if (warning) expect(err).toContain(warning);
+    else expect(err).toBe("");
+  }
 });
 
 posix("opt-in Discord recall appends only the same verified conversation’s owner history", async () => {

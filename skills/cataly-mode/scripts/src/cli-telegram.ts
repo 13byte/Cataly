@@ -2,6 +2,7 @@ import { inboundActivity } from "../../../../src/update/source-activity.ts";
 import { die } from "./cli-context.ts";
 import type { CatalyConfig } from "./config.ts";
 import { fetchHttp, MessengerError } from "./messenger/http.ts";
+import { applyTelegramProfileDefaults, messengerProfileDefaultsEnabled } from "./messenger/profile-defaults.ts";
 import { Telegram } from "./messenger/telegram.ts";
 import { fileTgInboundStore } from "./messenger/telegram-inbound-state.ts";
 import { envInt, telegramInboundLoop } from "./messenger/telegram-inbound.ts";
@@ -30,7 +31,7 @@ export const telegramInbound = async (config: CatalyConfig, minutes: number, act
     process.env["CATALY_TELEGRAM_GROUP_ID"] === undefined ? undefined : num("CATALY_TELEGRAM_GROUP_ID");
   const topicId = process.env["CATALY_TELEGRAM_TOPIC_ID"] === undefined ? undefined : num("CATALY_TELEGRAM_TOPIC_ID");
   // Authentication and transport readiness must finish before advertising or consuming inbound work.
-  const identity = await tg.call<{ id?: unknown; is_bot?: unknown }>("getMe", {}).catch(() => {
+  const identity = await tg.call<{ id?: unknown; is_bot?: unknown; first_name?: unknown }>("getMe", {}).catch(() => {
     throw new MessengerError("Telegram inbound bot identity could not be verified; check token and API access", 0);
   });
   if (
@@ -51,6 +52,8 @@ export const telegramInbound = async (config: CatalyConfig, minutes: number, act
   using store = fileTgInboundStore(stateDir, identity.id);
   store.checkWritable();
   store.load();
+  if (messengerProfileDefaultsEnabled() && typeof identity.first_name === "string")
+    await applyTelegramProfileDefaults(tg, identity.id, identity.first_name);
   // The INBOUND line stays exactly as monitors parse it; receive lag goes to its own jsonl.
   const recall = config.recall?.enabled
     ? (await import("./messenger/recall-telegram.ts")).telegramOwnerRecall(config, identity.id, ownerId)

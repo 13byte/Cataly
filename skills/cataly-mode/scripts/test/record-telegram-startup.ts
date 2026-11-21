@@ -14,7 +14,8 @@ globalThis.fetch = Object.assign(
     if (url.origin !== "https://api.telegram.org" || !url.pathname.startsWith(prefix))
       throw new Error("Unexpected Telegram startup endpoint");
     const method = url.pathname.slice(prefix.length);
-    const params = JSON.parse(String(init?.body));
+    const body = init?.body;
+    const params = body instanceof FormData ? { photo: body.get("photo") } : JSON.parse(String(body));
     appendFileSync(journal, `${JSON.stringify({ method, params })}\n`, { mode: 0o600 });
     console.log(`STARTUP_REQUEST ${method}`);
     if (scenario["hold"] === method) {
@@ -34,7 +35,20 @@ globalThis.fetch = Object.assign(
     let result: unknown;
     if (method === "getMe") result = scenario["identity"];
     else if (method === "getWebhookInfo") result = scenario["webhook"];
-    else if (method === "getUpdates") result = scenario["updates"] ?? [];
+    else if (method === "getUserProfilePhotos") result = scenario["photos"];
+    else if (method === "setMyName") result = true;
+    else if (method === "setMyProfilePhoto") {
+      const image = body instanceof FormData ? body.get("avatar") : null;
+      const expected = Bun.file(new URL("../../assets/cataly-avatar.jpg", import.meta.url));
+      if (
+        !(image instanceof File) ||
+        image.type !== "image/jpeg" ||
+        image.name !== "cataly-avatar.jpg" ||
+        !Buffer.from(await image.arrayBuffer()).equals(Buffer.from(await expected.arrayBuffer()))
+      )
+        throw new Error("Unexpected Telegram default profile photo");
+      result = true;
+    } else if (method === "getUpdates") result = scenario["updates"] ?? [];
     else if (method === "setMessageReaction" && Array.isArray(scenario["updates"])) result = true;
     else if (method === "sendMessage" && scenario["sent"] !== undefined) result = scenario["sent"];
     else throw new Error("Unexpected Telegram startup method");

@@ -90,10 +90,11 @@ test(
       expect(result.requests.map((request) => request.method)).toEqual([
         "getMe",
         "getWebhookInfo",
+        "getUserProfilePhotos",
         "getUpdates",
         "setMessageReaction",
       ]);
-      expect(result.requests[2]?.params).not.toHaveProperty("offset");
+      expect(result.requests.find((request) => request.method === "getUpdates")?.params).not.toHaveProperty("offset");
       expect(readFileSync(legacy, "utf8")).toBe("1000");
       const saved = JSON.parse(readFileSync(cursorPath(state.dir), "utf8"));
       expect(saved).toMatchObject({ version: 1, botId: 900, offset: 6 });

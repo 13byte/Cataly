@@ -23,9 +23,11 @@ import { discordInboundQueue } from "./messenger/discord-inbound-queue.ts";
 import { discordInboundEnv } from "./messenger/discord-inbound-state.ts";
 import { openDiscordLaneInbox } from "./messenger/discord-lane-inbox.ts";
 import { DiscordLaneIntakeHold, enqueueDiscordLane } from "./messenger/discord-lane-routing.ts";
+import { runNativeDiscord } from "./cli-discord-native.ts";
 import { headEmitter, reconcileHead } from "./messenger/head-admission.ts";
 import { headUnresolved } from "./messenger/head-admission-state.ts";
 import { fetchHttp } from "./messenger/http.ts";
+import { applyDiscordAvatarDefault, messengerProfileDefaultsEnabled } from "./messenger/profile-defaults.ts";
 import { recordOwes } from "./owes.ts";
 import { realClock } from "./run.ts";
 const idList = (value: string | undefined): string[] =>
@@ -60,6 +62,8 @@ export const discordInboundCommand = async (
     idList(env[name]).map((id) => discordInboundEnv(name, id)),
   );
   if (!all && channelIds.length === 0) discordInboundEnv("CATALY_DISCORD_CHANNEL_ID", env["CATALY_DISCORD_CHANNEL_ID"]);
+  const executable = env["CATALY_DISCORD_NATIVE_BIN"];
+  if (executable) return await runNativeDiscord(executable, { ...options, stateDir, channels: channelIds });
   const token = env["CATALY_DISCORD_TOKEN"] || die("CATALY_DISCORD_TOKEN is not set");
   const mode = env["CATALY_MONITOR_ADMISSION"];
   const native = mode === "1";
@@ -102,6 +106,7 @@ export const discordInboundCommand = async (
       all,
       threads,
     });
+    if (intake.missingAvatar && messengerProfileDefaultsEnabled()) await applyDiscordAvatarDefault(discord);
     const identity = { bot: intake.botId, owner: ownerId };
     const serviceLanes = wake ? discordLaneMonitor(deps, discord, identity) : undefined;
     if (wake) laneInbox = openDiscordLaneInbox(stateDir);

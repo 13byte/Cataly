@@ -4,6 +4,7 @@ use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use tokio::time::timeout;
 
+use super::tools::{HostToolCall, Tools};
 use super::{Kind, Response, Rpc};
 
 const MAX_REPLY_BYTES: usize = 64 * 1024;
@@ -40,6 +41,7 @@ enum Event<'a> {
     ExtensionUiRequest {
         method: &'a str,
     },
+    HostToolCall(#[serde(borrow)] HostToolCall<'a>),
     #[serde(other)]
     Other,
 }
@@ -80,13 +82,17 @@ pub enum TurnOutcome {
 }
 
 impl Rpc {
-    pub(crate) async fn run_turn(&mut self, message: &str) -> Result<TurnOutcome> {
-        timeout(TURN_DEADLINE, self.prompt(message))
+    pub(crate) async fn run_turn(
+        &mut self,
+        message: &str,
+        tools: Option<Tools>,
+    ) -> Result<TurnOutcome> {
+        timeout(TURN_DEADLINE, self.prompt(message, tools))
             .await
             .context("OMP turn deadline elapsed; execution may have started")?
     }
 
-    async fn prompt(&mut self, message: &str) -> Result<TurnOutcome> {
+    async fn prompt(&mut self, message: &str, mut tools: Option<Tools>) -> Result<TurnOutcome> {
         let id = self.allocate_id()?;
         self.write(&Prompt {
             kind: "prompt",
@@ -169,6 +175,11 @@ impl Rpc {
                         bail!(
                             "OMP requested interactive input; Cataly did not approve or answer it"
                         );
+                    }
+                    Event::HostToolCall(call) => {
+                        ensure!(started, "OMP host tool outside an active turn");
+                        let tools = tools.as_mut().context("OMP host tool in text-only mode")?;
+                        tools.call(self, call).await?;
                     }
                     Event::PromptResult { .. }
                     | Event::MessageEnd { .. }

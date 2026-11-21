@@ -1,6 +1,6 @@
 use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::io::{Read, Write};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, ensure};
@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::omp::Identity;
 
+mod discord;
 mod receipts;
 pub(super) use receipts::Claim;
 
@@ -29,6 +30,11 @@ pub enum Record {
 }
 
 impl Store {
+    #[cfg(feature = "discord")]
+    pub(super) fn root(&self) -> &Path {
+        &self.root
+    }
+
     pub fn open(root: &Path) -> Result<Self> {
         private_dir(root)?;
         let root = fs::canonicalize(root)?;
@@ -105,7 +111,7 @@ impl Store {
     }
 }
 
-fn private_dir(path: &Path) -> Result<()> {
+pub(super) fn private_dir(path: &Path) -> Result<()> {
     match DirBuilder::new().mode(0o700).create(path) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
@@ -116,7 +122,9 @@ fn private_dir(path: &Path) -> Result<()> {
     }
     let metadata = fs::symlink_metadata(path)?;
     ensure!(
-        metadata.is_dir() && metadata.permissions().mode().trailing_zeros() >= 6,
+        metadata.is_dir()
+            && metadata.uid() == rustix::process::geteuid().as_raw()
+            && metadata.permissions().mode().trailing_zeros() >= 6,
         "Cataly state directory must be a private real directory: {}",
         path.display()
     );

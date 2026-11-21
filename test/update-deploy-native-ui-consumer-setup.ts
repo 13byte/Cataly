@@ -68,6 +68,11 @@ writePaneState(${JSON.stringify(config.stateDir)}, { ...processIdentity(process.
     }
     handled = pending.length;
   });
+  // Bun can start fixture teardown before a timed-out caller reaches its finally block.
+  const closeRequests = f.ownCleanup(() => {
+    watcher.close();
+    clearTimeout(timer);
+  });
   writeFileSync(
     runtimeBinary(config),
     `#!${process.execPath}
@@ -118,9 +123,6 @@ console.log(JSON.stringify({ result }));
     ...f,
     config,
     requests,
-    closeRequests: () => {
-      watcher.close();
-      clearTimeout(timer);
-    },
+    closeRequests,
   };
 }

@@ -10,14 +10,18 @@ use tokio::time::timeout;
 
 use crate::frames::{Frames, Kind, LOGICAL_LIMIT, PHYSICAL_LIMIT};
 
+#[cfg(unix)]
+pub mod tools;
+#[cfg(unix)]
 mod turn;
+#[cfg(unix)]
 pub use turn::TurnOutcome;
 
 const EXIT_DEADLINE: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Copy, Serialize)]
 #[serde(tag = "type")]
-pub enum Request {
+pub enum Request<'a> {
     #[serde(rename = "negotiate_protocol", rename_all = "camelCase")]
     Negotiate { protocol_version: u32 },
     #[serde(rename = "get_state")]
@@ -25,16 +29,16 @@ pub enum Request {
     #[serde(rename = "fork")]
     Fork,
     #[serde(rename = "set_host_tools")]
-    ProbeHostTools { tools: [(); 0] },
+    SetHostTools { tools: &'a [serde_json::Value] },
 }
 
-impl Request {
+impl Request<'_> {
     const fn name(self) -> &'static str {
         match self {
             Self::Negotiate { .. } => "negotiate_protocol",
             Self::GetState => "get_state",
             Self::Fork => "fork",
-            Self::ProbeHostTools { .. } => "set_host_tools",
+            Self::SetHostTools { .. } => "set_host_tools",
         }
     }
 }
@@ -43,7 +47,7 @@ impl Request {
 struct CommandFrame<'a> {
     id: &'a str,
     #[serde(flatten)]
-    request: Request,
+    request: Request<'a>,
 }
 
 #[derive(Deserialize)]
@@ -140,7 +144,7 @@ impl Rpc {
 
     pub(crate) async fn call<T: DeserializeOwned>(
         &mut self,
-        request: Request,
+        request: Request<'_>,
     ) -> Result<Option<T>> {
         let id = self.allocate_id()?;
         self.write(&CommandFrame { id: &id, request }).await?;
@@ -194,7 +198,7 @@ impl Rpc {
 
     pub(crate) async fn probe_host_tools(&mut self) -> Result<bool> {
         let Some(registration) = self
-            .call::<Registration>(Request::ProbeHostTools { tools: [] })
+            .call::<Registration>(Request::SetHostTools { tools: &[] })
             .await?
         else {
             return Ok(false);

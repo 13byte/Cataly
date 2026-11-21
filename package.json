@@ -19,7 +19,7 @@
     "lint:loc": "bun scripts/check-loc.ts",
     "knip": "knip",
     "test": "bun test ./test/",
-    "test:ci": "bun test --parallel=2 --timings=.bun-test-timings.json ./test/",
+    "test:ci": "bun test --parallel=1 --timings=.bun-test-timings.json ./test/",
     "test:skill": "cd skills/cataly-mode/scripts && bun test",
     "test:extension": "cd extension && bun test",
     "ci": "bun run check:fixtures && bun run check && bun run typecheck && bun run knip && bun run lint:loc && bun run test:ci && bun run test:skill && bun run test:extension"

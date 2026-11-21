@@ -36,7 +36,7 @@ export const channelDiscord: Command = async ({ positionals, opt, values, config
     const options = discordInboundOptions();
     const client = discordClient();
     const request = inboundRequest(client);
-    const botId = await verifyDiscordInboundIdentity(request, options.ownerId);
+    const { botId } = await verifyDiscordInboundIdentity(request, options.ownerId);
     const channel = await request<DcChannel>(`/channels/${channelId}`);
     if (!channel || channel.id !== channelId || !Number.isInteger(channel.type))
       throw new ChannelPurposeError("Discord purpose source channel identity is invalid");

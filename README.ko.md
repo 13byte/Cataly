@@ -208,6 +208,79 @@ JSON
 결과를 반환하고, 결과가 불명확한 요청은 재실행하지 않습니다. `run`은 OMP에
 설정된 모델을 사용하며 현재 도구 실행·승인·메신저 회신 없이 텍스트만 반환합니다.
 
+대화형 클라이언트에서는 `run`과 같은 필드로 `run_controlled`를 실행할 수
+있습니다. 실행 중 같은 스트림에서 `{"op":"run_status","id":"request-1"}` 또는
+`{"op":"cancel","id":"request-1"}`을 보내세요. 제어 응답의 `control` 값은
+`"running"` 또는 `"cancelling"`이며, 실행 결과는 별도로 도착합니다. 전송
+전에 취소하면 실행 기록을 남기지 않습니다. 전송 뒤에 취소하면 해당 레인의
+OMP 프로세스를 닫습니다. 결과가 불명확하면 롤백된 것으로 간주하지 않으며,
+자동으로 다시 실행하지 않습니다.
+
+`run_with_tools`는 같은 필드로 새 레인이나 멈춰 둔 레인을 열고 읽기 전용
+도구 `cataly_read_readme`만 노출합니다. OMP가 도구를 요청하면 Cataly가
+`{"id":"request-1","approval_id":"…","tool":"cataly_read_readme"}`을 보냅니다.
+같은 스트림에 `{"op":"decide","id":"request-1","approval_id":"…","decision":"approve"}`
+또는 `"deny"`를 보내세요. 현재 대기 중인 승인 ID에만 답할 수 있습니다.
+승인 결정과 최종 실행 결과는 별도로 도착합니다. 승인하면 레인 안의
+`README.md`만 읽습니다. 최대 16 KiB의 UTF-8 일반 파일을 지원하며,
+심볼릭 링크와 하드 링크는 읽지 않습니다. 승인 전에 거절하거나 연결이
+끊기면 파일 내용을 전달하지 않습니다. `run`과 `run_controlled`는
+기존 텍스트 전용 경로를 유지합니다.
+
+`cargo build --release`로 빌드하세요. Unix에서는 Bun 없이 Rust 명령을 직접
+실행할 수 있습니다: `target/release/cataly --cwd "$WORKSPACE" discord --state-dir "$STATE_DIR" --channel "$CHANNEL_ID" --gateway`.
+환경에 `CATALY_DISCORD_TOKEN`과 `CATALY_DISCORD_OWNER_ID`를 설정하세요.
+`--gateway`를 빼면 REST로 폴링하고, `--poll-seconds 0`이면 한 번만 폴링합니다.
+기존 `cataly inbound discord` 명령에서 Rust 모니터를 실행하는 설정은 아래와 같습니다.
+
+| 설정 | 값 |
+| --- | --- |
+| `CATALY_DISCORD_NATIVE_BIN` | Rust 바이너리(`target/release/cataly`)의 절대 경로 |
+| `CATALY_DISCORD_NATIVE_WORKSPACE` | `README.md`를 읽을 작업 디렉터리의 절대 경로 |
+| `CATALY_DISCORD_NATIVE_CHANNEL_ID` | 선택 사항. 인입 목록의 채널 또는 스레드 하나를 지정합니다. 생략하면 명시적으로 등록한 인입 채널만 사용합니다. |
+| `CATALY_OMP` / `CATALY_DISCORD_NATIVE_MODEL` | 필요할 때만 지정하는 OMP 실행 파일과 모델 |
+
+Rust가 Gateway 하트비트와 재연결, REST 조회·전송, 버튼, OMP 레인을 맡습니다.
+명시적으로 등록한 채널·스레드만 처리합니다. 전환 전에 기존 모니터를 중지하세요.
+호환 실행기는 첫 실행 때 기존 채널 커서를 가져옵니다. 기존 head/ASK 라우팅과
+`--context`, `--wake-lanes`, `--activity-file`은 `CATALY_DISCORD_NATIVE_BIN`을
+설정하지 않는 기존 경로에서 유지합니다.
+
+소유자의 일반 텍스트는 도구 없이 실행하고, 첨부 파일은 다운로드하지 않습니다.
+같은 채널·스레드에서 저장된 세션을 재사용하되, 실행이 끝나면 OMP 프로세스는
+닫습니다. OMP가 호스트 도구를 지원할 때, Gateway에서 `!cataly <요청>`으로
+승인 기반 README 도구를 사용할 수 있습니다. 결과는 원래 메시지에 답장으로
+달리며 채널 구성원에게 보입니다.
+
+Rust는 답장 각 부분을 보내기 전에 전송 의도를 기록하고, 확인 뒤에는 Discord가
+반환한 메시지 ID를 저장합니다. 재시작해도 완료된 요청이나 확인된 답장을
+반복하지 않습니다. 전송 여부가 불명확하면 해당 부분부터 보류합니다.
+`DISCORD_REPLY_HELD`가 기록되면 원래 Discord 스레드와 네이티브 상태 기록을
+확인하세요.
+
+#### 네이티브 Discord의 로컬 메모리
+
+`~/.local/bin/ai-memory`가 설치되어 있으면 Rust 모니터가 사용합니다.
+다른 절대 경로는 `CATALY_MEMORY_BIN`으로 지정하고, 빈 값으로 설정하면
+체크포인트를 끕니다. 메모리 전용 로컬 워커가 추가 모델 호출 없이
+`127.0.0.1:49374`에 색인합니다. 서버가 내려가도 로컬 체크포인트는 남습니다.
+
+일반 대화는 방에만 기록합니다. 새 메모 8개, 10분 주기 또는 세션 파일
+16 MB 도달 시 저장하여 20 MB 전에 여유를 둡니다. 오래 남길 내용은
+`!remember room …`, `!remember person …`, `!remember project …`,
+`!remember common …` 중 하나로 범위를 지정하세요. 명시 저장은 OMP를
+띄우지 않고 로컬에서 처리합니다. 공통 메모리도 같은 상태 디렉터리와
+같은 봇·소유자 범위 안에서만 프로젝트를 넘나듭니다. 사람 메모리는 채널 응답에
+섞지 않고 로컬 ai-memory에서 읽습니다. 승인한 도구 출력과 첨부 파일은
+수집하지 않으며, 원본 OMP 세션 파일은 자르거나 삭제하지 않습니다.
+
+Cataly는 OMP 버전 문자열이나 SDK, 코어 패치가 아닌 공개 RPC에 의존합니다.
+`Cataly Native` CI는 변경 시 기준 버전을 검사하고, 최신 공식 Linux 릴리스는
+매일 별도로 검증합니다. `cataly doctor`로 설치된 RPC와 호스트 도구 지원 여부를
+확인할 수 있습니다. 공개 RPC가 깨지면 어댑터를 수정해야 하며, 결과를 확인하지
+못한 실행은 자동으로 반복하지 않습니다. Discord 네트워크 라이브러리 없이
+OMP 하네스만 빌드하려면 `--no-default-features`를 사용하세요.
+
 <table width="100%"><tr><td>
 
 **중요**

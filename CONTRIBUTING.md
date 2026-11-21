@@ -120,12 +120,15 @@ git -C "$compat" fetch --quiet --no-tags https://github.com/dbc-hbin/omp-ulw.git
 git -C "$compat" -c advice.detachedHead=false checkout --quiet "$compat_pin"
 test "$(git -C "$compat" rev-parse HEAD)" = "$compat_pin"
 export CATALY_TEST_COMPAT_ULW_ENTRY="$compat/index.ts"
-bun run ci
+(umask 022 && bun run ci)
 ```
 
 Fixture preparation needs network access unless the exact packages are already
 available. The compatibility checkout is test-only, outside the repository, and
 does not select a production dependency or change model/auth settings.
+On POSIX, the subshell's `umask 022` keeps test installation fixtures from
+inheriting group write permissions on developer machines. It does not change
+your shell's umask or the installer's ownership and mode checks.
 
 The full chain is:
 
@@ -138,12 +141,14 @@ The full chain is:
 | `typecheck` | Harness, skill, and extension TypeScript projects |
 | `knip` | Unused files, exports, and dependencies |
 | `lint:loc` | The 250-line limit per capped TypeScript file |
-| `test:ci` | Harness tests in two isolated Bun file workers |
+| `test:ci` | Harness tests in an isolated Bun file worker, one file at a time |
 | `test:skill` | The skill's script suite |
 | `test:extension` | Native OMP extension integration |
 
-`bun run test` remains the sequential harness command for debugging. File workers
-are native `--parallel`, not `--concurrent`; tests within each file are sequential.
+`bun run test` remains the direct harness command for debugging. CI uses one
+isolated file worker because the installer, release, and runtime fixtures
+already launch real subprocesses. Concurrent file workers can exhaust those
+fixtures' wall-clock budgets. Run only one full CI invocation per checkout.
 Do not change discovery, skips, assertions, worker limits, or timeouts to hide a
 failure. `.bun-test-timings.json` is an ordering hint, not a coverage gate; files
 missing from it still run. Its effect on total runtime has not been established.

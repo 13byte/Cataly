@@ -1,5 +1,5 @@
 import type { Clock } from "../run.ts";
-import { DeliveryUncertainError, guardText, type Http, MessengerError, withBackoff } from "./http.ts";
+import { DEFAULT_RETRY, DeliveryUncertainError, guardText, type Http, MessengerError, withBackoff } from "./http.ts";
 import { cutAt } from "./split.ts";
 
 export type TgTarget = { readonly chatId: number | string; readonly threadId?: number };
@@ -45,8 +45,14 @@ export class Telegram {
     private readonly base = "https://api.telegram.org",
   ) {}
 
-  async call<T = unknown>(method: string, params: Record<string, unknown>): Promise<T> {
-    const readOnly = ["getUpdates", "getMe", "getWebhookInfo", "getFile", "getChat"].includes(method);
+  async call<T = unknown>(
+    method: string,
+    params: Record<string, unknown> | FormData,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    const readOnly = ["getUpdates", "getMe", "getWebhookInfo", "getFile", "getChat", "getUserProfilePhotos"].includes(
+      method,
+    );
     const res = await withBackoff(
       this.http,
       this.clock,
@@ -55,10 +61,12 @@ export class Telegram {
         readOnly,
         operation: `telegram ${method}`,
         url: `${this.base}/bot${this.botToken}/${method}`,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(params),
+        ...(params instanceof FormData
+          ? { body: params }
+          : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(params) }),
+        ...(signal === undefined ? {} : { signal }),
       },
-      undefined,
+      signal === undefined ? undefined : { ...DEFAULT_RETRY, attempts: 1 },
       retryAfter,
     );
     let body: { ok?: boolean; result?: T; description?: string; error_code?: number };

@@ -25,9 +25,25 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return new Response('{"diagnostic":"private authentication payload"}', { status: 401 });
   }
   let body: unknown;
-  if (url.pathname === "/api/v10/users/@me") body = { id: "99", bot: true };
-  else if (url.pathname === "/api/v10/applications/@me") body = { flags: scenario === "intent" ? 0 : 1 << 19 };
-  else if (url.pathname === "/api/v10/channels/20") {
+  if (url.pathname === "/api/v10/users/@me") {
+    if (init?.method === "PATCH") {
+      const patch = JSON.parse(String(init.body));
+      const bytes = await Bun.file(new URL("../../assets/cataly-avatar.jpg", import.meta.url)).arrayBuffer();
+      if (
+        Object.keys(patch).length !== 1 ||
+        patch.avatar !== `data:image/jpeg;base64,${Buffer.from(bytes).toString("base64")}`
+      )
+        throw new Error("Unexpected Discord default profile payload");
+      console.log("PROFILE_WRITE discord");
+      if (scenario === "avatar-denied") return new Response("{}", { status: 403 });
+      body = { id: "99", bot: true, avatar: "default-image", username: "Selected Bot" };
+    } else {
+      const avatar = scenario === "avatar-unset" || scenario === "avatar-denied" ? null : "custom-image";
+      body = { id: "99", bot: true, avatar, username: "Selected Bot" };
+    }
+  } else if (url.pathname === "/api/v10/applications/@me") {
+    body = { flags: scenario === "intent" ? 0 : 1 << 19 };
+  } else if (url.pathname === "/api/v10/channels/20") {
     channelReads++;
     if (scenario === "context") body = { id: "20", type: 11, name: "task thread", parent_id: "30" };
     else if (scenario === "recall") body = { id: "20", type: 0, name: "task channel" };
