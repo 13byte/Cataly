@@ -186,9 +186,9 @@ posix("journal recovery preserves conflicting native edits and unrelated install
   expect(readFileSync(f.paths.journal)).toEqual(journal);
 });
 
-test.skipIf(process.platform !== "linux")(
-  "native recovery holds a live Dori receipt before changing the command",
-  async () => {
+posix.each(["dori", "cataly"])(
+  "native recovery holds a live %s role receipt before changing the command",
+  async (role) => {
     const { f, before, after } = await activationFixture(true);
     const source = pointer(f.paths.live);
     const omp = join(f.paths.dori, "bin/omp");
@@ -197,11 +197,11 @@ test.skipIf(process.platform !== "linux")(
     const runtime = join(f.paths.dori, "state/runtime");
     mkdirSync(runtime, { recursive: true, mode: 0o700 });
     const receipt = join(runtime, "owned-pane.json");
-    saveJson(receipt, { ...processIdentity(process.pid), role: "dori", sessionId: "isolated" });
+    saveJson(receipt, { ...processIdentity(process.pid), role, sessionId: "isolated" });
     replacePointer(omp, native, undefined);
     saveJson(f.paths.journal, { version: 1, before, after });
     const journal = readFileSync(f.paths.journal);
-    expect(() => recoverInstalled(f.paths)).toThrow("Live Dori PID");
+    expect(() => recoverInstalled(f.paths)).toThrow(`Live Cataly PID ${process.pid} holds release activation`);
     expect(pointer(f.paths.live)).toBe(source);
     expect(pointer(omp)).toBeUndefined();
     expect(readFileSync(f.paths.state)).toEqual(state);
