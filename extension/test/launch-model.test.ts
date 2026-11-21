@@ -87,6 +87,8 @@ for (const [name, options, status] of [
   });
 }
 
+// Native host initialization on Windows can exceed the short subprocess deadline under CI load.
+const fixtureTimeoutMs = process.platform === "win32" ? 60_000 : 25_000;
 for (const boundary of ["session", "provider"] as const) {
   for (const availability of ["available", "unavailable"] as const) {
     const requests = availability === "available" ? "one request" : "zero requests";
@@ -116,7 +118,7 @@ for (const boundary of ["session", "provider"] as const) {
             },
             stdout: "pipe",
             stderr: "pipe",
-            timeout: 25_000,
+            timeout: fixtureTimeoutMs,
           });
           const [out, err, code] = await Promise.all([
             new Response(child.stdout).text(),
@@ -128,7 +130,7 @@ for (const boundary of ["session", "provider"] as const) {
           rmSync(home, { recursive: true, force: true });
         }
       },
-      30_000,
+      fixtureTimeoutMs + 5_000,
     );
   }
 }
