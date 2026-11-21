@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -87,7 +87,7 @@ test.each(cwdCases)("schedule add/list and one-shot scheduler preserve argv and 
   expect(readFileSync(job.last.output, "utf8")).toContain(literal);
   expect(readFileSync(job.last.output, "utf8")).toContain("stderr");
   expect(invoke(["scheduler", "--loop", "0"]).code).toBe(0);
-  expect(job.cwd).toBe(cwd);
+  expect(job.cwd).toBe(realpathSync.native(cwd));
   expect(readFileSync(join(cwd, "runs"), "utf8")).toBe("x");
 });
 
