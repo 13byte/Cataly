@@ -113,11 +113,11 @@ test.each(layouts)("freshness preserves tracked Git activity but not its writer 
       const entries = result.out.split("\0");
       if (throughParent) {
         // Sample the same native worktree with no pathspec while the sweep owns its writer lock.
-        const unfiltered = await run([...argv.slice(0, 6), "--untracked-files=normal"], opts);
-        const writer = "?? dori-state/lanes/.supervision-writers/";
+        const unfiltered = await run([...argv.slice(0, 6), "--untracked-files=all"], opts);
+        const writer = /^\?\? dori-state\/lanes\/\.supervision-writers\/[^/]+\.lock$/;
         expect(unfiltered.code, unfiltered.err).toBe(0);
-        expect(unfiltered.out.split("\0")).toContain(writer);
-        expect(entries).not.toContain(writer);
+        expect(unfiltered.out.split("\0").filter((row) => writer.test(row))).toHaveLength(1);
+        expect(entries.some((row) => writer.test(row))).toBe(false);
       }
       statuses.push(entries);
       for (const entry of entries) {

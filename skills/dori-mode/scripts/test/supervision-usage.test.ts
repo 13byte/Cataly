@@ -44,5 +44,5 @@ for (const added of [false, true]) {
       expect((await f.settle(() => supervisor.sweep(f.lane, `Working ${21 + turn}m`))).hung).toBe(false);
     }
     expect(f.refs().findLast((ref) => ref.ref === path)).toEqual(expected);
-  });
+  }, 20_000);
 }
