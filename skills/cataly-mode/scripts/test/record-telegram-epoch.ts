@@ -25,6 +25,7 @@ globalThis.fetch = Object.assign(
     let result: unknown;
     if (method === "getMe") result = identity;
     else if (method === "getWebhookInfo") result = { url: "" };
+    else if (method === "getUserProfilePhotos") result = { total_count: 1, photos: [[{ file_id: "configured" }]] };
     else if (method === "getUpdates")
       result = updates
         .filter((update) => params.offset === undefined || update.update_id >= params.offset)

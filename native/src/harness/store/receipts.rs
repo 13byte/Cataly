@@ -88,7 +88,7 @@ impl Store {
     }
 }
 
-fn load<T: DeserializeOwned>(path: &Path) -> Result<Option<T>> {
+pub(super) fn load<T: DeserializeOwned>(path: &Path) -> Result<Option<T>> {
     let file = match File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -105,13 +105,19 @@ fn load<T: DeserializeOwned>(path: &Path) -> Result<Option<T>> {
     ))
 }
 
-fn publish(path: &Path, record: &impl Serialize) -> Result<()> {
+pub(super) fn publish(path: &Path, record: &impl Serialize) -> Result<()> {
     let temporary = path.with_extension(format!(
         "{}.tmp",
         path.extension()
             .and_then(std::ffi::OsStr::to_str)
             .context("Cataly record missing suffix")?
     ));
+    // Store owns the directory lock. A leftover temp file was never published, or its hard link already exists.
+    match fs::remove_file(&temporary) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error).context("reclaiming an interrupted Cataly receipt write"),
+    }
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)

@@ -12,7 +12,7 @@ import { foregroundCli } from "./update-deploy-foreground-cli.ts";
 import { foregroundActor } from "./update-deploy-foreground-readiness.ts";
 import { processName } from "./proc-name.ts";
 import { deploymentConfig, type ForegroundFixtureOptions } from "./update-deploy-setup.ts";
-const cleanups: Array<() => Promise<void>> = [];
+const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => {
   const errors: unknown[] = [];
   for (const cleanup of cleanups.splice(0).reverse()) {
@@ -204,6 +204,17 @@ export async function foregroundFixture(options: ForegroundFixtureOptions = {}) 
     }
     return { front, status: state.agentStatus! };
   };
+  const ownCleanup = (cleanup: () => void): (() => void) => {
+    let pending = true;
+    const dispose = () => {
+      if (!pending) return;
+      pending = false;
+      cleanup();
+    };
+    if (closing) dispose();
+    else cleanups.push(dispose);
+    return dispose;
+  };
   const cli = foregroundCli(config, observe);
   return {
     root,
@@ -222,6 +233,7 @@ export async function foregroundFixture(options: ForegroundFixtureOptions = {}) 
     writeBootstrap,
     writeHealth,
     observe,
+    ownCleanup,
     sendLine: (line: string) => child.stdin!.write(`${line}\n`),
     closeNativeInput: () => (child.stdio[3] as Writable).end(),
   };

@@ -66,7 +66,7 @@ export const discordInbound = async (
   const ownerId = discordInboundEnv("CATALY_DISCORD_OWNER_ID", opts.ownerId);
   const explicit = opts.channelIds.map((id) => discordInboundEnv("CATALY_DISCORD_CHANNEL_IDS", id));
   const request = inboundRequest(discord);
-  const botId = await verifyDiscordInboundIdentity(request, ownerId);
+  const { botId, missingAvatar } = await verifyDiscordInboundIdentity(request, ownerId);
   const watched = new Map<string, DiscordInboundStore>();
   const parents = new Map<string, string>();
   const threads = opts.threads !== false && !opts.all;
@@ -175,6 +175,7 @@ export const discordInbound = async (
   let polls = 0;
   return {
     botId,
+    missingAvatar,
     accepts,
     parentFor,
     recallSpaceFor,

@@ -4,6 +4,8 @@ use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
 use serde::Serialize;
 
+#[cfg(all(unix, feature = "discord"))]
+mod discord;
 mod frames;
 #[cfg(unix)]
 mod harness;
@@ -48,11 +50,17 @@ enum Command {
         #[arg(long, default_value_t = 2, value_parser = clap::value_parser!(u8).range(1..=32))]
         max_sessions: u8,
     },
+    /// Run the native Discord intake, approvals and reply transport in the foreground.
+    #[cfg(all(unix, feature = "discord"))]
+    Discord(discord::Options),
+    /// Send or edit Discord text from standard input without launching OMP.
+    #[cfg(all(unix, feature = "discord"))]
+    DiscordSend(discord::SendOptions),
 }
 
 #[derive(Serialize)]
 struct DoctorReport {
-    omp_version: String,
+    omp_version: Option<String>,
     rpc_protocol: u32,
     host_tools: bool,
 }
@@ -74,7 +82,13 @@ async fn main() -> Result<()> {
     let omp = omp::Executable::new(&cli.omp, &cli.cwd, cli.model.as_deref())?;
     match cli.command {
         Command::Doctor => {
-            let omp_version = omp.version().await?;
+            let omp_version = match omp.version().await {
+                Ok(version) => Some(version),
+                Err(error) => {
+                    eprintln!("OMP version metadata unavailable: {error:#}");
+                    None
+                }
+            };
             let report = omp.inspect(omp::Target::Ephemeral).await?;
             println!(
                 "{}",
@@ -114,6 +128,10 @@ async fn main() -> Result<()> {
             )
             .await?;
         }
+        #[cfg(all(unix, feature = "discord"))]
+        Command::Discord(options) => Box::pin(discord::run(&omp, &cli.cwd, options)).await?,
+        #[cfg(all(unix, feature = "discord"))]
+        Command::DiscordSend(options) => Box::pin(discord::send(options)).await?,
     }
     Ok(())
 }

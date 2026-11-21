@@ -98,7 +98,10 @@ impl<'a> Executable<'a> {
 
     fn command(&self) -> Command {
         let mut command = Command::new(&self.path);
-        command.current_dir(self.cwd).kill_on_drop(true);
+        command
+            .current_dir(self.cwd)
+            .env_remove("CATALY_DISCORD_TOKEN")
+            .kill_on_drop(true);
         command
     }
 
@@ -151,6 +154,8 @@ impl<'a> Executable<'a> {
 
     pub(crate) async fn connect(&self, target: Target<'_>) -> Result<Connection> {
         let mut command = self.command();
+        // Stock OMP can inject this auxiliary tool after a host-tool refresh even with --no-tools.
+        command.env("PI_AUTO_QA", "0");
         command.args([
             "--mode",
             "rpc-ui",

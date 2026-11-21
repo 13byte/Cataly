@@ -8,6 +8,7 @@ use crate::omp::{Executable, Target, session_state};
 use crate::rpc::Rpc;
 
 mod control;
+pub mod discord;
 mod store;
 mod work;
 
@@ -214,6 +215,19 @@ impl Harness<'_, '_> {
     }
 }
 
+impl<'a, 'b> Harness<'a, 'b> {
+    fn new(omp: &'a Executable<'b>, options: Options<'a>) -> Result<Self> {
+        Ok(Self {
+            omp,
+            cwd: options.cwd,
+            store: Store::open(options.root)?,
+            max_sessions: options.max_sessions,
+            sessions: BTreeMap::new(),
+        })
+    }
+}
+
+#[derive(Clone, Copy)]
 pub struct Options<'a> {
     pub cwd: &'a Path,
     pub root: &'a Path,
@@ -221,14 +235,7 @@ pub struct Options<'a> {
 }
 
 pub async fn run(omp: &Executable<'_>, options: Options<'_>) -> Result<()> {
-    omp.version().await?;
-    let mut harness = Harness {
-        omp,
-        cwd: options.cwd,
-        store: Store::open(options.root)?,
-        max_sessions: options.max_sessions,
-        sessions: BTreeMap::new(),
-    };
+    let mut harness = Harness::new(omp, options)?;
     let commands = control::serve(&mut harness).await;
     let shutdown = harness.shutdown().await;
     match (commands, shutdown) {

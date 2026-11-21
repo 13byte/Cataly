@@ -3,8 +3,8 @@ import { isDiscordSnowflake } from "./discord-inbound-state.ts";
 import { MessengerError } from "./http.ts";
 
 /** Requires an authenticated bot distinct from the configured owner and enabled for owner messages. */
-export const verifyDiscordInboundIdentity = async (request: Request, ownerId: string): Promise<string> => {
-  const me = await request<{ id?: string; bot?: boolean }>("/users/@me");
+export const verifyDiscordInboundIdentity = async (request: Request, ownerId: string) => {
+  const me = await request<{ id?: string; bot?: boolean; avatar?: unknown }>("/users/@me");
   if (me?.bot !== true || !isDiscordSnowflake(me.id)) {
     throw new MessengerError("Discord inbound requires an authenticated bot identity; use a bot token", 401);
   }
@@ -19,5 +19,5 @@ export const verifyDiscordInboundIdentity = async (request: Request, ownerId: st
       403,
     );
   }
-  return botId;
+  return { botId, missingAvatar: me.avatar === null };
 };

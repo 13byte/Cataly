@@ -224,6 +224,94 @@ uncertain requests are held, not replayed. `run` uses the configured OMP model
 and currently returns text only. It does not handle tools, approvals, or
 messenger delivery.
 
+For interactive clients, `run_controlled` accepts the same fields as `run`.
+While it is active, send `{"op":"run_status","id":"request-1"}` or
+`{"op":"cancel","id":"request-1"}` on the same stream. Control replies carry
+`control: "running"` or `"cancelling"`; the run's receipt arrives separately.
+Cancellation before dispatch leaves no run claim. After dispatch, Cataly closes
+the lane's OMP process. An unconfirmed outcome is not a rollback and must not
+be automatically replayed.
+
+`run_with_tools` takes the same fields and opens a new or parked lane with
+one read-only tool, `cataly_read_readme`. When OMP calls it, Cataly emits
+`{"id":"request-1","approval_id":"…","tool":"cataly_read_readme"}`.
+On the same stream, reply with
+`{"op":"decide","id":"request-1","approval_id":"…","decision":"approve"}` or
+use `"deny"`. Only an exact, pending approval ID is accepted. The decision
+acknowledgement is separate from the final run receipt. Approval reads only
+the lane's `README.md`: a regular UTF-8 file up to 16 KiB with no symbolic or
+hard links. Denial or disconnect before approval discloses no file content.
+`run` and `run_controlled` still use the text-only path.
+
+Build with `cargo build --release`. On Unix, the Rust binary can run Discord
+without Bun: `target/release/cataly --cwd "$WORKSPACE" discord --state-dir "$STATE_DIR" --channel "$CHANNEL_ID" --gateway`.
+Set `CATALY_DISCORD_TOKEN` and `CATALY_DISCORD_OWNER_ID` in its environment.
+Without `--gateway`, Rust uses REST polling; `--poll-seconds 0` runs one poll.
+The existing `cataly inbound discord` can launch the Rust monitor with:
+
+| Setting | Value |
+| --- | --- |
+| `CATALY_DISCORD_NATIVE_BIN` | Absolute path to the Rust binary (`target/release/cataly`). |
+| `CATALY_DISCORD_NATIVE_WORKSPACE` | Absolute path to the workspace whose `README.md` may be approved. |
+| `CATALY_DISCORD_NATIVE_CHANNEL_ID` | Optional exact channel or thread ID from the inbound list. If unset, use all explicitly listed inbound channels, not auto-discovered channels. |
+| `CATALY_OMP` / `CATALY_DISCORD_NATIVE_MODEL` | Optional OMP executable and model overrides. |
+
+Rust owns Gateway heartbeat and resume, REST history and sends, button
+callbacks, and the OMP lane. It only watches explicitly listed channels or
+threads. Stop the legacy monitor before switching; the compatibility launcher
+imports the existing channel cursor on first use. Legacy head/ASK routing and
+the `--context`, `--wake-lanes`, and `--activity-file` flags stay with the legacy
+command configuration, without `CATALY_DISCORD_NATIVE_BIN`.
+
+With the same `CATALY_DISCORD_NATIVE_BIN`, `cataly send discord` uses Rust
+for text, replies and edits. You can also run it without Bun or OMP:
+`target/release/cataly discord-send --thread "$THREAD_ID" < reply.txt`.
+Use `--reply MESSAGE_ID` to reply or `--edit MESSAGE_ID` to update a single
+message. For a channel, use `--to CHANNEL_ID` or a unique `--to '#name'`
+in `CATALY_DISCORD_GUILD_ID`. The direct command emits a JSON delivery receipt.
+Multi-part fenced Markdown stays on the compatibility send path.
+
+Ordinary owner text runs with OMP's tools disabled; attachments are not
+downloaded. Follow-ups reuse the saved session, and the OMP process exits
+between turns. On Gateway, `!cataly <request>` enables the approval-gated
+README tool when OMP advertises host tools. Use private channels: results are
+visible to channel members and reply to the original message.
+
+Rust records a send intent before each Discord reply part and saves the remote
+message ID after confirmation. Restarting does not rerun completed requests or
+repeat confirmed parts. If a POST cannot be confirmed, that part and later
+parts are held rather than retried blindly. Check the monitor for
+`DISCORD_REPLY_HELD` and inspect the original thread and the native state
+directory before reconciling a receipt.
+
+#### Local memory for native Discord
+
+The native monitor uses the local [ai-memory](https://github.com/akitaonrails/ai-memory)
+installation when `~/.local/bin/ai-memory` exists. Use `CATALY_MEMORY_BIN`
+to select another absolute binary path, or set it to an empty value to turn
+off native checkpoints. The recorder is a separate bounded local worker,
+not another model call. It indexes notes on `127.0.0.1:49374`; if the server
+is down, private checkpoints remain on disk for later export.
+
+Cataly checkpoints bounded owner text to its room. It exports after eight
+new notes, on the ten-minute maintenance tick, or when the session reaches
+16 MB, before the 20 MB warning point. For durable notes use
+`!remember room …`, `!remember person …`, `!remember project …`, or
+`!remember common …`. These commands save locally without launching OMP.
+Only explicit notes leave the room scope, and common notes are shared across
+projects within the same bot-owner account and state directory, never
+between owners. Person notes are not sent into channel replies. Read them
+locally in ai-memory. Approved tool output and attachments are not captured.
+Checkpoints do not delete, truncate, or rotate the original OMP session.
+
+Cataly depends on the installed OMP's public RPC, not its version string,
+SDK, or patched core. The latest official Linux release is tested daily by
+the `Cataly Native` workflow alongside pinned release tests on changes.
+Use `cataly doctor` to check the installed protocol and optional host tools.
+An incompatible RPC change still needs an adapter fix; an ambiguous turn stays
+held rather than being replayed. Build with `--no-default-features` if you
+only want the OMP harness without Discord's networking libraries.
+
 <table width="100%"><tr><td>
 
 **Important**
