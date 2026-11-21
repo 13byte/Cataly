@@ -1,4 +1,5 @@
 import { UpdateError } from "./config.ts";
+import { NATIVE_VALUE_FLAGS } from "../runtime/omp-options.ts";
 
 export const RESUME_FLAG =
   /^(?:--resume|--continue|--session|--restore|--fork|--from-claude|--from-codex|-r|-c)(?:=|$)/;
@@ -7,48 +8,6 @@ const OWNED_FLAG =
   /^(?:--system-prompt|--append-system-prompt|--system-prompt-template|--profile|--alias|-e|--extensions?|--trusted-extension|--hook|--dori-role)(?:=|$)/;
 
 export const isNativeOwnedFlag = (arg: string): boolean => OWNED_FLAG.test(arg);
-
-// OMP v18.20.0 cli/flag-tables.ts STRING_SETTERS: a value must not swallow the model flag or final prompt.
-export const NATIVE_VALUE_FLAGS: Readonly<Record<string, true>> = {
-  "--cwd": true,
-  "--config": true,
-  "--add-dir": true,
-  "--mode": true,
-  "--fork": true,
-  "--provider": true,
-  "--model": true,
-  "--smol": true,
-  "--slow": true,
-  "--goal": true,
-  "--plan": true,
-  "--prewalk-into": true,
-  "--plan-yolo-into": true,
-  "--max-time": true,
-  "--warn-cost": true,
-  "--max-cost": true,
-  "--service-tier": true,
-  "--spinner-interval": true,
-  "--max-fps": true,
-  "--motion": true,
-  "--api-key": true,
-  "--system-prompt": true,
-  "--system-prompt-template": true,
-  "--append-system-prompt": true,
-  "--provider-session-id": true,
-  "--prompt-cache-key": true,
-  "--session-dir": true,
-  "--models": true,
-  "--tools": true,
-  "--thinking": true,
-  "--export": true,
-  "--hook": true,
-  "--extension": true,
-  "-e": true,
-  "--trusted-extension": true,
-  "--plugin-dir": true,
-  "--skills": true,
-  "--approval-mode": true,
-};
 
 // OMP v18.20.0 cli/flag-tables.ts VALUELESS_FLAGS, including the parser's short aliases.
 export const NATIVE_BOOLEAN_FLAGS: Readonly<Record<string, true>> = {

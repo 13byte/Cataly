@@ -3,7 +3,8 @@ import { resolve } from "node:path";
 import type * as NativeArgs from "../../test/fixtures/omp-native-host/node_modules/@oh-my-pi/pi-coding-agent/dist/types/cli/args.d.ts";
 import type * as NativeFlags from "../../test/fixtures/omp-native-host/node_modules/@oh-my-pi/pi-coding-agent/dist/types/cli/flag-tables.d.ts";
 import { classifyOmpArgv } from "../../src/runtime/omp-argv.ts";
-import { NATIVE_BOOLEAN_FLAGS, NATIVE_VALUE_FLAGS } from "../../src/update/native-argv.ts";
+import { NATIVE_VALUE_FLAGS } from "../../src/runtime/omp-options.ts";
+import { NATIVE_BOOLEAN_FLAGS } from "../../src/update/native-argv.ts";
 import { modelLaunchCommand, modelLaunchProblem } from "../../skills/dori-mode/scripts/src/launch-model.ts";
 
 // CI has no extension peer: exercise the frozen host module boundary instead of an ambient package import.

@@ -1,5 +1,6 @@
 import { classifyOmpArgv, mayRunOmpArgv } from "../../../../src/runtime/omp-argv.ts";
-import { NATIVE_BOOLEAN_FLAGS, NATIVE_VALUE_FLAGS, RESUME_FLAG } from "../../../../src/update/native-argv.ts";
+import { NATIVE_VALUE_FLAGS } from "../../../../src/runtime/omp-options.ts";
+import { NATIVE_BOOLEAN_FLAGS, RESUME_FLAG } from "../../../../src/update/native-argv.ts";
 import { fill } from "./config.ts";
 import { exactModelIdentity, type ModelReadback } from "./lane-state.ts";
 import type { SessionRef } from "../../../../src/runtime/types.ts";

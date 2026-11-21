@@ -57,6 +57,7 @@ import { type AskLane, automaticDiscordAskRoute, bindAskLane } from "./discord-a
 import { DiscordLane } from "./discord-lane.ts";
 import { HeadAdmissions } from "./head-admission.ts";
 import { type PromptModel, withLaneBookkeeping } from "./lane-bookkeeping.ts";
+import { lanePolicyHook } from "./lane-policy.ts";
 import { BATCH_MS, MONITOR_DESCRIPTION, Monitors } from "./monitor";
 import { NativeRemote } from "./native-remote.ts";
 import { ROLE_INVARIANTS } from "./role-invariants.ts";
@@ -98,6 +99,7 @@ export interface DoriContext {
     getBranch(): SessionEntry[];
     getEntries?(): readonly SessionEntry[];
     ensureOnDisk?(): Promise<void>;
+    getHeader?(): { parentSession?: string } | null;
   };
   ui: {
     notify(message: string, type?: "info" | "warning" | "error"): void;
@@ -200,12 +202,6 @@ const GOAL_STATUS: Record<string, GoalStatus> = {
   complete: "complete",
   dropped: "dropped",
 };
-
-/**
- * Role by agent registry id. omp rebinds extension factories to every subagent session in the same process without
- * re-evaluating this module, so a subagent finds its spawning agent's role here through `ctx.agent.parentId`.
- */
-const agentRoles = new Map<string, DoriRole>();
 
 const parseRole = (value: unknown): DoriRole | undefined => (value === "dori" || value === "lane" ? value : undefined);
 
@@ -330,6 +326,7 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
     type: "string",
   });
 
+  const policy = lanePolicyHook(pi, recordedRole);
   let role: DoriRole | undefined;
   let stateDir: string | undefined;
   let loadError: string | undefined;
@@ -852,7 +849,6 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
         // a later branch or tree move in this session does not restore the role from its record.
         rejectedBootstrap = sessionId;
         role = undefined;
-        agentRoles.delete(ctx.agent.id);
         monitors.stopAll();
         removePane();
         throw error;
@@ -962,9 +958,10 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
         monitors.invalidateAdmissions();
       }
       const branch = ctx.sessionManager.getBranch();
+      const inherited = ctx.agent.kind === "sub" ? await policy.inherit(ctx) : undefined;
       let flaggedRole = false;
       if (ctx.agent.kind === "sub") {
-        role = ctx.agent.parentId === undefined ? undefined : agentRoles.get(ctx.agent.parentId);
+        role = inherited?.role;
       } else {
         if (
           eventName === "session_start" &&
@@ -1033,8 +1030,6 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
           if (session?.intake) pi.appendEntry("omp-dori:intake", session.intake);
         }
       }
-      if (role) agentRoles.set(ctx.agent.id, role);
-      else agentRoles.delete(ctx.agent.id);
       try {
         // Opening an OMP transcript is read-only. This appends before publishing the pane so the resumed
         // foreground must actually take the native session lease; a conflicting writer will force a sibling.
@@ -1079,9 +1074,10 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
         if (activation !== undefined && remoteActivation === activation) nativeRemote.stop();
         throw error;
       } finally {
-        // A rejected bootstrap has cleared the role, so it is not recorded; any other failure keeps the role this
-        // process runs with, and its record, as a later resume without the flag must restore it.
-        if (flaggedRole && role) pi.appendEntry(ROLE_ENTRY, role);
+        // Preserve the ordinary child's runtime-only role; only a protected child needs a recoverable record.
+        const persistRole = flaggedRole || (ctx.agent.kind === "sub" && inherited?.binding !== undefined);
+        if (persistRole && role && !recordedRole(ctx.sessionManager.getBranch())) pi.appendEntry(ROLE_ENTRY, role);
+        policy.sync(role, ctx, eventName, event, flaggedRole, inherited);
       }
       if (activation !== undefined && activation === remoteActivation) {
         if (remoteJournalReady) await syncRemote(ctx, activation);

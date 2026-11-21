@@ -18,6 +18,7 @@ import { usageOptionsError } from "./usage-options.ts";
 import type { CommitIdentity } from "./verify-pr-check.ts";
 import type { VoiceSettings } from "./voice/settings.ts";
 import { recallSettingsError, type RecallSettings } from "./messenger/recall-text.ts";
+import { checkLanePolicy, type LanePolicy, PolicyError } from "./lane-policy.ts";
 
 export type ArgvTemplate = readonly string[];
 
@@ -71,6 +72,7 @@ export type DoriConfig = LaunchConfig & {
   readonly supervision: SupervisionOptions;
   readonly quota?: QuotaOptions;
   readonly prAutoTrack: boolean; // opt-in: claim and checkpoint PR links are tracked for `dori pr watch`
+  readonly lanePolicy?: LanePolicy;
   readonly recall?: RecallSettings;
   readonly doctor?: DoctorOptions;
 };
@@ -140,6 +142,11 @@ export const loadConfig = async (path = configPath(), home = homedir(), env = pr
   const file = Bun.file(path);
   const raw = (await file.exists()) ? ((await file.json()) as Partial<DoriConfig>) : {};
   checkRuntime(raw.runtime);
+  try {
+    checkLanePolicy(raw.lanePolicy);
+  } catch (error) {
+    throw error instanceof PolicyError ? new ConfigError(error.message) : error;
+  }
   const laneRuntime = env["DORI_LANE_RUNTIME"] ?? raw.laneRuntime;
   if (laneRuntime !== undefined && laneRuntime !== "terminal" && laneRuntime !== "headless")
     throw new ConfigError(`invalid laneRuntime: expected "terminal" or "headless", got ${JSON.stringify(laneRuntime)}`);
