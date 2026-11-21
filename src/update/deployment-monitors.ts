@@ -1,6 +1,14 @@
 import { lstatSync, readFileSync } from "node:fs";
-import { isAbsolute } from "node:path";
-import type { IntakeSpec, MonitorSet, MonitorSpec, ProcessIdentity } from "./deployment-types.ts";
+import { isAbsolute, join } from "node:path";
+import { DeploymentHeld } from "./deployment-process.ts";
+import type {
+  DeploymentConfig,
+  DeploymentRecord,
+  IntakeSpec,
+  MonitorSet,
+  MonitorSpec,
+  ProcessIdentity,
+} from "./deployment-types.ts";
 
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -33,7 +41,7 @@ const processReceipt = (value: unknown): ProcessIdentity => {
 };
 
 /** Explicit operator input only; never discover commands in model transcripts or recover secrets from argv. */
-export function readMonitorSet(path: string, sessionId: string, trusted = false): MonitorSet {
+function readMonitorIntent(path: string, sessionId: string, trusted: boolean) {
   const stat = lstatSync(path);
   if (
     !stat.isFile() ||
@@ -44,7 +52,12 @@ export function readMonitorSet(path: string, sessionId: string, trusted = false)
     throw new Error("monitor metadata ownership differs");
   if (trusted && (stat.mode & 0o077) !== 0) throw new Error("trusted monitor bootstrap must be private");
   const value: unknown = JSON.parse(readFileSync(path, "utf8"));
-  if (!record(value) || value["version"] !== 1 || value["sessionId"] !== sessionId || !Array.isArray(value["monitors"]))
+  if (
+    !record(value) ||
+    (value["version"] !== 1 && value["version"] !== 2) ||
+    value["sessionId"] !== sessionId ||
+    !Array.isArray(value["monitors"])
+  )
     throw new Error("monitor metadata session or version differs");
   const names = new Set<string>();
   const monitors: MonitorSpec[] = value["monitors"].map((item: unknown): MonitorSpec => {
@@ -59,9 +72,14 @@ export function readMonitorSet(path: string, sessionId: string, trusted = false)
       typeof item["filter"] !== "string" ||
       typeof item["cwd"] !== "string" ||
       !isAbsolute(item["cwd"]) ||
+      (item["mode"] !== undefined && item["mode"] !== "persistent" && item["mode"] !== "once") ||
       (item["restart"] !== undefined && item["restart"] !== "on-failure")
     )
       throw new Error("monitor metadata contains an invalid specification");
+    if (item["mode"] === "once")
+      throw new DeploymentHeld(
+        `managed restart waits for once monitor "${item["name"]}" to finish successfully or be explicitly stopped`,
+      );
     names.add(item["name"]);
     new RegExp(item["filter"]);
     return {
@@ -72,6 +90,11 @@ export function readMonitorSet(path: string, sessionId: string, trusted = false)
       ...(item["restart"] === "on-failure" ? { restart: item["restart"] } : {}),
     };
   });
+  return { value, names, monitors };
+}
+
+export function readMonitorSet(path: string, sessionId: string, trusted = false): MonitorSet {
+  const { value, names, monitors } = readMonitorIntent(path, sessionId, trusted);
   const raw = value["intake"];
   if (
     !record(raw) ||
@@ -139,17 +162,26 @@ export function readMonitorSet(path: string, sessionId: string, trusted = false)
   };
 }
 
+/** Recheck desired intent before stopping an actor, even when the handoff was prepared earlier. */
+export function assertMonitorStopSafe(config: DeploymentConfig, handoff: DeploymentRecord): void {
+  const path = join(config.stateDir, "monitors", `${encodeURIComponent(config.sessionId)}.json`);
+  // Legacy actors may only have the explicitly admitted bootstrap.
+  if (handoff.bootstrap && !lstatSync(path, { throwIfNoEntry: false })) return;
+  readMonitorIntent(path, config.sessionId, false);
+}
+
 export function sameMonitorSpecs(left: readonly MonitorSpec[], right: readonly MonitorSpec[]): boolean {
   const canonical = (specs: readonly MonitorSpec[]): string =>
     JSON.stringify(
       [...specs]
         .sort((a, b) => a.name.localeCompare(b.name))
-        .map(({ name, argv, filter, cwd, restart }) => ({
+        .map(({ name, argv, filter, cwd, restart, mode }) => ({
           name,
           argv,
           filter: new RegExp(filter).source,
           cwd,
           restart,
+          mode,
         })),
     );
   return canonical(left) === canonical(right);
