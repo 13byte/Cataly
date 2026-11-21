@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { saveDeploymentJson } from "../src/update/deployment-files.ts";
-import { loadSourceUpdateConfig } from "../src/update/source-update-config.ts";
+import { parseSourceUpdateConfig } from "../src/update/source-update-config.ts";
 import { fixture } from "./update-deploy-setup.ts";
 
 export function sourceFixture() {
@@ -17,5 +17,5 @@ export function sourceFixture() {
     deployment: f.config,
   };
   saveDeploymentJson(path, settings);
-  return { root: f.root, path, settings, config: loadSourceUpdateConfig(path) };
+  return { root: f.root, path, settings, config: parseSourceUpdateConfig(settings, path) };
 }

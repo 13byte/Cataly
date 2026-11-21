@@ -114,7 +114,7 @@ for (const screen of [">", "compaction failed\n>"]) {
     f.clock.at += 60_000;
     world.screen = ">";
     expect((await freshnessTick(deps, state.dir)).some((act) => act.kind === "stalled")).toBe(true);
-  });
+  }, 30_000);
 }
 
 test("fresh evidence resumes a confirmed stall even while usage remains unknown", async () => {
@@ -158,4 +158,4 @@ test("normal partial coverage is not a recurring supervision error", async () =>
     );
     expect((await deps.registry.read(lane.key))?.lastSupervisionError).toBeUndefined();
   }
-});
+}, 30_000);

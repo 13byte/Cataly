@@ -629,7 +629,7 @@ These consumer commands use no porting/review models or GitHub write permission.
 
 ## CI-gated source updates
 
-`dori update source` follows this repository's CI-passing `main` without model porting or consumer-release migration. It is opt-in and reuses the managed deployment transaction for private candidate preparation, same-session resume, monitor/intake health and rollback. Automatic forward stops require the existing draft-aware native UI handoff, currently Linux/herdr; unsupported UI surfaces hold rather than falling back to a signal.
+`dori update source` follows this repository's CI-passing `main` without model porting or consumer-release migration. It is opt-in and reuses the managed deployment transaction for private candidate preparation, same-session resume, monitor/intake health and rollback. Automatic forward stops require the existing draft-aware native UI handoff, currently Linux/herdr; unsupported UI surfaces hold rather than falling back to a signal. Source-update configuration admission requires POSIX ownership and mode checks; it is not available on Windows. Existing consumer commands are unaffected.
 
 ```bash
 dori update source check

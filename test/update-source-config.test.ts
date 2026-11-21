@@ -1,8 +1,11 @@
 import { expect, test } from "bun:test";
 import { chmodSync, existsSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
-import { saveDeploymentJson } from "../src/update/deployment-files.ts";
-import { loadSourceUpdateConfig, sourceRequiredCi } from "../src/update/source-update-config.ts";
+import {
+  loadSourceUpdateConfig,
+  parseSourceUpdateConfig,
+  sourceRequiredCi,
+} from "../src/update/source-update-config.ts";
 import { sourceFixture } from "./update-source-setup.ts";
 
 const checks = ["check", "e2e-herdr", "e2e-hc"];
@@ -33,23 +36,28 @@ const invalid: Record<string, unknown>[] = [
 for (const change of invalid)
   test(`source configuration rejects unsafe settings ${JSON.stringify(change)}`, () => {
     const f = sourceFixture();
-    saveDeploymentJson(f.path, { ...f.settings, ...change });
-    expect(() => loadSourceUpdateConfig(f.path)).toThrow();
+    expect(() => parseSourceUpdateConfig({ ...f.settings, ...change }, f.path)).toThrow();
   });
 
 test("source configuration cannot opt out of draft-aware stop or count duplicate receivers", () => {
   const f = sourceFixture();
-  saveDeploymentJson(f.path, { ...f.settings, deployment: { ...f.settings.deployment, nativeStopMode: "signal" } });
-  expect(() => loadSourceUpdateConfig(f.path)).toThrow("UI stop");
-  saveDeploymentJson(f.path, {
-    ...f.settings,
-    activityFiles: [...f.settings.activityFiles, ...f.settings.activityFiles],
-  });
-  expect(() => loadSourceUpdateConfig(f.path)).toThrow("distinct paths");
+  expect(() =>
+    parseSourceUpdateConfig(
+      { ...f.settings, deployment: { ...f.settings.deployment, nativeStopMode: "signal" } },
+      f.path,
+    ),
+  ).toThrow("UI stop");
+  expect(() =>
+    parseSourceUpdateConfig(
+      { ...f.settings, activityFiles: [...f.settings.activityFiles, ...f.settings.activityFiles] },
+      f.path,
+    ),
+  ).toThrow("distinct paths");
 });
 
 test.skipIf(process.platform === "win32")("source configuration rejects unprotected and linked opt-in files", () => {
   const f = sourceFixture();
+  expect(loadSourceUpdateConfig(f.path)).toEqual(f.config);
   chmodSync(f.path, 0o666);
   expect(() => loadSourceUpdateConfig(f.path)).toThrow("owned protected");
   chmodSync(f.path, 0o600);
@@ -60,4 +68,10 @@ test.skipIf(process.platform === "win32")("source configuration rejects unprotec
 
 test("the source gate accepts additional explicitly required CI jobs", () => {
   expect(sourceRequiredCi([...checks, "extra-job"])).toEqual([...checks, "extra-job"]);
+});
+
+test.skipIf(process.platform !== "win32")("source configuration cannot use an unverified Windows ACL", () => {
+  const f = sourceFixture();
+  expect(() => loadSourceUpdateConfig(f.path)).toThrow("requires verified POSIX configuration file ownership");
+  expect(existsSync(f.config.deployment.releaseRoot)).toBe(false);
 });

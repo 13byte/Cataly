@@ -31,6 +31,8 @@ export function sourceRequiredCi(value: unknown): string[] {
 }
 
 export function loadSourceUpdateConfig(path: string): SourceUpdateConfig {
+  if (process.platform === "win32")
+    throw new Error("source update requires verified POSIX configuration file ownership");
   const stat = lstatSync(path);
   if (
     !stat.isFile() ||
@@ -39,7 +41,10 @@ export function loadSourceUpdateConfig(path: string): SourceUpdateConfig {
     (process.getuid !== undefined && stat.uid !== process.getuid())
   )
     throw new Error("source update config must be an owned protected regular file");
-  const value: unknown = JSON.parse(readFileSync(path, "utf8"));
+  return parseSourceUpdateConfig(JSON.parse(readFileSync(path, "utf8")), path);
+}
+
+export function parseSourceUpdateConfig(value: unknown, path: string): SourceUpdateConfig {
   const keys = [
     "version",
     "repository",
