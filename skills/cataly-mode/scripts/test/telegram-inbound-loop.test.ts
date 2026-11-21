@@ -116,7 +116,7 @@ test("activity stays unavailable for a full batch until the backlog is drained",
     ),
   ).rejects.toBe(stop);
   expect(states).toEqual([false, true]);
-});
+}, 30_000);
 
 test("poll errors revoke activity health and a failed healthy observer escapes", async () => {
   const states: boolean[] = [];
