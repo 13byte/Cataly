@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { writePaneState, type PaneState } from "../skills/dori-mode/scripts/src/lane-state.ts";
+import { writePaneState, type PaneState } from "../skills/cataly-mode/scripts/src/lane-state.ts";
 import { saveDeploymentJson } from "../src/update/deployment-files.ts";
 import { processIdentity } from "../src/update/deployment-process.ts";
 import type { RuntimeIdentity } from "../src/update/deployment-types.ts";
@@ -97,7 +97,7 @@ process.on("SIGTERM", async () => {
   const runtime: RuntimeIdentity = {
     ...identity,
     pane: deployment.pane,
-    role: "dori",
+    role: "cataly",
     sessionId: deployment.sessionId,
     sessionFile: join(f.root, "private-session-not-opened.jsonl"),
     startedAt: new Date().toISOString(),
@@ -105,7 +105,7 @@ process.on("SIGTERM", async () => {
   };
   const state: PaneState = {
     paneId: runtime.pane,
-    role: "dori",
+    role: "cataly",
     sessionId: runtime.sessionId,
     sessionFile: runtime.sessionFile,
     pid: runtime.pid,

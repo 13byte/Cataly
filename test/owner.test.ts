@@ -37,18 +37,18 @@ describe("owner profile in the lead's prompt", () => {
     const { d } = home();
     expect(ownerPromptSection(d.store.root)).toBeUndefined();
     for (const name of ["lead.md", "duty.md"] as const)
-      expect(rolePrompt(d, name)).toBe(fill(readFileSync(promptFile(name), "utf8"), { dori: "dori" }));
+      expect(rolePrompt(d, name)).toBe(fill(readFileSync(promptFile(name), "utf8"), { cataly: "cataly" }));
   });
 
   test("lead startup references the local profile without copying its contents into the system prompt", async () => {
     const { d, write, cli } = home();
     write({ Preferences: ["- (2026-11-19) Conclusion first."], Decisions: ["- (2026-11-18) Merge without asking."] });
     const lead = rolePrompt(d, "lead.md");
-    expect(lead).toContain("dori owner show");
+    expect(lead).toContain("cataly owner show");
     expect(lead).not.toContain("Conclusion first.");
     expect(lead).not.toContain("Merge without asking.");
     expect((await cli("show")).out).toContain("Conclusion first.");
-    expect(rolePrompt(d, "duty.md")).not.toContain("dori owner show");
+    expect(rolePrompt(d, "duty.md")).not.toContain("cataly owner show");
     await captureIo(async () => {
       await up(d, "/w");
       return 0;
@@ -160,11 +160,11 @@ describe("owner check", () => {
   });
 });
 
-describe("dori harness owner", () => {
+describe("cataly harness owner", () => {
   test("show, init, snapshot, diff and revert; check exits 1 on a problem", async () => {
     const { w, paths, cli } = home();
     expect((await cli("show")).out).toStartWith("NO_OWNER_PROFILE ");
-    await expect(cli("snapshot")).rejects.toThrow("dori harness owner init creates one");
+    await expect(cli("snapshot")).rejects.toThrow("cataly harness owner init creates one");
     expect((await cli("init")).out).toStartWith(`OWNER_INIT ${paths.profile}`);
     await expect(cli("init")).rejects.toThrow("exists");
     expect(await cli("check")).toEqual({ code: 0, out: `OWNER_OK ${TEMPLATE.length} bytes` });

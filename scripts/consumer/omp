@@ -7,8 +7,8 @@ while [ -L "$self" ]; do
 done
 source=$(CDPATH= cd -- "$(dirname -- "$self")/../.." && pwd -P)
 launch_cwd=$PWD
-mkdir -p "$HOME/.cache/omp-dori"
-guard=$(mktemp -d "$HOME/.cache/omp-dori/guard.XXXXXX")
+mkdir -p "$HOME/.cache/omp-cataly"
+guard=$(mktemp -d "$HOME/.cache/omp-cataly/guard.XXXXXX")
 trap 'rmdir "$guard"' EXIT HUP INT TERM
 cd "$guard"
 selected=$(bun "$source/src/release/automatic.ts" "$source" "$HOME" "$$" "$@")
@@ -19,7 +19,7 @@ if [ "$selected" != "$source" ]; then
   exec "$selected/scripts/consumer/omp" "$@"
 fi
 # This shell execs the launcher, so it holds the native cache lease for the whole session.
-omp=$(DORI_NATIVE_LEASE_PID=$$ bun "$source/scripts/source-dependencies.ts" consumer "$source" "$HOME")
+omp=$(CATALY_NATIVE_LEASE_PID=$$ bun "$source/scripts/source-dependencies.ts" consumer "$source" "$HOME")
 cd "$launch_cwd"
 rmdir "$guard"
 trap - EXIT HUP INT TERM

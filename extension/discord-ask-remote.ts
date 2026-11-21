@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { openDiscordAskMailbox } from "../skills/dori-mode/scripts/src/messenger/discord-ask-mailbox.ts";
-import { isDiscordSnowflake } from "../skills/dori-mode/scripts/src/messenger/discord-inbound-state.ts";
-import { Discord } from "../skills/dori-mode/scripts/src/messenger/discord.ts";
-import { fetchHttp } from "../skills/dori-mode/scripts/src/messenger/http.ts";
+import { openDiscordAskMailbox } from "../skills/cataly-mode/scripts/src/messenger/discord-ask-mailbox.ts";
+import { isDiscordSnowflake } from "../skills/cataly-mode/scripts/src/messenger/discord-inbound-state.ts";
+import { Discord } from "../skills/cataly-mode/scripts/src/messenger/discord.ts";
+import { fetchHttp } from "../skills/cataly-mode/scripts/src/messenger/http.ts";
 import { buildDiscordAskCard } from "./discord-ask-card.ts";
 import { type AskData, parseAskAnswer, parseAskChoice, projectAskForm } from "./discord-ask-form.ts";
 import { type AskButtonSocket, openAskButtons } from "./discord-ask-interactions.ts";

@@ -7,7 +7,7 @@ import { groupId } from "../src/runtime/group.ts";
 import { World } from "./fake.ts";
 import { captureIo } from "./inbox-setup.ts";
 
-describe("dori up", () => {
+describe("cataly up", () => {
   test("herdr: the same 8 calls carry this home's context and register all four roles", async () => {
     const w = new World();
     const d = w.deps();
@@ -33,7 +33,7 @@ describe("dori up", () => {
     ];
     expect(w.calls.map((c) => [c.cmd, ...c.argv])).toEqual(
       [
-        ["workspace", "create", "--label", "dori", "--cwd", "/w", ...env.flatMap((e) => ["--env", e]), "--no-focus"],
+        ["workspace", "create", "--label", "cataly", "--cwd", "/w", ...env.flatMap((e) => ["--env", e]), "--no-focus"],
         ["pane", "run", "w1:p2", prompt("lead.md")],
         [
           "tab",
@@ -49,9 +49,9 @@ describe("dori up", () => {
         ],
         ["pane", "run", "w1:p3", prompt("duty.md")],
         split("w1:p3", ...env),
-        ["pane", "run", "w1:p4", "dori duty --interval 60"],
+        ["pane", "run", "w1:p4", "cataly duty --interval 60"],
         split("w1:p4", ...env, "HERDR_WORKSPACE_ID=w1"),
-        ["pane", "run", "w1:p5", "dori loop"],
+        ["pane", "run", "w1:p5", "cataly loop"],
       ].map((argv) => ["herdr", ...argv]),
     );
     expect(JSON.parse(readFileSync(join(root, "roles.json"), "utf8"))).toEqual({
@@ -72,20 +72,20 @@ describe("dori up", () => {
     });
     const runs = w.calls.filter((c) => c.cmd === "hc" && c.argv[1] === "run").map((c) => c.argv);
     expect(runs).toHaveLength(4);
-    for (const argv of runs) expect(argv).toContain(`dori.group=${groupId(d.store.root)}`);
-    expect(runs.map((a) => a.find((x) => x.startsWith("dori.role=")))).toEqual([
-      "dori.role=lead",
-      "dori.role=duty",
-      "dori.role=duty-loop",
-      "dori.role=hourly-loop",
+    for (const argv of runs) expect(argv).toContain(`cataly.group=${groupId(d.store.root)}`);
+    expect(runs.map((a) => a.find((x) => x.startsWith("cataly.role=")))).toEqual([
+      "cataly.role=lead",
+      "cataly.role=duty",
+      "cataly.role=duty-loop",
+      "cataly.role=hourly-loop",
     ]);
     expect(runs.some((a) => a.some((x) => x.startsWith("HERDR_WORKSPACE_ID=")))).toBe(false);
     expect(w.calls.some((c) => c.cmd === "herdr")).toBe(false);
     expect(w.hc.calls.filter((c) => c[0] === "send").map((c) => c.at(-1))).toEqual([
       expect.stringContaining("lead.md"),
       expect.stringContaining("duty.md"),
-      "dori duty --interval 60",
-      "dori loop",
+      "cataly duty --interval 60",
+      "cataly loop",
     ]);
     expect(JSON.parse(readFileSync(join(d.store.root, "roles.json"), "utf8"))).toEqual({
       lead: "hc:t1",

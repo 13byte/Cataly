@@ -7,10 +7,10 @@ import { observeRemotePty } from "./fixtures/remote-attach.ts";
 import { remoteTestModel } from "./fixtures/remote-test-model.ts";
 
 const hc = Bun.which("hc");
-const host = process.env["DORI_TEST_OMP_ROOT"];
-const cli = resolve(import.meta.dir, "../skills/dori-mode/scripts/src/cli.ts");
+const host = process.env["CATALY_TEST_OMP_ROOT"];
+const cli = resolve(import.meta.dir, "../skills/cataly-mode/scripts/src/cli.ts");
 const extension = resolve(import.meta.dir, "../extension/index.ts");
-const pinned = process.env["DORI_TEST_OMP_EXEC"];
+const pinned = process.env["CATALY_TEST_OMP_EXEC"];
 const ompArgv = pinned ? [pinned] : host ? [process.execPath, join(host, "dist", "cli.js")] : undefined;
 
 type Env = Record<string, string | undefined>;
@@ -50,8 +50,8 @@ test.skipIf(process.platform === "win32" || !hc || !ompArgv)(
       HC_SESSION: `remote-${side}`,
       TERM: "xterm-256color",
       SHELL: "/bin/sh",
-      DORI_STATE_DIR: side === "b" ? scope : join(root, "source-state"),
-      DORI_CONFIG: join(root, "config.json"),
+      CATALY_STATE_DIR: side === "b" ? scope : join(root, "source-state"),
+      CATALY_CONFIG: join(root, "config.json"),
       PI_CODING_AGENT_DIR: join(root, "omp"),
       NO_PROXY: "127.0.0.1",
     });
@@ -83,7 +83,7 @@ test.skipIf(process.platform === "win32" || !hc || !ompArgv)(
             "--no-extensions",
             "-e",
             extension,
-            "--dori-role",
+            "--cataly-role",
             "lane",
             "--model",
             "{model}",
@@ -91,7 +91,7 @@ test.skipIf(process.platform === "win32" || !hc || !ompArgv)(
           ],
         }),
       );
-      const worker = join(root, "dori-peer");
+      const worker = join(root, "cataly-peer");
       writeFileSync(worker, `#!/bin/sh\nexec ${shq(process.execPath)} ${shq(cli)} "$@"\n`, { mode: 0o700 });
       const invoke = (env: Env, ...args: string[]) => run(env, [process.execPath, cli, "remote", ...args]);
       await run(b, [hc!, "server", "start"]);

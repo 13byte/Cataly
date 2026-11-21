@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { fixture, linux } from "./release-bootstrap-setup.ts";
+import { darwin, fixture, linux } from "./release-bootstrap-setup.ts";
 
 // POSIX-only: the fixture runs install.sh under bash with shebang runtime stubs.
 const posix = test.skipIf(process.platform === "win32");
@@ -21,8 +21,8 @@ posix.each(["{}", '{"runtime":"hc"}'])(
           process.execPath,
           "--eval",
           `
-const {loadConfig} = await import(${JSON.stringify(resolve(import.meta.dir, "../skills/dori-mode/scripts/src/config.ts"))});
-const {runtimeChoice} = await import(${JSON.stringify(resolve(import.meta.dir, "../skills/dori-mode/scripts/src/run.ts"))});
+const {loadConfig} = await import(${JSON.stringify(resolve(import.meta.dir, "../skills/cataly-mode/scripts/src/config.ts"))});
+const {runtimeChoice} = await import(${JSON.stringify(resolve(import.meta.dir, "../skills/cataly-mode/scripts/src/run.ts"))});
 console.log(JSON.stringify(runtimeChoice(await loadConfig(), process.env)));`,
         ],
         {
@@ -32,7 +32,7 @@ console.log(JSON.stringify(runtimeChoice(await loadConfig(), process.env)));`,
       expect(result.exitCode, result.stderr.toString()).toBe(0);
       return JSON.parse(result.stdout.toString());
     };
-    expect(choice().kind).toBe("hc");
+    expect(choice()).toEqual({ kind: "headless", source: "default" });
     const held = f.run(["--runtime", "herdr"]);
     expect(held.exitCode).not.toBe(0);
     expect(held.stderr.toString()).toContain(
@@ -47,7 +47,35 @@ console.log(JSON.stringify(runtimeChoice(await loadConfig(), process.env)));`,
     writeFileSync(config, selected);
     const installed = f.run(["--runtime", "herdr"]);
     expect(installed.exitCode, installed.stderr.toString()).toBe(0);
-    expect(choice()).toEqual({ kind: "herdr", source: "config" });
+    expect(choice()).toEqual({ kind: "headless", source: "default" });
     expect(readFileSync(config, "utf8")).toBe(selected);
   },
 );
+
+posix.each([
+  [linux, ".dori"],
+  [darwin, ".omp-dori"],
+] as const)("headless bootstrap accepts historical config without either executable: %j", (profile, folder) => {
+  const f = fixture(profile);
+  f.assets(
+    { version: 1, profiles: [linux, darwin] },
+    { version: 1, profiles: [linux, darwin].map((host) => ({ ...host, runtime: "headless" })) },
+  );
+  const home = join(f.home, folder);
+  mkdirSync(home);
+  const config = join(home, "config.json");
+  const old = `{"runtime":"${profile.runtime}","ownerValue":"keep"}\n`;
+  writeFileSync(config, old);
+  const bin = join(f.root, "bin");
+  for (const tool of ["hc", "herdr"]) renameSync(join(bin, tool), join(f.root, tool));
+  const fresh = f.run([], { PATH: `${bin}:/usr/bin:/bin` });
+  expect(fresh.exitCode, fresh.stderr.toString()).toBe(0);
+  expect(f.selected()).toEqual(f.expected(join(f.home, folder === ".dori" ? ".cataly" : ".omp-cataly"), "headless"));
+  const result = f.run(["--home", home], { PATH: `${bin}:/usr/bin:/bin` });
+  expect(result.exitCode, result.stderr.toString()).toBe(0);
+  expect(f.selected()).toEqual(f.expected(home, "headless"));
+  expect(readFileSync(config, "utf8")).toBe(old);
+  const explicit = f.run(["--runtime", profile.runtime], { PATH: `${bin}:/usr/bin:/bin` });
+  expect(explicit.exitCode).not.toBe(0);
+  expect(explicit.stderr.toString()).toContain(`${profile.runtime} is required`);
+});

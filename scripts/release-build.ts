@@ -1,6 +1,7 @@
 import {
   closeSync,
   constants,
+  cpSync,
   fstatSync,
   lstatSync,
   mkdirSync,
@@ -13,7 +14,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { supportsReleaseProfile, validateReleaseManifest } from "../src/release/manifest.ts";
+import {
+  headlessReleaseProfiles,
+  nativeMetadata,
+  supportsReleaseProfile,
+  terminalMetadata,
+} from "../src/release/capabilities.ts";
+import { validateReleaseManifest } from "../src/release/manifest.ts";
 import type { ReleaseManifest } from "../src/release/types.ts";
 import { isReleaseVersion, releaseVersion } from "../src/release/version.ts";
 import { readSourceBundle } from "../src/release/source-bundle.ts";
@@ -40,14 +47,47 @@ export function buildRelease(root: string, output: string, prerelease: boolean):
 }
 
 async function buildReleaseAssets(root: string, output: string, prerelease: boolean): Promise<ReleaseManifest> {
-  if (!isReleaseVersion(releaseVersion)) throw new Error("Canonical package version is not a release version");
   const commit = (await git(root, ["rev-parse", "--verify", "HEAD^{commit}"])).toString().trim();
   const tree = (await git(root, ["rev-parse", "--verify", `${commit}^{tree}`])).toString().trim();
-  const temporary = realpathSync(mkdtempSync(join(tmpdir(), "omp-dori-release-")));
+  return packageReleaseTree({ root, commit, tree }, output, prerelease);
+}
+
+/** Package one immutable tree. The publishing gate still independently regenerates from actual committed HEAD. */
+export async function packageReleaseTree(
+  identity: { readonly root: string; readonly commit: string; readonly tree: string },
+  output: string,
+  prerelease: boolean,
+): Promise<ReleaseManifest> {
+  if (!isReleaseVersion(releaseVersion)) throw new Error("Canonical package version is not a release version");
+  const { root, commit, tree } = identity;
+  const temporary = realpathSync(mkdtempSync(join(tmpdir(), "cataly-release-")));
   try {
     const archiveRoot = `omp-dori-${releaseVersion}`;
     const source = join(temporary, archiveRoot);
-    const observed = await committedSource(root, commit, source);
+    await committedSource(root, tree, source);
+    // The archived v1 updater needs these paths, not a duplicate copy of the old skill or runtime.
+    const legacySkill = join(source, "skills/dori-mode");
+    const currentSkill = join(source, "skills/cataly-mode");
+    mkdirSync(join(legacySkill, "scripts/src"), { recursive: true, mode: 0o700 });
+    // An upgraded primary's old discovery link is still its skill:// root. Traversal to a sibling is not allowed.
+    // Only copy read-only skill resources; all executable code goes through the one canonical CLI.
+    for (const resource of ["SKILL.md", "references", "assets"])
+      cpSync(join(currentSkill, resource), join(legacySkill, resource), {
+        recursive: true,
+        errorOnExist: true,
+        force: false,
+      });
+    const example = readFileSync(join(currentSkill, "references/config.example.json"), "utf8");
+    writeFileSync(
+      join(legacySkill, "references/config.example.json"),
+      example.replaceAll("~/.cataly/", "~/.dori/").replaceAll('"--cataly-role"', '"--dori-role"'),
+    );
+    const cli = join(legacySkill, "scripts/src/cli.ts");
+    writeFileSync(cli, '#!/usr/bin/env bun\nimport "../../../cataly-mode/scripts/src/cli.ts";\n', {
+      flag: "wx",
+      mode: 0o755,
+    });
+    const observed = sourceManifest(source);
     const packageData: unknown = JSON.parse(readFileSync(join(source, "package.json"), "utf8"));
     if (
       typeof packageData !== "object" ||
@@ -58,7 +98,7 @@ async function buildReleaseAssets(root: string, output: string, prerelease: bool
     }
     for (const name of [
       "LICENSE",
-      "LICENSE.omp-dori",
+      "LICENSE.integration",
       "NOTICE",
       "install.sh",
       "omp-ulw.lock",
@@ -70,6 +110,8 @@ async function buildReleaseAssets(root: string, output: string, prerelease: bool
       "native-addon/bun.lock",
       "scripts/source-dependencies.ts",
       "scripts/consumer/omp",
+      terminalMetadata,
+      nativeMetadata,
     ]) {
       if (!observed.files.some((file) => file.path === name)) throw new Error(`Committed release is missing ${name}`);
     }
@@ -135,9 +177,15 @@ async function buildReleaseAssets(root: string, output: string, prerelease: bool
       },
       ompUlw: { repository: "https://github.com/dbc-hbin/omp-ulw.git", commit: pin },
     });
-    const capabilityFile = observed.files.find((file) => file.path === "release-capabilities.json");
-    if (capabilityFile) {
-      supportsReleaseProfile(manifest, manifest.requirements, readFileSync(join(source, capabilityFile.path)));
+    const historical = readFileSync(join(source, terminalMetadata));
+    const profiles = headlessReleaseProfiles(manifest, readFileSync(join(source, nativeMetadata)));
+    for (const runtime of [manifest.requirements, { platform: "darwin", arch: "arm64", runtime: "hc" }]) {
+      if (!supportsReleaseProfile(manifest, runtime, historical))
+        throw new Error(
+          `Release must retain the historical ${runtime.platform}/${runtime.arch}/${runtime.runtime} profile`,
+        );
+      if (!profiles.some((profile) => profile.platform === runtime.platform && profile.arch === runtime.arch))
+        throw new Error(`Release must provide headless on ${runtime.platform}/${runtime.arch}`);
     }
     const assets: Record<string, Buffer> = {
       [manifest.archive.name]: archive,
@@ -164,7 +212,7 @@ export async function verifyDistribution(root: string, directory: string): Promi
   const manifest = validateReleaseManifest(JSON.parse(readAsset(directory, "release-manifest.json").toString("utf8")));
   const names = [manifest.archive.name, "install.sh", "release-manifest.json", "SHA256SUMS"];
   const assets = Object.fromEntries(names.map((name) => [name, readAsset(directory, name)]));
-  const temporary = mkdtempSync(join(tmpdir(), "omp-dori-dist-check-"));
+  const temporary = mkdtempSync(join(tmpdir(), "cataly-dist-check-"));
   try {
     const expected = await buildReleaseAssets(root, join(temporary, "dist"), manifest.prerelease);
     if (!sameManifest(manifest.source, expected.source))

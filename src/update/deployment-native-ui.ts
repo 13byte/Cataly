@@ -1,5 +1,5 @@
 import { readFileSync, realpathSync } from "node:fs";
-import { readPaneState } from "../../skills/dori-mode/scripts/src/lane-state.ts";
+import { readPaneState } from "../../skills/cataly-mode/scripts/src/lane-state.ts";
 import type { DeploymentCli } from "./deployment-cli.ts";
 import { attestMonitorForeground } from "./deployment-monitor-receipts.ts";
 import { DeploymentBusy, DeploymentHeld, sameProcess, underProcess } from "./deployment-process.ts";
@@ -84,7 +84,7 @@ export async function assertNativeUiIdle(
     throw new DeploymentHeld("UI replacement controller must run independently outside the target actor");
   const state = readPaneState(config.stateDir, config.pane);
   if (current.status === "working" || state?.agentStatus === "working")
-    throw new DeploymentBusy("native Dori is busy; waiting for its idle boundary");
+    throw new DeploymentBusy("native Cataly is busy; waiting for its idle boundary");
   if (
     (current.status !== "idle" && current.status !== "done") ||
     current.agent !== "omp" ||
@@ -93,7 +93,7 @@ export async function assertNativeUiIdle(
     expected.pane !== config.pane ||
     expected.sessionId !== config.sessionId ||
     !state ||
-    state.role !== "dori" ||
+    state.role !== "cataly" ||
     state.paneId !== config.pane ||
     state.pid !== expected.pid ||
     state.sessionId !== expected.sessionId ||

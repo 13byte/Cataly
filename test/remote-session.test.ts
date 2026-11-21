@@ -2,9 +2,9 @@ import { afterEach, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { adoptLane, launchLane } from "../skills/dori-mode/scripts/src/launch.ts";
-import { RemoteRecords } from "../skills/dori-mode/scripts/src/remote-records.ts";
-import { remoteOperation } from "../skills/dori-mode/scripts/src/remote-worker.ts";
+import { adoptLane, launchLane } from "../skills/cataly-mode/scripts/src/launch.ts";
+import { RemoteRecords } from "../skills/cataly-mode/scripts/src/remote-records.ts";
+import { remoteOperation } from "../skills/cataly-mode/scripts/src/remote-worker.ts";
 import { liveSessions, selectSession } from "../src/remote/client.ts";
 import { remotePolicy, setRemotePolicy } from "../src/remote/policy.ts";
 import { remoteSocketPath } from "../src/remote/socket-path.ts";
@@ -14,7 +14,7 @@ import { formatRef, type SessionRef } from "../src/runtime/types.ts";
 import { startTestEndpoint } from "./fixtures/remote-endpoint.ts";
 import { headlessFixture } from "./fixtures/runtime-headless.ts";
 
-const CLI = resolve(import.meta.dir, "../skills/dori-mode/scripts/src/cli.ts");
+const CLI = resolve(import.meta.dir, "../skills/cataly-mode/scripts/src/cli.ts");
 const cleanup: Array<() => void | Promise<void>> = [];
 afterEach(async () => {
   for (const dispose of cleanup.splice(0).reverse()) await dispose();
@@ -24,7 +24,7 @@ function sandbox() {
   const root = mkdtempSync(join(tmpdir(), "cataly-remote-test-"));
   const state = join(root, "state");
   cleanup.push(() => rmSync(root, { force: true, recursive: true }));
-  const env = { ...process.env, DORI_CONFIG: join(root, "missing-config.json"), DORI_STATE_DIR: state };
+  const env = { ...process.env, CATALY_CONFIG: join(root, "missing-config.json"), CATALY_STATE_DIR: state };
   return { root, state, env };
 }
 
@@ -104,7 +104,7 @@ test.skipIf(process.platform === "win32")(
       const { target } = await startTestEndpoint(f.stateDir, cleanup, { session, pane: formatRef(ref) });
       const receipt = new RemoteRecords(f.stateDir).path("session", session);
       const request = { op: "close", session, generation: target.generation, force: true };
-      await expect(remoteOperation(f.deps, request, false)).rejects.toThrow("use dori close or dori park");
+      await expect(remoteOperation(f.deps, request, false)).rejects.toThrow("use cataly close or cataly park");
       expect(await runtime.observe(ref)).toMatchObject({
         sessionId: session,
         status: "idle",
@@ -156,7 +156,7 @@ test.skipIf(process.platform === "win32").each(["addressed", "pane-less"] as con
     }
     expect(await finished).toMatchObject({ message: "close held by approval" });
     expect(await adoptLane(f.deps, adopted)).toMatchObject({ sessionRef: { runtime: "hc", id: "t7" } });
-    await expect(remoteOperation(f.deps, request, false)).rejects.toThrow("use dori close or dori park");
+    await expect(remoteOperation(f.deps, request, false)).rejects.toThrow("use cataly close or cataly park");
   },
 );
 
@@ -164,8 +164,8 @@ test.skipIf(process.platform === "win32")(
   "live discovery rejects unsafe sockets and selection rejects ambiguous IDs",
   async () => {
     const { state } = sandbox();
-    const { target } = await startTestEndpoint(state, cleanup);
-    expect(await liveSessions(state)).toEqual([target]);
+    const { target } = await startTestEndpoint(state, cleanup, { legacyLead: true });
+    expect(await liveSessions(state)).toEqual([{ ...target, role: "cataly" }]);
     expect(() => selectSession([target, { ...target, session: "native-002" }], "native")).toThrow("Ambiguous");
     chmodSync(remoteSocketPath(state, target.session), 0o666);
     expect(await liveSessions(state)).toEqual([]);
@@ -173,7 +173,7 @@ test.skipIf(process.platform === "win32")(
 );
 
 test("remote request transport keeps text out of process arguments", async () => {
-  const argv = peer("lab-peer", "/separate home/bin/dori");
+  const argv = peer("lab-peer", "/separate home/bin/cataly");
   expect(argv).toEqual([
     "hc",
     "exec",
@@ -183,11 +183,11 @@ test("remote request transport keeps text out of process arguments", async () =>
     "55",
     "--stdin",
     "--",
-    "/separate home/bin/dori",
+    "/separate home/bin/cataly",
     "remote",
     "accept",
   ]);
-  expect(() => peer("-invalid", "dori")).toThrow("Invalid");
+  expect(() => peer("-invalid", "cataly")).toThrow("Invalid");
   await expect(
     throughPeer([process.execPath, "-e", "console.log(JSON.stringify({ok:true,data:await Bun.stdin.json()}))"], {
       op: "send",

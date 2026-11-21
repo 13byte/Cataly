@@ -204,7 +204,7 @@ export const foregroundActor = {
 };
 
 export function silentForegroundActor() {
-  const root = mkdtempSync(join(tmpdir(), "dori-silent-foreground-"));
+  const root = mkdtempSync(join(tmpdir(), "cataly-silent-foreground-"));
   const marker = join(root, "monitor.pid");
   const script = join(root, "actor");
   const { promise: started, resolve } = Promise.withResolvers<void>();

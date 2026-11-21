@@ -1,5 +1,5 @@
 /**
- * Offline synthetic benchmark of `dori inbound discord`: an earlier single-channel REST intake against this checkout.
+ * Offline synthetic benchmark of `cataly inbound discord`: an earlier single-channel REST intake against this checkout.
  * The in-process Discord stand-in serves loopback HTTP and WebSocket traffic; no external Discord calls,
  * credentials or real IDs are used. These timings do not measure Discord service latency. Usage:
  *   bun scripts/bench-discord-intake.ts [--runs 3] [--seed 1] [--poll-ms 3000] [--scenarios a,b5,b20,c,d] [--base REF]
@@ -204,7 +204,7 @@ const main = async () => {
   const pollMs = Number(values["poll-ms"] ?? 3_000);
   const wanted = (values.scenarios ?? SCENARIOS.map((s) => s.name).join(",")).split(",");
   const ref = values.base ?? "f5d34ab98ad040a500689fbeefe507e54281eff3";
-  const source = await Bun.$`git show ${ref}:skills/dori-mode/scripts/src/messenger/discord-inbound.ts`.text();
+  const source = await Bun.$`git show ${ref}:skills/cataly-mode/scripts/src/messenger/discord-inbound.ts`.text();
   const variants = variantsFor(await loadBaseline(source));
   console.log("# OFFLINE synthetic intake benchmark (loopback HTTP/WebSocket; not Discord service latency)");
   console.log(

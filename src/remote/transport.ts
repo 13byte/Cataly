@@ -6,7 +6,7 @@ const targetPattern = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 
 export function peer(machine: string, executable: string): readonly string[] {
   if (!targetPattern.test(machine)) throw new Error("Invalid hc machine name");
-  if (executable !== "dori" && !isAbsolute(executable)) throw new Error("--via must be an absolute dori path");
+  if (executable !== "cataly" && !isAbsolute(executable)) throw new Error("--via must be an absolute cataly path");
   return ["hc", "exec", "--on", machine, "--timeout", "55", "--stdin", "--", executable, "remote", "accept"];
 }
 

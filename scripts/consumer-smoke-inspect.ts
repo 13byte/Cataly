@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
-import type { DoriConfig } from "../skills/dori-mode/scripts/src/config.ts";
+import type { CatalyConfig } from "../skills/cataly-mode/scripts/src/config.ts";
 import { validateReleaseManifest } from "../src/release/manifest.ts";
 import type { NativeReceipt } from "../src/release/native.ts";
 import { digest } from "../src/update/source.ts";
@@ -44,8 +44,8 @@ if (import.meta.main) {
   const { prepareConsumerDiscovery } = await import(join(source, "src/release/discovery.ts"));
   const { assertNativeSource } = await import(join(source, "src/release/native.ts"));
   const { assertSourceBundle, readSourceBundle } = await import(join(source, "src/release/source-bundle.ts"));
-  const { loadConfig } = await import(join(source, "skills/dori-mode/scripts/src/config.ts"));
-  const { runtimesFor } = await import(join(source, "skills/dori-mode/scripts/src/run.ts"));
+  const { loadConfig } = await import(join(source, "skills/cataly-mode/scripts/src/config.ts"));
+  const { runtimesFor } = await import(join(source, "skills/cataly-mode/scripts/src/run.ts"));
   const paths = consumerPaths(home, side);
   const state = loadInstalled(paths);
   assert.deepEqual(state?.current, expected);
@@ -63,8 +63,8 @@ if (import.meta.main) {
   assert.equal(addon.version, "18.20.0");
   assert.equal(addon.stale, false);
   assert.equal(realpathSync(addon.path), realpathSync(native.addon));
-  const config: DoriConfig = await loadConfig(paths.config, home);
-  assert.equal(config.runtime, runtime);
+  const config: CatalyConfig = await loadConfig(paths.config, home);
+  if (runtime !== "headless") assert.equal(config.runtime, runtime);
   assert.equal(config.stateDir, join(side, "state"));
   assert.equal(config.agentCommand[0], join(source, "scripts/consumer/omp"));
   for (const selected of [join(source, "extension"), join(side, "omp.yml")]) {
@@ -74,20 +74,42 @@ if (import.meta.main) {
   assert(config.agentCommand.includes(overlay));
   assert(lstatSync(dirname(overlay)).isDirectory(), "Installed discovery overlay is missing");
   prepareConsumerDiscovery(paths, source);
-  const skill = readFileSync(join(dirname(overlay), "skills/omp-dori-mode/SKILL.md"), "utf8");
-  assert.match(skill, /^name: omp-dori-mode$/m);
+  const skill = readFileSync(join(dirname(overlay), "skills/omp-cataly-mode/SKILL.md"), "utf8");
+  assert.match(skill, /^name: omp-cataly-mode$/m);
   const ulw = readSourceBundle(source);
   const dependency = join(paths.dependencies, `omp-ulw-${expected.ompUlw.commit}-${ulw.identity}`);
   assert.equal(config.ompUlwPath, join(dependency, "index.ts"));
   assertSourceBundle(dependency, ulw, home);
   const namespace = `omp-dori-${digest(side).slice(0, 12)}`;
   assert.equal(process.env["HC_SESSION"], namespace);
-  assert.equal(process.env["DORI_HERDR_SESSION"], namespace);
-  assert.equal(process.env["DORI_RUNTIME"], undefined);
+  assert.equal(process.env["CATALY_HERDR_SESSION"], namespace);
+  assert.equal(process.env["CATALY_RUNTIME"], undefined);
   const runtimes = runtimesFor(config, process.env);
-  assert.deepEqual(runtimes.choice, { kind: runtime, source: "config" });
+  assert.deepEqual(runtimes.choice, { kind: runtime, source: runtime === "headless" ? "default" : "config" });
   assert.equal(runtimes.default.kind, runtime);
   assert.deepEqual(await runtimes.default.list(), [], "Fresh private runtime unexpectedly contains sessions");
+  if (runtime === "headless") {
+    const { HeadlessRuntime } = await import(join(source, "src/runtime/headless.ts"));
+    const { assertNoLiveCataly } = await import(join(source, "src/release/live.ts"));
+    const local = new HeadlessRuntime(join(context.out, "explicit-native-state"));
+    const ref = await local.create({
+      name: "release reservation witness",
+      role: "duty-loop",
+      container: "tab",
+      cwd: join(context.out, "workspace"),
+      env: {},
+    });
+    try {
+      assert.throws(() => assertNoLiveCataly(paths), /Native session .* holds release activation/);
+      const live = await local.startLoop(ref, { CATALY_STATE_DIR: local.stateDir, CATALY_RUNTIME: "headless" });
+      assert.equal(live.status, "working");
+      assert.equal(live.harnessRole, "duty-loop");
+      assert.throws(() => assertNoLiveCataly(paths), /Native session .* holds release activation/);
+    } finally {
+      await local.stopHarnessRole(ref, "duty-loop");
+    }
+    assert.doesNotThrow(() => assertNoLiveCataly(paths));
+  }
   console.log(
     JSON.stringify(
       {

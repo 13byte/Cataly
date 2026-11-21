@@ -9,7 +9,7 @@ export async function checkTestFixtures(
 ): Promise<void> {
   for (const [name, entry] of [
     ["bound ULW fixture", join(root, "ref/omp-ulw/index.ts")],
-    ["DORI_TEST_COMPAT_ULW_ENTRY", env["DORI_TEST_COMPAT_ULW_ENTRY"]],
+    ["CATALY_TEST_COMPAT_ULW_ENTRY", env["CATALY_TEST_COMPAT_ULW_ENTRY"]],
   ] as const) {
     if (!entry || !isAbsolute(entry) || !statSync(entry, { throwIfNoEntry: false })?.isFile()) {
       throw new Error(`${name} must name an existing absolute fixture file`);

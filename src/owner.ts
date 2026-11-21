@@ -1,5 +1,5 @@
-// The owner profile: `$DORI_HOME/owner.md`, dated observations about the person the lead works for. It exists only
-// when the owner creates it (`dori harness owner init`); with no file the lead's prompt has no owner section and the
+// The owner profile: `$CATALY_HOME/owner.md`, dated observations about the person the lead works for. It exists only
+// when the owner creates it (`cataly harness owner init`); with no file the lead's prompt has no owner section and the
 // hourly loop asks for no distill. See docs/owner-profile.md.
 import {
   closeSync,

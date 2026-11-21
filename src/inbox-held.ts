@@ -6,7 +6,7 @@ import type { SessionRef } from "./runtime/types.ts";
 import { resolveTarget } from "./target.ts";
 
 /**
- * `dori send --to-shell`: the operator's per-message opt-in to type this one message into a pane with no agent.
+ * `cataly send --to-shell`: the operator's per-message opt-in to type this one message into a pane with no agent.
  * Only the CLI flag reaches here, never relayed content, and queued messages are never typed with it. If an agent
  * is in the pane, or appears before typing, the message takes the queued agent path instead.
  */
@@ -14,7 +14,7 @@ export async function sendToShell(d: Deps, target: string, text: string, from: s
   const ref = resolveTarget(d, target);
   const rt = d.runtimes.for(ref);
   if ((await rt.probe(ref)).status !== "shell") return send(d, target, text, from);
-  if (await rt.typeIntoShell(ref, text)) return "DELIVERED";
+  if (rt.kind !== "headless" && (await rt.typeIntoShell(ref, text))) return "DELIVERED";
   await d.store.enqueue(ref, { at: d.now(), from, text }, target === "lead", resolveAgain(d, target, ref));
   return "QUEUED";
 }
@@ -74,7 +74,7 @@ export function releaseHeld(d: Deps, target: string, index: number, how: "ack" |
     const m = Number.isInteger(index) ? msgs[index - 1] : undefined;
     if (!m)
       throw new Refusal(
-        `no entry ${index} in the inbox of ${paneId} (${msgs.length} entries; see dori harness inbox list ${target})`,
+        `no entry ${index} in the inbox of ${paneId} (${msgs.length} entries; see cataly harness inbox list ${target})`,
       );
     if (m.attempt?.state !== "ambiguous")
       throw new Refusal(`entry ${index} of ${paneId} is not held; only held entries can be acked or resent`);

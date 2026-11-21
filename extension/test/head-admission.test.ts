@@ -7,10 +7,10 @@ import { fileURLToPath } from "node:url";
 import {
   discordInboundQueue,
   type DiscordInboundQueue,
-} from "../../skills/dori-mode/scripts/src/messenger/discord-inbound-queue.ts";
+} from "../../skills/cataly-mode/scripts/src/messenger/discord-inbound-queue.ts";
 import { headReceipt } from "../head-receipt.ts";
-import { takeLock } from "../../skills/dori-mode/scripts/src/checkpoint-lock.ts";
-import { openOwes } from "../../skills/dori-mode/scripts/src/owes.ts";
+import { takeLock } from "../../skills/cataly-mode/scripts/src/checkpoint-lock.ts";
+import { openOwes } from "../../skills/cataly-mode/scripts/src/owes.ts";
 import { until } from "./fake-pi.ts";
 
 const posix = test.skipIf(typeof process.getuid !== "function");
@@ -25,7 +25,7 @@ type Event = {
   published?: boolean;
   streaming?: boolean;
   content?: string;
-  details?: { ompDoriAdmission: { identity: string; fingerprint: string } };
+  details?: { ompCatalyAdmission: { identity: string; fingerprint: string } };
 };
 type Head = {
   proc: Subprocess<"ignore", "pipe", "pipe">;
@@ -54,7 +54,7 @@ const event = (head: Head, name: string): Promise<Event> => {
   });
 };
 const root = () => {
-  const dir = mkdtempSync(join(tmpdir(), "dori-head-admission-"));
+  const dir = mkdtempSync(join(tmpdir(), "cataly-head-admission-"));
   mkdirSync(join(dir, "queue"), { mode: 0o700 });
   roots.push(dir);
   return dir;
@@ -111,7 +111,8 @@ const queued = <T>(dir: string, inspect: (queue: DiscordInboundQueue) => T): T =
     queue.close();
   }
 };
-const sources = (head: Head) => head.events.flatMap((event) => (event.details ? [event.details.ompDoriAdmission] : []));
+const sources = (head: Head) =>
+  head.events.flatMap((event) => (event.details ? [event.details.ompCatalyAdmission] : []));
 const pending = (dir: string, first: string | null, cursor: string) =>
   queued(dir, (queue) => {
     const source = queue.first();
@@ -291,7 +292,7 @@ posix(
     await first.proc.exited;
     await sourceExited(first, 1);
     const env: NodeJS.ProcessEnv = { ...process.env, HOME: dir, PI_CODING_AGENT_DIR: join(dir, "agent") };
-    delete env.DORI_MONITOR_ADMISSION;
+    delete env.CATALY_MONITOR_ADMISSION;
     const source = Bun.spawn(
       [
         process.execPath,
@@ -349,11 +350,11 @@ posix(
       .split("\n")
       .map((line) => JSON.parse(line));
     const rejected = entries.filter(
-      (entry) => entry.type === "custom" && entry.customType === "omp-dori:admission-rejected",
+      (entry) => entry.type === "custom" && entry.customType === "omp-cataly:admission-rejected",
     );
     expect(rejected).toHaveLength(2);
     for (const entry of rejected) {
-      const source = entry.data.ompDoriAdmission;
+      const source = entry.data.ompCatalyAdmission;
       expect(await headReceipt(file, source.identity, source.fingerprint)).toEqual({
         outcome: "rejected",
         receipt: entry.id,
@@ -376,10 +377,13 @@ posix(
       true,
     ]);
     const delivered = head.events.filter((item) => item.event === "native-message-end");
-    expect(delivered.map((item) => item.details?.ompDoriAdmission.identity)).toEqual(["99:10:20:101", "99:10:20:102"]);
+    expect(delivered.map((item) => item.details?.ompCatalyAdmission.identity)).toEqual([
+      "99:10:20:101",
+      "99:10:20:102",
+    ]);
     const file = head.events.find((item) => item.event === "ready")!.file!;
     for (const item of delivered) {
-      const source = item.details!.ompDoriAdmission;
+      const source = item.details!.ompCatalyAdmission;
       expect((await headReceipt(file, source.identity, source.fingerprint))?.outcome).toBe("accepted");
       queued(dir, (queue) => expect(queue.admission(source.identity, source.fingerprint)).toBeNull());
     }
@@ -401,13 +405,13 @@ posix(
     const head = start(dir, "atomic-batch");
     await sourceExited(head, 0);
     const handoffs = head.events.filter((item) => item.event === "handoff");
-    expect(handoffs.map((item) => item.details?.ompDoriAdmission.identity)).toEqual(["99:10:20:101", "99:10:20:102"]);
+    expect(handoffs.map((item) => item.details?.ompCatalyAdmission.identity)).toEqual(["99:10:20:101", "99:10:20:102"]);
     // Each native entry was still unpublished when its message_end was judged.
     expect(handoffs.map((item) => item.published)).toEqual([false, false]);
     expect(head.events.filter((item) => item.unresolved !== undefined)).toEqual([]);
     const file = head.events.find((item) => item.event === "ready")!.file!;
     for (const handoff of handoffs) {
-      const source = handoff.details!.ompDoriAdmission;
+      const source = handoff.details!.ompCatalyAdmission;
       expect(await headReceipt(file, source.identity, source.fingerprint)).toEqual({
         outcome: "accepted",
         receipt: handoff.entry!,
@@ -418,7 +422,7 @@ posix(
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line))
-      .filter((entry) => entry.type === "custom" && entry.customType === "omp-dori:fixture-batch");
+      .filter((entry) => entry.type === "custom" && entry.customType === "omp-cataly:fixture-batch");
     expect(batches).toHaveLength(2);
     pending(dir, null, "102");
     await stop(head);
@@ -453,16 +457,19 @@ posix(
       held = false;
       await sourceExited(head, 0);
       const admitted = head.events.filter((item) => item.event === "owe-admitted");
-      expect(admitted.map((item) => item.details?.ompDoriAdmission.identity ?? "prior")).toEqual([
+      expect(admitted.map((item) => item.details?.ompCatalyAdmission.identity ?? "prior")).toEqual([
         "prior",
         "99:10:20:101",
         "99:10:20:102",
       ]);
       expect(openOwes(join(dir, "queue"), Date.now()).map((owe) => owe.message)).toEqual(["90", "101", "102"]);
       const handoffs = head.events.filter((item) => item.event === "handoff");
-      expect(handoffs.map((item) => item.details?.ompDoriAdmission.identity)).toEqual(["99:10:20:101", "99:10:20:102"]);
+      expect(handoffs.map((item) => item.details?.ompCatalyAdmission.identity)).toEqual([
+        "99:10:20:101",
+        "99:10:20:102",
+      ]);
       for (const item of handoffs) {
-        const source = item.details!.ompDoriAdmission;
+        const source = item.details!.ompCatalyAdmission;
         expect(
           (
             await headReceipt(
@@ -515,7 +522,7 @@ posix(
     let held = true;
     try {
       const ready = await event(head, "ready");
-      expect((await event(head, "before-owe")).details?.ompDoriAdmission.identity).toBe("99:10:20:101");
+      expect((await event(head, "before-owe")).details?.ompCatalyAdmission.identity).toBe("99:10:20:101");
       head.proc.send({ op: "stop-monitors" });
       await event(head, "monitors-stopped");
       await until(() => {

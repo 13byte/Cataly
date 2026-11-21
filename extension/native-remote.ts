@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { remoteSocketPath } from "../src/remote/socket-path.ts";
-import type { DoriApi, DoriContext } from "./index.ts";
+import type { CatalyApi, CatalyContext } from "./index.ts";
 import { NativeRemoteSocket } from "./native-remote-socket.ts";
 import { nativeReportLines, remoteMessage, remoteRecord, remoteText, remoteTranscript } from "./native-remote-view.ts";
 
@@ -10,8 +10,8 @@ const SEND_LIMIT = 1024;
 
 type Scope = {
   stateDir: string;
-  ctx: DoriContext;
-  role: "dori" | "lane";
+  ctx: CatalyContext;
+  role: "cataly" | "lane";
   pane?: string;
   owns: () => boolean;
   approvalPending: () => boolean;
@@ -47,10 +47,10 @@ type Activation = {
 
 const ok = (data: unknown) => ({ ok: true, data });
 const fail = (error: string) => ({ ok: false, error });
-const modelId = (model: DoriContext["model"]) =>
+const modelId = (model: CatalyContext["model"]) =>
   model?.provider ? `${model.provider}/${model.id}` : (model?.id ?? null);
 const validId = (id: unknown): id is string => typeof id === "string" && /^[a-zA-Z0-9_.:-]{1,96}$/.test(id);
-const resetBoundary = (ctx: DoriContext) =>
+const resetBoundary = (ctx: CatalyContext) =>
   ctx.sessionManager.getBranch().findLast((entry) => entry.type === "reset_boundary")?.id;
 
 const pageSize = (limit: unknown): number | undefined =>
@@ -64,7 +64,7 @@ export class NativeRemote {
   private activation?: Activation;
   private transport?: NativeRemoteSocket;
 
-  constructor(private readonly pi: DoriApi) {}
+  constructor(private readonly pi: CatalyApi) {}
 
   async activate(scope: Scope): Promise<void> {
     const session = scope.ctx.sessionManager.getSessionId();
@@ -122,7 +122,7 @@ export class NativeRemote {
   }
 
   /** Prevent changing the target of an in-flight host action. Other transitions revoke the old writer immediately. */
-  beforeTransition(ctx: DoriContext): { cancel: true } | undefined {
+  beforeTransition(ctx: CatalyContext): { cancel: true } | undefined {
     const current = this.forContext(ctx);
     if (!current) return;
     if (current.closing || current.changingModel || this.applyingSubmission(current)) {
@@ -133,7 +133,7 @@ export class NativeRemote {
     this.transport?.disconnect();
   }
 
-  event(type: string, event: unknown, ctx: DoriContext): void {
+  event(type: string, event: unknown, ctx: CatalyContext): void {
     const original = this.forContext(ctx);
     const current =
       original && (type === "before_agent_start" || type === "agent_start") ? this.refreshReset(original) : original;
@@ -204,7 +204,7 @@ export class NativeRemote {
     }
   }
 
-  private forContext(ctx: DoriContext): Activation | undefined {
+  private forContext(ctx: CatalyContext): Activation | undefined {
     const current = this.activation;
     if (
       current &&

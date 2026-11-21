@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readMonitorManifests } from "../skills/dori-mode/scripts/src/boot-monitors.ts";
+import { readMonitorManifests } from "../skills/cataly-mode/scripts/src/boot-monitors.ts";
 import { readMonitorSet, sameMonitorSpecs } from "../src/update/deployment-monitors.ts";
 import { DeploymentHeld } from "../src/update/deployment-process.ts";
 
@@ -14,7 +14,7 @@ const spec = { name: "inbound", argv: ["sleep", "30"], cwd: tmpdir(), filter: ".
 // The managed deployment reader enforces POSIX ownership and mode bits; boot is portable.
 const posix = test.skipIf(process.platform === "win32");
 const fixture = (version: number, mode?: string) => {
-  const root = mkdtempSync(join(tmpdir(), "dori-monitor-lifecycle-"));
+  const root = mkdtempSync(join(tmpdir(), "cataly-monitor-lifecycle-"));
   roots.push(root);
   const omp = join(root, "monitors");
   mkdirSync(omp, { mode: 0o700 });

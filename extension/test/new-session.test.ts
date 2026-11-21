@@ -3,14 +3,14 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { readPaneState } from "../../skills/dori-mode/scripts/src/lane-state";
+import { readPaneState } from "../../skills/cataly-mode/scripts/src/lane-state";
 import { readMonitorSet } from "../../src/update/deployment-monitors.ts";
 import { ROLE_INVARIANTS } from "../role-invariants.ts";
 import { type FakePi, type FakeSession, load, until, useConfig } from "./fake-pi";
 
 const PANE = "w1:p61";
-const ROLE = "omp-dori:role";
-const MONITOR = "omp-dori:monitor";
+const ROLE = "omp-cataly:role";
+const MONITOR = "omp-cataly:monitor";
 const agentStart = { type: "before_agent_start", prompt: "ulw keep working", systemPrompt: ["base prompt"] };
 const roleEntry = (role: string) => ({ type: "custom", customType: ROLE, data: role });
 const session = (id: string, entries: FakeSession["entries"] = []): FakeSession => ({
@@ -46,12 +46,12 @@ const runningPid = async (pi: FakePi): Promise<number> => {
 };
 
 beforeEach(() => {
-  for (const key of ["DORI_CONFIG", "DORI_STATE_DIR", "HERDR_PANE_ID", "HC_TERMINAL_ID", "DORI_MANAGED_STARTUP"])
+  for (const key of ["CATALY_CONFIG", "CATALY_STATE_DIR", "HERDR_PANE_ID", "HC_TERMINAL_ID", "CATALY_MANAGED_STARTUP"])
     previousEnv.set(key, process.env[key]);
   stateDir = useConfig(join(import.meta.dir, "fake-ulw.ts"));
   process.env.HERDR_PANE_ID = PANE;
   delete process.env.HC_TERMINAL_ID;
-  delete process.env.DORI_MANAGED_STARTUP;
+  delete process.env.CATALY_MANAGED_STARTUP;
 });
 afterEach(async () => {
   try {
@@ -82,7 +82,7 @@ test("a new lane carries only its role and resets goal, approvals and working st
     { type: "mode_change", mode: "goal", data: { goal: { objective: "old objective", status: "active" } } },
     { type: "custom", customType: "unrelated", data: "old session data" },
   ]);
-  const pi = await load({ session: started, flags: { "dori-role": "lane" } });
+  const pi = await load({ session: started, flags: { "cataly-role": "lane" } });
   sessions.push(pi);
   await pi.emit("session_start");
   await pi.emit("tool_approval_requested", { toolCallId: "old-approval" });
@@ -97,7 +97,7 @@ test("a new lane carries only its role and resets goal, approvals and working st
   pi.session = fresh;
   await pi.emit("session_switch", { type: "session_switch", reason: "new" });
   expect(fresh.entries).toEqual([roleEntry("lane")]);
-  expect(pi.active).toEqual(["read", "bash", "dori_report", "goal"]);
+  expect(pi.active).toEqual(["read", "bash", "cataly_report", "goal"]);
   expect(readPaneState(stateDir, PANE)).toMatchObject({
     role: "lane",
     sessionId: fresh.id,
@@ -109,7 +109,7 @@ test("a new lane carries only its role and resets goal, approvals and working st
   expect(await pi.emit("before_agent_start", agentStart)).toContainEqual({
     systemPrompt: ["base prompt", ROLE_INVARIANTS.lane, "<fake-ulw-policy>"],
   });
-  await expect(run(pi, { op: "list" })).rejects.toThrow("monitor works only in the Dori session");
+  await expect(run(pi, { op: "list" })).rejects.toThrow("monitor works only in the Cataly session");
   await pi.emit("tool_approval_resolved", { toolCallId: "old-approval" });
   expect(readPaneState(stateDir, PANE)?.approvalPending).toBe(false);
 });
@@ -120,9 +120,9 @@ test.each([
   ["session_branch", "branch"],
   ["session_branch", "fork"],
   ["session_tree", undefined],
-] as const)("%s with reason %s does not carry a Dori role or monitors into a plain branch", async (event, reason) => {
-  const started = session("dori-old");
-  const pi = await load({ session: started, flags: { "dori-role": "dori" } });
+] as const)("%s with reason %s does not carry a Cataly role or monitors into a plain branch", async (event, reason) => {
+  const started = session("cataly-old");
+  const pi = await load({ session: started, flags: { "cataly-role": "cataly" } });
   sessions.push(pi);
   await pi.emit("session_start");
   await run(pi, { op: "start", ...spec });
@@ -135,7 +135,7 @@ test.each([
   expect(pi.active).toEqual(["read", "bash"]);
   expect(readPaneState(stateDir, PANE)).toBeNull();
   expect(await pi.emit("before_agent_start", agentStart)).toEqual([undefined]);
-  await expect(run(pi, { op: "list" })).rejects.toThrow("monitor works only in the Dori session");
+  await expect(run(pi, { op: "list" })).rejects.toThrow("monitor works only in the Cataly session");
   await pi.emit("tool_approval_requested", { toolCallId: "plain-approval" });
   expect(readPaneState(stateDir, PANE)).toBeNull();
 
@@ -148,8 +148,8 @@ test.each([
   expect(readPaneState(stateDir, PANE)).toBeNull();
 });
 
-test.each(["dori", "lane"] as const)("a recorded %s destination overrides role and monitor carry", async (role) => {
-  const pi = await load({ session: session("dori-old"), flags: { "dori-role": "dori" } });
+test.each(["cataly", "lane"] as const)("a recorded %s destination overrides role and monitor carry", async (role) => {
+  const pi = await load({ session: session("cataly-old"), flags: { "cataly-role": "cataly" } });
   sessions.push(pi);
   await pi.emit("session_start");
   await run(pi, { op: "start", ...spec });
@@ -162,30 +162,33 @@ test.each(["dori", "lane"] as const)("a recorded %s destination overrides role a
   await until(() => !alive(oldPid));
   expect(destination.entries).toEqual(entries);
   expect(readPaneState(stateDir, PANE)).toMatchObject({ role, sessionId: destination.id });
-  if (role === "dori") {
+  if (role === "cataly") {
     await runningPid(pi);
     expect((await run(pi, { op: "list" })).content[0]?.text).toContain("destination (pid");
     expect((await run(pi, { op: "list" })).content[0]?.text).not.toContain("inbound (pid");
     expect(pi.active).toEqual(["read", "bash", "monitor"]);
   } else {
-    expect(pi.active).toEqual(["read", "bash", "dori_report", "goal"]);
-    await expect(run(pi, { op: "list" })).rejects.toThrow("monitor works only in the Dori session");
+    expect(pi.active).toEqual(["read", "bash", "cataly_report", "goal"]);
+    await expect(run(pi, { op: "list" })).rejects.toThrow("monitor works only in the Cataly session");
   }
 });
 
 // POSIX-only: reads the 0o600 bootstrap the product verifies by mode and owner uid, and sends SIGTERM.
-posix("a new Dori session does not reapply its original session-bound bootstrap", async () => {
+posix("a new Cataly session does not reapply its original session-bound bootstrap", async () => {
   const started = session("bootstrap-old");
   const bootstrap = join(stateDir, "..", "bootstrap.json");
   const intake = { path: join(stateDir, "heartbeat"), monitor: spec.name, maxAgeMs: 120_000 };
   writeFileSync(bootstrap, JSON.stringify({ version: 1, sessionId: started.id, monitors: [spec], intake }), {
     mode: 0o600,
   });
-  const pi = await load({ session: started, flags: { "dori-role": "dori", "dori-monitor-bootstrap": bootstrap } });
+  const pi = await load({
+    session: started,
+    flags: { "cataly-role": "cataly", "cataly-monitor-bootstrap": bootstrap },
+  });
   sessions.push(pi);
   await pi.emit("session_start");
-  expect(started.entries.at(-1)).toEqual(roleEntry("dori"));
-  expect(started.entries.filter((entry) => entry.customType === "omp-dori:monitor-bootstrap")).toHaveLength(1);
+  expect(started.entries.at(-1)).toEqual(roleEntry("cataly"));
+  expect(started.entries.filter((entry) => entry.customType === "omp-cataly:monitor-bootstrap")).toHaveLength(1);
   const oldPid = await runningPid(pi);
 
   const fresh = session("bootstrap-new");
@@ -195,9 +198,9 @@ posix("a new Dori session does not reapply its original session-bound bootstrap"
   // Intake routing belongs to the monitors, not to the old session's private bootstrap token.
   expect(readMonitorSet(saved, fresh.id, true)).toMatchObject({ sessionId: fresh.id, monitors: [spec], intake });
   expect(fresh.entries).toEqual([
-    roleEntry("dori"),
+    roleEntry("cataly"),
     { type: "custom", customType: MONITOR, data: { op: "start", ...spec, id: expect.any(String) } },
-    { type: "custom", customType: "omp-dori:intake", data: intake },
+    { type: "custom", customType: "omp-cataly:intake", data: intake },
   ]);
   await until(() => !alive(oldPid));
   const exitedPid = await runningPid(pi);
@@ -224,22 +227,25 @@ posix("a new Dori session does not reapply its original session-bound bootstrap"
 
 // POSIX-only: reads the 0o600 bootstrap the product verifies by mode and owner uid.
 posix.each([false, true])("rejected bootstrap cannot seed a new session (recorded: %s)", async (recorded) => {
-  const started = session("bootstrap-rejected", recorded ? [roleEntry("dori")] : []);
+  const started = session("bootstrap-rejected", recorded ? [roleEntry("cataly")] : []);
   const bootstrap = join(stateDir, "..", "bootstrap.json");
   const intake = { path: join(stateDir, "heartbeat"), monitor: spec.name, maxAgeMs: 120_000 };
   writeFileSync(bootstrap, JSON.stringify({ version: 1, sessionId: "other-session", monitors: [spec], intake }), {
     mode: 0o600,
   });
-  const pi = await load({ session: started, flags: { "dori-role": "dori", "dori-monitor-bootstrap": bootstrap } });
+  const pi = await load({
+    session: started,
+    flags: { "cataly-role": "cataly", "cataly-monitor-bootstrap": bootstrap },
+  });
   sessions.push(pi);
   await expect(pi.emit("session_start")).rejects.toThrow("session or version");
-  expect(started.entries).toEqual(recorded ? [roleEntry("dori")] : []);
+  expect(started.entries).toEqual(recorded ? [roleEntry("cataly")] : []);
   await pi.emit("session_tree");
   await pi.emit("session_branch");
   await pi.emit("agent_start");
   await pi.emit("tool_approval_requested", { toolCallId: "rejected-approval" });
   expect(readPaneState(stateDir, PANE)).toBeNull();
-  await expect(run(pi, { op: "list" })).rejects.toThrow("monitor works only in the Dori session");
+  await expect(run(pi, { op: "list" })).rejects.toThrow("monitor works only in the Cataly session");
 
   const fresh = session("after-rejection");
   pi.session = fresh;

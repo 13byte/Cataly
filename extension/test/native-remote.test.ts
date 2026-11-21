@@ -4,13 +4,13 @@ import { existsSync, lstatSync, mkdirSync, rmSync, symlinkSync, writeFileSync } 
 import { createConnection } from "node:net";
 import { dirname } from "node:path";
 import { remoteSocketDir, remoteSocketPath } from "../../src/remote/socket-path.ts";
-import ompDori from "../index.ts";
+import ompCataly from "../index.ts";
 import { fakePi, type FakePi, useConfig } from "./fake-pi.ts";
 
 type Reply = { ok: true; data: Record<string, unknown> } | { ok: false; error: string };
 const roots: string[] = [];
 const active: FakePi[] = [];
-const names = ["HC_TERMINAL_ID", "HERDR_PANE_ID", "CATALY_HEADLESS_ID", "DORI_CONFIG", "DORI_STATE_DIR"] as const;
+const names = ["HC_TERMINAL_ID", "HERDR_PANE_ID", "CATALY_HEADLESS_ID", "CATALY_CONFIG", "CATALY_STATE_DIR"] as const;
 const env = new Map<string, string | undefined>();
 const unixSocketTest = test.skipIf(typeof process.getuid !== "function");
 
@@ -57,13 +57,13 @@ function data(reply: Reply): Record<string, unknown> {
   return reply.data;
 }
 
-async function fixture(options?: { role?: "dori" | "lane"; mode?: string; sub?: boolean; plain?: boolean }) {
+async function fixture(options?: { role?: "cataly" | "lane"; mode?: string; sub?: boolean; plain?: boolean }) {
   const root = useConfig("");
   roots.push(root);
   const session = randomUUID();
   const fake = fakePi({
     session: { id: session, file: `${root}/native/${session}.jsonl`, entries: [] },
-    flags: options?.plain ? {} : { "dori-role": options?.role ?? "dori" },
+    flags: options?.plain ? {} : { "cataly-role": options?.role ?? "cataly" },
     mode: options?.mode ?? "tui",
     agent: options?.sub ? { kind: "sub", id: "Child", parentId: "Main" } : undefined,
   });
@@ -97,7 +97,7 @@ async function fixture(options?: { role?: "dori" | "lane"; mode?: string; sub?: 
     return true;
   };
   active.push(fake);
-  await ompDori(fake.api);
+  await ompCataly(fake.api);
   const path = remoteSocketPath(root, session);
   const info = async (at = path) => data(await request(at, { op: "info" }));
   const bound = async () => {
@@ -110,14 +110,14 @@ async function fixture(options?: { role?: "dori" | "lane"; mode?: string; sub?: 
 test("native role and monitor work without Unix user ownership", async () => {
   const root = useConfig("");
   roots.push(root);
-  const fake = fakePi({ session: { id: randomUUID(), entries: [] }, flags: { "dori-role": "dori" } });
+  const fake = fakePi({ session: { id: randomUUID(), entries: [] }, flags: { "cataly-role": "cataly" } });
   active.push(fake);
   const original = Object.getOwnPropertyDescriptor(process, "getuid");
   Object.defineProperty(process, "getuid", { value: undefined, configurable: true });
   try {
-    await ompDori(fake.api);
+    await ompCataly(fake.api);
     await fake.emit("session_start");
-    expect(fake.session.entries).toContainEqual({ type: "custom", customType: "omp-dori:role", data: "dori" });
+    expect(fake.session.entries).toContainEqual({ type: "custom", customType: "omp-cataly:role", data: "cataly" });
     expect(fake.active).toContain("monitor");
     expect(fake.notes.join("\n")).not.toContain("Native remote");
   } finally {
@@ -131,7 +131,13 @@ unixSocketTest("private socket is exact, bounded, and only publishes native Cata
   await fake.emit("session_start");
   expect(lstatSync(remoteSocketDir(root)).mode & 0o7777).toBe(0o700);
   expect(lstatSync(path).mode & 0o7777).toBe(0o600);
-  expect(await info()).toMatchObject({ session, role: "dori", model: "fixture/one", status: "idle", pid: process.pid });
+  expect(await info()).toMatchObject({
+    session,
+    role: "cataly",
+    model: "fixture/one",
+    status: "idle",
+    pid: process.pid,
+  });
   const ask = await bound();
   expect(await ask("exec", { text: "id" })).toMatchObject({ ok: false });
   expect(await ask("read", { session: "different" })).toMatchObject({ ok: false });
@@ -180,11 +186,11 @@ unixSocketTest("an existing exact socket owner cannot be replaced by another roo
   const first = await info();
   const second = fakePi({
     session: { id: session, entries: [] },
-    flags: { "dori-role": "lane" },
+    flags: { "cataly-role": "lane" },
     mode: "tui",
   });
   active.push(second);
-  await ompDori(second.api);
+  await ompCataly(second.api);
   await second.emit("session_start");
   expect(second.notes.join("\n")).toContain("already has a live owner");
   expect(await info()).toEqual(first);

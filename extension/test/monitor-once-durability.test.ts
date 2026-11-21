@@ -12,7 +12,7 @@ const posix = test.skipIf(process.platform === "win32");
 posix("a successful once child reports an actual native journal failure", async () => {
   await assertNativeHost();
   // Bind the public entry point of the installed pinned host, not an optional extension peer.
-  const { SessionManager } = await import(join(process.env["DORI_TEST_OMP_ROOT"]!, "src/index.ts"));
+  const { SessionManager } = await import(join(process.env["CATALY_TEST_OMP_ROOT"]!, "src/index.ts"));
   const stateDir = useConfig(join(import.meta.dir, "fake-ulw.ts"));
   const root = dirname(stateDir);
   const journal = join(root, "journal");
@@ -25,7 +25,7 @@ posix("a successful once child reports an actual native journal failure", async 
   const unsubscribe = manager.onPersistenceError((error: Error) => failures.push(error));
   const pi = await load({
     session: { id: manager.getSessionId(), file: manager.getSessionFile(), entries: [] },
-    flags: { "dori-role": "dori" },
+    flags: { "cataly-role": "cataly" },
   });
   const context = pi.ctx;
   pi.ctx = () => ({ ...context(), cwd: root, sessionManager: manager });

@@ -16,7 +16,7 @@ export function fixtureGit(cwd: string, ...argv: string[]): string {
   const git = ["git", "-c", `core.hooksPath=${devNull}`, "-c", "gc.auto=0", "-c", "maintenance.auto=false", ...argv];
   const result = Bun.spawnSync(
     // umask keeps the fixture private on POSIX; the Windows shell has neither command.
-    windows ? git : ["/bin/sh", "-c", 'umask 077; exec "$@"', "dori-source-fixture", ...git],
+    windows ? git : ["/bin/sh", "-c", 'umask 077; exec "$@"', "cataly-source-fixture", ...git],
     {
       cwd,
       env: {

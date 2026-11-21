@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { copyFileSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { acquireConsumerLock } from "../src/release/files.ts";
-import { assertNoLiveDori } from "../src/release/live.ts";
+import { assertNoLiveCataly } from "../src/release/live.ts";
 import { processIdentity } from "../src/update/deployment-process.ts";
 import { processExists } from "../src/update/proc.ts";
 import { fixture } from "./release-consumer-setup.ts";
@@ -45,7 +45,7 @@ darwin.each(["runtime", "lock"] as const)(
         const runtime = join(paths.dori, "state", "runtime");
         mkdirSync(runtime, { recursive: true, mode: 0o700 });
         writeFileSync(join(runtime, "witness.json"), JSON.stringify({ ...identity, role: "dori" }));
-        expect(() => assertNoLiveDori(paths)).toThrow("identity is unavailable");
+        expect(() => assertNoLiveCataly(paths)).toThrow("identity is unavailable");
       } else {
         const lock = join(paths.root, "consumer.lock");
         const owner = join(lock, "owner.json");

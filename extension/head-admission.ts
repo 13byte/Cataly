@@ -1,5 +1,7 @@
 import { isAbsolute } from "node:path";
-import type { HeadRequest, HeadResult } from "../skills/dori-mode/scripts/src/messenger/head-admission.ts";
+import { isHeadAdmissionProtocol } from "../skills/cataly-mode/scripts/src/messenger/head-admission-protocol.ts";
+import type { HeadReply, HeadRequest, HeadResult } from "../skills/cataly-mode/scripts/src/messenger/head-admission.ts";
+import { MONITOR_MESSAGE } from "../skills/cataly-mode/scripts/src/session-compat.ts";
 import { hasHeadReceipt, headReceipt } from "./head-receipt.ts";
 
 type Head = { id: string; file: string; entries(): readonly unknown[]; ensureOnDisk(): Promise<void> };
@@ -9,7 +11,7 @@ type Binding = {
   accepts(content: string): boolean;
   deliver(
     content: string,
-    details: { ompDoriAdmission: { identity: string; fingerprint: string } },
+    details: { ompCatalyAdmission: { identity: string; fingerprint: string } },
   ): void | Promise<void>;
 };
 type Pending = {
@@ -26,14 +28,11 @@ export class HeadAdmissions {
   readonly #serial = new Map<string, Promise<HeadResult>>();
   constructor(
     private readonly current: () => Head | undefined,
-    private readonly reject: (details: { ompDoriAdmission: { identity: string; fingerprint: string } }) => void,
+    private readonly reject: (details: { ompCatalyAdmission: { identity: string; fingerprint: string } }) => void,
     private readonly changed: (pending: number, unresolved?: string) => void,
   ) {}
 
-  async receive(
-    raw: unknown,
-    binding: Binding,
-  ): Promise<{ request: string; protocol: "dori-head-admission-v1" } & HeadResult> {
+  async receive(raw: unknown, binding: Binding): Promise<HeadReply> {
     if (
       raw === null ||
       typeof raw !== "object" ||
@@ -42,7 +41,7 @@ export class HeadAdmissions {
       raw.request.length === 0 ||
       raw.request.length > 64 ||
       !("protocol" in raw) ||
-      raw.protocol !== "dori-head-admission-v1" ||
+      !isHeadAdmissionProtocol(raw.protocol) ||
       !("op" in raw) ||
       (raw.op !== "prepare" && raw.op !== "dispatch" && raw.op !== "reconcile") ||
       !("identity" in raw) ||
@@ -64,7 +63,7 @@ export class HeadAdmissions {
     try {
       const reply = await result;
       if (reply.outcome === "unresolved") this.changed(this.#pending.size, request.identity);
-      return { protocol: "dori-head-admission-v1", request: request.request, ...reply };
+      return { protocol: request.protocol, request: request.request, ...reply };
     } finally {
       if (this.#serial.get(request.identity) === result) this.#serial.delete(request.identity);
     }
@@ -89,7 +88,7 @@ export class HeadAdmissions {
     if (request.op === "prepare") return { outcome: "ready", headFile: head.file, headPid: process.pid };
     if (request.headFile !== head.file) return { outcome: "unresolved" };
     if (!accepts) {
-      this.reject({ ompDoriAdmission: { identity: request.identity, fingerprint: request.fingerprint } });
+      this.reject({ ompCatalyAdmission: { identity: request.identity, fingerprint: request.fingerprint } });
       await head.ensureOnDisk();
       const rejected = await headReceipt(head.file, request.identity, request.fingerprint);
       return rejected ? { ...rejected, headFile: head.file, headPid: process.pid } : { outcome: "unresolved" };
@@ -105,7 +104,7 @@ export class HeadAdmissions {
       this.changed(this.#pending.size);
       const delivered = Promise.resolve(
         binding.deliver(request.content, {
-          ompDoriAdmission: { identity: request.identity, fingerprint: request.fingerprint },
+          ompCatalyAdmission: { identity: request.identity, fingerprint: request.fingerprint },
         }),
       ).then(() => pending.promise);
       // Stop releases the receipt wait even during async delivery; its later rejection remains observed.
@@ -123,13 +122,13 @@ export class HeadAdmissions {
         message?: {
           customType?: string;
           details?: {
-            ompDoriAdmission?: { identity?: string; fingerprint?: string };
+            ompCatalyAdmission?: { identity?: string; fingerprint?: string };
           };
         };
       } | null
     )?.message;
-    const admission = message?.details?.ompDoriAdmission;
-    if (message?.customType !== "dori-monitor" || typeof admission?.identity !== "string") return;
+    const admission = message?.details?.ompCatalyAdmission;
+    if (message?.customType !== MONITOR_MESSAGE || typeof admission?.identity !== "string") return;
     const pending = this.#pending.get(admission.identity);
     if (!pending || pending.fingerprint !== admission.fingerprint) return;
     try {

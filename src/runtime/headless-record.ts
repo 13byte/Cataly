@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   existsSync,
@@ -11,14 +10,16 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { parseCatalyRole } from "../../skills/cataly-mode/scripts/src/session-compat.ts";
 import { type HeadlessObservation, type HeadlessRequest, object } from "./headless-protocol.ts";
-import { HEADLESS_ADDRESS, type SessionInfo, type SessionRef } from "./types.ts";
+import { HEADLESS_ADDRESS, type SessionInfo, type SessionRef, type SessionRole } from "./types.ts";
 
 export type Reservation = {
   readonly ref: SessionRef;
   readonly name: string;
   readonly cwd: string;
   readonly startedAt: string;
+  readonly role?: SessionRole;
 };
 export type Endpoint = { readonly socket: string; readonly key: string; readonly pid: number };
 export type StopReceipt = { readonly detail?: string; readonly closedSessionId?: string };
@@ -71,7 +72,12 @@ export function laneEntry(stateDir: string, ref: SessionRef): { dir: string; res
   privateDir(dataDir(stateDir));
   privateDir(dir);
   const reservation = readPrivate<Reservation>(join(dir, "reservation.json"));
-  if (!reservation || reservation.ref?.runtime !== "headless" || reservation.ref.id !== ref.id)
+  if (
+    !reservation ||
+    reservation.ref?.runtime !== "headless" ||
+    reservation.ref.id !== ref.id ||
+    ![undefined, "lane", "lead", "duty", "duty-loop", "hourly-loop"].includes(reservation.role)
+  )
     throw new HeadlessError("headless reservation identity unreadable");
   return { dir, reservation };
 }
@@ -121,7 +127,15 @@ export async function observeHost(stateDir: string, ref: SessionRef): Promise<He
   if (stopped) return { ...base, ...(stopped.detail ? { detail: stopped.detail } : {}), status: "gone" };
   if (!readPrivate<Endpoint>(join(entry.dir, "endpoint.json"))) return { ...base, status: "unknown" };
   try {
-    return await requestHost<HeadlessObservation>(stateDir, ref, { op: "observe" });
+    const observation = await requestHost<Omit<HeadlessObservation, "role"> & { readonly role?: unknown }>(
+      stateDir,
+      ref,
+      { op: "observe" },
+    );
+    const { role: rawRole, ...rest } = observation;
+    const role = parseCatalyRole(rawRole);
+    if (rawRole !== undefined && role === undefined) throw new HeadlessError("invalid headless runtime role");
+    return role === undefined ? rest : { ...rest, role };
   } catch (error) {
     // Socket loss is not proof of exit. A broker killed externally cannot be rebound or signaled by PID.
     return { ...base, status: "unknown", detail: error instanceof Error ? error.message : String(error) };
@@ -155,25 +169,6 @@ export async function listHosts(stateDir: string, group: string | undefined): Pr
       }),
   );
   return records.flat();
-}
-
-export async function spawnHost(dir: string, start: HostStart) {
-  const { env } = start;
-  const child = spawn(process.execPath, [join(import.meta.dir, "headless-broker.ts"), dir], {
-    detached: true,
-    stdio: ["pipe", "ignore", "ignore"],
-    // Secrets are streamed to the child, not persisted or inserted into argv.
-    env: { PATH: env["PATH"], HOME: env["HOME"], TMPDIR: env["TMPDIR"] },
-  });
-  await new Promise<void>((done, fail) => {
-    child.once("error", fail);
-    child.stdin.once("error", fail);
-    child.stdin.end(JSON.stringify(start), done);
-  }).catch((error: unknown) => {
-    throw new HeadlessError(`headless supervisor start unconfirmed (${String(error)})`);
-  });
-  child.unref();
-  return child;
 }
 
 type Host = {
@@ -226,7 +221,7 @@ export async function serveHost(dir: string, make: (reservation: Reservation) =>
     writePrivate(join(dir, "endpoint.json"), { socket, key, pid: process.pid });
     const code = await host.start(start, config);
     writePrivate(join(dir, "stopped.json"), {
-      ...(code === 0 ? {} : { detail: `OMP exited (${code})` }),
+      ...(code === 0 ? {} : { detail: `headless process exited (${code})` }),
       ...(host.closedSessionId === undefined ? {} : { closedSessionId: host.closedSessionId }),
     });
   } catch (error) {

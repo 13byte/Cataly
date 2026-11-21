@@ -13,7 +13,7 @@ test("public upstream status awaits the running observation instead of serializi
   const f = fixture();
   const config = join(f.directory, "config.json");
   f.write(f.directory, "config.json", JSON.stringify(f.config));
-  const cli = join(import.meta.dir, "../skills/dori-mode/scripts/src/cli.ts");
+  const cli = join(import.meta.dir, "../skills/cataly-mode/scripts/src/cli.ts");
   const proc = Bun.spawn([process.execPath, cli, "upstream", "status", "--config", config], {
     env: { PATH: process.env["PATH"], HOME: f.directory },
     stdin: "ignore",
@@ -27,7 +27,7 @@ test("public upstream status awaits the running observation instead of serializi
   ]);
   expect(code).toBe(0);
   expect(stderr).toBe("");
-  expect(JSON.parse(stdout)).toMatchObject({ target: "dori", running: { status: "unknown" }, jobs: [] });
+  expect(JSON.parse(stdout)).toMatchObject({ target: "cataly", running: { status: "unknown" }, jobs: [] });
 });
 
 const activeFixture = async () => {
@@ -80,7 +80,7 @@ test.skipIf(process.platform !== "linux")(
   async () => {
     const f = await activeFixture();
     const identity = "e".repeat(64);
-    const cache = join(f.config.home, ".cache/omp-dori");
+    const cache = join(f.config.home, ".cache/omp-cataly");
     const bin = join(cache, `native-${process.platform}-${process.arch}-${identity}`, "bin");
     mkdirSync(bin, { recursive: true, mode: 0o700 });
     const alias = join(bin, "omp");

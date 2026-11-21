@@ -170,7 +170,7 @@ export class World {
     const kind = opts.runtime ?? "herdr";
     const quiet = { env: {}, sleep: async () => {} };
     return {
-      store: new Store(mkdtempSync(join(tmpdir(), "dori-test-"))),
+      store: new Store(mkdtempSync(join(tmpdir(), "cataly-test-"))),
       runtimes: new Runtimes(kind, (k) => {
         if (k === "headless") throw new Error("Terminal test world does not have a headless runtime");
         return k === "hc"
@@ -181,7 +181,7 @@ export class World {
       exec: this.exec,
       now: () => this.clock,
       agentCmd: "omo",
-      doriCmd: "dori",
+      catalyCmd: "cataly",
       host: () => this.host,
       usage: this.recorder,
     };

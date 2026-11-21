@@ -1,5 +1,8 @@
 node_modules
+.cataly/
+.omp-cataly/
 .dori/
+.omp-dori/
 *.tmp
 .DS_Store
 .omo/

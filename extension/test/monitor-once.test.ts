@@ -14,7 +14,7 @@ test("a completed once job remains listed but never starts again on resume or ne
   const stateDir = useConfig(join(import.meta.dir, "fake-ulw.ts"));
   const marker = join(dirname(stateDir), "runs");
   const session: FakeSession = { id: "once-owner", entries: [] };
-  const first = await load({ session, flags: { "dori-role": "dori" } });
+  const first = await load({ session, flags: { "cataly-role": "cataly" } });
   let resumed: FakePi | undefined;
   try {
     await first.emit("session_start");
@@ -52,7 +52,7 @@ test.each([
   const stateDir = useConfig(join(import.meta.dir, "fake-ulw.ts"));
   const marker = join(dirname(stateDir), "runs");
   const session: FakeSession = { id: "retry-owner", entries: [] };
-  const first = await load({ session, flags: { "dori-role": "dori" } });
+  const first = await load({ session, flags: { "cataly-role": "cataly" } });
   let resumed: FakePi | undefined;
   try {
     await first.emit("session_start");
@@ -94,7 +94,7 @@ test.each([
 test("an explicit start may replace a completed once job and stop forgets its terminal record", async () => {
   const stateDir = useConfig(join(import.meta.dir, "fake-ulw.ts"));
   const marker = join(dirname(stateDir), "runs");
-  const pi = await load({ session: { id: "repeat-owner", entries: [] }, flags: { "dori-role": "dori" } });
+  const pi = await load({ session: { id: "repeat-owner", entries: [] }, flags: { "cataly-role": "cataly" } });
   const params = {
     op: "start",
     name: "ci",
@@ -126,11 +126,11 @@ test("active once work holds managed restart and successful completion restores 
   const stateDir = useConfig(join(import.meta.dir, "fake-ulw.ts"));
   const release = join(dirname(stateDir), "release");
   const session: FakeSession = { id: "managed-once", entries: [] };
-  const pi = await load({ session, flags: { "dori-role": "dori" } });
+  const pi = await load({ session, flags: { "cataly-role": "cataly" } });
   const manifest = join(stateDir, "monitors", `${session.id}.json`);
   try {
     await pi.emit("session_start");
-    pi.api.appendEntry("omp-dori:intake", { path: join(stateDir, "heartbeat"), monitor: "inbound", maxAgeMs: 1000 });
+    pi.api.appendEntry("omp-cataly:intake", { path: join(stateDir, "heartbeat"), monitor: "inbound", maxAgeMs: 1000 });
     await run(pi, { op: "start", name: "inbound", argv: ["sleep", "30"], filter: "." });
     await run(pi, {
       op: "start",
@@ -165,7 +165,7 @@ test("active once work holds managed restart and successful completion restores 
 
 test("process termination remains visible and does not complete once work", async () => {
   const stateDir = useConfig(join(import.meta.dir, "fake-ulw.ts"));
-  const pi = await load({ session: { id: "signal-once", entries: [] }, flags: { "dori-role": "dori" } });
+  const pi = await load({ session: { id: "signal-once", entries: [] }, flags: { "cataly-role": "cataly" } });
   try {
     await pi.emit("session_start");
     await run(pi, {

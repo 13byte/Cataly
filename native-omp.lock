@@ -2,8 +2,8 @@
   "version": 1,
   "repository": "https://github.com/can1357/oh-my-pi.git",
   "commit": "c308970263ae13744ea15ab67302e3dac840e266",
-  "patchSha256": "0f8922d8fd63e46db60e5f30f381e2c0318e066f2f519398475a0343a2591f57",
-  "resultTree": "273e9405b41875d43c9cf7df6fcde9b711eacf80",
+  "patchSha256": "44d09f095dfb940533795ac3890f4fb3f6013cf385f2647d1d3bf10df72b7405",
+  "resultTree": "0818106b7230fe526ff781a761c9aac2b40f5537",
   "files": [
     {
       "path": "docs/context-files.md",
@@ -27,7 +27,7 @@
     },
     {
       "path": "docs/tools/wait.md",
-      "sha256": "4973f55f76758298b6f59af43cd6fdb2fedcd5dca9c152edb968571ecebae1b1",
+      "sha256": "e9b8a086854c1a07dd3485e5e5680110927be16c963cb96211a459aeb01a285b",
       "executable": false
     },
     {

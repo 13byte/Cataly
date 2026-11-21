@@ -3,7 +3,7 @@ import { existsSync, readFileSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { runUpdate } from "../src/update/cli.ts";
 import { UpdateInterrupted } from "../src/update/config.ts";
-import { DoriUpdater } from "../src/update/controller.ts";
+import { CatalyUpdater } from "../src/update/controller.ts";
 import { loadUpdateConfig } from "../src/update/load.ts";
 import { detectHead } from "../src/update/prepare.ts";
 import type { UpdateState } from "../src/update/types.ts";
@@ -23,7 +23,7 @@ describe("bounded configured ref detection", () => {
     const f = fixture();
     const config = join(f.directory, "config.json");
     f.write(f.directory, "config.json", JSON.stringify(f.config));
-    const updater = new DoriUpdater(loadUpdateConfig(config), () => {});
+    const updater = new CatalyUpdater(loadUpdateConfig(config), () => {});
     renameSync(join(f.remote, ".git"), join(f.remote, ".git.offline"));
     try {
       expect(await runUpdate(["check", "--config", config])).toBe(4);
@@ -69,7 +69,7 @@ describe("bounded configured ref detection", () => {
     const f = fixture();
     const controller = new AbortController();
     controller.abort();
-    const updater = new DoriUpdater(f.config, () => {}, controller.signal);
+    const updater = new CatalyUpdater(f.config, () => {}, controller.signal);
     const error = await updater.once("stage").catch((error: unknown) => error);
     expect(error).toBeInstanceOf(UpdateInterrupted);
     const { state } = await updater.status();

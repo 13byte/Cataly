@@ -1,5 +1,6 @@
 import { lstatSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
+import { parseCatalyRole } from "../../skills/cataly-mode/scripts/src/session-compat.ts";
 import { DeploymentHeld } from "./deployment-process.ts";
 import type {
   DeploymentConfig,
@@ -138,7 +139,7 @@ export function readMonitorSet(path: string, sessionId: string, trusted = false)
       !trusted ||
       !record(rawRuntime) ||
       typeof rawRuntime["pane"] !== "string" ||
-      rawRuntime["role"] !== "dori" ||
+      parseCatalyRole(rawRuntime["role"]) !== "cataly" ||
       rawRuntime["sessionId"] !== sessionId ||
       typeof rawRuntime["startedAt"] !== "string" ||
       !Number.isFinite(Date.parse(rawRuntime["startedAt"]))
@@ -147,7 +148,7 @@ export function readMonitorSet(path: string, sessionId: string, trusted = false)
     runtime = {
       ...processReceipt(rawRuntime),
       pane: rawRuntime["pane"],
-      role: "dori",
+      role: "cataly",
       sessionId,
       startedAt: rawRuntime["startedAt"],
     };

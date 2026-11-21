@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "omp-dori-native-host-fixture",
+      "name": "omp-cataly-native-host-fixture",
       "dependencies": {
         "@oh-my-pi/pi-coding-agent": "18.20.0",
       },

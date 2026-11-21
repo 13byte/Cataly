@@ -25,23 +25,23 @@ posix("a local change in the way of the pull stops the install, names the file a
   // Then it fails, lists the changed file, and points at the way to install the checkout as it is.
   expect(r.code).toBe(1);
   expect(r.err).toContain(cli);
-  expect(r.err).toContain("DORI_NO_PULL=1");
+  expect(r.err).toContain("CATALY_NO_PULL=1");
   expect(readFileSync(join(src, cli), "utf8")).toBe("patched\n");
 });
 
-posix("DORI_NO_PULL=1 installs a changed checkout as it is, without pulling", () => {
+posix("CATALY_NO_PULL=1 installs a changed checkout as it is, without pulling", () => {
   // Given a checkout with a local edit and a newer upstream commit.
   const { src, home, cli, upstreamCommit, install } = setup();
   const before = git(src, "rev-parse", "HEAD");
   upstreamCommit("v2\n");
   writeFileSync(join(src, cli), "patched\n");
-  // When the source installer runs with DORI_NO_PULL=1.
-  const r = install({ DORI_NO_PULL: "1" });
+  // When the source installer runs with CATALY_NO_PULL=1.
+  const r = install({ CATALY_NO_PULL: "1" });
   // Then the install finishes, and the checkout keeps its commit and its local edit.
   expect(r.code).toBe(0);
   expect(git(src, "rev-parse", "HEAD")).toBe(before);
   expect(readFileSync(join(src, cli), "utf8")).toBe("patched\n");
-  expect(existsSync(join(home, ".dori/config.json"))).toBe(true);
+  expect(existsSync(join(home, ".cataly/config.json"))).toBe(true);
 });
 
 posix("a pull blocked by a local commit lists that commit and how to go on", () => {
@@ -55,23 +55,26 @@ posix("a pull blocked by a local commit lists that commit and how to go on", () 
   // Then it fails and names the local commit, which git status alone would not show.
   expect(r.code).toBe(1);
   expect(r.err).toContain("local fix");
-  expect(r.err).toContain("DORI_NO_PULL=1");
+  expect(r.err).toContain("CATALY_NO_PULL=1");
 });
 
-posix("DORI_NO_PULL=true and DORI_NO_PULL=yes skip the pull like DORI_NO_PULL=1; DORI_NO_PULL=0 still pulls", () => {
-  // Given an installed checkout and a newer upstream commit.
-  const { upstream, src, upstreamCommit, install } = setup();
-  const before = git(src, "rev-parse", "HEAD");
-  upstreamCommit("v2\n");
-  // When the source installer runs with each truthy spelling; then the checkout stays at its commit.
-  for (const value of ["true", "yes"]) {
-    expect(install({ DORI_NO_PULL: value }).code).toBe(0);
-    expect(git(src, "rev-parse", "HEAD")).toBe(before);
-  }
-  // And with 0 it pulls as usual.
-  expect(install({ DORI_NO_PULL: "0" }).code).toBe(0);
-  expect(git(src, "rev-parse", "HEAD")).toBe(git(upstream, "rev-parse", "HEAD"));
-});
+posix(
+  "CATALY_NO_PULL=true and CATALY_NO_PULL=yes skip the pull like CATALY_NO_PULL=1; CATALY_NO_PULL=0 still pulls",
+  () => {
+    // Given an installed checkout and a newer upstream commit.
+    const { upstream, src, upstreamCommit, install } = setup();
+    const before = git(src, "rev-parse", "HEAD");
+    upstreamCommit("v2\n");
+    // When the source installer runs with each truthy spelling; then the checkout stays at its commit.
+    for (const value of ["true", "yes"]) {
+      expect(install({ CATALY_NO_PULL: value }).code).toBe(0);
+      expect(git(src, "rev-parse", "HEAD")).toBe(before);
+    }
+    // And with 0 it pulls as usual.
+    expect(install({ CATALY_NO_PULL: "0" }).code).toBe(0);
+    expect(git(src, "rev-parse", "HEAD")).toBe(git(upstream, "rev-parse", "HEAD"));
+  },
+);
 
 posix("a branch with no upstream is not taken for local work: git's reason, no reset suggested", () => {
   // Given a checkout with a local edit whose branch tracks nothing.
@@ -99,9 +102,9 @@ posix("a failed fetch is not taken for local work: no reset is suggested", () =>
 
 posix("the OMP extension and explicit ULW path install without replacing existing owner configuration", () => {
   const { home, src, ulw, install } = setup();
-  mkdirSync(join(home, ".dori"));
-  writeFileSync(join(home, ".dori/.omp-dori"), "primary\n");
-  const path = join(home, ".dori/config.json");
+  mkdirSync(join(home, ".cataly"));
+  writeFileSync(join(home, ".cataly/.omp-cataly"), "primary\n");
+  const path = join(home, ".cataly/config.json");
   writeFileSync(
     path,
     JSON.stringify({
@@ -111,20 +114,20 @@ posix("the OMP extension and explicit ULW path install without replacing existin
     }),
   );
   expect(install().code).toBe(0);
-  expect(readlinkSync(join(home, "extensions/omp-dori"))).toBe(join(src, "extension"));
+  expect(readlinkSync(join(home, "extensions/omp-cataly"))).toBe(join(src, "extension"));
   // omp-ulw becomes an OMP extension, so the config's import path is emptied rather than pointed at it.
   expect(readlinkSync(join(home, "extensions/omp-ulw"))).toBe(ulw);
   expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
     defaultModel: "provider/custom",
     hooks: { threadReply: ["fixture"] },
     ompUlwPath: "",
-    agentCommand: [join(home, ".dori/bin/omp"), "--dori-role", "lane", "--model", "{model}", "{prompt}"],
+    agentCommand: [join(home, ".cataly/bin/omp"), "--cataly-role", "lane", "--model", "{model}", "{prompt}"],
   });
 });
 
 posix("an existing non-link extension directory is preserved and stops installation", () => {
   const { home, install } = setup();
-  const extension = join(home, "extensions/omp-dori");
+  const extension = join(home, "extensions/omp-cataly");
   mkdirSync(extension, { recursive: true });
   writeFileSync(join(extension, "owner.txt"), "keep\n");
   expect(install().code).toBe(1);

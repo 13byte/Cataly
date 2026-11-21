@@ -26,7 +26,7 @@ posix("a candidate without support for the configured host/runtime profile is ne
   const f = fixture();
   const one = await installBundle(f.paths, f.release("one").bundle, undefined);
   const config = JSON.parse(readFileSync(f.paths.config, "utf8"));
-  config.runtime = process.platform === "darwin" ? "herdr" : "hc";
+  config.sessionRuntime = "headless";
   saveJson(f.paths.config, config);
   const settings = readFileSync(f.paths.config);
   const pointer = readlinkSync(f.paths.live);
@@ -40,7 +40,7 @@ posix("a candidate without support for the configured host/runtime profile is ne
   expect(readFileSync(f.paths.config)).toEqual(settings);
   expect(readAutomaticState(f.paths)).toMatchObject({
     outcome: "failed",
-    detail: "Available release does not support this installation profile",
+    detail: expect.stringContaining("conflicts with preserved config runtime"),
   });
 });
 
@@ -84,14 +84,14 @@ posix("primary consumer shell re-execs the newly selected source before resolvin
   mkdirSync(cwd);
   writeFileSync(join(cwd, "bunfig.toml"), 'preload = ["./injected.ts"]\n');
   writeFileSync(join(cwd, "injected.ts"), 'throw new Error("untrusted preload ran");\n');
-  const launched = Bun.spawnSync([join(current, "scripts/consumer/omp"), "--dori-role", "dori", "space argument"], {
+  const launched = Bun.spawnSync([join(current, "scripts/consumer/omp"), "--cataly-role", "dori", "space argument"], {
     cwd,
     env: { HOME: f.paths.home, PATH: `${dirname(process.execPath)}:${process.env["PATH"]}` },
   });
   expect(launched.exitCode, launched.stderr.toString()).toBe(0);
   expect(launched.stdout.toString().trim().split("\n")).toEqual([
     "new-native",
-    "--dori-role",
+    "--cataly-role",
     "dori",
     "space argument",
   ]);
@@ -133,7 +133,7 @@ posix("isolated launch computes extension and discovery argv from the new source
   mkdirSync(cwd);
   writeFileSync(join(cwd, "bunfig.toml"), 'preload = ["./injected.ts"]\n');
   writeFileSync(join(cwd, "injected.ts"), 'throw new Error("untrusted preload ran");\n');
-  const launched = Bun.spawnSync([join(f.paths.dori, "bin/omp"), "--dori-role", "dori"], {
+  const launched = Bun.spawnSync([join(f.paths.dori, "bin/omp"), "--cataly-role", "dori"], {
     cwd,
     env: { HOME: f.paths.home, PATH: process.env["PATH"] },
   });
@@ -148,10 +148,10 @@ posix("automatic CLI opt-out and resume are durable and leave config bytes untou
   const f = fixture();
   await installBundle(f.paths, f.release("one").bundle, undefined);
   const config = readFileSync(f.paths.config);
-  const cli = resolve(import.meta.dir, "../skills/dori-mode/scripts/src/cli.ts");
+  const cli = resolve(import.meta.dir, "../skills/cataly-mode/scripts/src/cli.ts");
   for (const mode of ["disable", "status", "enable"] as const) {
     const result = Bun.spawnSync([process.execPath, cli, "update", "auto", mode], {
-      env: { HOME: f.paths.home, DORI_HOME: f.paths.dori, PATH: process.env["PATH"] },
+      env: { HOME: f.paths.home, CATALY_HOME: f.paths.dori, PATH: process.env["PATH"] },
     });
     expect(result.exitCode, result.stderr.toString()).toBe(0);
     expect(JSON.parse(result.stdout.toString()).automatic.enabled).toBe(mode === "enable");

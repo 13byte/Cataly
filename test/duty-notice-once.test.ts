@@ -160,11 +160,11 @@ describe("duty notices survive queue and settlement retries", () => {
     const { d, at, pane } = await quietLane();
     const dir = join(d.store.root, "own-prompts");
     mkdirSync(join(dir, "nudge.md"), { recursive: true });
-    process.env["DORI_PROMPTS_DIR"] = dir;
+    process.env["CATALY_PROMPTS_DIR"] = dir;
     try {
       expect((await at(10)).map((e) => e.action)).toContain("lane-failed");
     } finally {
-      delete process.env["DORI_PROMPTS_DIR"];
+      delete process.env["CATALY_PROMPTS_DIR"];
     }
     expect(d.store.lane("talker")!.nudges).toBe(0);
     expect(pane.received.filter((m) => m.includes("[duty -> talker]"))).toEqual([]);

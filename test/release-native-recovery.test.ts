@@ -131,7 +131,7 @@ posix(
     const native = pointer(omp);
     const state = readFileSync(f.paths.state);
     const source = pointer(f.paths.live);
-    const cli = resolve(import.meta.dir, "../skills/dori-mode/scripts/src/cli.ts");
+    const cli = resolve(import.meta.dir, "../skills/cataly-mode/scripts/src/cli.ts");
     for (const changed of [
       undefined,
       join(releasePath(f.paths, after.current), "scripts/consumer/omp"),
@@ -141,8 +141,8 @@ posix(
       expect(() => recoverInstalled(f.paths)).toThrow("native OMP pointer");
       await expect(installBundle(f.paths, bundle, before)).rejects.toThrow("native OMP");
       await expect(rollbackRelease(f.paths, before)).rejects.toThrow("native OMP");
-      const result = Bun.spawnSync([process.execPath, cli, "update", "status"], {
-        env: { HOME: f.paths.home, PATH: process.env["PATH"], DORI_TELEMETRY: "0", DO_NOT_TRACK: "1" },
+      const result = Bun.spawnSync([process.execPath, cli, "update", "status", "--home", f.paths.cataly], {
+        env: { HOME: f.paths.home, PATH: process.env["PATH"], CATALY_TELEMETRY: "0", DO_NOT_TRACK: "1" },
         timeout: 10_000,
       });
       expect(result.exitCode).toBe(2);

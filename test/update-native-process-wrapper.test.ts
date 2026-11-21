@@ -22,13 +22,13 @@ afterEach(() => {
 });
 
 function fixture() {
-  const directory = mkdtempSync(join(tmpdir(), "dori-native-process-wrapper-"));
+  const directory = mkdtempSync(join(tmpdir(), "cataly-native-process-wrapper-"));
   directories.push(directory);
   for (const name of ["candidate", "remote", "job"]) mkdirSync(join(directory, name), { mode: 0o700 });
   const agent = { argv: ["omp", MODEL, "{prompt}"], timeoutMs: 1000 };
   const config: UpdateConfig = {
     version: 1,
-    target: "dori",
+    target: "cataly",
     runtime: "herdr",
     root: join(directory, "updates"),
     remote: join(directory, "remote"),

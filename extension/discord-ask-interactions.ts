@@ -1,7 +1,7 @@
-import { discordApiBase } from "../skills/dori-mode/scripts/src/messenger/discord.ts";
-import { discordGateway, type GatewaySocket } from "../skills/dori-mode/scripts/src/messenger/discord-gateway.ts";
-import { isDiscordSnowflake } from "../skills/dori-mode/scripts/src/messenger/discord-inbound-state.ts";
-import { fetchHttp } from "../skills/dori-mode/scripts/src/messenger/http.ts";
+import { discordApiBase } from "../skills/cataly-mode/scripts/src/messenger/discord.ts";
+import { discordGateway, type GatewaySocket } from "../skills/cataly-mode/scripts/src/messenger/discord-gateway.ts";
+import { isDiscordSnowflake } from "../skills/cataly-mode/scripts/src/messenger/discord-inbound-state.ts";
+import { fetchHttp } from "../skills/cataly-mode/scripts/src/messenger/http.ts";
 import type { AskData } from "./discord-ask-form.ts";
 
 export type AskButtonSocket = (url: string) => GatewaySocket;
@@ -49,7 +49,7 @@ export async function openAskButtons(
   signal: AbortSignal,
   open?: AskButtonSocket,
 ): Promise<InteractionConnection | undefined> {
-  const apiOverride = process.env["DORI_DISCORD_API_BASE"];
+  const apiOverride = process.env["CATALY_DISCORD_API_BASE"];
   if (!open && apiOverride) return undefined; // Never send a fixture credential to Discord's real Gateway.
   if (signal.aborted) return undefined;
   const base = discordApiBase(apiOverride);

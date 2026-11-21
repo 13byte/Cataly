@@ -56,14 +56,14 @@ process.stdout.write(await Bun.stdin.text());
     const pending = inspectActiveDeployment(f.config, abort.signal);
     try {
       await waitFor(() => existsSync(marker));
-      expect(readdirSync(f.root).filter((name) => name.startsWith("dori-status-"))).toHaveLength(1);
+      expect(readdirSync(f.root).filter((name) => name.startsWith("cataly-status-"))).toHaveLength(1);
       const pid = Number(readFileSync(marker, "utf8"));
       abort.abort();
       const result = await pending;
       expect(result.status).toBe("unknown");
       expect(result).not.toHaveProperty("sourceHash");
       expect(processIdentity(pid)).toBeUndefined();
-      expect(readdirSync(f.root).filter((name) => name.startsWith("dori-status-"))).toHaveLength(0);
+      expect(readdirSync(f.root).filter((name) => name.startsWith("cataly-status-"))).toHaveLength(0);
       expect(readFileSync(active, "utf8")).toBe(before);
       expect(sameProcess(runtime)).toBe(true);
       expect(existsSync(f.signalPath)).toBe(false);

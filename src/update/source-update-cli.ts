@@ -5,13 +5,13 @@ import { DeploymentHeld } from "./deployment-process.ts";
 import { MainCiNotReady } from "./github-ci.ts";
 import { loadSourceUpdateConfig, sourceRequiredCi } from "./source-update-config.ts";
 
-const USAGE = `Usage: dori update source <check|status|apply> [--config FILE]
+const USAGE = `Usage: cataly update source <check|status|apply> [--config FILE]
   apply --when idle [--owner-quiet 30m] [--require-ci check,e2e-herdr,e2e-hc] [--dry-run] [--retry-failed]
-  dori idle-check [--owner-quiet 30m] [--config FILE]
-  dori lead restart --when idle [--owner-quiet 30m] [--dry-run] [--config FILE]
+  cataly idle-check [--owner-quiet 30m] [--config FILE]
+  cataly lead restart --when idle [--owner-quiet 30m] [--dry-run] [--config FILE]
 Source mode follows CI-passing main, not consumer releases or model-porting upstream.
 Apply/restart must run outside the lead. They preserve its session and use managed health checks and rollback.
-Configuration is opt-in: DORI_HOME/source-update.json (default ~/.dori/source-update.json).
+Configuration is opt-in: CATALY_HOME/source-update.json (default ~/.cataly/source-update.json).
 --retry-failed retries a previously verified rollback once; the supervisor never adds it.
 Exit 4 is held/rolled back, 6 is durable recovery pending, 2 needs operator review. Nothing enables a service.`;
 
@@ -59,10 +59,10 @@ export async function runSourceUpdate(argv: string[]): Promise<number> {
       throw new Error("--require-ci applies only to source check/apply");
     if (operation === "status" && args.values["owner-quiet"] !== undefined)
       throw new Error("status does not change quiet policy");
-    const doriHome = process.env["DORI_HOME"] ?? join(homedir(), ".dori");
-    if (args.values.config === undefined && !isAbsolute(doriHome)) throw new Error("DORI_HOME must be absolute");
+    const catalyHome = process.env["CATALY_HOME"] ?? join(homedir(), ".cataly");
+    if (args.values.config === undefined && !isAbsolute(catalyHome)) throw new Error("CATALY_HOME must be absolute");
     if (args.values.config !== undefined && !args.values.config.trim()) throw new Error("--config requires a file");
-    const config = loadSourceUpdateConfig(resolve(args.values.config ?? join(doriHome, "source-update.json")));
+    const config = loadSourceUpdateConfig(resolve(args.values.config ?? join(catalyHome, "source-update.json")));
     const quiet = args.values["owner-quiet"];
     if (quiet !== undefined) {
       const match = /^([1-9]\d*)(m|h)$/.exec(quiet);

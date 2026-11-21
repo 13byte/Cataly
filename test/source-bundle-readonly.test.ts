@@ -7,7 +7,7 @@ import { sourceManifest } from "../src/update/source.ts";
 import { fixtureGit, overlayFixture } from "./source-bundle-setup.ts";
 
 test("rejecting staged source drift leaves both the shared index and object database unchanged", () => {
-  const root = mkdtempSync(join(realpathSync(tmpdir()), "dori-readonly-source-"));
+  const root = mkdtempSync(join(realpathSync(tmpdir()), "cataly-readonly-source-"));
   try {
     const f = overlayFixture(join(root, "bundle"), join(root, "checkout"));
     f.put("presets.ts", "export const changed = true;\n");

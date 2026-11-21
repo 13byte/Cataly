@@ -2,13 +2,13 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { Discord } from "../../skills/dori-mode/scripts/src/messenger/discord.ts";
-import { discordInbound } from "../../skills/dori-mode/scripts/src/messenger/discord-inbound.ts";
-import { discordInboundLive } from "../../skills/dori-mode/scripts/src/messenger/discord-inbound-live.ts";
-import { discordInboundQueue } from "../../skills/dori-mode/scripts/src/messenger/discord-inbound-queue.ts";
-import type { DiscordInboundStore } from "../../skills/dori-mode/scripts/src/messenger/discord-inbound-state.ts";
-import { fetchHttp } from "../../skills/dori-mode/scripts/src/messenger/http.ts";
-import { realClock } from "../../skills/dori-mode/scripts/src/run.ts";
+import { Discord } from "../../skills/cataly-mode/scripts/src/messenger/discord.ts";
+import { discordInbound } from "../../skills/cataly-mode/scripts/src/messenger/discord-inbound.ts";
+import { discordInboundLive } from "../../skills/cataly-mode/scripts/src/messenger/discord-inbound-live.ts";
+import { discordInboundQueue } from "../../skills/cataly-mode/scripts/src/messenger/discord-inbound-queue.ts";
+import type { DiscordInboundStore } from "../../skills/cataly-mode/scripts/src/messenger/discord-inbound-state.ts";
+import { fetchHttp } from "../../skills/cataly-mode/scripts/src/messenger/http.ts";
+import { realClock } from "../../skills/cataly-mode/scripts/src/run.ts";
 import { OWNER_ID, type startFakeDiscord } from "./fake-discord.ts";
 
 export type Emit = { channel: string; message: string; at: number };
@@ -28,7 +28,7 @@ const discordFor = (fake: Fake) => new Discord(fetchHttp, realClock, "bench-toke
 const record = (emit: (e: Emit) => void) => (message: { channel: string; message: string }) =>
   emit({ channel: message.channel, message: message.message, at: performance.now() });
 
-/** Calls `poll` every `ms` after the previous one finishes, like `dori inbound discord` does; failures are logged only. */
+/** Calls `poll` every `ms` after the previous one finishes, like `cataly inbound discord` does; failures are logged only. */
 const loop = (poll: () => Promise<void>, ms: number): Instance => {
   let running = true;
   const done = (async () => {
@@ -56,9 +56,9 @@ type BaselineModule = {
 
 /** Loads the intake of an earlier commit unchanged; its sibling imports resolve to this checkout's unchanged modules. */
 export const loadBaseline = async (source: string): Promise<BaselineModule> => {
-  const dir = resolve(import.meta.dir, "../../skills/dori-mode/scripts/src/messenger");
+  const dir = resolve(import.meta.dir, "../../skills/cataly-mode/scripts/src/messenger");
   const rewritten = source.replace(/from "\.\/([\w-]+\.ts)"/g, (_, file: string) => `from "${join(dir, file)}"`);
-  const out = join(tmpdir(), `dori-bench-baseline-${process.pid}`);
+  const out = join(tmpdir(), `cataly-bench-baseline-${process.pid}`);
   mkdirSync(out, { recursive: true });
   const path = join(out, "discord-inbound-baseline.ts");
   writeFileSync(path, rewritten);
@@ -94,7 +94,7 @@ const gateway: Variant = {
     const stores = new Map<string, DiscordInboundStore>();
     const storeFor = (id: string) => stores.get(id) ?? stores.set(id, memoryStore()).get(id)!;
     const intake = await discordInbound(discordFor(fake), storeFor, { ownerId: OWNER_ID, channelIds: channels });
-    const stateDir = mkdtempSync(join(tmpdir(), "dori-bench-queue-"));
+    const stateDir = mkdtempSync(join(tmpdir(), "cataly-bench-queue-"));
     const queue = discordInboundQueue(stateDir);
     const live = discordInboundLive(
       intake,

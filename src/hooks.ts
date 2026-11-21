@@ -15,7 +15,7 @@ export type Hooks = {
 export type HookName = keyof Hooks;
 export type HookVars = Partial<Record<"key" | "text" | "evidence" | "pr" | "repo" | "number" | "sha", string>>;
 
-/** `$DORI_HOME/config.json` is present but its `hooks` value is not the documented shape. */
+/** `$CATALY_HOME/config.json` is present but its `hooks` value is not the documented shape. */
 export class ConfigError extends Error {}
 
 const NAMES: readonly HookName[] = ["onReady", "onReport", "onLost", "reviewCommand"];
@@ -93,7 +93,7 @@ export async function hooksSettled(ms: number = HOOK_SETTLE_MS): Promise<void> {
     for (const hook of pending.values()) {
       hook.killed = true;
       hook.kill?.();
-      process.stderr.write(`dori: hook ${hook.name} failed (timed out after ${ms} ms)\n`);
+      process.stderr.write(`cataly: hook ${hook.name} failed (timed out after ${ms} ms)\n`);
     }
   }
 }
@@ -108,7 +108,7 @@ export function runHook(d: Deps, name: Exclude<HookName, "reviewCommand">, vars:
   const hook: Running = { name };
   const fail = (why: string) => {
     if (hook.killed) return;
-    process.stderr.write(`dori: hook ${name} failed (${why})\n`);
+    process.stderr.write(`cataly: hook ${name} failed (${why})\n`);
   };
   const run = async (): Promise<void> => {
     try {

@@ -21,7 +21,7 @@ function rolesWorld() {
   const order = () =>
     m.w.calls.flatMap((c) =>
       c.cmd === "hc" && c.argv[1] === "run"
-        ? [`open ${c.argv.find((a) => a.startsWith("dori.role="))}`]
+        ? [`open ${c.argv.find((a) => a.startsWith("cataly.role="))}`]
         : c.cmd === "herdr" && c.argv[1] === "close"
           ? [`close ${c.argv[2]}`]
           : [],
@@ -29,11 +29,11 @@ function rolesWorld() {
   return { ...m, order };
 }
 
-describe("dori migrate: roles and loops", () => {
+describe("cataly migrate: roles and loops", () => {
   test("duty-loop: the old loop is closed before the new one opens", async () => {
     const { d, lines, opts, order } = rolesWorld();
     expect(await migrate(d, { role: "duty-loop" }, opts())).toBe(0);
-    expect(order()).toEqual(["close w1:p4", "open dori.role=duty-loop"]);
+    expect(order()).toEqual(["close w1:p4", "open cataly.role=duty-loop"]);
     expect(lines).toEqual(["MIGRATED duty-loop w1:p4 -> hc:t1"]);
     expect(refText(d.store.roles()["duty-loop"]!)).toBe("hc:t1");
     expect(readJournal(d.store.root, "duty-loop")).toBeUndefined();
@@ -42,8 +42,8 @@ describe("dori migrate: roles and loops", () => {
   test("hourly-loop: the new loop opens before the old one is closed", async () => {
     const { w, d, opts, order } = rolesWorld();
     expect(await migrate(d, { role: "hourly-loop" }, opts())).toBe(0);
-    expect(order()).toEqual(["open dori.role=hourly-loop", "close w1:p5"]);
-    expect(w.hc.sent[0]!.text).toBe("dori loop");
+    expect(order()).toEqual(["open cataly.role=hourly-loop", "close w1:p5"]);
+    expect(w.hc.sent[0]!.text).toBe("cataly loop");
   });
 
   test("lead: handoff from its prompt file, roles.json switched, its inbox moved", async () => {
@@ -59,7 +59,7 @@ describe("dori migrate: roles and loops", () => {
     const brief = start.split(" ").at(-1)!.replaceAll("'", "");
     const handoff = readFileSync(brief, "utf8");
     expect(handoff).toContain("## Handoff");
-    expect(handoff).toContain("dori owner show");
+    expect(handoff).toContain("cataly owner show");
     expect(handoff).not.toContain(observation);
     expect(d.store.queued({ runtime: "hc", id: "t1" }).map((m) => m.text)).toEqual(["[REPORT k] hi"]);
   });
@@ -77,7 +77,7 @@ describe("dori migrate: roles and loops", () => {
   });
 });
 
-describe("dori migrate --resume and refusals", () => {
+describe("cataly migrate --resume and refusals", () => {
   test("--resume is refused when no session path is recorded", async () => {
     const { w, d, opts } = migrateWorld();
     await expect(migrate(d, { lane: "k" }, opts({ resume: true }))).rejects.toThrow(/no recorded session path/);
@@ -111,13 +111,15 @@ describe("dori migrate --resume and refusals", () => {
     expect(await migrate({ ...d, agentCmd: "omp --model selected/model" }, { lane: "k" }, opts({ resume: true }))).toBe(
       0,
     );
-    expect(w.hc.sent[0]!.text).toBe("omp --model selected/model --dori-role lane --resume='/synthetic/current.jsonl'");
+    expect(w.hc.sent[0]!.text).toBe(
+      "omp --model selected/model --cataly-role lane --resume='/synthetic/current.jsonl'",
+    );
   });
 
-  test("OMP lead replacements select the Dori role", async () => {
+  test("OMP lead replacements select the Cataly role", async () => {
     const { w, d, opts } = rolesWorld();
     expect(await migrate({ ...d, agentCmd: "omp" }, { role: "lead" }, opts())).toBe(0);
-    expect(w.hc.sent[0]!.text).toStartWith("omp --dori-role dori --append-system-prompt ");
+    expect(w.hc.sent[0]!.text).toStartWith("omp --cataly-role cataly --append-system-prompt ");
   });
 
   test("a migration already running for the name is refused", async () => {

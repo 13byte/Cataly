@@ -13,8 +13,9 @@ import {
 } from "./inbox-files.ts";
 import { mergeForwarded, mergePending } from "./inbox-forward.ts";
 import { destinationOf, lockQueue, mergeOwnSpool, type Queued, queueMessage } from "./inbox-spool.ts";
-import { refFromText, refText, sameSession } from "./refs.ts";
+import { sameSession } from "./refs.ts";
 import type { SessionRef } from "./runtime/types.ts";
+import { readRoles, registerRole, removeRoles } from "./store-roles.ts";
 import {
   KEEP_RUNS,
   KEY_RE,
@@ -43,7 +44,7 @@ const checkedId = (id: string): string => {
 };
 
 export class Store {
-  constructor(readonly root: string = process.env["DORI_HOME"] ?? join(homedir(), ".dori")) {
+  constructor(readonly root: string = process.env["CATALY_HOME"] ?? join(homedir(), ".cataly")) {
     for (const d of ["lanes", "inbox", "briefs", "receipts", "backlog", "loop/runs", "duty"])
       mkdirSync(join(root, d), { recursive: true });
   }
@@ -82,15 +83,14 @@ export class Store {
     return this.lanes().find((l) => sameSession(l.sessionRef, ref) && l.status !== "done");
   }
 
-  /** roles.json holds ref strings (refText), so an older binary still parses it; a bare value is a herdr pane. */
   roles(): Partial<Record<Role, SessionRef>> {
-    const raw = this.readJson<Partial<Record<Role, string>>>(join(this.root, "roles.json")) ?? {};
-    return Object.fromEntries(Object.entries(raw).map(([role, text]) => [role, refFromText(text)]));
+    return readRoles(this.root);
   }
-
   setRole(role: Role, ref: SessionRef): void {
-    const raw = this.readJson<Partial<Record<Role, string>>>(join(this.root, "roles.json")) ?? {};
-    this.writeJson(join(this.root, "roles.json"), { ...raw, [role]: refText(ref) });
+    registerRole(this.root, role, ref);
+  }
+  clearRoles(expected: readonly [Role, SessionRef][]): void {
+    removeRoles(this.root, expected);
   }
 
   briefPath(key: string): string {

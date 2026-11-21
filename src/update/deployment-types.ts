@@ -5,9 +5,9 @@ export type DeploymentConfig = {
   readonly releaseRoot: string;
   readonly liveSource: string;
   readonly home: string;
-  readonly doriHome: string;
-  readonly doriConfig: string;
-  /** Dori's pane/monitor metadata root; native session files stay where they are. */
+  readonly catalyHome: string;
+  readonly catalyConfig: string;
+  /** Cataly's pane/monitor metadata root; native session files stay where they are. */
   readonly stateDir: string;
   readonly bun: string;
   /** Omitted selects the release-bound native source; an absolute path is an explicit external-toolchain override. */
@@ -54,7 +54,7 @@ export type RuntimeIdentity = ProcessIdentity & {
   readonly sessionFile: string;
   readonly startedAt: string;
   readonly cwd: string;
-  readonly role: "dori";
+  readonly role: "cataly";
   readonly busy?: boolean;
   readonly approvalPending?: boolean;
   readonly executableHash?: string;

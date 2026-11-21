@@ -3,21 +3,19 @@ import { POLL_MS, type MigrateOpts, type Subject } from "./migrate-capture.ts";
 import { drainForward, moveBack, moveInbox } from "./migrate-inbox.ts";
 import { refText } from "./refs.ts";
 import { groupId } from "./runtime/group.ts";
-import { formatRef, openSession, type RuntimeKind, type SessionRef, type SessionRuntime } from "./runtime/types.ts";
+import { formatRef, openSession, type SessionRef, type TerminalRuntime } from "./runtime/types.ts";
 import { type MigrateJournal, removeJournal, writeJournal } from "./store-journal.ts";
 import type { Role } from "./store-types.ts";
 
 export const VERIFY_MS = 3 * 60_000;
 
-export const runtimeOf = (d: Deps, kind: RuntimeKind): SessionRuntime => d.runtimes.for({ runtime: kind, id: "" });
-
-/** The group new sessions join on the target: this home's group label on hc, a new "dori" workspace on herdr. */
-const targetGroup = async (d: Deps, rt: SessionRuntime, cwd: string): Promise<string> =>
-  rt.kind === "hc" ? groupId(d.store.root) : rt.createGroup("dori", cwd);
+/** The group new sessions join on the target: this home's group label on hc, a new "cataly" workspace on herdr. */
+const targetGroup = async (d: Deps, rt: TerminalRuntime, cwd: string): Promise<string> =>
+  rt.kind === "hc" ? groupId(d.store.root) : rt.createGroup("cataly", cwd);
 
 /** Step (4): opens the replacement on the target; the journal records it before anything else moves. */
 async function open(d: Deps, s: Subject, j: MigrateJournal, command: string): Promise<MigrateJournal> {
-  const rt = runtimeOf(d, j.to);
+  const rt = d.runtimes.terminal(j.to);
   const newRef = await openSession(rt, s.spec(await targetGroup(d, rt, s.cwd)), command);
   const next: MigrateJournal = { ...j, phase: "opened", newRef };
   writeJournal(d.store.root, next);
@@ -79,10 +77,10 @@ export async function swapAgent(d: Deps, s: Subject, j: MigrateJournal, command:
  */
 export async function swapLoop(d: Deps, role: Role, j: MigrateJournal, cwd: string, opts: MigrateOpts) {
   const closeFirst = role === "duty-loop";
-  const command = role === "duty-loop" ? `${d.doriCmd} duty --interval 60` : `${d.doriCmd} loop`;
+  const command = role === "duty-loop" ? `${d.catalyCmd} duty --interval 60` : `${d.catalyCmd} loop`;
   if (j.phase === "hold") {
     if (closeFirst) await closeQuietly(d, j.from);
-    const rt = runtimeOf(d, j.to);
+    const rt = d.runtimes.terminal(j.to);
     const group = await targetGroup(d, rt, cwd);
     const spec = { name: role, role, container: "tab", cwd, env: harnessLaunchEnv(d), group } as const;
     j = { ...j, phase: "opened", newRef: await openSession(rt, spec, command) };

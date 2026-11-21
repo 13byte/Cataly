@@ -45,7 +45,7 @@ describe("owner distill from the hourly loop", () => {
     );
     expect(requests()).toHaveLength(1);
     const text = readFileSync(procedure, "utf8");
-    expect(text).toContain("Run `dori owner snapshot`.");
+    expect(text).toContain("Run `cataly owner snapshot`.");
     expect(text).toContain(join(root, "owner-history", "2026-11-20.md"));
     expect(text).toContain("`(replaces: <the old entry text, verbatim>)`");
     expect(text).not.toMatch(/\{\{\w+\}\}/);

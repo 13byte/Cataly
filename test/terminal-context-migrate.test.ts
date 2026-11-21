@@ -17,7 +17,7 @@ for (const runtime of ["herdr", "hc"] as const) {
     `${runtime}: reopened migration journals preserve context for lanes, lead, duty and both controllers`,
     async () => {
       const f = managedTerminal(runtime);
-      const deps = { ...f.deps, doriCmd: shq(f.omp) };
+      const deps = { ...f.deps, catalyCmd: shq(f.omp) };
       const from: SessionRef = runtime === "hc" ? { runtime: "herdr", id: "wold:p1" } : { runtime: "hc", id: "told" };
       const options: MigrateOpts = {
         to: runtime,
@@ -118,7 +118,7 @@ for (const runtime of ["herdr", "hc"] as const) {
       ).toBe(0);
       expect(f.daemon.captures).toHaveLength(1);
       const child = expectContext(f.daemon.captures[0]!, f.expected);
-      expect(child.argv).toEqual([...f.prefix, "--dori-role", "lane", `--resume=${sessionPath}`]);
+      expect(child.argv).toEqual([...f.prefix, "--cataly-role", "lane", `--resume=${sessionPath}`]);
     } finally {
       await f.daemon.close();
     }

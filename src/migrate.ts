@@ -14,7 +14,7 @@ import { Refusal } from "./refusal.ts";
 import { askCheckpoint, capture, type MigrateOpts, type Subject } from "./migrate-capture.ts";
 import { swapAgent, swapLoop } from "./migrate-swap.ts";
 import { refText } from "./refs.ts";
-import type { RuntimeKind, SessionRef } from "./runtime/types.ts";
+import type { SessionRef } from "./runtime/types.ts";
 import {
   createJournal,
   lockMigration,
@@ -42,7 +42,7 @@ function laneSubject(d: Deps, key: string): Subject {
     from: lane.sessionRef,
     cwd: lane.cwd,
     brief: () => readFileSync(lane.brief, "utf8"),
-    footer: prompt("lane-footer.md", { key, dori: d.doriCmd }),
+    footer: prompt("lane-footer.md", { key, cataly: d.catalyCmd }),
     logTail: lane.log.slice(-20).map((e) => `- ${new Date(e.at).toISOString()} ${e.kind}: ${e.text}`),
     ...(lane.sessionPath === undefined ? {} : { sessionPath: lane.sessionPath }),
     spec: (group) => ({
@@ -70,14 +70,14 @@ function roleSubject(d: Deps, role: Role, from: SessionRef): Subject {
     brief: () => rolePrompt(d, name),
     logTail: [],
     spec: (group) => ({
-      name: role === "lead" ? "dori" : "duty",
+      name: role === "lead" ? "cataly" : "duty",
       role,
       container: "tab",
       cwd: process.cwd(),
       env: harnessLaunchEnv(d),
       ...(group === undefined ? {} : { group }),
     }),
-    command: (brief) => `${agentCommand(d, "dori")} --append-system-prompt ${shq(brief)}`,
+    command: (brief) => `${agentCommand(d, "cataly")} --append-system-prompt ${shq(brief)}`,
     setHold: () => {},
     switchTo: (ref) => d.store.setRole(role, ref),
   };
@@ -91,7 +91,7 @@ async function resumeCommand(d: Deps, s: Subject): Promise<string> {
     throw new Refusal(`--resume refused for ${s.name}: no recorded session path; migrate without --resume`);
   if (status !== "idle" && status !== "done")
     throw new Refusal(`--resume refused for ${s.name}: its session is ${status}, not idle or done`);
-  const command = agentCommand(d, s.kind === "lane" ? "lane" : "dori");
+  const command = agentCommand(d, s.kind === "lane" ? "lane" : "cataly");
   return isOmpAgentCommand(d.agentCmd)
     ? `${command} --resume=${shq(sessionPath)}`
     : `${command} --session ${shq(sessionPath)}`;
@@ -103,7 +103,7 @@ async function agentSession(d: Deps, s: Subject, j: MigrateJournal | undefined, 
   if (j === undefined) {
     if (opts.resume) resume = await resumeCommand(d, s);
     j = { name: s.name, kind: s.kind, phase: "hold", from: s.from, to: opts.to, at: d.now() };
-    if (!createJournal(d.store.root, j)) throw new Refusal(`another dori harness migrate of ${s.name} is running`);
+    if (!createJournal(d.store.root, j)) throw new Refusal(`another cataly harness migrate of ${s.name} is running`);
     s.setHold(true);
   }
   if (j.phase === "hold" && j.briefPath === undefined) {
@@ -134,7 +134,7 @@ async function migrateName(d: Deps, name: string, from: SessionRef, opts: Migrat
     return 0;
   }
   const release = lockMigration(d.store.root, name, d.now());
-  if (!release) throw new Refusal(`another dori harness migrate of ${name} is running`);
+  if (!release) throw new Refusal(`another cataly harness migrate of ${name} is running`);
   try {
     if (LOOP_ROLES.includes(name as Role))
       return await swapLoop(d, name as Role, j ?? fresh(d, name, from, opts), process.cwd(), opts);
@@ -146,12 +146,12 @@ async function migrateName(d: Deps, name: string, from: SessionRef, opts: Migrat
 
 function fresh(d: Deps, name: string, from: SessionRef, opts: MigrateOpts): MigrateJournal {
   const j: MigrateJournal = { name, kind: "role", phase: "hold", from, to: opts.to, at: d.now() };
-  if (!createJournal(d.store.root, j)) throw new Refusal(`another dori harness migrate of ${name} is running`);
+  if (!createJournal(d.store.root, j)) throw new Refusal(`another cataly harness migrate of ${name} is running`);
   return j;
 }
 
 /**
- * `dori migrate`: hands sessions over to `opts.to`. `--all` = every open lane, then lead and duty, then the duty loop
+ * `cataly migrate`: hands sessions over to `opts.to`. `--all` = every open lane, then lead and duty, then the duty loop
  * and the hourly loop. Returns the exit code: 3 when any session rolled back, else 0.
  */
 export async function migrate(d: Deps, t: Target, opts: MigrateOpts): Promise<number> {
@@ -182,12 +182,11 @@ export async function migrate(d: Deps, t: Target, opts: MigrateOpts): Promise<nu
   return code;
 }
 
-const KINDS: readonly RuntimeKind[] = ["herdr", "hc"];
 const ROLE_NAMES: readonly Role[] = [...AGENT_ROLES, ...LOOP_ROLES];
 
 export async function runMigrate(d: Deps, a: Args): Promise<number> {
-  const to = (one(a, "to") ?? d.choice().kind) as RuntimeKind;
-  if (!KINDS.includes(to)) throw new Refusal(`--to must be herdr or hc`);
+  const to = one(a, "to") ?? d.choice().kind;
+  if (to !== "herdr" && to !== "hc") throw new Refusal(`--to must be herdr or hc`);
   const role = one(a, "role") as Role | undefined;
   if (role !== undefined && !ROLE_NAMES.includes(role))
     throw new Refusal(`--role must be one of ${ROLE_NAMES.join(", ")}`);

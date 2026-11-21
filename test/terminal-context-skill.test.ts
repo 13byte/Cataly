@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { loadConfig } from "../skills/dori-mode/scripts/src/config.ts";
-import { exactModelIdentity } from "../skills/dori-mode/scripts/src/lane-state.ts";
-import { launchLane } from "../skills/dori-mode/scripts/src/launch.ts";
-import { agentIn, depsFor, fakeClock, laneState, newWorld } from "../skills/dori-mode/scripts/test/fakes.ts";
+import { loadConfig } from "../skills/cataly-mode/scripts/src/config.ts";
+import { exactModelIdentity } from "../skills/cataly-mode/scripts/src/lane-state.ts";
+import { launchLane } from "../skills/cataly-mode/scripts/src/launch.ts";
+import { agentIn, depsFor, fakeClock, laneState, newWorld } from "../skills/cataly-mode/scripts/test/fakes.ts";
 import { recordingOmp } from "./terminal-context-setup.ts";
 import { expectContext, managedTerminal } from "./terminal-managed-setup.ts";
 
@@ -21,7 +21,7 @@ for (const runtime of ["herdr", "hc"] as const) {
         mkdirSync(dirname(custom), { recursive: true });
         recordingOmp(custom);
         writeFileSync(
-          f.config.doriConfig,
+          f.config.catalyConfig,
           JSON.stringify({
             runtime,
             stateDir: f.config.stateDir,
@@ -31,7 +31,7 @@ for (const runtime of ["herdr", "hc"] as const) {
           }),
         );
       }
-      const config = await loadConfig(f.config.doriConfig, f.config.home);
+      const config = await loadConfig(f.config.catalyConfig, f.config.home);
       const native = newWorld();
       const startedAt = "2026-01-01T12:00:00.000Z";
       const model = exactModelIdentity(config.defaultModel);
@@ -99,23 +99,23 @@ for (const runtime of ["herdr", "hc"] as const) {
         expect(f.daemon.captures).toHaveLength(1);
         const child = expectContext(f.daemon.captures[0]!, {
           ...f.expected,
-          DORI_OMP_ULW_PATH: external ? customUlw : f.expected.DORI_OMP_ULW_PATH,
+          CATALY_OMP_ULW_PATH: external ? customUlw : f.expected.CATALY_OMP_ULW_PATH,
         });
         if (external) {
-          expect(child.argv).toEqual([custom, `--dori-launch-model=${config.defaultModel}`, "--owner-option", ""]);
+          expect(child.argv).toEqual([custom, `--cataly-launch-model=${config.defaultModel}`, "--owner-option", ""]);
           expect(child.argv).not.toContain("--config");
           expect(config.agentCommand[0]).toBe(custom);
           expect(config.ompUlwPath).toBe(customUlw);
         } else {
           expect(child.argv).toEqual([
             f.omp,
-            `--dori-launch-model=${config.defaultModel}`,
+            `--cataly-launch-model=${config.defaultModel}`,
             `--config=${f.toolchain.nativeConfig}`,
             "--no-extensions",
             `--extension=${join(f.toolchain.ompUlw!.source, "extension")}`,
             "--owner-option",
             "",
-            "--dori-role=lane",
+            "--cataly-role=lane",
             `--model=${config.defaultModel}`,
           ]);
         }

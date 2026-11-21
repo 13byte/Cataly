@@ -20,7 +20,7 @@ export async function nativeUiConsumerFixture(
   };
   const healthPath = join(config.stateDir, "runtime", `${encodeURIComponent(config.pane)}.json`);
   const modules = {
-    state: new URL("../skills/dori-mode/scripts/src/lane-state.ts", import.meta.url).href,
+    state: new URL("../skills/cataly-mode/scripts/src/lane-state.ts", import.meta.url).href,
     process: new URL("../src/update/deployment-process.ts", import.meta.url).href,
     source: new URL("../src/update/source.ts", import.meta.url).href,
   };
@@ -41,7 +41,7 @@ writeHealth(${JSON.stringify(healthPath)}, JSON.stringify({ ...health,
 }));
 writeHealth(${JSON.stringify(f.bootstrap.intake.path)}, String(Date.now()), { mode: 0o600 });
 writePaneState(${JSON.stringify(config.stateDir)}, { ...processIdentity(process.pid),
-  paneId: ${JSON.stringify(config.pane)}, role: "dori", sessionId: ${JSON.stringify(config.sessionId)},
+  paneId: ${JSON.stringify(config.pane)}, role: "cataly", sessionId: ${JSON.stringify(config.sessionId)},
   sessionFile: ${JSON.stringify(f.runtime.sessionFile)}, cwd: ${JSON.stringify(f.runtime.cwd)},
   startedAt, updatedAt: startedAt, approvalPending: false, agentStatus: "idle", goal: { status: "none" },
 });

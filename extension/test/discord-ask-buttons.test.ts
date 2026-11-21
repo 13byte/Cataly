@@ -27,7 +27,7 @@ test.skipIf(process.platform === "win32")(
       JSON.stringify({ sessions: { session: { channel, owner, tokenFile } } }),
       { mode: 0o600 },
     );
-    const previousBase = process.env["DORI_DISCORD_API_BASE"];
+    const previousBase = process.env["CATALY_DISCORD_API_BASE"];
     const callbackTypes: number[] = [];
     const path = `/api/v10/channels/${channel}/messages`;
     const edits: {
@@ -55,7 +55,7 @@ test.skipIf(process.platform === "win32")(
         return new Response(null, { status: 404 });
       },
     });
-    process.env["DORI_DISCORD_API_BASE"] = `http://127.0.0.1:${server.port}/api/v10`;
+    process.env["CATALY_DISCORD_API_BASE"] = `http://127.0.0.1:${server.port}/api/v10`;
     let receive: (frame: string) => void = () => {};
     let seq = 1;
     let intents = -1;
@@ -138,8 +138,8 @@ test.skipIf(process.platform === "win32")(
     } finally {
       bridge.clear();
       native.resolve(undefined);
-      if (previousBase === undefined) delete process.env["DORI_DISCORD_API_BASE"];
-      else process.env["DORI_DISCORD_API_BASE"] = previousBase;
+      if (previousBase === undefined) delete process.env["CATALY_DISCORD_API_BASE"];
+      else process.env["CATALY_DISCORD_API_BASE"] = previousBase;
       server.stop(true);
       rmSync(root, { recursive: true, force: true });
     }

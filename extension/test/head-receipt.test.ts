@@ -11,13 +11,13 @@ const identity = "99:10:20:101";
 const fingerprint = "a".repeat(64);
 const receipt = (outcome: "accepted" | "rejected", patch = {}) => ({
   type: outcome === "accepted" ? "custom_message" : "custom",
-  customType: outcome === "accepted" ? "dori-monitor" : "omp-dori:admission-rejected",
+  customType: outcome === "accepted" ? "cataly-monitor" : "omp-cataly:admission-rejected",
   id: "native-entry-1",
-  [outcome === "accepted" ? "details" : "data"]: { ompDoriAdmission: { identity, fingerprint } },
+  [outcome === "accepted" ? "details" : "data"]: { ompCatalyAdmission: { identity, fingerprint } },
   ...patch,
 });
 const transcript = (text: string) => {
-  const dir = mkdtempSync(join(tmpdir(), "dori-native-receipt-"));
+  const dir = mkdtempSync(join(tmpdir(), "cataly-native-receipt-"));
   roots.push(dir);
   const file = join(dir, "session.jsonl");
   writeFileSync(file, text, { mode: 0o600 });
@@ -36,13 +36,28 @@ posix.each(["accepted", "rejected"] as const)(
   },
 );
 
+posix.each(["accepted", "rejected"] as const)(
+  "the newest exact v0.1.3 %s admission receipt wins over an older Cataly receipt",
+  async (outcome) => {
+    const legacy = {
+      type: outcome === "accepted" ? "custom_message" : "custom",
+      customType: outcome === "accepted" ? "dori-monitor" : "omp-dori:admission-rejected",
+      id: "dori-entry",
+      [outcome === "accepted" ? "details" : "data"]: { ompDoriAdmission: { identity, fingerprint } },
+    };
+    const older = receipt(outcome === "accepted" ? "rejected" : "accepted");
+    const file = transcript(`${JSON.stringify(older)}\n${JSON.stringify(legacy)}\n`);
+    expect(await headReceipt(file, identity, fingerprint)).toEqual({ outcome, receipt: "dori-entry" });
+  },
+);
+
 posix("stdout-shaped text and an unterminated native tail are not admission receipts", async () => {
   const body = JSON.stringify(receipt("accepted"));
   const file = transcript(`${JSON.stringify({ type: "message", content: body })}\n${body}`);
   expect(await headReceipt(file, identity, fingerprint)).toBeUndefined();
 });
 
-posix.each([{ details: { ompDoriAdmission: { identity, fingerprint: "b".repeat(64) } } }, { id: "" }, { id: null }])(
+posix.each([{ details: { ompCatalyAdmission: { identity, fingerprint: "b".repeat(64) } } }, { id: "" }, { id: null }])(
   "conflicting identity metadata never authorizes acknowledgement %#",
   async (patch) => {
     const file = transcript(`${JSON.stringify(receipt("accepted", patch))}\n`);

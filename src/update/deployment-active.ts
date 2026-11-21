@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { matchesDeploymentConfigHash } from "./deployment-config.ts";
 import { saveDeploymentJson } from "./deployment-files.ts";
 import { legacyMonitorReceipts } from "./deployment-legacy-monitors.ts";
 import { monitorProcessReceipts, readRuntimeHealth } from "./deployment-monitor-receipts.ts";
@@ -43,7 +44,7 @@ export function readActiveDeployment(config: DeploymentConfig): ActiveDeployment
 export async function inspectActiveDeployment(config: DeploymentConfig, signal?: AbortSignal) {
   try {
     const active = readActiveDeployment(config);
-    if (!active || active.version !== 1 || active.configHash !== digest(JSON.stringify(config)))
+    if (!active || active.version !== 1 || !matchesDeploymentConfigHash(config, active.configHash))
       throw new DeploymentHeld("no matching managed active receipt");
     const runtime = await captureRuntime(config, nativeCli(config, signal), true);
     if (
@@ -53,7 +54,7 @@ export async function inspectActiveDeployment(config: DeploymentConfig, signal?:
       active.runtime.sessionFile !== runtime.sessionFile
     )
       throw new DeploymentHeld("active receipt does not own the current native session/PID");
-    const temporary = mkdtempSync(join(tmpdir(), "dori-status-"));
+    const temporary = mkdtempSync(join(tmpdir(), "cataly-status-"));
     try {
       const held = JSON.parse(
         await command(

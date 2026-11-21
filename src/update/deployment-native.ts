@@ -1,7 +1,7 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { type DeploymentCli, hcDeploymentCli, herdrDeploymentCli } from "./deployment-cli.ts";
 import { runtimeBinary } from "./deployment-config.ts";
-import { readPaneState } from "../../skills/dori-mode/scripts/src/lane-state.ts";
+import { readPaneState } from "../../skills/cataly-mode/scripts/src/lane-state.ts";
 import type { Exec } from "../runtime/exec.ts";
 import type { LegacyRollbackForeground } from "./deployment-legacy-monitors.ts";
 import { attestMonitorForeground } from "./deployment-monitor-receipts.ts";
@@ -74,7 +74,7 @@ export async function captureRuntime(
   const state = readPaneState(config.stateDir, config.pane);
   const current = await cli.probe(config.pane, "deployment held", config.stateDir);
   if (
-    state?.role !== "dori" ||
+    state?.role !== "cataly" ||
     state.sessionId !== config.sessionId ||
     state.paneId !== config.pane ||
     current.pid !== state.pid ||
@@ -88,7 +88,7 @@ export async function captureRuntime(
     !state.sessionFile ||
     typeof state.cwd !== "string"
   )
-    throw new DeploymentHeld("native Dori identity, idle state or approval boundary did not match");
+    throw new DeploymentHeld("native Cataly identity, idle state or approval boundary did not match");
   const identity = processIdentity(state.pid);
   if (!identity) throw new DeploymentHeld("native PID identity is unavailable");
   const key = JSON.stringify(identity);
@@ -101,7 +101,7 @@ export async function captureRuntime(
   const runtime: RuntimeIdentity = {
     ...identity,
     pane: config.pane,
-    role: "dori",
+    role: "cataly",
     sessionId: state.sessionId,
     sessionFile: state.sessionFile,
     startedAt: state.startedAt,
@@ -131,7 +131,7 @@ export async function captureRuntime(
   if (
     !latest ||
     latest.pid !== state.pid ||
-    latest.role !== "dori" ||
+    latest.role !== "cataly" ||
     latest.paneId !== config.pane ||
     latest.sessionId !== state.sessionId ||
     latest.startedAt !== state.startedAt ||
@@ -143,7 +143,7 @@ export async function captureRuntime(
     throw new DeploymentHeld("native approval became pending during observation");
   const busy = current.status === "working" || latest.agentStatus === "working";
   if (busy && !allowWorking) {
-    if (!quiesce) throw new DeploymentBusy("native Dori is busy; waiting for its idle boundary");
+    if (!quiesce) throw new DeploymentBusy("native Cataly is busy; waiting for its idle boundary");
     verifyQuiesceCheckpoint(config, quiesce, runtime);
   }
   return { ...runtime, busy, approvalPending: latest.approvalPending };

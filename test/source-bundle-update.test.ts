@@ -25,7 +25,7 @@ function fixture() {
   fixtureGit(remote, "branch", "-M", "main");
   fixtureGit(source, "init", "--quiet");
   fixtureGit(source, "add", ".");
-  fixtureGit(source, "commit", "--quiet", "-m", "Pinned Dori bundle");
+  fixtureGit(source, "commit", "--quiet", "-m", "Pinned Cataly bundle");
   const original = ULW_UPDATE_FILES.map((file) => readFileSync(join(source, file)));
   const output = join(root, "candidate");
   const advance = (conflict = false) => {

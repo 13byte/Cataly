@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { expandHome } from "../skills/dori-mode/scripts/src/config.ts";
+import { expandHome } from "../skills/cataly-mode/scripts/src/config.ts";
+import { importLegacyEnvironment } from "../src/legacy-environment.ts";
 import { consumerPaths } from "../src/release/files.ts";
 import { assertNativeSource, leaseNativePath, nativeDirectory, provisionNativeSource } from "../src/release/native.ts";
 import { leaseNativeIdentity, scriptLeaseHolder } from "../src/release/native-cache-lease.ts";
@@ -8,6 +9,7 @@ import { resolveConsumerOmpUlwPath } from "../src/release/runtime.ts";
 import { assertSourceBundle, readSourceBundle } from "../src/release/source-bundle.ts";
 import { provisionSourceOverlay } from "../src/release/source-checkout.ts";
 
+importLegacyEnvironment();
 const [action, rawSource, rawHome, rawTarget] = process.argv.slice(2);
 if (!rawSource || !rawHome) throw new Error("source dependencies require an action, source root and home");
 const source = resolve(rawSource);
@@ -22,15 +24,15 @@ if (action === "native" || action === "assert-native") {
   process.stdout.write(`${receipt.directory}\n`);
 } else if (action === "consumer") {
   leaseNativeIdentity(home, readSourceBundle(source, true).identity, scriptLeaseHolder());
-  const configPath = process.env["DORI_CONFIG"] ?? consumerPaths(home).config;
+  const configPath = process.env["CATALY_CONFIG"] ?? consumerPaths(home).config;
   const config = existsSync(configPath) ? JSON.parse(readFileSync(configPath, "utf8")) : {};
-  const path = expandHome(config.ompUlwPath ?? join(home, ".dori/omp-ulw/index.ts"), home);
+  const path = expandHome(config.ompUlwPath ?? join(home, ".cataly/omp-ulw/index.ts"), home);
   const selected = resolveConsumerOmpUlwPath(path, {
     home,
     sourceRoot: source,
     useDefault: config.ompUlwPath === undefined,
   });
-  if (selected === path && (config.ompUlwPath === undefined || path === join(home, ".dori/omp-ulw/index.ts")))
+  if (selected === path && (config.ompUlwPath === undefined || path === join(home, ".cataly/omp-ulw/index.ts")))
     assertSourceBundle(realpathSync(dirname(path)), readSourceBundle(source), home);
   process.stdout.write(`${join(nativeDirectory(source, home), "bin/omp")}\n`);
 } else if (action === "lease-path") {

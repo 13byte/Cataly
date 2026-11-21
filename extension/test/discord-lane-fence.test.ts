@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
-import { DeliveryState } from "../../skills/dori-mode/scripts/src/delivery-state.ts";
-import { openDiscordLaneInbox } from "../../skills/dori-mode/scripts/src/messenger/discord-lane-inbox.ts";
-import type { Lane } from "../../skills/dori-mode/scripts/src/registry.ts";
-import { realClock } from "../../skills/dori-mode/scripts/src/run.ts";
-import { tellLane } from "../../skills/dori-mode/scripts/src/tell.ts";
-import { depsFor, laneState, newWorld, withState } from "../../skills/dori-mode/scripts/test/fakes.ts";
+import { DeliveryState } from "../../skills/cataly-mode/scripts/src/delivery-state.ts";
+import { openDiscordLaneInbox } from "../../skills/cataly-mode/scripts/src/messenger/discord-lane-inbox.ts";
+import type { Lane } from "../../skills/cataly-mode/scripts/src/registry.ts";
+import { realClock } from "../../skills/cataly-mode/scripts/src/run.ts";
+import { tellLane } from "../../skills/cataly-mode/scripts/src/tell.ts";
+import { depsFor, laneState, newWorld, withState } from "../../skills/cataly-mode/scripts/test/fakes.ts";
 import { DiscordLane } from "../discord-lane.ts";
 import { fakePi, until } from "./fake-pi.ts";
 
@@ -55,6 +55,7 @@ posix(
 
       native.start(pi.api, state.dir, pi.ctx(), { key: lane.key, sessionId: session }, false, {
         idle: () => true,
+        approvalFree: () => true,
         goalAllows: () => true,
         consumePause: () => {},
       });

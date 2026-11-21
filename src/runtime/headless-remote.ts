@@ -75,7 +75,11 @@ export async function deliverLocal(
   try {
     // Preserve the local lane's established behavior; remote exact input never wraps slash-leading text.
     const message = text.trimStart().startsWith("/") ? `[CATALY message]\n${text}` : text;
-    await rpc.request({ type: "follow_up", message });
+    // Follow-up queues cannot drain an idle OMP transcript without an assistant/tool-result tail, in particular
+    // a freshly opened lead or duty. Start a native prompt when idle and queue it if a turn races with admission.
+    await rpc.request(
+      state.settled ? { type: "prompt", message, streamingBehavior: "followUp" } : { type: "follow_up", message },
+    );
     return { kind: "delivered", started: state.settled };
   } catch {
     return { kind: "ambiguous", detail: "OMP did not confirm the submitted input", failure: null };

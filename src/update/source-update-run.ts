@@ -1,5 +1,6 @@
 import { join } from "node:path";
-import { readPaneState } from "../../skills/dori-mode/scripts/src/lane-state.ts";
+import { readPaneState } from "../../skills/cataly-mode/scripts/src/lane-state.ts";
+import { matchesDeploymentConfigHash } from "./deployment-config.ts";
 import { ownReleaseRoot } from "./deployment-files.ts";
 import { forwardStopStarted } from "./deployment-native-ui.ts";
 import { acquireRestartLock, DeploymentHeld, sameProcess, underProcess } from "./deployment-process.ts";
@@ -53,7 +54,7 @@ async function assertRetryAllowed(
 
 function outside(config: SourceUpdateConfig, record?: DeploymentRecord): void {
   const pane = readPaneState(config.deployment.stateDir, config.deployment.pane);
-  if (pane?.role === "dori" && pane.sessionId === config.deployment.sessionId && underProcess(process.pid, pane.pid))
+  if (pane?.role === "cataly" && pane.sessionId === config.deployment.sessionId && underProcess(process.pid, pane.pid))
     throw new DeploymentHeld("source controller must run outside the lead process tree");
   for (const identity of [
     record?.oldRuntime,
@@ -146,8 +147,9 @@ export async function applySourceUpdate(
       saveSourceState(config, state);
     }
     const selected: SourceJob = job;
-    if (selected.deploymentConfigHash !== digest(JSON.stringify(config.deployment)))
+    if (!matchesDeploymentConfigHash(config.deployment, selected.deploymentConfigHash))
       throw new DeploymentHeld("restore the recorded deployment configuration before source recovery");
+    if (!selected.deployment) selected.deploymentConfigHash = digest(JSON.stringify(config.deployment));
     const persist = (record: DeploymentRecord) => {
       selected.deployment = record;
       if (record.status === "rolled-back" || record.status === "failed")

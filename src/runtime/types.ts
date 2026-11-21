@@ -1,6 +1,6 @@
 export type TerminalRuntimeKind = "herdr" | "hc";
 export type RuntimeKind = TerminalRuntimeKind | "headless";
-/** One session as its runtime addresses it. `group`: the herdr workspace id or the hc dori.group label. `container`: the herdr tab id (absent on hc). */
+/** One session as its runtime addresses it. `group`: the herdr workspace id or the hc cataly.group label. `container`: the herdr tab id (absent on hc). */
 export type SessionRef = {
   readonly runtime: RuntimeKind;
   readonly id: string;
@@ -85,28 +85,38 @@ export type CloseScope = "session" | "container";
 export type ReadOptions = { readonly unwrapped?: boolean };
 /** `foregroundOnly`: hc skips the observational screen check; herdr already samples foreground after its screen check. */
 export type ProbeOptions = { readonly foregroundOnly?: boolean };
-export interface SessionRuntime {
+interface SessionOperations {
   readonly kind: RuntimeKind;
-  /** The caller's own session from the runtime's env (HERDR_PANE_ID + HERDR_WORKSPACE_ID / HC_TERMINAL_ID), or undefined. */
+  /** The caller's own session from this runtime's environment, or undefined. */
   self(): SessionRef | undefined;
-  /** herdr: `workspace create --label <label> --cwd <cwd> --no-focus` -> the workspace id (its root pane is left as is, as today). hc: returns `label` unchanged, no call. */
-  createGroup(label: string, cwd: string): Promise<string>;
-  /** A session with the user's shell in it and nothing started. */
+  /** Allocates a session address before its agent starts: an idle shell for a terminal or a native lane reservation. */
   create(spec: CreateSpec): Promise<SessionRef>;
-  /** herdr: `pane run <id> <command>`. hc: `send <id> <command>` into the shell (no --if: a shell reports no status). */
-  start(ref: SessionRef, command: string): Promise<void>;
   list(filter?: { readonly group?: string }): Promise<readonly SessionInfo[]>;
   probe(ref: SessionRef, opts?: ProbeOptions): Promise<Probe>;
-  /** herdr: `pane read --source recent` (`recent-unwrapped` when unwrapped). hc: `read`; unwrapped joins rows as wide as the terminal's `cols`. */
+  /** Reads recent terminal output or native conversation observations. */
   read(ref: SessionRef, lines: number, opts?: ReadOptions): Promise<string>;
-  /** Never types into a session whose probe says shellInFront, whatever `status` says. Default `when` = "idle". */
+  /** Agent delivery never types into a shell. Default `when` = "idle". */
   deliver(ref: SessionRef, text: string, opts?: DeliverOptions): Promise<DeliverOutcome>;
+  /** Closes the session by default; terminal runtimes may also close its container. */
+  close(ref: SessionRef, scope?: CloseScope, expectedSessionId?: string): Promise<void>;
+}
+
+export interface TerminalRuntime extends SessionOperations {
+  readonly kind: TerminalRuntimeKind;
+  /** herdr creates an unfocused workspace and returns its id; hc returns the group label unchanged. */
+  createGroup(label: string, cwd: string): Promise<string>;
+  /** herdr: `pane run <id> <command>`. hc: `send <id> <command>` into the shell (no --if: a shell reports no status). */
+  start(ref: SessionRef, command: string): Promise<void>;
   submitTyped(ref: SessionRef, into: AgentIdentity): Promise<SubmitResult>;
   typeIntoShell(ref: SessionRef, text: string): Promise<boolean>;
   keys(ref: SessionRef, keys: readonly Key[]): Promise<void>;
-  /** herdr: "session" = `pane close <id>`; "container" = `tab close <ref.container>` (pane close when the ref has no container). hc: kill then rm for both. Default "session". */
-  close(ref: SessionRef, scope?: CloseScope, expectedSessionId?: string): Promise<void>;
 }
+
+export interface NativeSessionRuntime extends SessionOperations {
+  readonly kind: "headless";
+}
+
+export type SessionRuntime = TerminalRuntime | NativeSessionRuntime;
 
 /** Id shape of a bare ref: only a herdr pane `w<ws>:p<pane>` may appear without its prefix. */
 const BARE_HERDR = /^w[0-9A-Za-z]+:p[0-9A-Za-z]+$/;
@@ -137,7 +147,7 @@ export const formatRef: (ref: SessionRef) => string = (ref) => `${ref.runtime}:$
  * create + start in one call (the root harness path). A start that fails closes the session create just made (scope
  * "session"), so no idle shell is left behind, and rethrows the start error; a close that fails too is one stderr line.
  */
-export const openSession: (rt: SessionRuntime, spec: CreateSpec, command: string) => Promise<SessionRef> = async (
+export const openSession: (rt: TerminalRuntime, spec: CreateSpec, command: string) => Promise<SessionRef> = async (
   rt,
   spec,
   command,
@@ -148,7 +158,7 @@ export const openSession: (rt: SessionRuntime, spec: CreateSpec, command: string
   } catch (e) {
     await rt.close(ref, "session").catch((closeError: unknown) => {
       const why = closeError instanceof Error ? closeError.message : String(closeError);
-      process.stderr.write(`dori: could not close ${formatRef(ref)} after its start failed (${why})\n`);
+      process.stderr.write(`cataly: could not close ${formatRef(ref)} after its start failed (${why})\n`);
     });
     throw e;
   }

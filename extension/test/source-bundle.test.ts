@@ -27,16 +27,16 @@ for (const input of [
   { name: "successful consumer directory", indexed: false, managed: true, failure: "none" },
 ] as const) {
   for (const boundary of ["session", "provider"] as const) {
-    for (const role of ["lane", "dori", undefined] as const) {
+    for (const role of ["lane", "cataly", undefined] as const) {
       // One native session lifecycle per test deadline; the process environment is shared.
       test.serial(
         `${input.name} at the ${boundary} boundary for ${role ?? "ordinary"}`,
         async () => {
           const keys = [
             "HOME",
-            "DORI_CONFIG",
-            "DORI_STATE_DIR",
-            "DORI_OMP_ULW_PATH",
+            "CATALY_CONFIG",
+            "CATALY_STATE_DIR",
+            "CATALY_OMP_ULW_PATH",
             "HERDR_PANE_ID",
             "HC_TERMINAL_ID",
           ];
@@ -48,11 +48,16 @@ for (const input of [
             delete process.env["HERDR_PANE_ID"];
             delete process.env["HC_TERMINAL_ID"];
             if (input.failure === "missing") {
-              process.env["DORI_OMP_ULW_PATH"] = join(home, ".cache/omp-dori", `omp-ulw-${"0".repeat(64)}`, "index.ts");
+              process.env["CATALY_OMP_ULW_PATH"] = join(
+                home,
+                ".cache/omp-cataly",
+                `omp-ulw-${"0".repeat(64)}`,
+                "index.ts",
+              );
             } else {
-              delete process.env["DORI_OMP_ULW_PATH"];
+              delete process.env["CATALY_OMP_ULW_PATH"];
               const dependency = input.managed
-                ? join(home, ".dori/releases/consumer-dependencies", `omp-ulw-${"a".repeat(40)}-${"b".repeat(64)}`)
+                ? join(home, ".cataly/releases/consumer-dependencies", `omp-ulw-${"a".repeat(40)}-${"b".repeat(64)}`)
                 : join(home, "external-overlay");
               mkdirSync(dependency, { recursive: true });
               const error = 'throw new Error("intentional dependency failure");';

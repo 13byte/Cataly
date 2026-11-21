@@ -1,7 +1,15 @@
-import { HEADLESS_ADDRESS, type RuntimeKind, type SessionRef, type SessionRuntime } from "./types.ts";
+import {
+  HEADLESS_ADDRESS,
+  type RuntimeKind,
+  type SessionRef,
+  type SessionRuntime,
+  type TerminalRuntime,
+} from "./types.ts";
 
 const nonEmpty = (value: string | undefined): string | undefined =>
   value === undefined || value === "" ? undefined : value;
+
+class TerminalRuntimeError extends Error {}
 
 /**
  * The caller's own session: a valid native lane ID takes precedence over inherited terminal IDs, then
@@ -19,7 +27,7 @@ export const selfSession = (env: Readonly<Record<string, string | undefined>>): 
 };
 
 /**
- * The runtimes one process talks to: `default` is the selected kind (where new sessions open), `for(ref)` is the
+ * The runtimes one process talks to: `default` is the selected session runtime, and `for(ref)` is the
  * runtime that owns a stored session. Each kind is built on first use and then reused.
  */
 export class Runtimes {
@@ -37,6 +45,15 @@ export class Runtimes {
 
   for(ref: SessionRef): SessionRuntime {
     return this.of(ref.runtime);
+  }
+
+  /** Resolve a terminal-only operation without consulting the default or constructing a native adapter. */
+  terminal(kind: RuntimeKind): TerminalRuntime {
+    if (kind === "headless") throw new TerminalRuntimeError("headless OMP lanes have no terminal");
+    const runtime = this.of(kind);
+    if (runtime.kind === "headless" || runtime.kind !== kind)
+      throw new TerminalRuntimeError(`expected ${kind} runtime, got ${runtime.kind}`);
+    return runtime;
   }
 
   /** The kinds built so far, in first-use order, to enumerate sessions across every runtime in use. */

@@ -7,6 +7,7 @@
         "scripts/source-dependencies.ts",
         "scripts/source-configuration.ts",
         "scripts/verify-consumer-release.ts",
+        "scripts/consumer-smoke-candidate.ts",
         "scripts/consumer-smoke-harness.ts",
         "scripts/bench-discord-intake.ts",
         "src/update/deployment-launcher.ts",
@@ -20,7 +21,7 @@
       ],
       "project": ["src/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"]
     },
-    "skills/dori-mode/scripts": {
+    "skills/cataly-mode/scripts": {
       "entry": [
         "test/**/*.test.ts",
         "test/record-gateway.ts",

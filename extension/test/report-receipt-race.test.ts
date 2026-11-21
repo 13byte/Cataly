@@ -3,15 +3,15 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import * as fs from "node:fs";
 import { dirname, join } from "node:path";
 
-import { takeLock } from "../../skills/dori-mode/scripts/src/checkpoint-lock.ts";
-import { type EvidenceRef, fileEvidence } from "../../skills/dori-mode/scripts/src/evidence.ts";
-import { Registry } from "../../skills/dori-mode/scripts/src/registry.ts";
-import { Reports } from "../../skills/dori-mode/scripts/src/reports.ts";
+import { takeLock } from "../../skills/cataly-mode/scripts/src/checkpoint-lock.ts";
+import { type EvidenceRef, fileEvidence } from "../../skills/cataly-mode/scripts/src/evidence.ts";
+import { Registry } from "../../skills/cataly-mode/scripts/src/registry.ts";
+import { Reports } from "../../skills/cataly-mode/scripts/src/reports.ts";
 import { type FakePi, load, useConfig } from "./fake-pi";
 
 const PANE = "w1:p5";
 const KEY = "receipt-race";
-const ENV = ["DORI_CONFIG", "DORI_STATE_DIR", "HERDR_PANE_ID", "HC_TERMINAL_ID"] as const;
+const ENV = ["CATALY_CONFIG", "CATALY_STATE_DIR", "HERDR_PANE_ID", "HC_TERMINAL_ID"] as const;
 const TEXTS: readonly string[] = ["first racer", "second racer"];
 const MOVED = "1 of 1 evidence items are new; the evidence clock moved";
 const STILL = "the same evidence was recorded before; the evidence clock did not move";
@@ -31,7 +31,7 @@ type Accepted = {
 const line = (text: string, clock: string): string => `[REPORT] ${KEY} | milestone | ${text}\n${clock}`;
 
 /**
- * Two dori_report calls through the real tool race for the lane's real registry writer lock, which the test holds.
+ * Two cataly_report calls through the real tool race for the lane's real registry writer lock, which the test holds.
  * The cache-busted extension still shares node:fs. Observe each racer's EEXIST on the real lock path without
  * substituting either the lock or its result. Start the second racer only after the first captured its evidence and
  * hit that lock; `rewrite` changes the bytes in between. Releasing the lock lets the journal order both appenders.
@@ -79,10 +79,10 @@ const race = async (rewrite?: string, switchSession = false): Promise<Accepted[]
     lockPath = `${registry.path(KEY)}.lock`;
     const source = join(root, "result.txt");
     fs.writeFileSync(source, "bytes read by the first racer");
-    pi = await load({ session: { id: "receipt-race", entries: [] }, flags: { "dori-role": "lane" } });
+    pi = await load({ session: { id: "receipt-race", entries: [] }, flags: { "cataly-role": "lane" } });
     await pi.emit("session_start");
-    const tool = pi.tools.get("dori_report");
-    if (!tool) throw new Error("dori_report is not registered");
+    const tool = pi.tools.get("cataly_report");
+    if (!tool) throw new Error("cataly_report is not registered");
     // The lock code Registry.locked takes it with (as holdRegistry does); this live process owns it.
     const held = takeLock(lockPath, Date.now(), (message) => new Error(message));
     if (typeof held === "string") throw new Error(`registry lock is already held: ${held}`);

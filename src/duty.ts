@@ -168,7 +168,7 @@ export async function dutyTick(d: Deps): Promise<DutyEvent[]> {
         minutes: String(Math.floor(quietMin)),
         since: hhmm(since),
         age: ageText(now - since),
-        dori: d.doriCmd,
+        cataly: d.catalyCmd,
         ...(waiting
           ? { target: "", wholeTarget: indented(whole).join("\n"), waitingSince: hhmm(waitingSinceOf(lane)) }
           : {}),
@@ -176,7 +176,7 @@ export async function dutyTick(d: Deps): Promise<DutyEvent[]> {
       // Built and queued before it is counted: a nudge that could not be built or queued is not used up. A waiting
       // nudge's first line names the target in what it leaves of WIDTH beside the key (at most 40 columns), so the time
       // shows; its body names the target whole, since a cut link or job id names nothing the lane can check. A
-      // template from before {{wholeTarget}} (DORI_PROMPTS_DIR) gets the whole target under its first line instead.
+      // template from before {{wholeTarget}} (CATALY_PROMPTS_DIR) gets the whole target under its first line instead.
       const name = waiting ? "nudge-waiting.md" : "nudge.md";
       const template = readFileSync(promptFile(name), "utf8");
       const room = waiting ? WIDTH - Bun.stringWidth(fill(template, vars).split("\n")[0]!) : 0;

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, copyFileSync, lstatSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { UpdateError } from "./config.ts";
-import { doriPin } from "./source-pin.ts";
+import { catalyPin } from "./source-pin.ts";
 import type { SourceEntry, SourceManifest, UpdateInputs, UpdateJob } from "./types.ts";
 
 export const digest = (value: string | Uint8Array): string => createHash("sha256").update(value).digest("hex");
@@ -11,7 +11,10 @@ export const digest = (value: string | Uint8Array): string => createHash("sha256
 const OMIT: Readonly<Record<string, true>> = {
   ".git": true,
   node_modules: true,
+  ".cataly": true,
+  ".omp-cataly": true,
   ".dori": true,
+  ".omp-dori": true,
   ".omp": true,
   ".omo": true,
   ".cache": true,
@@ -180,10 +183,11 @@ export function assertSource(job: UpdateJob): void {
   }
 }
 
-const sameDoriPin = (local: SourceManifest, candidate: SourceManifest): boolean =>
-  local.ulwPresent === candidate.ulwPresent && JSON.stringify(doriPin(local)) === JSON.stringify(doriPin(candidate));
+const sameCatalyPin = (local: SourceManifest, candidate: SourceManifest): boolean =>
+  local.ulwPresent === candidate.ulwPresent &&
+  JSON.stringify(catalyPin(local)) === JSON.stringify(catalyPin(candidate));
 /** Carry only frozen source-bundle payloads and the local pin, never an old-source overlay or library fetch. */
-export function carryDoriPin(local: string, candidate: string, expected: SourceManifest): void {
+export function carryCatalyPin(local: string, candidate: string, expected: SourceManifest): void {
   const incoming = sourceManifest(candidate);
   const library = (manifest: SourceManifest): readonly SourceEntry[] =>
     manifest.files.filter((file) => file.path.startsWith(`${ULW_LIBRARY}/`));
@@ -193,24 +197,24 @@ export function carryDoriPin(local: string, candidate: string, expected: SourceM
     (!expected.files.some((file) => file.path === "omp-ulw.lock") &&
       incoming.files.some((file) => file.path === "omp-ulw.lock"))
   ) {
-    throw new UpdateError("new upstream conflicts with the frozen local ULW lock/library; Dori-only staging held");
+    throw new UpdateError("new upstream conflicts with the frozen local ULW lock/library; Cataly-only staging held");
   }
   if (expected.ulwPresent) mkdirSync(join(candidate, ULW_LIBRARY), { recursive: true, mode: 0o700 });
-  for (const file of doriPin(expected)) {
+  for (const file of catalyPin(expected)) {
     const to = join(candidate, file.path);
     mkdirSync(dirname(to), { recursive: true, mode: 0o700 });
     copyFileSync(join(local, file.path), to);
     chmodSync(to, file.executable ? 0o755 : 0o644);
   }
-  if (!sameDoriPin(expected, sourceManifest(candidate))) {
+  if (!sameCatalyPin(expected, sourceManifest(candidate))) {
     throw new UpdateError("prepared candidate did not preserve the frozen local ULW lock/library");
   }
 }
 
-/** Source-bundle payloads and the ULW library are frozen local pins, carried byte for byte by a Dori-only port. */
-export function assertDoriScope(inputs: UpdateInputs, candidate: SourceManifest): void {
-  if (!sameDoriPin(inputs.local, candidate)) {
-    throw new UpdateError("Dori-only update changed the frozen ULW lock/library");
+/** Source-bundle payloads and the ULW library are frozen local pins, carried byte for byte by a Cataly-only port. */
+export function assertCatalyScope(inputs: UpdateInputs, candidate: SourceManifest): void {
+  if (!sameCatalyPin(inputs.local, candidate)) {
+    throw new UpdateError("Cataly-only update changed the frozen ULW lock/library");
   }
 }
 

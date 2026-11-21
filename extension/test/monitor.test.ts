@@ -120,63 +120,70 @@ describe("Monitors", () => {
 });
 
 describe("monitor tool", () => {
-  let dori: FakePi;
+  let cataly: FakePi;
   beforeEach(async () => {
     useConfig(join(import.meta.dir, "fake-ulw.ts"));
-    dori = await load({ session: { id: "dori", entries: [] }, flags: { "dori-role": "dori" } });
-    await dori.emit("session_start");
+    cataly = await load({ session: { id: "cataly", entries: [] }, flags: { "cataly-role": "cataly" } });
+    await cataly.emit("session_start");
   });
 
   const run = (pi: FakePi, params: Record<string, unknown>) =>
     pi.tools.get("monitor")?.execute("call", params, undefined, undefined, pi.ctx());
 
-  test("wakes the Dori session with an aside message and stops every monitor at session shutdown", async () => {
-    await run(dori, { op: "start", name: "inbox", argv: ["sh", "-c", "echo 'msg hi'; exec sleep 30"], filter: "^msg" });
-    await until(() => dori.messages.length > 0);
-    expect(dori.messages).toEqual([{ content: "[inbox] msg hi", options: { triggerTurn: true, deliverAs: "aside" } }]);
-    const listed = await run(dori, { op: "list" });
+  test("wakes the Cataly session with an aside message and stops every monitor at session shutdown", async () => {
+    await run(cataly, {
+      op: "start",
+      name: "inbox",
+      argv: ["sh", "-c", "echo 'msg hi'; exec sleep 30"],
+      filter: "^msg",
+    });
+    await until(() => cataly.messages.length > 0);
+    expect(cataly.messages).toEqual([
+      { content: "[inbox] msg hi", options: { triggerTurn: true, deliverAs: "aside" } },
+    ]);
+    const listed = await run(cataly, { op: "list" });
     const pid = Number(/pid (\d+)/.exec(listed?.content[0]?.text ?? "")?.[1]);
     expect(alive(pid)).toBe(true);
 
-    await dori.emit("session_shutdown");
+    await cataly.emit("session_shutdown");
     await until(() => !alive(pid));
-    const stopped = (await run(dori, { op: "list" }))?.content[0]?.text;
+    const stopped = (await run(cataly, { op: "list" }))?.content[0]?.text;
     expect(stopped).toContain("inbox [mode=persistent status=recorded]");
     expect(stopped).not.toContain("pid ");
   });
 
-  test("monitors stop when the Dori session switches away", async () => {
-    await run(dori, { op: "start", name: "w", argv: ["sleep", "30"], filter: "." });
-    const pid = Number(/pid (\d+)/.exec((await run(dori, { op: "list" }))?.content[0]?.text ?? "")?.[1]);
-    dori.session = { id: "plain", entries: [] };
-    await dori.emit("session_switch", { type: "session_switch", reason: "resume" });
+  test("monitors stop when the Cataly session switches away", async () => {
+    await run(cataly, { op: "start", name: "w", argv: ["sleep", "30"], filter: "." });
+    const pid = Number(/pid (\d+)/.exec((await run(cataly, { op: "list" }))?.content[0]?.text ?? "")?.[1]);
+    cataly.session = { id: "plain", entries: [] };
+    await cataly.emit("session_switch", { type: "session_switch", reason: "resume" });
     await until(() => !alive(pid));
-    expect(dori.session.entries).toEqual([]);
-    expect(dori.active).not.toContain("monitor");
-    await expect(run(dori, { op: "list" })).rejects.toThrow(
-      "monitor works only in the Dori session (omp --dori-role dori)",
+    expect(cataly.session.entries).toEqual([]);
+    expect(cataly.active).not.toContain("monitor");
+    await expect(run(cataly, { op: "list" })).rejects.toThrow(
+      "monitor works only in the Cataly session (omp --cataly-role cataly)",
     );
   });
 
-  test("monitors stop when /tree moves the Dori session to a point before its role was recorded", async () => {
-    await run(dori, { op: "start", name: "w", argv: ["sleep", "30"], filter: "." });
-    const pid = Number(/pid (\d+)/.exec((await run(dori, { op: "list" }))?.content[0]?.text ?? "")?.[1]);
-    dori.session = { id: "dori", entries: [] };
-    await dori.emit("session_tree", { type: "session_tree", newLeafId: null });
+  test("monitors stop when /tree moves the Cataly session to a point before its role was recorded", async () => {
+    await run(cataly, { op: "start", name: "w", argv: ["sleep", "30"], filter: "." });
+    const pid = Number(/pid (\d+)/.exec((await run(cataly, { op: "list" }))?.content[0]?.text ?? "")?.[1]);
+    cataly.session = { id: "cataly", entries: [] };
+    await cataly.emit("session_tree", { type: "session_tree", newLeafId: null });
     await until(() => !alive(pid));
-    expect(dori.active).not.toContain("monitor");
+    expect(cataly.active).not.toContain("monitor");
   });
 
   test("hides explicitly selected monitor tools from native children on every session transition", async () => {
     const ordinary = ["read", "edit", "bash"];
     for (const [id, parentId] of [
-      ["DoriChild", "Main"],
-      ["DoriGrandchild", "DoriChild"],
+      ["CatalyChild", "Main"],
+      ["CatalyGrandchild", "CatalyChild"],
       ["UnboundChild", "UnknownMain"],
     ] as const) {
       const child = await load({
         session: { id, entries: [] },
-        flags: { "dori-role": "dori" },
+        flags: { "cataly-role": "cataly" },
         agent: { kind: "sub", id, parentId },
         active: [...ordinary, "monitor"],
       });
@@ -188,10 +195,10 @@ describe("monitor tool", () => {
         expect(child.session.entries).toEqual([]);
       }
     }
-    expect(dori.active).toEqual(["read", "bash", "monitor"]);
+    expect(cataly.active).toEqual(["read", "bash", "monitor"]);
   });
 
-  test("rejects direct monitor calls from a native child that inherited the Dori role", async () => {
+  test("rejects direct monitor calls from a native child that inherited the Cataly role", async () => {
     const child = await load({
       session: { id: "direct-child", entries: [] },
       agent: { kind: "sub", id: "DirectChild", parentId: "Main" },
@@ -199,18 +206,18 @@ describe("monitor tool", () => {
     await child.emit("session_start");
     for (const op of ["list", "start", "stop"]) {
       const params = { op, name: "forbidden", argv: [process.execPath, "-e", ""], filter: ".*" };
-      // The Dori-owned definition has a live main session, so this also exercises the native kind guard itself.
-      for (const owner of [child, dori])
+      // The Cataly-owned definition has a live main session, so this also exercises the native kind guard itself.
+      for (const owner of [child, cataly])
         await expect(
           owner.tools.get("monitor")?.execute("call", params, undefined, undefined, child.ctx()),
-        ).rejects.toThrow("monitor works only in the Dori session (omp --dori-role dori)");
+        ).rejects.toThrow("monitor works only in the Cataly session (omp --cataly-role cataly)");
     }
   });
 
-  test("preserves ordinary tools and monitor access in the Dori main agent", async () => {
+  test("preserves ordinary tools and monitor access in the Cataly main agent", async () => {
     const main = await load({
       session: { id: "main-tools", entries: [] },
-      flags: { "dori-role": "dori" },
+      flags: { "cataly-role": "cataly" },
       active: ["read", "edit", "bash"],
     });
     await main.emit("session_start");
@@ -218,12 +225,12 @@ describe("monitor tool", () => {
     expect((await run(main, { op: "list" }))?.content[0]?.text).toBe("no monitors running or recorded");
   });
 
-  test("refuses to run outside the Dori session", async () => {
-    const lane = await load({ session: { id: "lane", entries: [] }, flags: { "dori-role": "lane" } });
+  test("refuses to run outside the Cataly session", async () => {
+    const lane = await load({ session: { id: "lane", entries: [] }, flags: { "cataly-role": "lane" } });
     await lane.emit("session_start");
     expect(lane.active).not.toContain("monitor");
     await expect(run(lane, { op: "list" })).rejects.toThrow(
-      "monitor works only in the Dori session (omp --dori-role dori)",
+      "monitor works only in the Cataly session (omp --cataly-role cataly)",
     );
   });
 });

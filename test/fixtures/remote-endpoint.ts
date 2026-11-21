@@ -6,12 +6,13 @@ type EndpointOptions = {
   readonly session?: string;
   readonly pane?: string;
   readonly beforeClose?: () => Promise<void>;
+  readonly legacyLead?: boolean;
 };
 
 export async function startTestEndpoint(
   state: string,
   cleanup: Array<() => void | Promise<void>>,
-  { session = "native-001", pane, beforeClose }: EndpointOptions = {},
+  { session = "native-001", pane, beforeClose, legacyLead = false }: EndpointOptions = {},
 ) {
   const dir = remoteSocketDir(state);
   mkdirSync(dir, { mode: 0o700, recursive: true });
@@ -34,7 +35,8 @@ export async function startTestEndpoint(
       pending += bytes;
       if (!pending.includes("\n")) return;
       const request = JSON.parse(pending) as { op: string; generation?: string; text?: string };
-      if (request.op === "info") connection.end(`${JSON.stringify({ ok: true, data: target })}\n`);
+      if (request.op === "info")
+        connection.end(`${JSON.stringify({ ok: true, data: legacyLead ? { ...target, role: "dori" } : target })}\n`);
       else if (request.generation !== target.generation) connection.end('{"ok":false,"error":"wrong generation"}\n');
       else if (request.op === "read")
         connection.end('{"ok":true,"data":{"messages":[{"role":"assistant","text":"status"}]}}\n');

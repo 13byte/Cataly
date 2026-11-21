@@ -1,7 +1,8 @@
+import { isCatalyEntry } from "../skills/cataly-mode/scripts/src/session-compat.ts";
 import type { MonitorSpec } from "../src/update/deployment-types.ts";
 import type { MonitorExit } from "./monitor.ts";
 
-export const MONITOR_ENTRY = "omp-dori:monitor";
+export const MONITOR_ENTRY = "omp-cataly:monitor";
 type Entry = { readonly type: string; readonly customType?: string; readonly data?: unknown };
 export type RecordedMonitor = {
   readonly spec: MonitorSpec;
@@ -38,7 +39,7 @@ export function recordedMonitorStates(branch: readonly Entry[]): Map<string, Rec
   for (const entry of branch) {
     if (
       entry.type !== "custom" ||
-      entry.customType !== MONITOR_ENTRY ||
+      !isCatalyEntry(entry.customType, MONITOR_ENTRY) ||
       typeof entry.data !== "object" ||
       entry.data === null
     )

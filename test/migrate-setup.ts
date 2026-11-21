@@ -6,7 +6,7 @@ import type { Lane, QueuedMessage } from "../src/store-types.ts";
 import { World, href } from "./fake.ts";
 
 export const OLD = href("w1:p3");
-export const FOOTER = "## Lane rules (added by dori for lane `k`)\n\nrules";
+export const FOOTER = "## Lane rules (added by cataly for lane `k`)\n\nrules";
 export const msg = (text: string, at: number, attempt?: QueuedMessage["attempt"]): QueuedMessage => ({
   at,
   from: "cli",

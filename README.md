@@ -84,7 +84,7 @@ Here is the workflow on current `main`:
    metadata into the work.
 2. **The lead assigns the work.** The lead can handle small requests directly or
    launch a **lane**: a dedicated [oh-my-pi (OMP)](https://github.com/can1357/oh-my-pi)
-   coding session in herdr or hc, with a brief and an explicit `Done` condition.
+   coding session with a brief and an explicit `Done` condition. Native sessions run without a terminal by default.
    The lane registry ties the work to its session and messenger thread.
 3. **The lane works and reports.** Worklogs, reports, and checkpoints make
    progress inspectable across restarts. Ordinary Discord chat
@@ -101,7 +101,7 @@ Here is the workflow on current `main`:
 - Installation starts no agent, messenger receiver, or service. Enable only the
   monitors and integrations you want.
 - Keep credentials and private transcripts out of public reports.
-- Optional telemetry can be disabled with `DORI_TELEMETRY=0` or `DO_NOT_TRACK=1`.
+- Optional telemetry can be disabled with `CATALY_TELEMETRY=0` or `DO_NOT_TRACK=1`.
 
 ## Get started
 
@@ -109,8 +109,13 @@ Here is the workflow on current `main`:
 
 **Note**
 
-Cataly is the project name. The CLI and launchers still use `dori`, `omp-dori`,
-and `omp`; existing install paths and release asset names are unchanged.
+Use `cataly` for operation, `cataly-harness` for the standalone harness, and
+`omp-cataly` for a separate installation. Fresh homes default to `~/.cataly`
+(primary) or `~/.omp-cataly` (side). An upgrade stays in its original home.
+
+[Install a verified current release](docs/releases.md#install-a-current-release)
+or [upgrade an existing v0.1.3 installation without terminal tooling](docs/releases.md#upgrade-a-v013-installation).
+The upgrade leaves existing configuration unchanged.
 
 </td></tr></table>
 
@@ -125,10 +130,10 @@ npm install cataly
 bun add cataly
 ```
 
-The installed command is still `dori-harness`:
+The Cataly package exposes `cataly-harness`:
 
 ```bash
-./node_modules/.bin/dori-harness --help
+./node_modules/.bin/cataly-harness --help
 ```
 
 This installs the harness CLI, not the full OMP and messenger setup. For that
@@ -137,16 +142,16 @@ setup, use one of the options below.
 |                | [Published preview](#try-the-published-preview) | [Current source](#work-from-current-source)          |
 | -------------- | ----------------------------------------------- | ---------------------------------------------------- |
 | **Build**      | v0.1.2 prerelease                               | current `main`                                       |
-| **Scope**      | Linux x64 / herdr / Discord                     | herdr or hc, your chosen messenger                   |
+| **Scope**      | Linux x64 / herdr / Discord                     | native headless sessions; optional herdr or hc       |
 | **OMP**        | independently installed native OMP 18.18.8      | pinned, patched OMP 18.20.0 with the omp-ulw overlay |
-| **Home**       | primary `~/.dori`                               | side mode `~/.omp-dori`                              |
+| **Home**       | historical primary `~/.dori`                   | side mode `~/.omp-cataly`                            |
 
 ### Try the published preview
 
 The [v0.1.2 prerelease](https://github.com/vntrevx/Cataly/releases/tag/v0.1.2)
 is the published **Linux x64 / herdr / Discord** preview. The tested baseline
 is Ubuntu 24.04 x64, Bun 1.4.4, native OMP 18.18.8, and herdr 0.9.5. This tag
-requires an independently installed OMP and uses the primary `~/.dori` home.
+requires an independently installed OMP and uses the historical `~/.dori` home.
 It does not contain the newer `main` features or toolchain.
 
 1. [Install the exact preview](https://github.com/vntrevx/Cataly/blob/v0.1.2/docs/releases.md#install-the-exact-preview).
@@ -160,8 +165,8 @@ It does not contain the newer `main` features or toolchain.
 
 ### Work from current source
 
-Use a separate checkout with git, Bun 1.4.4+, and your chosen runtime (herdr or
-hc). The default source installer prepares the pinned, patched **OMP 18.20.0**
+Use a separate checkout with git and Bun 1.4.4+. On Linux and macOS the
+default session runtime needs neither herdr nor hc. The installer prepares the pinned, patched **OMP 18.20.0**
 and **omp-ulw** overlay; a stock `omp` is not a substitute. No preinstalled OMP
 or Cargo is needed for this default setup.
 
@@ -172,21 +177,27 @@ does not update the checkout, prepare dependencies, or change installation files
 ```bash
 git clone https://github.com/vntrevx/Cataly.git "$HOME/src/Cataly" || exit 1
 cd "$HOME/src/Cataly" || exit 1
-DORI_INSTALL_MODE=side DORI_NO_PULL=1 DORI_SRC="$PWD" \
+CATALY_INSTALL_MODE=side CATALY_NO_PULL=1 CATALY_SRC="$PWD" \
   bash scripts/install-source.sh
 ```
 
-Side mode uses `~/.omp-dori` by default and leaves the primary `~/.dori`
-installation alone. After configuring the side home, use `omp-dori omp` to
-start OMP through the generated wrapper. Follow the
+Side mode uses `~/.omp-cataly` by default and leaves the primary `~/.cataly`
+installation alone. Use `omp-cataly omp` to open the bound OMP for provider
+setup, and `omp-cataly harness up` to start the harness explicitly. Follow the
 [source setup and startup guide](docs/releases.md#source-checkouts-for-maintainers)
-for your runtime and messenger. Use `omp-dori doctor` for a read-only setup
-check and `omp-dori status` to see your lanes.
+for your runtime and messenger. Use `omp-cataly doctor` for a read-only setup
+check and `omp-cataly status` to see your lanes.
 
-Opt-in [source updates](skills/dori-mode/references/scripts.md#ci-gated-source-updates)
+For new sessions, `cataly harness status` shows `RUNTIME headless (from default)`
+unless you explicitly select another runtime. Old installations may have
+`"runtime": "hc"` or `"herdr"`; leave that field in place. To opt in to a terminal
+for new sessions, set `"sessionRuntime": "hc"` or `"herdr"`. Stored terminal
+sessions still belong to their original backend.
+
+Opt-in [source updates](skills/cataly-mode/references/scripts.md#ci-gated-source-updates)
 follow CI-passing main with idle and quiet admission, same-session restart,
 monitor health, and rollback. This is separate from consumer release updates
-and the model-assisted `dori upstream` workflow.
+and the model-assisted `cataly upstream` workflow.
 
 <table width="100%"><tr><td>
 
@@ -204,10 +215,10 @@ claimed here. A merge to `main` does not update the published preview.
 | Set up and operate                                                          | Go deeper                                                                       |
 | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | [Installation, support, updates, and rollback](docs/releases.md)            | [Runtime adapters and session contracts](docs/runtime.md)                       |
-| [Messenger setup](skills/dori-mode/references/setup.md)                     | [Container setup for source development](docs/container.md)                     |
-| [Dori operating rules](skills/dori-mode/SKILL.md)                           | [Scheduling and backlog](docs/hourly-loop.md)                                   |
-| [Lane commands and configuration](skills/dori-mode/references/scripts.md)   | [Shared locks and lane priority](docs/locks.md)                                 |
-| [Done protocol](skills/dori-mode/references/done-protocol.md)               | [Opt-in paid Discord voice assistant (current source)](docs/discord-voice.md)   |
+| [Messenger setup](skills/cataly-mode/references/setup.md)                     | [Container setup for source development](docs/container.md)                     |
+| [Cataly operating rules](skills/cataly-mode/SKILL.md)                           | [Scheduling and backlog](docs/hourly-loop.md)                                   |
+| [Lane commands and configuration](skills/cataly-mode/references/scripts.md)   | [Shared locks and lane priority](docs/locks.md)                                 |
+| [Done protocol](skills/cataly-mode/references/done-protocol.md)               | [Opt-in paid Discord voice assistant (current source)](docs/discord-voice.md)   |
 | [Changelog](CHANGELOG.md)                                                   | [Opt-in owner profile for the lead](docs/owner-profile.md)                      |
 
 ## Contributing
@@ -223,7 +234,7 @@ Cataly integrates [dori-superagent](https://github.com/sisyphuslabs/dori-superag
 [oh-my-pi](https://github.com/can1357/oh-my-pi), and
 [omp-ulw](https://github.com/dbc-hbin/omp-ulw). The dori-superagent-derived
 material retains the [Sustainable Use License 1.0](LICENSE). The existing OMP
-integration retains its [MIT license and copyright notices](LICENSE.omp-dori);
+integration retains its [MIT license and copyright notices](LICENSE.integration);
 the MIT notice does not apply to the whole repository. Other components keep
 their own terms. See the [licensing guide](LICENSING.md) and [NOTICE](NOTICE) for
 source revisions and modified-copy attribution.

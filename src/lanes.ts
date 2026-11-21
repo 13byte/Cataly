@@ -1,16 +1,18 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { shq } from "./delivery.ts";
 import { oneName } from "./fit.ts";
-import { agentCommand, harnessLaneEnv, prompt, type Deps } from "./harness.ts";
+import { agentCommand, harnessLaneEnv, nativeHarnessCommand, prompt, type Deps } from "./harness.ts";
 import { settled, tellLead, type SendResult } from "./inbox.ts";
 import { Refusal } from "./refusal.ts";
 import { runHook } from "./hooks.ts";
 import { checkPriority } from "./lock-queue.ts";
+import { acquire, release } from "./loop-lock.ts";
 import { applyEvidence, blockerOf, waitingSinceOf, waitingTarget } from "./progress.ts";
 import { refText } from "./refs.ts";
 import { groupId } from "./runtime/group.ts";
+import { HeadlessRuntime } from "./runtime/headless.ts";
 import { openSession } from "./runtime/types.ts";
 import { KEY_RE, reservedKey, type Lane } from "./store-types.ts";
 
@@ -30,28 +32,49 @@ export async function startLane(
   const priority = opts.priority === undefined ? undefined : checkPriority(opts.priority);
   const reserved = reservedKey(key);
   if (reserved) throw new Refusal(reserved);
+  const lock = `${d.store.briefPath(key)}.start.lock`;
+  const held = acquire(d, lock);
+  if ("holder" in held) throw new Refusal(`another start owns lane ${key} (${held.holder})`);
+  try {
+    return await startAdmitted(d, key, briefFile, opts, priority);
+  } finally {
+    release(d, held.nonce, lock);
+  }
+}
+
+async function startAdmitted(
+  d: Deps,
+  key: string,
+  briefFile: string,
+  opts: { cwd?: string; group?: string },
+  priority?: number,
+): Promise<Lane> {
   const existing = d.store.lane(key);
   if (existing && existing.status !== "done" && existing.status !== "lost")
     throw new Refusal(`lane ${key} is already open in ${refText(existing.sessionRef)}`);
-  const cwd = resolve(opts.cwd ?? process.cwd());
+  const rt = d.runtimes.default;
+  if (rt.kind === "headless" && !(rt instanceof HeadlessRuntime))
+    throw new Refusal("native lane runtime is unavailable");
+  const cwd = rt.kind === "headless" ? realpathSync(opts.cwd ?? process.cwd()) : resolve(opts.cwd ?? process.cwd());
+  const native = rt instanceof HeadlessRuntime ? await nativeHarnessCommand(d) : undefined;
   const briefPath = d.store.briefPath(key);
-  const footer = prompt("lane-footer.md", { key, dori: d.doriCmd });
+  const footer = prompt("lane-footer.md", { key, cataly: d.catalyCmd });
   await Bun.write(briefPath, `${readFileSync(briefFile, "utf8").trimEnd()}\n\n${footer}`);
 
   // The group is the caller's own when it runs in a session of the selected runtime (a lane opened from the lead's
-  // workspace stays there); otherwise herdr gets a new "dori" workspace and hc this home's group label.
-  const rt = d.runtimes.default;
+  // workspace stays there); otherwise herdr gets a new "cataly" workspace and hc this home's group label.
   const self = d.runtimes.selfAny(process.env);
   const group =
     opts.group ??
     (self?.runtime === rt.kind ? self.group : undefined) ??
-    (rt.kind === "herdr" ? await rt.createGroup("dori", cwd) : groupId(d.store.root));
+    (rt.kind === "herdr" ? await rt.createGroup("cataly", cwd) : groupId(d.store.root));
   const kickoff = `Read your brief at ${briefPath} and execute it. Your lane key is ${key}.`;
-  const ref = await openSession(
-    rt,
-    { name: key, role: "lane", container: "tab", cwd, env: harnessLaneEnv(d, key), group },
-    `${agentCommand(d, "lane")} ${shq(kickoff)}`,
-  );
+  const env = harnessLaneEnv(d, key);
+  const spec = { name: key, role: "lane", container: "tab", cwd, env, group } as const;
+  const ref =
+    rt.kind === "headless"
+      ? await rt.create(spec)
+      : await openSession(rt, spec, `${agentCommand(d, "lane")} ${shq(kickoff)}`);
 
   const now = d.now();
   const lane: Lane = {
@@ -72,9 +95,43 @@ export async function startLane(
     log: [{ at: now, kind: "start", text: briefFile }],
   };
   d.store.saveLane(lane);
+  if (rt instanceof HeadlessRuntime && native) {
+    try {
+      let binding = "";
+      if (native.lanePolicy !== undefined) {
+        const { policyBinding, prepareLanePolicy, writeLanePolicy } =
+          await import("../skills/cataly-mode/scripts/src/lane-policy-store.ts");
+        const policy = prepareLanePolicy(rt.stateDir, key, native.lanePolicy);
+        if (policy) {
+          writeLanePolicy(policy, { key, lifecycleEpoch: ref.id });
+          binding = policyBinding(policy);
+        }
+      }
+      const seen = await rt.startNative(ref, native.argv, { ...env, CATALY_LANE_POLICY: binding });
+      if (seen.role !== "lane" || seen.cwd !== cwd || !seen.sessionId || !seen.sessionFile)
+        throw new Refusal("native lane did not prove the requested role, cwd and session");
+      lane.sessionPath = seen.sessionFile;
+      d.store.saveLane(lane);
+      const result = await rt.begin(ref, seen.sessionId, kickoff);
+      if (result.sessionId !== seen.sessionId || result.goal?.status !== "active")
+        throw new Refusal("native kickoff was not confirmed; inspect before taking further action");
+    } catch (error) {
+      // A process or kickoff might still be live. Only conclusive exit frees the lane key for a new start.
+      const seen = await rt.observe(ref).catch(() => undefined);
+      const current = d.store.lane(key);
+      if (seen?.status === "gone" && current?.sessionRef.id === ref.id && current.status === "working") {
+        current.status = "lost";
+        current.log.push({ at: d.now(), kind: "lost", text: "native host exited during startup" });
+        d.store.saveLane(current);
+      }
+      throw new Refusal(
+        `lane ${key} startup held at ${refText(ref)}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
   await tellLead(d, `[START ${key}] lane opened in ${refText(ref)}`, key);
   const open = d.store.lanes().filter((l) => l.status === "working" || l.status === "waiting").length;
-  d.usage.record({ name: "dori.lane_started", open_lanes: Math.min(open, 1000) });
+  d.usage.record({ name: "cataly.lane_started", open_lanes: Math.min(open, 1000) });
   return lane;
 }
 
@@ -159,7 +216,7 @@ export async function ready(
   const sent = await settled(tellLead(d, `[READY ${key}] ${text}\n${evidenceLine(evidence)}`, key));
   void runHook(d, "onReady", { key, text, evidence: evidence.join(" ") });
   d.usage.record({
-    name: "dori.lane_ready",
+    name: "cataly.lane_ready",
     evidence_count: Math.min(evidence.length, 100),
     lane_minutes: Math.min(Math.floor((now - lane.createdAt) / 60_000), 10_080),
   });

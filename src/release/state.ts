@@ -4,6 +4,7 @@ import { assertSetupFile, type SetupSnapshot } from "../setup-files.ts";
 import { assertSourceAdmission, sameManifest, sourceManifest } from "../update/source.ts";
 import {
   type ConsumerPaths,
+  isPrimaryConsumer,
   owned,
   pointer,
   readJson,
@@ -13,7 +14,7 @@ import {
   saveJson,
   syncDirectory,
 } from "./files.ts";
-import { assertNoLiveDori } from "./live.ts";
+import { assertNoLiveCataly } from "./live.ts";
 import { acquireLaunchGate, assertNoConsumerLaunches } from "./launch-leases.ts";
 import { validateReleaseManifest } from "./manifest.ts";
 import { assertLock } from "./provision.ts";
@@ -35,7 +36,7 @@ export const releasePath = (paths: ConsumerPaths, manifest: ReleaseManifest): st
 export const manifestPath = (paths: ConsumerPaths, manifest: ReleaseManifest): string =>
   join(paths.manifests, `${releaseId(manifest)}.json`);
 const nativeTarget = (paths: ConsumerPaths, state: InstalledState | undefined): string | undefined =>
-  paths.dori === join(paths.home, ".dori") && state?.current.requirements.omp === "18.20.0"
+  isPrimaryConsumer(paths) && state?.current.requirements.omp === "18.20.0"
     ? join(releasePath(paths, state.current), "scripts/consumer/omp")
     : undefined;
 
@@ -63,8 +64,8 @@ export function assertInstalledPointer(paths: ConsumerPaths, state: InstalledSta
     throw new Error(
       `Unmanaged or changed source pointer: ${paths.live}; preserve it and resolve ownership before installing`,
     );
-  if (paths.dori === join(paths.home, ".dori")) {
-    if (pointer(join(paths.dori, "bin/omp")) !== nativeTarget(paths, state))
+  if (isPrimaryConsumer(paths)) {
+    if (pointer(join(paths.cataly, "bin/omp")) !== nativeTarget(paths, state))
       throw new Error("Unmanaged or changed native OMP pointer; preserve it and resolve ownership before installing");
   } else preflightReferences(paths);
 }
@@ -115,7 +116,7 @@ function recoverInstalledUnlocked(paths: ConsumerPaths): InstalledState | undefi
   const actual = pointer(paths.live);
   const before = journal.before ? releasePath(paths, journal.before.current) : undefined;
   const after = releasePath(paths, journal.after.current);
-  const omp = paths.dori === join(paths.home, ".dori") ? join(paths.dori, "bin/omp") : undefined;
+  const omp = isPrimaryConsumer(paths) ? join(paths.cataly, "bin/omp") : undefined;
   const native = omp ? pointer(omp) : undefined;
   if (!omp) preflightReferences(paths);
   if (native !== nativeTarget(paths, journal.before) && native !== nativeTarget(paths, journal.after))
@@ -129,10 +130,8 @@ function recoverInstalledUnlocked(paths: ConsumerPaths): InstalledState | undefi
     recovered = journal.before;
   } else throw new Error("Source pointer conflicts with interrupted activation; preserve it for inspection");
   const expectedNative = nativeTarget(paths, recovered);
-  if (omp && native !== expectedNative) {
-    assertNoLiveDori(paths);
-    replacePointer(omp, native, expectedNative);
-  }
+  assertNoLiveCataly(paths);
+  if (omp && native !== expectedNative) replacePointer(omp, native, expectedNative);
   if (recovered) saveJson(paths.state, recovered);
   else removeState(paths);
   unlinkSync(paths.journal);
@@ -162,7 +161,7 @@ function activateReleaseUnlocked(
   assertInstalledPointer(paths, before);
   if (before) verifyRelease(paths, before.current);
   const target = verifyRelease(paths, after.current);
-  assertNoLiveDori(paths);
+  assertNoLiveCataly(paths);
   if (configuration) {
     assertSetupFile(configuration.snapshot);
     configuration.beforeJournal?.();
@@ -170,7 +169,7 @@ function activateReleaseUnlocked(
   const journal: Journal = { version: 1, ...(before ? { before } : {}), after };
   saveJson(paths.journal, journal);
   const old = before ? releasePath(paths, before.current) : undefined;
-  const omp = paths.dori === join(paths.home, ".dori") ? join(paths.dori, "bin/omp") : undefined;
+  const omp = isPrimaryConsumer(paths) ? join(paths.cataly, "bin/omp") : undefined;
   const nativeBefore = nativeTarget(paths, before);
   const nativeAfter = nativeTarget(paths, after);
   try {

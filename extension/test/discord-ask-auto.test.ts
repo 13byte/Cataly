@@ -2,13 +2,13 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { writePaneState } from "../../skills/dori-mode/scripts/src/lane-state.ts";
-import { Registry } from "../../skills/dori-mode/scripts/src/registry.ts";
+import { writePaneState } from "../../skills/cataly-mode/scripts/src/lane-state.ts";
+import { Registry } from "../../skills/cataly-mode/scripts/src/registry.ts";
 import { DiscordAsk } from "../discord-ask.ts";
 import { automaticDiscordAskRoute, bindAskLane } from "../discord-ask-auto.ts";
 import { until } from "./fake-pi.ts";
 
-const cli = join(import.meta.dir, "../../skills/dori-mode/scripts/src/cli.ts");
+const cli = join(import.meta.dir, "../../skills/cataly-mode/scripts/src/cli.ts");
 const primary = "109867692300000031";
 const secondary = "109867692300000032";
 const owner = "109867692300000033";
@@ -43,10 +43,10 @@ async function verifyAutomaticAsk(credential: "private file" | "lead environment
   const override = join(state, "discord-ask.json");
   const settings = JSON.stringify({ stateDir: state, ompUlwPath: "" });
   const envKeys = [
-    "DORI_HOME",
-    "DORI_CONFIG",
-    "DORI_DISCORD_API_BASE",
-    "DORI_DISCORD_TOKEN",
+    "CATALY_HOME",
+    "CATALY_CONFIG",
+    "CATALY_DISCORD_API_BASE",
+    "CATALY_DISCORD_TOKEN",
     "HC_TERMINAL_ID",
     "HERDR_PANE_ID",
   ] as const;
@@ -108,10 +108,10 @@ async function verifyAutomaticAsk(credential: "private file" | "lead environment
   const base = `http://127.0.0.1:${server.port}`;
   delete process.env.HC_TERMINAL_ID;
   Object.assign(process.env, {
-    DORI_CONFIG: config,
-    DORI_HOME: home,
-    DORI_DISCORD_API_BASE: base,
-    DORI_DISCORD_TOKEN: credential === "lead environment" ? token : "nonmatching-fixture-token",
+    CATALY_CONFIG: config,
+    CATALY_HOME: home,
+    CATALY_DISCORD_API_BASE: base,
+    CATALY_DISCORD_TOKEN: credential === "lead environment" ? token : "nonmatching-fixture-token",
     HERDR_PANE_ID: "w1:p2",
   });
   mkdirSync(state, { mode: 0o700 });
@@ -124,17 +124,17 @@ async function verifyAutomaticAsk(credential: "private file" | "lead environment
       env: {
         PATH: process.env.PATH,
         HOME: home,
-        DORI_HOME: home,
-        DORI_CONFIG: config,
-        DORI_DISCORD_API_BASE: base,
-        DORI_DISCORD_TOKEN: token,
-        DORI_DISCORD_OWNER_ID: owner,
-        DORI_DISCORD_CHANNEL_IDS: channels,
-        DORI_DISCORD_THREADS: "off",
+        CATALY_HOME: home,
+        CATALY_CONFIG: config,
+        CATALY_DISCORD_API_BASE: base,
+        CATALY_DISCORD_TOKEN: token,
+        CATALY_DISCORD_OWNER_ID: owner,
+        CATALY_DISCORD_CHANNEL_IDS: channels,
+        CATALY_DISCORD_THREADS: "off",
         DO_NOT_TRACK: "1",
       },
     });
-  const readRoute = () => automaticDiscordAskRoute(state, "dori", "lead");
+  const readRoute = () => automaticDiscordAskRoute(state, "cataly", "lead");
   const bridge = new DiscordAsk();
   let terminal = Promise.withResolvers<{ data: { answer: string } } | undefined>();
   const ui = {
@@ -153,9 +153,9 @@ async function verifyAutomaticAsk(credential: "private file" | "lead environment
     }
     expect(route).toMatchObject({ channel: primary, owner });
     if (credential === "lead environment") {
-      process.env.DORI_DISCORD_TOKEN = "nonmatching-fixture-token";
+      process.env.CATALY_DISCORD_TOKEN = "nonmatching-fixture-token";
       expect(await readRoute()).toBeUndefined();
-      process.env.DORI_DISCORD_TOKEN = token;
+      process.env.CATALY_DISCORD_TOKEN = token;
     }
     expect(existsSync(override)).toBe(false);
     await bridge.arm(event, ui, state, "lead", readRoute);

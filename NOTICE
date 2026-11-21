@@ -25,7 +25,7 @@ The dori-superagent-derived material retains Sustainable Use License 1.0
 and its notices in LICENSE. The pre-existing omp-dori material incorporated
 from the local source, including its extension and OMP integration changes,
 retains the MIT terms and YeonGyu Kim, betive37, and vntrevx notices in
-LICENSE.omp-dori. Third-party components keep their own licenses. This
+LICENSE.integration. Third-party components keep their own licenses. This
 modified copy does not claim that upstream SUL material has become MIT.
 
 Bound upstream sources
@@ -43,6 +43,10 @@ those bases, patch digests, and resulting source identities. omp-ulw.lock
 retains its upstream repository/commit meaning. These are prepared source
 overlays, not a vendored union or an external fork dependency.
 
+The legacy-upstream figures in docs/ preserve their original labels and
+depict upstream operating assumptions, not Cataly's current runtime,
+commands or integration support.
+
 Original authors' copyright and license notices continue to apply to the
 patch excerpts and fetched source. The default runtime uses the official,
 version-matched MIT-licensed @oh-my-pi/pi-natives addon. Its compatibility
@@ -56,7 +60,7 @@ or enable another harness, receiver, or service.
 Adapted Discord table renderer
 ------------------------------
 
-skills/dori-mode/scripts/src/messenger/discord-markdown.ts is adapted from
+skills/cataly-mode/scripts/src/messenger/discord-markdown.ts is adapted from
 omp-superagent (https://github.com/dbc-hbin/omp-superagent),
 src/discord-markdown.ts at db3d74e4f37191dfbb74f8259563d1399c22f3b7.
 Changes preserve source escapes and indentation, bound display width before

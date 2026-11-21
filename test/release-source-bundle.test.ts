@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { extractArchive, readArchive } from "../src/release/archive.ts";
+import { automaticUpdate } from "../src/release/automatic.ts";
 import { saveJson } from "../src/release/files.ts";
 import { installBundle, rollbackRelease } from "../src/release/install.ts";
 import { validateReleaseManifest } from "../src/release/manifest.ts";
@@ -21,15 +22,15 @@ import {
 } from "../src/release/runtime.ts";
 import { readSourceBundle } from "../src/release/source-bundle.ts";
 import { releasePath } from "../src/release/state.ts";
-import { sourceManifest } from "../src/update/source.ts";
-import { isPolicyLaneCommand } from "../skills/dori-mode/scripts/src/lane-policy-launch.ts";
+import { digest, sourceManifest } from "../src/update/source.ts";
+import { isPolicyLaneCommand } from "../skills/cataly-mode/scripts/src/lane-policy-launch.ts";
 import { archive, type ConsumerFixture, fixture, withArchive } from "./release-consumer-setup.ts";
 import { fixtureGit, nativeCacheFixture, overlayFixture } from "./source-bundle-setup.ts";
 
 // POSIX-only: release installation refuses non-private directories by POSIX mode bits.
 const posix = test.skipIf(process.platform === "win32");
 
-function bundledRelease(f: ConsumerFixture, selected: string, nativeSource?: string) {
+function bundledRelease(f: ConsumerFixture, selected: string, nativeSource?: string, headless = false) {
   const original = f.release(selected);
   const source = join(f.root, `bundled-${selected}`);
   extractArchive(original.bundle.files, original.bundle.manifest, source);
@@ -50,6 +51,10 @@ function bundledRelease(f: ConsumerFixture, selected: string, nativeSource?: str
   );
   copyFileSync(resolve(import.meta.dir, "../scripts/consumer/omp"), join(source, "scripts/consumer/omp"));
   chmodSync(join(source, "scripts/consumer/omp"), 0o755);
+  if (headless) {
+    for (const path of ["release-capabilities.json", "release-headless.json"])
+      copyFileSync(resolve(import.meta.dir, "..", path), join(source, path));
+  }
   const publicSource = sourceManifest(source);
   const bytes = archive(
     publicSource.files.map((file) => ({
@@ -76,7 +81,14 @@ function bundledRelease(f: ConsumerFixture, selected: string, nativeSource?: str
     commit: ulw.commit,
     identity: bundle.identity,
   });
-  return { source, dependency, bundle: { manifest, files: readArchive(bytes, manifest) } };
+  const metadata = Buffer.from(JSON.stringify(manifest));
+  writeFileSync(join(original.dist, manifest.archive.name), bytes);
+  writeFileSync(join(original.dist, "release-manifest.json"), metadata);
+  writeFileSync(
+    join(original.dist, "SHA256SUMS"),
+    `${digest(bytes)}  ${manifest.archive.name}\n${digest(metadata)}  release-manifest.json\n`,
+  );
+  return { source, dependency, dist: original.dist, bundle: { manifest, files: readArchive(bytes, manifest) } };
 }
 
 posix(
@@ -100,7 +112,7 @@ posix(
     expect(configured.agentCommand[0]).toBe(join(f.paths.dori, "bin/omp"));
     expect(
       isPolicyLaneCommand(
-        resolveConsumerOmpCommand([join(f.paths.dori, "bin/omp"), "--dori-role", "lane", "{prompt}"], {
+        resolveConsumerOmpCommand([join(f.paths.dori, "bin/omp"), "--cataly-role", "lane", "{prompt}"], {
           home: f.paths.home,
           sourceRoot: sourceOne,
         }),
@@ -145,17 +157,76 @@ posix(
   },
 );
 
+const onReleaseHost = test.skipIf(
+  !(
+    (process.platform === "linux" && process.arch === "x64") ||
+    (process.platform === "darwin" && process.arch === "arm64")
+  ),
+);
+
+onReleaseHost.each(["manual", "automatic"] as const)(
+  "%s consumer update no longer requires the old terminal tool, but rollback does",
+  async (mode) => {
+    const f = fixture(true);
+    const old = bundledRelease(f, "terminal");
+    const before = await installBundle(f.paths, old.bundle, undefined);
+    const candidate = bundledRelease(f, "native", old.source, true);
+    const saved = readFileSync(f.paths.config);
+    const runtime = process.platform === "darwin" ? "hc" : "herdr";
+    expect(JSON.parse(saved.toString()).runtime).toBe(runtime);
+    const tools = "/usr/bin:/bin";
+    expect(Bun.which("hc", { PATH: tools })).toBeNull();
+    expect(Bun.which("herdr", { PATH: tools })).toBeNull();
+    const cli = (...args: string[]) =>
+      Bun.spawnSync([process.execPath, resolve(import.meta.dir, "../src/release/cli.ts"), ...args], {
+        env: { ...process.env, PATH: tools, CATALY_RUNTIME: "" },
+      });
+    const check = cli("check", "--from", candidate.dist);
+    expect(check.exitCode, check.stderr.toString()).toBe(0);
+    if (mode === "manual") {
+      const install = cli("install", "--from", candidate.dist);
+      expect(install.exitCode, install.stderr.toString()).toBe(0);
+    } else {
+      const oldPath = process.env["PATH"];
+      const previousRuntime = process.env["CATALY_RUNTIME"];
+      process.env["PATH"] = tools;
+      process.env["CATALY_RUNTIME"] = "";
+      try {
+        const stable = { ...candidate.bundle, manifest: { ...candidate.bundle.manifest, prerelease: false } };
+        expect(await automaticUpdate(f.paths, { now: 10_000, acquire: async () => stable })).toBe(
+          releasePath(f.paths, candidate.bundle.manifest),
+        );
+      } finally {
+        if (oldPath === undefined) delete process.env["PATH"];
+        else process.env["PATH"] = oldPath;
+        if (previousRuntime === undefined) delete process.env["CATALY_RUNTIME"];
+        else process.env["CATALY_RUNTIME"] = previousRuntime;
+      }
+    }
+    const retained = readlinkSync(f.paths.live);
+    expect(retained).toBe(releasePath(f.paths, candidate.bundle.manifest));
+    const rollback = cli("rollback", "--version", before.current.tag);
+    expect(rollback.exitCode).toBe(2);
+    expect(rollback.stderr.toString()).toContain(`${runtime} is required`);
+    const downgrade = cli("install", "--from", old.dist);
+    expect(downgrade.exitCode).toBe(2);
+    expect(downgrade.stderr.toString()).toContain("cannot downgrade");
+    expect(readlinkSync(f.paths.live)).toBe(retained);
+    expect(readFileSync(f.paths.config)).toEqual(saved);
+  },
+);
+
 test("a managed process selects its prepared default but retains an explicit external ULW path", () => {
-  const before = process.env["DORI_OMP_ULW_PATH"];
+  const before = process.env["CATALY_OMP_ULW_PATH"];
   try {
-    process.env["DORI_OMP_ULW_PATH"] = "/prepared/omp-ulw/index.ts";
+    process.env["CATALY_OMP_ULW_PATH"] = "/prepared/omp-ulw/index.ts";
     expect(resolveProcessOmpUlwPath("", "/home/fixture")).toBe("/prepared/omp-ulw/index.ts");
     expect(resolveProcessOmpUlwPath(join("/home/fixture", ".dori", "omp-ulw", "index.ts"), "/home/fixture")).toBe(
       "/prepared/omp-ulw/index.ts",
     );
     expect(resolveProcessOmpUlwPath("/owner/custom-ulw/index.ts", "/home/fixture")).toBe("/owner/custom-ulw/index.ts");
   } finally {
-    if (before === undefined) delete process.env["DORI_OMP_ULW_PATH"];
-    else process.env["DORI_OMP_ULW_PATH"] = before;
+    if (before === undefined) delete process.env["CATALY_OMP_ULW_PATH"];
+    else process.env["CATALY_OMP_ULW_PATH"] = before;
   }
 });

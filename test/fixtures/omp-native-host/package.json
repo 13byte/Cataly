@@ -1,5 +1,5 @@
 {
-  "name": "omp-dori-native-host-fixture",
+  "name": "omp-cataly-native-host-fixture",
   "private": true,
   "type": "module",
   "dependencies": {

@@ -2,10 +2,10 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, w
 import { join } from "node:path";
 import { takeInboxLock } from "./inbox-lock.ts";
 import { sameSession } from "./refs.ts";
-import type { RuntimeKind, SessionRef } from "./runtime/types.ts";
+import type { SessionRef, TerminalRuntimeKind } from "./runtime/types.ts";
 
 /**
- * The durable record of one `dori migrate` of a lane or role (`DORI_HOME/migrate/<name>.json`), rewritten tmp+rename
+ * The durable record of one `cataly migrate` of a lane or role (`CATALY_HOME/migrate/<name>.json`), rewritten tmp+rename
  * before each phase so a crashed run resumes where it stopped. `hold`: the session is held (no flush, no nudge);
  * `opened`: the replacement `newRef` exists; `switched`: the record points at it and only the old close is left.
  */
@@ -14,7 +14,7 @@ export type MigrateJournal = {
   readonly kind: "lane" | "role";
   readonly phase: "hold" | "opened" | "switched";
   readonly from: SessionRef;
-  readonly to: RuntimeKind;
+  readonly to: TerminalRuntimeKind;
   readonly newRef?: SessionRef;
   readonly at: number;
   readonly briefPath?: string;

@@ -1,14 +1,15 @@
 import { dirname, isAbsolute, join } from "node:path";
-import { configPath } from "../skills/dori-mode/scripts/src/config.ts";
-import { type DoriRole, readPaneState } from "../skills/dori-mode/scripts/src/lane-state.ts";
-import { readPrivateAskFile } from "../skills/dori-mode/scripts/src/messenger/discord-ask-mailbox.ts";
-import { discordAskReceivers } from "../skills/dori-mode/scripts/src/messenger/discord-ask-receiver.ts";
-import { isDiscordSnowflake } from "../skills/dori-mode/scripts/src/messenger/discord-inbound-state.ts";
-import { LANE_KEY, Registry, RESERVED_LANE_KEY, statusOf } from "../skills/dori-mode/scripts/src/registry.ts";
+import { configPath } from "../skills/cataly-mode/scripts/src/config.ts";
+import { type CatalyRole, readPaneState } from "../skills/cataly-mode/scripts/src/lane-state.ts";
+import { readPrivateAskFile } from "../skills/cataly-mode/scripts/src/messenger/discord-ask-mailbox.ts";
+import { discordAskReceivers } from "../skills/cataly-mode/scripts/src/messenger/discord-ask-receiver.ts";
+import { isDiscordSnowflake } from "../skills/cataly-mode/scripts/src/messenger/discord-inbound-state.ts";
+import { LANE_KEY, Registry, RESERVED_LANE_KEY, statusOf } from "../skills/cataly-mode/scripts/src/registry.ts";
+import { isCatalyEntry } from "../skills/cataly-mode/scripts/src/session-compat.ts";
 import { parseRef } from "../src/runtime/types.ts";
 import type { DiscordAskRoute } from "./discord-ask.ts";
 
-const LANE_ENTRY = "omp-dori:discord-ask-lane";
+const LANE_ENTRY = "omp-cataly:discord-ask-lane";
 type AskLaneEntry = { readonly type: string; readonly customType?: string; readonly data?: unknown };
 export type AskLane = { readonly key: string; readonly sessionId: string };
 
@@ -23,7 +24,9 @@ export function bindAskLane(
     record(LANE_ENTRY, binding);
     return binding;
   }
-  const value = branch.findLast((entry) => entry.type === "custom" && entry.customType === LANE_ENTRY)?.data;
+  const value = branch.findLast(
+    (entry) => entry.type === "custom" && isCatalyEntry(entry.customType, LANE_ENTRY),
+  )?.data;
   if (!value || typeof value !== "object" || !("sessionId" in value) || value.sessionId !== sessionId) return undefined;
   return "key" in value && typeof value.key === "string" && LANE_KEY.test(value.key)
     ? { key: value.key, sessionId }
@@ -59,18 +62,18 @@ export async function laneChannel(stateDir: string, sessionId: string, binding: 
 
 export async function automaticDiscordAskRoute(
   stateDir: string,
-  role: DoriRole,
+  role: CatalyRole,
   sessionId: string,
   binding?: AskLane,
 ): Promise<DiscordAskRoute | undefined> {
-  const home = process.env["DORI_HOME"] ?? dirname(configPath());
+  const home = process.env["CATALY_HOME"] ?? dirname(configPath());
   // Never let a relative override resolve against a lane's project directory.
   if (!isAbsolute(home)) return undefined;
   const tokenFile = join(home, "discord-token");
   // Older lead processes may already have the bot credential without the standard token file.
   // Lanes never use inherited messenger credentials, and discovery still requires a matching live receiver.
   const fileToken = readPrivateAskFile(tokenFile, 16_384);
-  const token = (fileToken ?? (role === "dori" ? process.env["DORI_DISCORD_TOKEN"] : undefined))?.trim();
+  const token = (fileToken ?? (role === "cataly" ? process.env["CATALY_DISCORD_TOKEN"] : undefined))?.trim();
   if (!token || !/^[\w.-]+$/.test(token)) return undefined;
   const target = role === "lane" ? await laneChannel(stateDir, sessionId, binding) : undefined;
   if (role === "lane" && !target) return undefined;

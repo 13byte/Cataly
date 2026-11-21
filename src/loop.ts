@@ -49,7 +49,7 @@ async function sync(d: Deps, run: LoopRun): Promise<void> {
             item.status = "done";
             log(d, item, "done", "PR merged");
             run.synced.push(`${item.id} done (PR merged)`);
-            run.findings.push(`${item.id} READY and its PR merged: dori harness done ${item.id}`);
+            run.findings.push(`${item.id} READY and its PR merged: cataly harness done ${item.id}`);
           }
         }
       } else if (item.status === "open" && item.source) {
@@ -133,7 +133,7 @@ function ask(d: Deps, run: LoopRun): void {
   const now = d.now();
   for (const item of d.store.items()) {
     if (item.status !== "open" || !item.decision) continue;
-    const line = `[DECIDE ${item.id}] ${item.decision} -> dori harness backlog decide ${item.id} --text '...' | dori harness backlog drop ${item.id}`;
+    const line = `[DECIDE ${item.id}] ${item.decision} -> cataly harness backlog decide ${item.id} --text '...' | cataly harness backlog drop ${item.id}`;
     if (item.askedAt === undefined) {
       item.askedAt = now;
       log(d, item, "ask", item.decision);

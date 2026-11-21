@@ -29,7 +29,7 @@ export function sourceGit(config: SourceUpdateConfig, args: string[], cwd: strin
       "/bin/sh",
       "-c",
       'umask 077; exec "$@"',
-      "dori-source-git",
+      "cataly-source-git",
       config.git,
       "-c",
       "core.hooksPath=/dev/null",
@@ -69,7 +69,7 @@ export function sourceReads(config: SourceUpdateConfig, signal?: AbortSignal): G
 /** Only an ordinary clean source checkout; never a linked worktree or consumer installation. */
 export async function currentSource(config: SourceUpdateConfig, signal?: AbortSignal): Promise<SourceSnapshot> {
   const deployment = config.deployment;
-  if (hasConsumerState(consumerPaths(deployment.home, deployment.doriHome)))
+  if (hasConsumerState(consumerPaths(deployment.home, deployment.catalyHome)))
     throw new DeploymentHeld("source updates cannot manage a consumer installation");
   const path = realpathSync(deployment.liveSource);
   owned(path);

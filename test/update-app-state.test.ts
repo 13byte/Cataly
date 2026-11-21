@@ -1,9 +1,9 @@
 import { describe, expect } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { readMonitorManifests } from "../skills/dori-mode/scripts/src/boot-monitors.ts";
-import { fileTgInboundStore } from "../skills/dori-mode/scripts/src/messenger/telegram-inbound-state.ts";
-import { Registry, type Lane } from "../skills/dori-mode/scripts/src/registry.ts";
+import { readMonitorManifests } from "../skills/cataly-mode/scripts/src/boot-monitors.ts";
+import { fileTgInboundStore } from "../skills/cataly-mode/scripts/src/messenger/telegram-inbound-state.ts";
+import { Registry, type Lane } from "../skills/cataly-mode/scripts/src/registry.ts";
 import { Store } from "../src/store.ts";
 import { applicationManifest } from "../src/update/app-state.ts";
 import { restoreUpdate, snapshotUpdate } from "../src/update/recovery.ts";
@@ -44,7 +44,7 @@ describe("candidate application state recovery", () => {
       version: 1,
       sessionId: "candidate-session",
       monitors: [
-        { name: "candidate-watch", argv: ["dori", "watch"], cwd: job.candidate, filter: "LANE_", suspended: true },
+        { name: "candidate-watch", argv: ["cataly", "watch"], cwd: job.candidate, filter: "LANE_", suspended: true },
       ],
     };
     f.write(skill, "monitors/candidate-session.json", JSON.stringify(monitors));

@@ -37,18 +37,18 @@ try {
   } else intervalSeconds = loadUpdateConfig(configPath).intervalSeconds;
   originalController = realpathSync(controllerPath);
 } catch {
-  console.error("DORI_SUPERVISOR_CONFIG_ERROR");
+  console.error("CATALY_SUPERVISOR_CONFIG_ERROR");
   process.exit(2);
 }
 const env = { ...process.env };
 for (const key of Object.keys(env)) {
   if (
-    /^DORI_.*(?:TOKEN|PASSWORD)$/.test(key) ||
+    /^(?:CATALY|DORI)_.*(?:TOKEN|PASSWORD)$/.test(key) ||
     ["SUDO_UID", "SUDO_GID", "SUDO_USER", "GH_TOKEN", "GITHUB_TOKEN"].includes(key)
   )
     delete env[key];
 }
-env["DORI_TELEMETRY"] = "0";
+env["CATALY_TELEMETRY"] = "0";
 env["DO_NOT_TRACK"] = "1";
 let stopped = false;
 let awakened = false;
@@ -62,14 +62,14 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     child?.kill(signal);
   });
 }
-console.log("DORI_SUPERVISOR_READY");
+console.log("CATALY_SUPERVISOR_READY");
 while (!stopped) {
   let delaySeconds = intervalSeconds;
   try {
     child = Bun.spawn(
       [
         executable,
-        resolve(controllerPath, "skills/dori-mode/scripts/src/cli.ts"),
+        resolve(controllerPath, "skills/cataly-mode/scripts/src/cli.ts"),
         ...(mode === "source" ? ["update", "source", "apply", "--when", "idle"] : ["upstream", "check"]),
         "--config",
         configPath,
@@ -87,21 +87,21 @@ while (!stopped) {
     if (stopped || code === 130) break;
     if (code === 4)
       console.error(
-        mode === "source" ? "DORI_SUPERVISOR_RETRY source=held" : "DORI_SUPERVISOR_RETRY detector=unavailable",
+        mode === "source" ? "CATALY_SUPERVISOR_RETRY source=held" : "CATALY_SUPERVISOR_RETRY detector=unavailable",
       );
-    if (code === 5) console.error("DORI_SUPERVISOR_RETRY lock=live-controller");
+    if (code === 5) console.error("CATALY_SUPERVISOR_RETRY lock=live-controller");
     if (mode === "source" && code === 6) {
-      console.error("DORI_SUPERVISOR_RETRY source=recovery-pending");
+      console.error("CATALY_SUPERVISOR_RETRY source=recovery-pending");
       delaySeconds = Math.min(intervalSeconds, 60);
     }
     if (code !== 0 && code !== 3 && code !== 4 && code !== 5 && !(mode === "source" && code === 6)) {
-      console.error(`DORI_SUPERVISOR_HELD exit=${code}`);
+      console.error(`CATALY_SUPERVISOR_HELD exit=${code}`);
       process.exit(2);
     }
     // The service manager reloads this script after a verified controller-link handoff.
     if (realpathSync(controllerPath) !== originalController) process.exit(75);
   } catch {
-    console.error("DORI_SUPERVISOR_HELD operation=controller");
+    console.error("CATALY_SUPERVISOR_HELD operation=controller");
     process.exit(2);
   }
   const until = performance.now() + delaySeconds * 1000;

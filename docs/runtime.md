@@ -1,20 +1,26 @@
-# Session runtimes: herdr and hc
+# Session runtimes: native OMP, herdr and hc
 
-**The OMP port retains herdr and hc (herdr-core) through the complete upstream runtime abstraction. Sessions on both can live in one home, and `dori harness migrate` moves sessions between them.** This document describes the source/runtime contract. The [first public preview](releases.md) supports Linux x64/herdr/Discord; Linux hc CI and the cross-OS macOS/Windows CI are distinct from live consumer support and exact-release QA evidence. The hc jobs in the release-gating `ci.yml` run on Linux, while `.github/workflows/cross-os.yml` runs macOS and Windows jobs outside that gate.
+On macOS and Linux the default is native: Cataly runs the lead, duty and lanes
+as OMP sessions, and the two scheduling loops as local processes. No terminal
+server is required. Optional herdr and hc (herdr-core) stay available for
+terminal sessions. Registered sessions keep their owning backend, and
+`cataly harness migrate` can move sessions between the terminal adapters.
 
-A session is one terminal with an agent or a loop in it: the lead, duty, the duty loop, the hourly loop, or a lane. herdr gives Dori workspaces, tabs and panes and detects the agent in a pane. hc gives Dori plain terminals with labels, and the agent in a terminal reports its own status. The harness talks to both through one interface, and nothing above that interface knows which runtime it is using.
+The [release guide](releases.md) separates current install profiles from the
+historical Linux x64/herdr/Discord preview. Linux hc CI and macOS/Windows
+cross-OS CI do not by themselves establish live consumer support.
 
-The primary installed `dori` remains the skill CLI. Every root harness command here uses `dori harness ...`; `dori-harness ...` after root linking or `bun src/cli.ts ...` are equivalent entrypoints. For example, skill `dori send discord` posts to a messenger, while `dori harness send lead` sends to an agent session.
+The primary installed `cataly` remains the skill CLI. Every root harness command here uses `cataly harness ...`; `cataly-harness ...` after root linking or `bun src/cli.ts ...` are equivalent entrypoints. For example, skill `cataly send discord` posts to a messenger, while `cataly harness send lead` sends to an agent session.
 
-Lead and duty start OMP with role `dori`; lanes and the built-in reviewer use role `lane`. Managed deployment and source-side wrappers pass a complete JSON string array through `DORI_AGENT_ARGV`. The harness quotes each argument for shell execution; the skill preserves the selected prefix and configured template suffix for installer-owned defaults, including their lexical and canonical installation paths. Managed commands retain their native config fence, pinned Dori extension and role-gated ULW selection. Explicit external commands remain intact. Without a managed selection, the harness retains `DORI_AGENT_CMD` as a user shell command, defaulting to `omp`. The skill configures its own argv template and default model separately; see the [skill configuration reference](../skills/dori-mode/references/scripts.md#configuration). The extension, pinned public omp-ulw and full sibling source layout must be installed together; the release installer provides that layout because the skill imports these runtime adapters by sibling path.
+Lead and duty start OMP with role `cataly`; lanes and the built-in reviewer use role `lane`. Managed deployment and source-side wrappers pass a complete JSON string array through `CATALY_AGENT_ARGV`. The harness quotes each argument for shell execution; the skill preserves the selected prefix and configured template suffix for installer-owned defaults, including their lexical and canonical installation paths. Managed commands retain their native config fence, pinned Cataly extension and role-gated ULW selection. Explicit external commands remain intact. Without a managed selection, the harness retains `CATALY_AGENT_CMD` as a user shell command, defaulting to `omp`. The skill configures its own argv template and default model separately; see the [skill configuration reference](../skills/cataly-mode/references/scripts.md#configuration). The extension, pinned public omp-ulw and full sibling source layout must be installed together; the release installer provides that layout because the skill imports these runtime adapters by sibling path.
 
-New terminal sessions receive the selected `HOME`, `DORI_CONFIG`, `DORI_HOME`, `DORI_STATE_DIR`, `DORI_AGENT_ARGV`, `DORI_OMP_ULW_PATH` and `OMP_ULW_SCOPE_FILE` explicitly across the terminal server boundary, along with configured `DORI_HERDR_SESSION` and `HC_SESSION`. Relative paths become absolute without collapsing symlinks or `..`; empty scope values remain unchanged. Fresh sessions clear `DORI_MANAGED_STARTUP` and obtain their own pane identity from the server. Initial launches, reviewer children, migration and native resume keep this context without forwarding arbitrary parent variables.
+New terminal sessions receive the selected `HOME`, `CATALY_CONFIG`, `CATALY_HOME`, `CATALY_STATE_DIR`, `CATALY_AGENT_ARGV`, `CATALY_OMP_ULW_PATH` and `OMP_ULW_SCOPE_FILE` explicitly across the terminal server boundary, along with configured `CATALY_HERDR_SESSION` and `HC_SESSION`. Relative paths become absolute without collapsing symlinks or `..`; empty scope values remain unchanged. Fresh sessions clear `CATALY_MANAGED_STARTUP` and obtain their own pane identity from the server. Initial launches, reviewer children, migration and native resume keep this context without forwarding arbitrary parent variables.
 
 Required managed ULW imports may select a dependency directory or its `index.ts` entry. Import and factory failures in either form cancel role requests at both the session and provider boundaries. Ordinary sessions and explicitly configured external overlays retain their existing behavior.
 
 Source installation holds when its selected native executable aliases a wrapper that the chosen install mode will overwrite. File identity checks cover direct paths, symlinks, aliased parents and hard links without reading wrapper contents. Explicit overrides are checked before their version probe or installation changes; a bundled native selection is checked as soon as it is available.
 
-The native selection must also avoid traversing a command symlink that installation will replace: the primary `dori` link or side `omp-dori` link. This check follows relative links, parent aliases and directory prefixes without rewriting the selected pathname. Independent paths to the same executable remain valid because relinking leaves their target inode intact.
+The native selection must also avoid traversing a command symlink that installation will replace: the primary `cataly` link or side `omp-cataly` link. This check follows relative links, parent aliases and directory prefixes without rewriting the selected pathname. Independent paths to the same executable remain valid because relinking leaves their target inode intact.
 
 The primary wrapper captures Bun as an absolute pathname before generating its bound-ULW guard. A relative `PATH` entry therefore keeps selecting the installation-time Bun after the guard changes directory, including when the wrapper is launched from another directory.
 
@@ -26,7 +32,7 @@ Process attestation also recognizes the pinned launcher's optional `PI_TIMING=1`
 
 ## The interface
 
-`SessionRuntime` in `src/runtime/types.ts` is the whole contract. Each runtime has one adapter, `src/runtime/herdr/` and `src/runtime/hc/`, and both run their CLI through one injectable process runner (`src/runtime/exec.ts`), so tests replace the binary with a recorder.
+`SessionRuntime` in `src/runtime/types.ts` covers session creation, observation, delivery and close. Only `TerminalRuntime` supports workspace creation, starting a shell command, submitting typed text, typing into a shell and sending keys. The following table describes the terminal adapters in `src/runtime/herdr/` and `src/runtime/hc/`. The headless host starts OMP by argv and operates its native goal and dialogs over RPC instead.
 
 | Method | What it does |
 |---|---|
@@ -47,23 +53,25 @@ A session is stored as a `SessionRef`: the runtime, the id (`w1:p3` on herdr, `t
 
 ## Choosing a runtime
 
-New sessions open on one runtime, picked in this order (`readRuntimeChoice` in `src/runtime/select.ts`):
+For new sessions, `CATALY_RUNTIME` overrides the configuration field `sessionRuntime`; both accept `headless`, `hc` and `herdr`. With neither set, macOS and Linux select `headless` even inside a terminal or when both binaries are installed. `cataly harness status` reports `RUNTIME headless (from default)`. Old `runtime` fields were often generated by an installer, so they do not opt a home into terminal execution after an upgrade.
 
-1. `DORI_RUNTIME=herdr` or `DORI_RUNTIME=hc`.
-2. `"runtime": "herdr"` or `"runtime": "hc"` in `$DORI_HOME/config.json` (default `~/.dori/config.json`) for the harness. The skill uses its `DORI_CONFIG` file (the same default); when those paths agree, one setting controls both.
-3. `HC_TERMINAL_ID` is set: Dori runs inside an hc terminal, so hc.
-4. `HERDR_PANE_ID` is set: Dori runs inside a herdr pane, so herdr.
-5. The binaries on PATH: hc (herdr-core) when it is installed, else herdr. hc is the default runtime; with both installed, herdr is one config line away.
+An explicit `launch --runtime` overrides the lane and session settings for that launch. With `"laneRuntime": "terminal"` and no explicit terminal backend selected, the skill consults the old `runtime` field, the enclosing terminal (`HC_TERMINAL_ID` then `HERDR_PANE_ID`), then `PATH` (`hc` then `herdr`). Windows retains terminal detection because the native host needs Unix sockets.
 
-When neither binary is on PATH and nothing above decides, Dori refuses and prints the fix in one line:
+When neither binary is on PATH and nothing above decides, commands that require a terminal refuse and print:
 
 ```
-neither herdr nor hc is on PATH: install hc (herdr-core) or herdr, or set "runtime": "herdr" or "hc" in <DORI_HOME>/config.json, or DORI_RUNTIME
+neither herdr nor hc is on PATH: install hc (herdr-core) or herdr, or set "runtime": "herdr" or "hc" in <CATALY_HOME>/config.json, or CATALY_RUNTIME
 ```
 
 (The real message prints the absolute path of your config file.)
 
-An invalid `DORI_RUNTIME` or config value is an error. `dori harness status` prints the choice first, for example `RUNTIME hc (from config)`; sources are `env`, `config`, `detect:HC_TERMINAL_ID`, `detect:HERDR_PANE_ID` and `detect:path`. With no choice it prints `RUNTIME unset:` and a fix. Skill `dori boot` prints the same selection, or `RUNTIME unavailable:` and a failed check.
+An invalid `CATALY_RUNTIME` or config value is an error. `cataly harness status` prints the choice first, for example `RUNTIME hc (from config)`; sources are `env`, `config`, `detect:HC_TERMINAL_ID`, `detect:HERDR_PANE_ID` and `detect:path`. With no choice it prints `RUNTIME unset:` and a fix. Skill `cataly boot` prints the same selection, or `RUNTIME unavailable:` and a failed check.
+
+For a registered native lead or duty session, use `cataly harness observe lead`
+or `cataly harness observe duty`. To stop the owned native harness, run
+`cataly harness stop`; busy or blocked agents hold rather than being forced
+closed. The command does not close legacy terminals. It can retire legacy
+registrations only after the original backend proves those sessions are gone.
 
 ## How herdr verbs map to hc
 
@@ -71,7 +79,7 @@ The herdr adapter calls the left column, the hc adapter the right one. Every hc 
 
 | herdr | hc | Used for |
 |---|---|---|
-| `workspace create --label L --cwd D --no-focus` | `run --bg --no-parent --no-notify --cwd D --label dori.group=G ... -- env K=V $SHELL` | The lead on `dori harness up` (on hc, a group is only a label) |
+| `workspace create --label L --cwd D --no-focus` | `run --bg --no-parent --no-notify --cwd D --label cataly.group=G ... -- env K=V $SHELL` | The lead on `cataly harness up` (on hc, a group is only a label) |
 | `tab create --label L --cwd D --no-focus [--workspace W]` | the same `run --bg ...` | Duty, lanes, migrated sessions |
 | `pane split <near> --direction down --ratio 0.3` | the same `run --bg ...` | The duty loop and the hourly loop |
 | `pane run <pane> <command>` | `send <t> -- <command>` | Starting the agent or loop in the new shell |
@@ -82,15 +90,15 @@ The herdr adapter calls the left column, the hc adapter the right one. Every hc 
 | `pane send-text <pane> <text>` | not needed: `send` pastes and presses Enter in one step | herdr's fallback when `agent prompt` answers `agent_not_ready` |
 | `pane send-keys <pane> enter` | `keys <t> enter` | Submitting typed text; Escape is `esc` on hc |
 | `pane process-info --pane <pane>` | `get <t>` (its `foreground` and `pid` fields) | Whether a shell is in front |
-| `--session <name>` (from `DORI_HERDR_SESSION`) | `HC_SESSION=<name>` in the environment | An isolated server, as the end-to-end tests use |
+| `--session <name>` (from `CATALY_HERDR_SESSION`) | `HC_SESSION=<name>` in the environment | An isolated server, as the end-to-end tests use |
 
-An injected skill environment controls `DORI_HERDR_SESSION` completely: if absent, herdr calls omit `--session` rather than inheriting the ambient value. With no injected environment, the skill continues to use `process.env`.
+An injected skill environment controls `CATALY_HERDR_SESSION` completely: if absent, herdr calls omit `--session` rather than inheriting the ambient value. With no injected environment, the skill continues to use `process.env`.
 
-Listing is `pane list` on herdr and `ls [--label dori.group=G]` on hc. On hc, `rm` answers `live` while the program is still dying, so Dori retries it 5 times, 200 ms apart, and logs one line if the terminal is still running after that.
+Listing is `pane list` on herdr and `ls [--label cataly.group=G]` on hc. On hc, `rm` answers `live` while the program is still dying, so Cataly retries it 5 times, 200 ms apart, and logs one line if the terminal is still running after that.
 
 ## Status
 
-Dori reads a session's status before it types anything into it. The words are `idle`, `working`, `blocked`, `done`, `error`, `unknown`, `shell` (no agent, a bare shell) and `gone`.
+Cataly reads a session's status before it types anything into it. The words are `idle`, `working`, `blocked`, `done`, `error`, `unknown`, `shell` (no agent, a bare shell) and `gone`.
 
 On herdr, install the OMP integration with `herdr integration install omp`. The [herdr v0.9.5 integration](https://github.com/herdrdev/herdr/blob/v0.9.5/src/integration/assets/omp/herdr-agent-state.ts) reports OMP's session and agent state. The adapter retains upstream's narrow screen check for the empty omo input box when a runtime says `working` between turns with live monitors. A screen read that fails or does not match stays working; it is not a general OMP idle detector.
 
@@ -102,44 +110,44 @@ For a known idle/working native state, the attested OMP lifecycle record can ref
 
 Skill direct sends and migration checkpoint requests gate on the status they just read. A rejected send is failed; an ambiguous or working-turn delivery is unconfirmed and is not resent automatically. A migration checkpoint ask currently treats only a gone agent as a stop; a failed/unconfirmed ask is not surfaced separately. A done agent receives without an hc `--if` gate because hc accepts only idle or working there. Force can bypass native blocked/error status, but never a process-bound OMP approval hold. A shell in front always holds input on both runtimes.
 
-Set `notes = false` in `~/.config/herdr-core/config.toml`. With notes on, hc types notes into a parent agent on its own, and Dori's inbox is meant to be the only thing that types into an agent. Dori already opens every terminal with `--no-parent --no-notify`.
+Set `notes = false` in `~/.config/herdr-core/config.toml`. With notes on, hc types notes into a parent agent on its own, and Cataly's inbox is meant to be the only thing that types into an agent. Cataly already opens every terminal with `--no-parent --no-notify`.
 
 ### OMP identity, goal and approval records
 
-The extension writes `<stateDir>/sessions/<encodeURIComponent(id)>.json`, preferring `HC_TERMINAL_ID` over `HERDR_PANE_ID`. Its schema is `paneId`, `role`, `sessionId`, optional `sessionFile`, `cwd`, `pid`, `startedAt`, `updatedAt`, `goal: {status, objective?}`, `approvalPending` and optional `agentStatus: idle|working` for compatibility with earlier records. `stateDir` follows `DORI_STATE_DIR`, then the `DORI_CONFIG` file's value, then `~/.dori/state`. Production callers pass that configured `stateDir` explicitly to enable OMP refinement. Runtime instances without it preserve native behavior and do not read operator config or extension state.
+The extension writes `<stateDir>/sessions/<encodeURIComponent(id)>.json`, preferring `HC_TERMINAL_ID` over `HERDR_PANE_ID`. Its schema is `paneId`, `role`, `sessionId`, optional `sessionFile`, `cwd`, `pid`, `startedAt`, `updatedAt`, `goal: {status, objective?}`, `approvalPending` and optional `agentStatus: idle|working` for compatibility with earlier records. `stateDir` follows `CATALY_STATE_DIR`, then the `CATALY_CONFIG` file's value, then `~/.cataly/state`. Production callers pass that configured `stateDir` explicitly to enable OMP refinement. Runtime instances without it preserve native behavior and do not read operator config or extension state.
 
 Both adapters attest the writer against the live terminal root, process ancestry, foreground and process start time before trusting a record. Missing, malformed, reused-pid, foreign or changing OMP identity stays unknown; an open approval becomes blocked even for force/submit-only delivery. Session IDs and files therefore come from the live OMP writer rather than an unrelated newest transcript. Linux process lookup and OMP's temp-relative, home-relative and absolute session-directory forms are preserved.
 
-Native goals remain agent-owned. Skill pause/resume reads back active/paused state before committing its registry transition and reports exit 3 when unverified. Budget-limited and unknown native goal states map to blocked, never no goal. Resumed roles persist, but a resumed native goal can be paused and need `/goal resume`. The `dori` role's recorded monitor specs can restore on that session's resume; fresh installation and the container entrypoint do not start any messenger or watcher.
+Native goals remain agent-owned. Skill pause/resume reads back active/paused state before committing its registry transition and reports exit 3 when unverified. Budget-limited and unknown native goal states map to blocked, never no goal. Resumed roles persist, but a resumed native goal can be paused and need `/goal resume`. The `cataly` role's recorded monitor specs can restore on that session's resume; fresh installation and default container startup do not start any messenger or watcher.
 
 OMP persists native goals as `mode_change` entries with `mode: "goal" | "goal_paused"` and `data: {goal: {objective, status, ...}}`. The extension replays `entry.data.goal` from the current branch on session start and resume, preserving active/paused status in its pane record; another mode ends the recorded goal. An owned OMP v18.18.8 session persisted the active-to-paused transition in this shape. The session JSONL owns this persistence; the pane JSON is the extension's derived state.
 
-Desired monitor state is `<stateDir>/monitors/<encodeURIComponent(sessionId)>.json` with `{version:1,sessionId,monitors:[{name,argv,filter,cwd}]}`. `dori boot` reads it without private transcript access and remains read-only.
+Desired monitor state is `<stateDir>/monitors/<encodeURIComponent(sessionId)>.json` with `{version:1,sessionId,monitors:[{name,argv,filter,cwd}]}`. `cataly boot` reads it without private transcript access and remains read-only.
 
 ### Manager-tool boundary
 
-`monitor` belongs to the Dori main session: the selected role must be `dori` and native `ctx.agent.kind` must be `main`. Registration is inactive by default. Session start, switch, branch and tree events remove an explicitly selected `monitor` from child tool lists, even when the child inherits the Dori role or receives a copied role flag. The execution guard separately rejects child `start`, `stop` and `list` calls; hiding a tool is not authorization.
+`monitor` belongs to the Cataly main session: the selected role must be `cataly` and native `ctx.agent.kind` must be `main`. Registration is inactive by default. Session start, switch, branch and tree events remove an explicitly selected `monitor` from child tool lists, even when the child inherits the Cataly role or receives a copied role flag. The execution guard separately rejects child `start`, `stop` and `list` calls; hiding a tool is not authorization.
 
 Native children still inherit their parent's role-gated ULW behavior. Ordinary tools such as `read`, `edit` and `bash`, including direct work in the main session, retain their existing selection and permission rules. This is an extension tool boundary, not an operating-system sandbox.
 
 ## Grouping
 
-On herdr, `dori harness up` creates a workspace named `dori`: the lead is its root pane, duty a tab, and the two loops are splits below duty. A lane opened from a pane in that workspace becomes a tab there.
+On herdr, `cataly harness up` creates a workspace named `cataly`: the lead is its root pane, duty a tab, and the two loops are splits below duty. A lane opened from a pane in that workspace becomes a tab there.
 
-hc has no workspaces, tabs or layout. Dori opens one terminal per session and labels it:
+hc has no workspaces, tabs or layout. Cataly opens one terminal per session and labels it:
 
-- `dori.group`: the home's group, the first 8 hex characters of the sha256 of the resolved `DORI_HOME` path, so two homes never share one;
-- `dori.role`: `lead`, `duty`, `duty-loop`, `hourly-loop` or `lane`;
-- `dori.name`: the session's name;
-- `dori.lane`: the lane key, on lanes only.
+- `cataly.group`: the home's group, the first 8 hex characters of the sha256 of the resolved `CATALY_HOME` path, so two homes never share one;
+- `cataly.role`: `lead`, `duty`, `duty-loop`, `hourly-loop` or `lane`;
+- `cataly.name`: the session's name;
+- `cataly.lane`: the lane key, on lanes only.
 
-`hc ls --label dori.group=<g>` lists one home's sessions. The terminal also gets the session name as its hc name when no live terminal holds it, but Dori identifies a terminal by its address and labels, never by the name.
+`hc ls --label cataly.group=<g>` lists one home's sessions. The terminal also gets the session name as its hc name when no live terminal holds it, but Cataly identifies a terminal by its address and labels, never by the name.
 
-Only one duty loop runs per home, whatever the runtime: it takes `duty/lock` under `DORI_HOME`, and a second `dori harness duty` does not start while it is held.
+Only one duty loop runs per home, whatever the runtime: it takes `duty/lock` under `CATALY_HOME`, and a second `cataly harness duty` does not start while it is held.
 
 ## Targets
 
-`dori harness send`, `dori harness role` and `dori harness inbox` take a session in several forms:
+`cataly harness send`, `cataly harness role` and `cataly harness inbox` take a session in several forms:
 
 - `herdr:w1:p3` or `hc:t7`, with the runtime spelled out;
 - a bare `w1:p3`, which is a herdr pane;
@@ -151,15 +159,15 @@ A bare `t7` is not a ref, because `t7` is a legal lane key: a lane named `t7` is
 ## Migrating sessions
 
 ```text
-dori harness migrate [--to hc|herdr] (--lane K | --role lead|duty|duty-loop|hourly-loop | --all) [--dry-run] [--wait-minutes N] [--resume]
+cataly harness migrate [--to hc|herdr] (--lane K | --role lead|duty|duty-loop|hourly-loop | --all) [--dry-run] [--wait-minutes N] [--resume]
 ```
 
 `--to` defaults to the selected runtime. `--all` takes every open lane, then lead and duty, then the duty loop and the hourly loop. For each agent session the steps are:
 
-1. Hold. A journal is created at `DORI_HOME/migrate/<name>.json` and the lane is marked as migrating, so the duty loop neither nudges it nor flushes its inbox.
-2. Checkpoint. The agent is asked to write a handoff checkpoint (goal, open todos, last state) to `briefs/<name>.handoff.md` and stop. Dori waits until it stops working, up to `--wait-minutes` (default 10). A `blocked` agent is asked nothing.
+1. Hold. A journal is created at `CATALY_HOME/migrate/<name>.json` and the lane is marked as migrating, so the duty loop neither nudges it nor flushes its inbox.
+2. Checkpoint. The agent is asked to write a handoff checkpoint (goal, open todos, last state) to `briefs/<name>.handoff.md` and stop. Cataly waits until it stops working, up to `--wait-minutes` (default 10). A `blocked` agent is asked nothing.
 3. Capture. A handoff brief `briefs/<name>.migrate-<time>.md` is written: the original brief, a `## Handoff` section with the last 20 lane log entries, the checkpoint, the last 80 screen lines and the queued messages, then the lane rules.
-4. Open. The replacement opens on the target, in this home's group on hc or a new `dori` workspace on herdr, with the agent started on the handoff brief.
+4. Open. The replacement opens on the target, in this home's group on hc or a new `cataly` workspace on herdr, with the agent started on the handoff brief.
 5. Verify. The replacement must report `idle` or `working` within 3 minutes.
 6. Move the inbox. A forward marker on the old inbox names the new session, and the old entries are merged into the new inbox. Queued entries stay queued, held entries stay held, and an entry that was typed but never submitted becomes held.
 7. Switch. The lane or role record points at the new session, and the lane keeps the old ref in `migratedFrom`.
@@ -172,31 +180,31 @@ Each session ends with one line:
 - `DEFERRED <name> blocked` or `DEFERRED <name> working past N min`: nothing moved, and the hold is lifted.
 - `SKIP <name> already on <runtime>`.
 
-`--dry-run` prints `PLAN <name> <old> -> <runtime>` with the queued-message count and changes nothing. An interrupted run resumes at its journal phase when started again; a second `dori harness migrate` of the same session cannot start concurrently.
+`--dry-run` prints `PLAN <name> <old> -> <runtime>` with the queued-message count and changes nothing. An interrupted run resumes at its journal phase when started again; a second `cataly harness migrate` of the same session cannot start concurrently.
 
-`--resume` starts the replacement on the old OMP session file (`omp --dori-role lane --resume=<path>` for a lane, role `dori` for lead/duty) instead of a handoff brief. It requires a live idle/done old agent and a recorded session path; otherwise nothing moves. Explicit custom agent commands retain their upstream `--session <path>` form. OMP role restoration does not imply its native goal resumed: inspect the goal and preserve paused ownership until the user explicitly directs resumption. A migration or monitor recovery event is not that instruction.
+`--resume` starts the replacement on the old OMP session file (`omp --cataly-role lane --resume=<path>` for a lane, role `cataly` for lead/duty) instead of a handoff brief. It requires a live idle/done old agent and a recorded session path; otherwise nothing moves. Explicit custom agent commands retain their upstream `--session <path>` form. OMP role restoration does not imply its native goal resumed: inspect the goal and preserve paused ownership until the user explicitly directs resumption. A migration or monitor recovery event is not that instruction.
 
 The two loops are plain processes with no inbox and no agent, so they skip steps 2, 3, 5 and 6. The duty loop's old session closes before the new one opens, since the lock allows one per home. The hourly loop's new session opens first, and its own lock keeps the two from running the same hour.
 
 ## Hooks and prompts
 
-`$DORI_HOME/config.json` can also hold `hooks`, argv templates that run without a shell:
+`$CATALY_HOME/config.json` can also hold `hooks`, argv templates that run without a shell:
 
 ```json
 {
   "runtime": "hc",
   "hooks": {
     "onReady": ["notify-send", "READY {key}", "{text} {evidence}"],
-    "onReport": ["logger", "-t", "dori", "{key}: {text}"],
-    "onLost": ["logger", "-t", "dori", "LOST {key}: {text}"],
+    "onReport": ["logger", "-t", "cataly", "{key}: {text}"],
+    "onLost": ["logger", "-t", "cataly", "LOST {key}: {text}"],
     "reviewCommand": ["my-reviewer", "--pr", "{pr}", "--sha", "{sha}"]
   }
 }
 ```
 
-`onReady` runs on `dori harness ready`, `onReport` on `dori harness report`, and `onLost` when the duty loop finds a vanished session. `{key}`, `{text}` and `{evidence}` are replaced inside each argv element. Hooks run in the background; failure logs one stderr line without failing the command. `reviewCommand` replaces the built-in OMP reviewer in `dori harness review`, receives `{pr}`, `{repo}`, `{number}`, `{sha}` and `{text}` (the rendered prompt), and must print `VERDICT: CLEAR` or `VERDICT: BLOCK`.
+`onReady` runs on `cataly harness ready`, `onReport` on `cataly harness report`, and `onLost` when the duty loop finds a vanished session. `{key}`, `{text}` and `{evidence}` are replaced inside each argv element. Hooks run in the background; failure logs one stderr line without failing the command. `reviewCommand` replaces the built-in OMP reviewer in `cataly harness review`, receives `{pr}`, `{repo}`, `{number}`, `{sha}` and `{text}` (the rendered prompt), and must print `VERDICT: CLEAR` or `VERDICT: BLOCK`.
 
-`DORI_PROMPTS_DIR` overrides templates individually. A missing file uses the built-in template, so a directory from before waiting-lane supervision can omit `nudge-waiting.md`. An existing override is used as-is: an unreadable file or a directory at that path reports `lane-failed` before the nudge is queued or counted, and repairing it lets the next pass try again. A missing override's default nudge is a real nudge and counts once. An override `nudge-waiting.md` without `{{wholeTarget}}` still names the whole waiting target: when its `{{target}}` was cut to fit the first line, or it has no `{{target}}`, the whole target is added on its own line under the first line. Restart the long-lived duty process with the matching CLI source during cutover.
+`CATALY_PROMPTS_DIR` overrides templates individually. A missing file uses the built-in template, so a directory from before waiting-lane supervision can omit `nudge-waiting.md`. An existing override is used as-is: an unreadable file or a directory at that path reports `lane-failed` before the nudge is queued or counted, and repairing it lets the next pass try again. A missing override's default nudge is a real nudge and counts once. An override `nudge-waiting.md` without `{{wholeTarget}}` still names the whole waiting target: when its `{{target}}` was cut to fit the first line, or it has no `{{target}}`, the whole target is added on its own line under the first line. Restart the long-lived duty process with the matching CLI source during cutover.
 
 Duty queues notices before recording their nudge count, escalation marker or LOST status. Each lane has a persisted random `noticeId` for its incarnation and a `progressEpoch` counter advanced by counted new evidence and READY, independently of the wall clock. Retries reuse the same notice ID; new evidence, READY and a reused lane key get fresh identities even when timestamps or pane IDs repeat. Legacy records persist their initial identity before their first notice is queued. LOST notices owed while no lead is registered or its inbox is locked remain in `duty/lead.jsonl`, outside the replaceable lane record, and move under the destination inbox lock once it is available.
 
@@ -218,20 +226,20 @@ Ref detection uses the same capture and drain bounds with a fixed 60-second comm
 
 Configured literal secrets are redacted in full in stdout, stderr and command error receipts. A longer configured secret takes precedence over its shorter prefix regardless of configuration order, including across stream reads.
 
-Environment and path isolation is not an OS sandbox. Descendants can survive a direct-child kill or output cancellation; the controller does not terminate process groups. A drain deadline holds the command as interrupted even when the direct child exited zero. A started reporter with incomplete output stays ambiguous and is never resent automatically. Inspect the retained receipt and verify every old child and descendant has stopped before `dori upstream recover --config FILE --ack-stopped JOB_ID`; that maintainer command acknowledges the operator's verification rather than stopping a process tree.
+Environment and path isolation is not an OS sandbox. Descendants can survive a direct-child kill or output cancellation; the controller does not terminate process groups. A drain deadline holds the command as interrupted even when the direct child exited zero. A started reporter with incomplete output stays ambiguous and is never resent automatically. Inspect the retained receipt and verify every old child and descendant has stopped before `cataly upstream recover --config FILE --ack-stopped JOB_ID`; that maintainer command acknowledges the operator's verification rather than stopping a process tree.
 
 ## Remote Cataly sessions
 
-Remote commands are opt-in, target-local operations on native OMP sessions with a Cataly `dori` or `lane` role. They use the operator's existing `hc` machine connection, not an OMP account, a published Collab link, or a new network listener. Commands do not discover ordinary OMP sessions or sessions from another installation. The underlying machine connection still grants the privileges of its configured account; Cataly's switches restrict only the Cataly interface.
+Remote commands are opt-in, target-local operations on native OMP sessions with a Cataly `cataly` or `lane` role. They use the operator's existing `hc` machine connection, not an OMP account, a published Collab link, or a new network listener. Commands do not discover ordinary OMP sessions or sessions from another installation. The underlying machine connection still grants the privileges of its configured account; Cataly's switches restrict only the Cataly interface.
 
-On the **target** installation, run `dori remote policy control on`. Run `dori remote policy wake on` separately to allow cold wake. Both default off. The source addresses one configured `hc` machine per command. Use `--via` with the absolute path of the target's `dori` wrapper when the chosen installation is not `dori` on the remote core's PATH.
+On the **target** installation, run `cataly remote policy control on`. Run `cataly remote policy wake on` separately to allow cold wake. Both default off. The source addresses one configured `hc` machine per command. Use `--via` with the absolute path of the target's `cataly` wrapper when the chosen installation is not `cataly` on the remote core's PATH.
 
 ```sh
-dori remote sessions --on lab --via /home/user/.omp-dori/bin/dori
-dori remote read SESSION --on lab --limit 20
-dori remote send SESSION --on lab --text 'Summarize your status' --id request-01 --no-wait
-dori remote receipt SESSION --on lab --id request-01
-dori remote watch SESSION --on lab --cursor 0 --until-completion
+cataly remote sessions --on lab --via /home/user/.omp-cataly/bin/cataly
+cataly remote read SESSION --on lab --limit 20
+cataly remote send SESSION --on lab --text 'Summarize your status' --id request-01 --no-wait
+cataly remote receipt SESSION --on lab --id request-01
+cataly remote watch SESSION --on lab --cursor 0 --until-completion
 ```
 
 Use the exact session ID or a unique live prefix. `--generation` pins an observed activation; use it with a previously issued request ID or cursor. `send` uses OMP's admission API and preserves the message body. Headless delivery refuses slash-leading text because the pinned RPC mode may interpret it as a prompt template. A receipt confirms admission, not an assistant reply; `read` and `watch` show the session's actual output without guessing which concurrent input caused it. The optional `--steer` is explicit. Lost transport does not imply that a mutation failed. Inspect its receipt instead of resending blindly.
@@ -244,9 +252,13 @@ Use the exact session ID or a unique live prefix. `--generation` pins an observe
 
 ## Headless OMP lanes
 
-Use `dori launch … --runtime headless` or set `"laneRuntime": "headless"` in the skill config to select the local headless runtime for new lanes. This does not move lead, duty or loop processes or change the default terminal runtime. Each lane runs one native `omp --mode rpc-ui` process, owned by a local supervisor. The supervisor keeps the process alive across CLI exits and reads OMP's session, goal, dialog and settlement state. It does not promise process sharing or a memory saving.
+On macOS and Linux, `cataly launch` starts a native OMP lane by default. Use the normal `cataly status`, `pause`, `resume` and `close` commands with the lane key; they address its recorded session. For a custom agent that needs a terminal, select a terminal explicitly.
 
-`omp acp` can run multiple sessions but does not expose the pinned OMP goal lifecycle used by Cataly lane pause and resume. `rpc-ui` retains those operations and OMP's approval UI; it is not launched with `--no-ui` or an approval bypass. Use `dori headless observe LANE` to view recent output and pending native dialogs. To answer a particular pending dialog locally, use `dori headless answer LANE REQUEST_ID --answer-file FILE` (`-` reads stdin). The JSON must match the native dialog: `{"confirmed":false}`, `{"value":"Deny"}`, `{"cancelled":true}`, or `{"answers":[{"id":"question-id","selectedOptions":["choice"]}]}`. Submitting an answer does not assert that the native tool executed.
+Each headless lane runs one native `omp --mode rpc-ui` process owned by a local supervisor that survives CLI exits. A failed terminal launch is never retried headless. An upgrade does not kill stored terminal sessions, migrate uncertain messages, or uninstall user-owned binaries. Finish existing terminal work on its owning backend before retiring that backend. The historical `hc` cross-machine transport remains an optional feature, not a local startup requirement.
+
+Before creating the first goal, the supervisor verifies the requested provider/model against the Cataly extension's catalog readback and OMP's current selection in that same session. If they disagree, no brief is sent. Inspect the registered lane with `cataly headless observe LANE`; the launcher does not substitute another model or retry the request.
+
+`omp acp` can run multiple sessions but does not expose the pinned OMP goal lifecycle used by Cataly lane pause and resume. `rpc-ui` retains those operations and OMP's approval UI; it is not launched with `--no-ui` or an approval bypass. Use `cataly headless observe LANE` to view recent output and pending native dialogs. To answer a particular pending dialog locally, use `cataly headless answer LANE REQUEST_ID --answer-file FILE` (`-` reads stdin). The JSON must match the native dialog: `{"confirmed":false}`, `{"value":"Deny"}`, `{"cancelled":true}`, or `{"answers":[{"id":"question-id","selectedOptions":["choice"]}]}`. Submitting an answer does not assert that the native tool executed.
 
 ## Limits
 
@@ -259,4 +271,4 @@ Use `dori launch … --runtime headless` or set `"laneRuntime": "headless"` in t
 
 These are test entrypoints, not a claim that they passed for any particular release. `bun test ./test/runtime-omp.test.ts ./test/runtime-omp-typed.test.ts` exercises process-bound identity, approvals and typed delivery on fake herdr/hc. Skill `test/omp-session.test.ts`/`test/omp-pause.test.ts` cover OMP session/native goal contracts; extension `test/status.test.ts` asserts HC status frames and role-removal invalidation, and `test/monitor-state.test.ts` asserts the desired monitor manifest. Full `bun test ./test/` includes both adapters against recorders. Real-server fixture tests are `test/e2e.test.ts` (isolated `herdr --session`), `test/e2e-hc.test.ts` (isolated `HC_SESSION`/XDG and an OSC fixture), and `test/e2e-migrate.test.ts` (herdr to hc); each skips without its binary. Fixture tests do not establish real OMP/provider or messenger behavior.
 
-The Dori extension appends compact guidance to root Dori and lane prompts when that block is absent, without rewriting incoming blocks or changing permissions. It leaves plain and child sessions unchanged and keeps lane bookkeeping scoped to GPT-6.1 Sol. `extension/test/role-invariants.test.ts` exercises the native prompt hook before and after inserting a synthetic compaction entry into an in-memory session; it does not run live compaction or call a model.
+The Cataly extension appends compact guidance to root Cataly and lane prompts when that block is absent, without rewriting incoming blocks or changing permissions. It leaves plain and child sessions unchanged and keeps lane bookkeeping scoped to GPT-6.1 Sol. `extension/test/role-invariants.test.ts` exercises the native prompt hook before and after inserting a synthetic compaction entry into an in-memory session; it does not run live compaction or call a model.
