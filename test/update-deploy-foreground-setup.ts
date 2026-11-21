@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Writable } from "node:stream";
-import { type PaneState, writePaneState } from "../skills/dori-mode/scripts/src/lane-state.ts";
+import { type PaneState, writePaneState } from "../skills/cataly-mode/scripts/src/lane-state.ts";
 import { processIdentity } from "../src/update/deployment-process.ts";
 import { procChildren, procCmdline, procStat } from "../src/update/proc.ts";
 import type { MonitorSet, RuntimeHealth, RuntimeIdentity } from "../src/update/deployment-types.ts";
@@ -27,7 +27,7 @@ afterEach(async () => {
 });
 /** Real exec-launched native group and script children; herdr supplies only their observed metadata. */
 export async function foregroundFixture(options: ForegroundFixtureOptions = {}) {
-  const root = mkdtempSync(join(tmpdir(), "dori-foreground-"));
+  const root = mkdtempSync(join(tmpdir(), "cataly-foreground-"));
   let closing = false;
   cleanups.push(async () => rmSync(root, { recursive: true, force: true }));
   const config = {
@@ -43,30 +43,30 @@ export async function foregroundFixture(options: ForegroundFixtureOptions = {}) 
         "--config",
         join(config.releaseRoot, "native-config.json"),
         `--resume=${sessionFile}`,
-        "--dori-role",
-        "dori",
+        "--cataly-role",
+        "cataly",
         "--model",
         config.model,
       ]
     : [];
   const signalPath = join(root, "signals");
   const script = join(root, options.bunOnly ? "known.ts" : "known.sh");
-  const dori = join(root, "dori");
+  const cataly = join(root, "cataly");
   const presence = join(root, "presence.sh");
   const unknown = join(root, "unknown.sh");
   const nested = options.subshell ? "(while IFS= read -r line; do :; done) <&0 &\n" : "";
   const shell = `#!/bin/bash\ntrap 'printf signal >> ${signalPath}' TERM INT HUP\n${nested}printf 'ready\\n'\nwhile IFS= read -r line; do :; done\nwait\n`;
   writeFileSync(script, options.bunOnly ? 'console.log("ready"); await Bun.stdin.text();\n' : shell, { mode: 0o700 });
   writeFileSync(unknown, shell, { mode: 0o700 });
-  writeFileSync(dori, `#!${process.execPath}\nconsole.log("ready"); await Bun.stdin.text();\n`, { mode: 0o700 });
-  writeFileSync(presence, `#!/bin/bash\nexec ${JSON.stringify(dori)} "$@"\n`, { mode: 0o700 });
+  writeFileSync(cataly, `#!${process.execPath}\nconsole.log("ready"); await Bun.stdin.text();\n`, { mode: 0o700 });
+  writeFileSync(presence, `#!/bin/bash\nexec ${JSON.stringify(cataly)} "$@"\n`, { mode: 0o700 });
   const activityPath = join(config.stateDir, "activity", "discord.json");
   const intakeArgv = options.activity
     ? [process.execPath, new URL("./update-source-intake-setup.ts", import.meta.url).pathname, activityPath]
     : [options.bunOnly ? process.execPath : "/bin/bash", script];
   const specs = [
     { name: "intake", argv: options.activity || options.bunOnly ? intakeArgv : [script], filter: ".", cwd: root },
-    { name: "dori-watch", argv: [presence], filter: ".", cwd: root },
+    { name: "cataly-watch", argv: [presence], filter: ".", cwd: root },
   ];
   // Direct shebang exec names /proc/comm after the script; explicit Bash reproduces the production foreground.
   const commands = [intakeArgv, [presence]];
@@ -82,7 +82,7 @@ export async function foregroundFixture(options: ForegroundFixtureOptions = {}) 
       : ["--noprofile", "--norc", "-c", 'exec "$@"', "native", process.execPath, config.omp, ...launchArgs];
   const runtimeFor = (pid: number): RuntimeIdentity => ({
     ...processIdentity(pid)!,
-    role: "dori",
+    role: "cataly",
     pane: config.pane,
     sessionId: config.sessionId,
     sessionFile,
@@ -158,7 +158,7 @@ export async function foregroundFixture(options: ForegroundFixtureOptions = {}) 
     paneId: config.pane,
     pid: runtime.pid,
     sessionId: runtime.sessionId,
-    role: "dori",
+    role: "cataly",
     presetLoaded: true,
     startedAt: runtime.startedAt,
     updatedAt: runtime.startedAt,

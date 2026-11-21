@@ -1,12 +1,13 @@
 import { lstatSync, readdirSync } from "node:fs";
 import { createConnection } from "node:net";
 import { join } from "node:path";
+import { parseCatalyRole } from "../../skills/cataly-mode/scripts/src/session-compat.ts";
 import { remoteSocketDir, remoteSocketPath } from "./socket-path.ts";
 
 export type Session = {
   readonly session: string;
   readonly generation: string;
-  readonly role: "dori" | "lane";
+  readonly role: "cataly" | "lane";
   readonly cwd: string;
   readonly status: string;
   readonly model?: string | null;
@@ -107,15 +108,16 @@ export async function liveSessions(stateDir: string): Promise<Session[]> {
         const path = join(dir, name);
         try {
           const value = object(await query(path, { op: "info" }));
+          const role = parseCatalyRole(value?.["role"]);
           if (
             typeof value?.["session"] === "string" &&
             typeof value["generation"] === "string" &&
             typeof value["cwd"] === "string" &&
             typeof value["status"] === "string" &&
-            (value["role"] === "dori" || value["role"] === "lane") &&
+            role !== undefined &&
             remoteSocketPath(stateDir, value["session"]) === path
           )
-            open.push(value as Session);
+            open.push({ ...(value as Omit<Session, "role">), role });
         } catch (error) {
           // A shutdown between directory listing and connection is not a live session.
           if (!["ENOENT", "ECONNREFUSED", "ECONNRESET"].includes((error as NodeJS.ErrnoException).code ?? "")) {

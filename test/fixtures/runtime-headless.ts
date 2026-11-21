@@ -1,10 +1,10 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { defaultConfig } from "../../skills/dori-mode/scripts/src/config.ts";
-import type { FlowDeps } from "../../skills/dori-mode/scripts/src/done-flow.ts";
-import { Registry } from "../../skills/dori-mode/scripts/src/registry.ts";
-import { run, type Runner } from "../../skills/dori-mode/scripts/src/run.ts";
+import { defaultConfig } from "../../skills/cataly-mode/scripts/src/config.ts";
+import type { FlowDeps } from "../../skills/cataly-mode/scripts/src/done-flow.ts";
+import { Registry } from "../../skills/cataly-mode/scripts/src/registry.ts";
+import { run, type Runner } from "../../skills/cataly-mode/scripts/src/run.ts";
 import { shq } from "../../src/delivery.ts";
 
 const fakeHost = resolve(import.meta.dir, "headless-rpc.ts");
@@ -28,9 +28,9 @@ export function headlessFixture() {
   const env = {
     HOME: home,
     PATH: `/usr/bin:/bin:${dirname(process.execPath)}`,
-    DORI_HOME: home,
-    DORI_STATE_DIR: stateDir,
-    DORI_CONFIG: path,
+    CATALY_HOME: home,
+    CATALY_STATE_DIR: stateDir,
+    CATALY_CONFIG: path,
     PI_CODING_AGENT_DIR: join(home, "omp-data"),
     CATALY_TEST_TRACE: trace,
     CATALY_TEST_SESSION: saved,
@@ -42,6 +42,7 @@ export function headlessFixture() {
     defaultCwd: cwd,
     laneRuntime: "headless" as const,
     runtime: "hc" as const,
+    defaultModel: "fixture/initial",
     agentCommand: [omp, "--model", "{model}", "{prompt}"],
     nudgeAfterMin: 1,
   };

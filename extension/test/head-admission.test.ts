@@ -7,13 +7,16 @@ import { fileURLToPath } from "node:url";
 import {
   discordInboundQueue,
   type DiscordInboundQueue,
-} from "../../skills/dori-mode/scripts/src/messenger/discord-inbound-queue.ts";
+} from "../../skills/cataly-mode/scripts/src/messenger/discord-inbound-queue.ts";
 import { headReceipt } from "../head-receipt.ts";
-import { takeLock } from "../../skills/dori-mode/scripts/src/checkpoint-lock.ts";
-import { openOwes } from "../../skills/dori-mode/scripts/src/owes.ts";
+import { takeLock } from "../../skills/cataly-mode/scripts/src/checkpoint-lock.ts";
+import { openOwes } from "../../skills/cataly-mode/scripts/src/owes.ts";
 import { until } from "./fake-pi.ts";
 
 const posix = test.skipIf(typeof process.getuid !== "function");
+const retainedSource = process.env["CATALY_TEST_V013_SOURCE"];
+const retainedReceipt = async (): Promise<typeof headReceipt> =>
+  retainedSource ? (await import(join(retainedSource, "extension/head-receipt.ts"))).headReceipt : headReceipt;
 
 type Event = {
   event: string;
@@ -54,7 +57,7 @@ const event = (head: Head, name: string): Promise<Event> => {
   });
 };
 const root = () => {
-  const dir = mkdtempSync(join(tmpdir(), "dori-head-admission-"));
+  const dir = mkdtempSync(join(tmpdir(), "cataly-head-admission-"));
   mkdirSync(join(dir, "queue"), { mode: 0o700 });
   roots.push(dir);
   return dir;
@@ -291,7 +294,7 @@ posix(
     await first.proc.exited;
     await sourceExited(first, 1);
     const env: NodeJS.ProcessEnv = { ...process.env, HOME: dir, PI_CODING_AGENT_DIR: join(dir, "agent") };
-    delete env.DORI_MONITOR_ADMISSION;
+    delete env.CATALY_MONITOR_ADMISSION;
     const source = Bun.spawn(
       [
         process.execPath,
@@ -352,9 +355,10 @@ posix(
       (entry) => entry.type === "custom" && entry.customType === "omp-dori:admission-rejected",
     );
     expect(rejected).toHaveLength(2);
+    const rollbackReceipt = await retainedReceipt();
     for (const entry of rejected) {
       const source = entry.data.ompDoriAdmission;
-      expect(await headReceipt(file, source.identity, source.fingerprint)).toEqual({
+      expect(await rollbackReceipt(file, source.identity, source.fingerprint)).toEqual({
         outcome: "rejected",
         receipt: entry.id,
       });
@@ -378,9 +382,10 @@ posix(
     const delivered = head.events.filter((item) => item.event === "native-message-end");
     expect(delivered.map((item) => item.details?.ompDoriAdmission.identity)).toEqual(["99:10:20:101", "99:10:20:102"]);
     const file = head.events.find((item) => item.event === "ready")!.file!;
+    const rollbackReceipt = await retainedReceipt();
     for (const item of delivered) {
       const source = item.details!.ompDoriAdmission;
-      expect((await headReceipt(file, source.identity, source.fingerprint))?.outcome).toBe("accepted");
+      expect((await rollbackReceipt(file, source.identity, source.fingerprint))?.outcome).toBe("accepted");
       queued(dir, (queue) => expect(queue.admission(source.identity, source.fingerprint)).toBeNull());
     }
     pending(dir, null, "102");
@@ -418,7 +423,7 @@ posix(
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line))
-      .filter((entry) => entry.type === "custom" && entry.customType === "omp-dori:fixture-batch");
+      .filter((entry) => entry.type === "custom" && entry.customType === "omp-cataly:fixture-batch");
     expect(batches).toHaveLength(2);
     pending(dir, null, "102");
     await stop(head);

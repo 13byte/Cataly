@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { lstatSync, mkdirSync, readFileSync, realpathSync, renameSync } from "node:fs";
 import { join } from "node:path";
+import { matchesDeploymentConfigHash } from "./deployment-config.ts";
 import { saveDeploymentJson } from "./deployment-files.ts";
 import { captureHandoff } from "./deployment-handoff.ts";
 import { forwardStopStarted } from "./deployment-native-ui.ts";
@@ -15,7 +16,7 @@ export function readRestartIntent(config: DeploymentConfig): DeploymentRecord | 
   if (
     !/^restart-[a-f0-9-]+$/.test(intent.id) ||
     intent.directory !== join(config.releaseRoot, "transactions", intent.id) ||
-    intent.configHash !== digest(JSON.stringify(config))
+    !matchesDeploymentConfigHash(config, intent.configHash)
   )
     throw new DeploymentHeld("pending restart intent differs");
   const record = JSON.parse(readFileSync(join(intent.directory, "deployment.json"), "utf8")) as DeploymentRecord;

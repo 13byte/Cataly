@@ -11,7 +11,7 @@ matrixTest(
   "native prompt composition preserves roles, workflows and state",
   async () => {
     const root = resolve(import.meta.dir, "../..");
-    const home = mkdtempSync(join(tmpdir(), "dori-native-matrix-"));
+    const home = mkdtempSync(join(tmpdir(), "cataly-native-matrix-"));
     try {
       const child = Bun.spawn(
         [process.execPath, join(root, "test/fixtures/omp-native-host/prompt-matrix.ts"), root, home],
@@ -22,9 +22,9 @@ matrixTest(
             TMPDIR: home,
             NO_COLOR: "1",
             PI_CODING_AGENT_DIR: join(home, "agent"),
-            DORI_CONFIG: join(home, "config.json"),
+            CATALY_CONFIG: join(home, "config.json"),
             OMP_ULW_SCOPE_FILE: join(home, "scope.json"),
-            DORI_TEST_OMP_ROOT: process.env.DORI_TEST_OMP_ROOT,
+            CATALY_TEST_OMP_ROOT: process.env.CATALY_TEST_OMP_ROOT,
           },
           stdout: "pipe",
           stderr: "pipe",

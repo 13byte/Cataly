@@ -96,12 +96,12 @@ export const bundleEnv = (home: string, bun = process.execPath): Record<string, 
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_TERMINAL_PROMPT: "0",
   GIT_OPTIONAL_LOCKS: "0",
-  BUN_INSTALL_CACHE_DIR: join(home, ".cache/omp-dori/bun"),
-  DORI_TELEMETRY: "0",
+  BUN_INSTALL_CACHE_DIR: join(home, ".cache/omp-cataly/bun"),
+  CATALY_TELEMETRY: "0",
   DO_NOT_TRACK: "1",
 });
 export const bundleGit = (argv: readonly string[], cwd: string, home: string): Promise<string> =>
-  command(["/bin/sh", "-c", 'umask 077; exec "$@"', "dori-source-git", ...args(argv)], cwd, bundleEnv(home), 300_000);
+  command(["/bin/sh", "-c", 'umask 077; exec "$@"', "cataly-source-git", ...args(argv)], cwd, bundleEnv(home), 300_000);
 
 function hashChunks(inputs: readonly string[], checkout: string, home: string): string {
   // One synchronous Bun driver keeps admission synchronous while Git children hash in parallel.
@@ -160,7 +160,7 @@ export function assertSourceBundle(checkout: string, bundle: BoundBundle, home: 
   };
   const head = git(["rev-parse", "HEAD"]);
   // Keep both index locking and newly computed tree objects private to this admission.
-  const temporary = mkdtempSync(join(tmpdir(), "dori-source-index-"));
+  const temporary = mkdtempSync(join(tmpdir(), "cataly-source-index-"));
   let tree: string;
   try {
     const index = join(temporary, "index");

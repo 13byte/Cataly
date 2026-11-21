@@ -5,7 +5,8 @@ import { FileSessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-st
 import { HeadAdmissions } from "../../../extension/head-admission.ts";
 import { Monitors } from "../../../extension/monitor.ts";
 import { assertNativeHost } from "./host.ts";
-import { recordOwes } from "../../../skills/dori-mode/scripts/src/owes.ts";
+import { recordOwes } from "../../../skills/cataly-mode/scripts/src/owes.ts";
+import { SESSION_WIRE } from "../../../skills/cataly-mode/scripts/src/session-compat.ts";
 
 const [root, mode, exitFile] = process.argv.slice(2);
 if (!root || !isAbsolute(root) || !exitFile || !process.send ||
@@ -31,7 +32,7 @@ const held = mode === "held" || mode === "backfill-held";
 const cli = mode === "cli" || mode === "cli-unproven";
 const admissions = new HeadAdmissions(
   () => mode === "absent" ? undefined : { id: identity, file, entries: () => contextManager.getEntries(), ensureOnDisk: () => contextManager.ensureOnDisk() },
-  (details) => session.appendCustomEntry("omp-dori:admission-rejected", details),
+  (details) => session.appendCustomEntry(SESSION_WIRE.admissionRejected, details),
   (pending, unresolved) => process.send?.({ event: "admission-status", pending, unresolved }),
 );
 const nativeHead = mode === "agent"
@@ -58,17 +59,17 @@ const monitors = new Monitors(async (content, delivery) => {
     nativeHead.send(content, details);
     return;
   }
-  const message = { customType: "dori-monitor", content, details };
+  const message = { customType: SESSION_WIRE.monitorMessage, content, details };
   if (mode === "atomic-batch") {
     // AgentSession persists message_end through appendCustomMessageEntry before extensions see it. During a native
     // appendEntriesAtomically batch (vibe mode changes) that append stays in memory until the batch publishes.
     void session
       .appendEntriesAtomically(() => {
-        session.appendCustomEntry("omp-dori:fixture-batch", {});
+        session.appendCustomEntry("omp-cataly:fixture-batch", {});
         const publish = Promise.withResolvers<void>();
         storage.held = publish.promise;
         queueMicrotask(() => {
-          const entry = session.appendCustomMessageEntry("dori-monitor", content, true, details);
+          const entry = session.appendCustomMessageEntry(SESSION_WIRE.monitorMessage, content, true, details);
           const published = readFileSync(file, "utf8").includes(`"id":"${entry}"`);
           process.send?.({ event: "handoff", content, details, entry, published });
           // The batch publishes once message_end is judged, or after a bound when the judgment awaits it.
@@ -78,22 +79,22 @@ const monitors = new Monitors(async (content, delivery) => {
       .catch((error: unknown) => process.send?.({ event: "diagnostic", content: String(error) }));
     return;
   }
-  const entry = held || mode === "cli-unproven" ? undefined : session.appendCustomMessageEntry("dori-monitor", content, true, details);
+  const entry = held || mode === "cli-unproven" ? undefined : session.appendCustomMessageEntry(SESSION_WIRE.monitorMessage, content, true, details);
   process.send?.({ event: "handoff", content, details, entry });
   if (mode !== "lost-ack" && !held) void admissions.messageEnded({ message });
 }, () => mode === "absent" ? undefined : identity, 5, admissions);
 const repo = resolve(import.meta.dir, "../../..");
 const argv = cli ? [process.execPath, "--preload",
-  join(repo, "skills/dori-mode/scripts/test/record-discord-inbound.ts"),
-  join(repo, "skills/dori-mode/scripts/src/cli.ts"), "inbound", "discord",
+  join(repo, "skills/cataly-mode/scripts/test/record-discord-inbound.ts"),
+  join(repo, "skills/cataly-mode/scripts/src/cli.ts"), "inbound", "discord",
   ...(mode === "cli" ? ["--loop", "0"] : []), "--context"] :
   [process.execPath, join(repo, "extension/test/record-head-inbound.ts"), join(root, "queue"), exitFile, mode ?? "accepted"];
 if (cli) {
   const config = join(root, "config.json");
   writeFileSync(config, JSON.stringify({ stateDir: join(root, "queue"), runtime: "herdr", hooks: {} }));
-  Object.assign(process.env, { DORI_CONFIG: config, DORI_STATE_DIR: join(root, "queue"),
-    DORI_DISCORD_TOKEN: "synthetic-inbound-token", DORI_DISCORD_OWNER_ID: "10", DORI_DISCORD_CHANNEL_ID: "20",
-    DORI_TEST_DISCORD_CASE: "context" });
+  Object.assign(process.env, { CATALY_CONFIG: config, CATALY_STATE_DIR: join(root, "queue"),
+    CATALY_DISCORD_TOKEN: "synthetic-inbound-token", CATALY_DISCORD_OWNER_ID: "10", CATALY_DISCORD_CHANNEL_ID: "20",
+    CATALY_TEST_DISCORD_CASE: "context" });
 }
 if (mode === "owes-serial") {
   monitors.start("prior", [process.execPath, "--eval",

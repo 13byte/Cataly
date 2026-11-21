@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { shq } from "../src/delivery.ts";
 import { HeadlessRuntime, headlessArgv } from "../src/runtime/headless.ts";
+import { LAUNCH_MODEL_OPTION } from "../src/runtime/headless-launch-model.ts";
 
 const fixtureHost = resolve(import.meta.dir, "fixtures/headless-rpc.ts");
 
@@ -25,9 +26,13 @@ test.skipIf(process.platform === "win32")(
     const ref = await rt.create({ role: "lane", container: "tab", cwd: dir, env, name: "remote" });
     let session: string | undefined;
     try {
-      session = (await rt.startNative(ref, headlessArgv([omp, "{prompt}"], "fixture/initial"), env)).sessionId;
+      const model = "fixture/initial";
+      session = (
+        await rt.startNative(ref, [...headlessArgv([omp, "{prompt}"], model), `${LAUNCH_MODEL_OPTION}${model}`], env)
+      ).sessionId;
       if (!session) throw new Error("native lane ID missing");
       const id = session;
+      await rt.begin(ref, id, "Verify remote native control");
       const peer = new HeadlessRuntime(dir, env);
       const literal = "slow admission: $HOME $(false) `verbatim` 'exact'\nsecond line";
       const pending = rt.remoteSend(ref, id, { id: "send-one", text: literal });
@@ -54,7 +59,6 @@ test.skipIf(process.platform === "win32")(
         model: "fixture/model/variant",
       });
       expect((await rt.observe(ref)).model).toBe("fixture/model/variant");
-      await rt.begin(ref, id, "Verify remote native control");
       await rt.setGoal(ref, id, "paused");
       expect(await peer.remoteSend(ref, id, { id: "paused", text: "stay quiet" })).toMatchObject({ status: "refused" });
       await rt.setGoal(ref, id, "active");

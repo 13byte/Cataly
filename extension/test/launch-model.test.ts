@@ -2,10 +2,69 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { readPaneState } from "../../skills/dori-mode/scripts/src/lane-state.ts";
+import { readPaneState } from "../../skills/cataly-mode/scripts/src/lane-state.ts";
 import { calls, load, useConfig, type FakeOptions } from "./fake-pi.ts";
 
 const exact = { provider: "subscription", id: "exact" };
+
+test("rpc-ui binds the native catalog proof to the launch and guards the first goal turn", async () => {
+  const keys = ["CATALY_CONFIG", "CATALY_STATE_DIR", "HERDR_PANE_ID", "HC_TERMINAL_ID", "CATALY_HEADLESS_ID"];
+  const previous = keys.map((key) => process.env[key]);
+  const stateDir = useConfig("");
+  const refId = "00000000-0000-4000-8000-000000000001";
+  const sessionId = "headless-launch";
+  const settings: FakeOptions = {
+    session: { id: sessionId, entries: [] },
+    flags: { "cataly-role": "lane", "cataly-launch-model": "Subscription/Exact" },
+    mode: "rpc",
+    hasUI: true,
+    model: { ...exact, id: "Exact" },
+    catalog: [exact, { ...exact, id: "Exact" }],
+    subscription: true,
+  };
+  process.env.CATALY_HEADLESS_ID = refId;
+  delete process.env.HC_TERMINAL_ID;
+  delete process.env.HERDR_PANE_ID;
+  let pi: Awaited<ReturnType<typeof load>> | undefined;
+  try {
+    pi = await load(settings);
+    await pi.emit("session_start");
+    expect(
+      pi.session.entries.find((entry) => entry.customType === "omp-cataly:headless-launch-model")?.data,
+    ).toMatchObject({
+      refId,
+      sessionId,
+      proof: {
+        requested: { provider: "Subscription", id: "Exact" },
+        observed: { provider: "subscription", id: "Exact" },
+        billing: "subscription",
+        source: "native-extension",
+        status: "matched",
+      },
+    });
+    await pi.emit("goal_updated", { goal: { status: "active", objective: "test kickoff" } });
+    await pi.emit("before_agent_start");
+    await pi.emit("before_provider_request");
+    settings.model = exact;
+    await expect(pi.emit("before_provider_request")).rejects.toThrow("STARTUP_MODEL_HOLD");
+    settings.model = { ...exact, id: "Exact" };
+    await pi.emit("before_provider_request");
+    await pi.emit("agent_end");
+    settings.model = exact;
+    await pi.emit("before_agent_start");
+    await pi.emit("before_provider_request");
+  } finally {
+    try {
+      await pi?.emit("session_shutdown");
+    } finally {
+      keys.forEach((key, index) => {
+        if (previous[index] === undefined) delete process.env[key];
+        else process.env[key] = previous[index];
+      });
+      rmSync(dirname(stateDir), { recursive: true, force: true });
+    }
+  }
+});
 
 for (const [name, options, status] of [
   ["exact subscribed model", { model: exact, subscription: true }, "matched"],
@@ -37,7 +96,7 @@ for (const [name, options, status] of [
   ["unknown native selection", {}, "unknown"],
 ] as const) {
   test(`native launch guard: ${name}`, async () => {
-    const keys = ["DORI_CONFIG", "DORI_STATE_DIR", "HERDR_PANE_ID", "HC_TERMINAL_ID"];
+    const keys = ["CATALY_CONFIG", "CATALY_STATE_DIR", "HERDR_PANE_ID", "HC_TERMINAL_ID"];
     const previous = keys.map((key) => process.env[key]);
     const stateDir = useConfig(join(import.meta.dir, "fake-ulw.ts"));
     process.env.HERDR_PANE_ID = "model:p1";
@@ -45,7 +104,7 @@ for (const [name, options, status] of [
     const selector = "selector" in options ? options.selector : "subscription/exact";
     const settings: FakeOptions = {
       session: { id: "model-session", entries: [] },
-      flags: { "dori-role": "lane", "dori-launch-model": selector },
+      flags: { "cataly-role": "lane", "cataly-launch-model": selector },
       ...("model" in options ? { model: options.model } : {}),
       ...("subscription" in options ? { subscription: options.subscription } : {}),
       ...("catalog" in options ? { catalog: [...options.catalog] } : {}),
@@ -96,7 +155,7 @@ for (const boundary of ["session", "provider"] as const) {
     test(
       title,
       async () => {
-        const home = mkdtempSync(join(tmpdir(), "dori-native-launch-"));
+        const home = mkdtempSync(join(tmpdir(), "cataly-native-launch-"));
         const config = join(home, "config.json");
         try {
           writeFileSync(config, JSON.stringify({ stateDir: join(home, "state"), ompUlwPath: "" }));
@@ -113,8 +172,8 @@ for (const boundary of ["session", "provider"] as const) {
               TMP: home,
               NO_COLOR: "1",
               PI_CODING_AGENT_DIR: join(home, "agent"),
-              DORI_CONFIG: config,
-              DORI_TEST_OMP_ROOT: process.env.DORI_TEST_OMP_ROOT,
+              CATALY_CONFIG: config,
+              CATALY_TEST_OMP_ROOT: process.env.CATALY_TEST_OMP_ROOT,
             },
             stdout: "pipe",
             stderr: "pipe",
@@ -138,7 +197,7 @@ for (const boundary of ["session", "provider"] as const) {
 test("the launch lock follows its initial session, not ordinary sessions opened in the same process", async () => {
   const settings: FakeOptions = {
     session: { id: "launch-target", entries: [] },
-    flags: { "dori-role": "lane", "dori-launch-model": "subscription/exact" },
+    flags: { "cataly-role": "lane", "cataly-launch-model": "subscription/exact" },
     model: exact,
   };
   const pi = await load(settings);
@@ -158,7 +217,7 @@ test("the launch lock follows its initial session, not ordinary sessions opened 
 test("a new session carrying the lane role also carries its exact model lock", async () => {
   const settings: FakeOptions = {
     session: { id: "lane-before-new", entries: [] },
-    flags: { "dori-role": "lane", "dori-launch-model": "subscription/exact" },
+    flags: { "cataly-role": "lane", "cataly-launch-model": "subscription/exact" },
     model: exact,
   };
   const pi = await load(settings);
@@ -173,7 +232,7 @@ test("a new session carrying the lane role also carries its exact model lock", a
 test("the initial launch cannot escape its model guard through a missing lane role", async () => {
   const pi = await load({
     session: { id: "wrong-role", entries: [] },
-    flags: { "dori-launch-model": "subscription/exact" },
+    flags: { "cataly-launch-model": "subscription/exact" },
     model: exact,
   });
   await pi.emit("session_start");
@@ -183,7 +242,7 @@ test("the initial launch cannot escape its model guard through a missing lane ro
 test("native children keep their own models instead of inheriting the root launch lock", async () => {
   const pi = await load({
     session: { id: "child", entries: [] },
-    flags: { "dori-role": "lane", "dori-launch-model": "subscription/exact" },
+    flags: { "cataly-role": "lane", "cataly-launch-model": "subscription/exact" },
     agent: { kind: "sub", id: "model-child" },
     model: { provider: "fixture", id: "other" },
   });

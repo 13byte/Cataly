@@ -102,7 +102,7 @@ console.log(JSON.stringify(process.argv.includes("--paginate") ? [values[path]] 
       [
         process.execPath,
         "--no-env-file",
-        resolve(import.meta.dir, "../skills/dori-mode/scripts/src/cli.ts"),
+        resolve(import.meta.dir, "../skills/cataly-mode/scripts/src/cli.ts"),
         ...args,
         "--config",
         f.path,
@@ -111,7 +111,7 @@ console.log(JSON.stringify(process.argv.includes("--paginate") ? [values[path]] 
         env: {
           HOME: config.deployment.home,
           PATH: process.env["PATH"],
-          DORI_TELEMETRY: "0",
+          CATALY_TELEMETRY: "0",
           DO_NOT_TRACK: "1",
           OPENAI_API_KEY: "unusable-source-test",
           ANTHROPIC_API_KEY: "unusable-source-test",

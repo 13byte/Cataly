@@ -12,7 +12,7 @@ import { nativeExtensionFactory, SOL_MODEL } from "./compose.ts";
 export const nativePolicy = async (
   entry: string,
   options: {
-    readonly role?: "dori" | "lane";
+    readonly role?: "cataly" | "lane";
     readonly agent?: ExtensionAgentIdentity;
     readonly bash?: { readonly command: string; readonly approvalMode: "yolo" | "always-ask" };
     readonly session?: { readonly file: string; readonly parentSession?: string };
@@ -29,7 +29,7 @@ export const nativePolicy = async (
         ...(options.session.parentSession ? { parentSession: options.session.parentSession } : {}),
       })
     : SessionManager.inMemory(cwd);
-  if (options.role) runtime.flagValues.set("dori-role", options.role);
+  if (options.role) runtime.flagValues.set("cataly-role", options.role);
   const extension = await loadExtensionFromFactory(factory, cwd, events, runtime, entry);
   let executions = 0;
   let approvals = 0;

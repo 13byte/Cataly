@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { main } from "../src/cli.ts";
 import { up } from "../src/cli-up.ts";
-import { fill, promptFile, rolePrompt } from "../src/harness.ts";
+import { fill, prompt, promptFile, rolePrompt } from "../src/harness.ts";
 import { OWNER_PROFILE_MAX_BYTES, ownerPaths, ownerPromptSection, snapshotPath, TEMPLATE } from "../src/owner.ts";
 import { checkOwner } from "../src/owner-check.ts";
 import { World } from "./fake.ts";
@@ -33,22 +33,44 @@ function home() {
 }
 
 describe("owner profile in the lead's prompt", () => {
+  test("retained operator prompts resolve both command placeholders without changing their files", () => {
+    const { d } = home();
+    const old = process.env["CATALY_PROMPTS_DIR"];
+    const dir = d.store.root;
+    const text = "{{dori}} / {{cataly}} / {{unknown}}";
+    expect(fill("{{dori}} owner snapshot / {{unknown}}", { cataly: d.catalyCmd })).toBe(
+      `${d.catalyCmd} owner snapshot / {{unknown}}`,
+    );
+    try {
+      process.env["CATALY_PROMPTS_DIR"] = dir;
+      for (const name of ["lead.md", "duty.md", "lane-footer.md"] as const) {
+        writeFileSync(join(dir, name), text);
+        const value = name === "lane-footer.md" ? prompt(name, { cataly: d.catalyCmd }) : rolePrompt(d, name);
+        expect(value).toBe(`${d.catalyCmd} / ${d.catalyCmd} / {{unknown}}`);
+        expect(readFileSync(join(dir, name), "utf8")).toBe(text);
+      }
+    } finally {
+      if (old === undefined) delete process.env["CATALY_PROMPTS_DIR"];
+      else process.env["CATALY_PROMPTS_DIR"] = old;
+    }
+  });
+
   test("off by default: no file leaves the lead and duty prompts exactly as the templates", () => {
     const { d } = home();
     expect(ownerPromptSection(d.store.root)).toBeUndefined();
     for (const name of ["lead.md", "duty.md"] as const)
-      expect(rolePrompt(d, name)).toBe(fill(readFileSync(promptFile(name), "utf8"), { dori: "dori" }));
+      expect(rolePrompt(d, name)).toBe(fill(readFileSync(promptFile(name), "utf8"), { cataly: "cataly" }));
   });
 
   test("lead startup references the local profile without copying its contents into the system prompt", async () => {
     const { d, write, cli } = home();
     write({ Preferences: ["- (2026-11-19) Conclusion first."], Decisions: ["- (2026-11-18) Merge without asking."] });
     const lead = rolePrompt(d, "lead.md");
-    expect(lead).toContain("dori owner show");
+    expect(lead).toContain("cataly owner show");
     expect(lead).not.toContain("Conclusion first.");
     expect(lead).not.toContain("Merge without asking.");
     expect((await cli("show")).out).toContain("Conclusion first.");
-    expect(rolePrompt(d, "duty.md")).not.toContain("dori owner show");
+    expect(rolePrompt(d, "duty.md")).not.toContain("cataly owner show");
     await captureIo(async () => {
       await up(d, "/w");
       return 0;
@@ -160,11 +182,11 @@ describe("owner check", () => {
   });
 });
 
-describe("dori harness owner", () => {
+describe("cataly harness owner", () => {
   test("show, init, snapshot, diff and revert; check exits 1 on a problem", async () => {
     const { w, paths, cli } = home();
     expect((await cli("show")).out).toStartWith("NO_OWNER_PROFILE ");
-    await expect(cli("snapshot")).rejects.toThrow("dori harness owner init creates one");
+    await expect(cli("snapshot")).rejects.toThrow("cataly harness owner init creates one");
     expect((await cli("init")).out).toStartWith(`OWNER_INIT ${paths.profile}`);
     await expect(cli("init")).rejects.toThrow("exists");
     expect(await cli("check")).toEqual({ code: 0, out: `OWNER_OK ${TEMPLATE.length} bytes` });

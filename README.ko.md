@@ -81,8 +81,8 @@
 1. **요청을 받습니다.** Discord 수신을 켜면 지정한 사용자의 메시지를 읽고,
    확인할 수 있는 답장 맥락과 첨부 파일 메타데이터를 함께 전달합니다.
 2. **리드가 작업을 맡깁니다.** 간단한 요청은 직접 처리합니다. 긴 작업에는 브리프와
-   명시적인 `Done` 조건을 붙여 **레인**을 엽니다. 레인은 herdr 또는 hc에서 실행되는
-   전용 [oh-my-pi(OMP)](https://github.com/can1357/oh-my-pi) 코딩 세션입니다.
+   명시적인 `Done` 조건을 붙여 **레인**을 엽니다. 레인은 전용
+   [oh-my-pi(OMP)](https://github.com/can1357/oh-my-pi) 코딩 세션이며, 기본값은 터미널 없는 실행입니다.
    레지스트리는 작업을 세션과 메신저 스레드에 연결합니다.
 3. **레인이 작업하고 보고합니다.** 작업 로그·보고·체크포인트를 통해 재시작 후에도
    진행 상황을 확인할 수 있습니다. Discord 채널이 레인 하나에 연결돼
@@ -99,7 +99,8 @@
 - 설치만으로 에이전트·메신저 수신기·서비스가 시작되지는 않습니다. 원하는 기능만
   활성화하세요.
 - 인증 정보와 비공개 대화는 공개 보고에서 제외하세요.
-- 선택적 텔레메트리는 `DORI_TELEMETRY=0` 또는 `DO_NOT_TRACK=1`로 끌 수 있습니다.
+- 텔레메트리는 기본적으로 꺼져 있습니다. `CATALY_TELEMETRY=1`로 동의한 경우에만
+  전송하며, `DO_NOT_TRACK=1`이 우선합니다.
 
 ## 시작하기
 
@@ -107,8 +108,12 @@
 
 **참고**
 
-Cataly는 프로젝트 이름입니다. `dori`, `omp-dori`, `omp` 명령과 기존 설치 경로,
-게시된 배포 파일 이름은 그대로입니다.
+운영 명령은 `cataly`, 독립 하네스는 `cataly-harness`, 별도 설치 래퍼는
+`omp-cataly`입니다. 새 설치의 기본 홈은 기본 모드 `~/.cataly`, Side 모드
+`~/.omp-cataly`입니다. 기존 설치를 업데이트해도 홈이나 설정 파일은 바뀌지 않습니다.
+
+[검증된 현재 릴리스 설치](docs/releases.md#install-a-current-release) 또는
+[터미널 도구 없이 v0.1.3에서 업데이트](docs/releases.md#upgrade-a-v013-installation)를 참고하세요.
 
 </td></tr></table>
 
@@ -123,10 +128,10 @@ npm install cataly
 bun add cataly
 ```
 
-설치 후 실행 명령은 기존과 동일하게 `dori-harness`입니다.
+이 버전에서 설치되는 하네스 명령은 `cataly-harness`입니다.
 
 ```bash
-./node_modules/.bin/dori-harness --help
+./node_modules/.bin/cataly-harness --help
 ```
 
 이 방법은 하네스 CLI만 설치합니다. OMP와 메신저까지 설정하려면 아래 방법 중
@@ -135,9 +140,9 @@ bun add cataly
 |            | [게시된 프리릴리스](#게시된-프리릴리스-써보기) | [현재 소스](#현재-소스에서-시작하기)           |
 | ---------- | ---------------------------------------------- | ---------------------------------------------- |
 | **빌드**   | v0.1.2 프리릴리스                              | 현재 `main`                                    |
-| **범위**   | Linux x64 / herdr / Discord                    | herdr 또는 hc, 선택한 메신저                   |
+| **범위**   | Linux x64 / herdr / Discord                    | 네이티브 세션 기본, herdr·hc 선택 사항          |
 | **OMP**    | 별도로 설치한 네이티브 OMP 18.18.8             | 고정된 패치 버전 OMP 18.20.0과 omp-ulw 오버레이 |
-| **설치 홈** | 기본 설치 홈 `~/.dori`                          | Side 모드 `~/.omp-dori`                        |
+| **설치 홈** | 이전 설치 홈 `~/.dori`                        | Side 모드 `~/.omp-cataly`                       |
 
 ### 게시된 프리릴리스 써보기
 
@@ -157,23 +162,51 @@ Bun 1.4.4, 네이티브 OMP 18.18.8, herdr 0.9.5입니다. 별도로 설치한 O
 
 ### 현재 소스에서 시작하기
 
-git, Bun 1.4.4 이상과 선택한 세션 런타임(herdr 또는 hc)을 준비해 별도 체크아웃을
-사용하세요. 소스 설치기는 고정된 패치 버전 **OMP 18.20.0**과 **omp-ulw** 오버레이를
+git과 Bun 1.4.4 이상을 준비해 별도 체크아웃을 사용하세요. Linux와 macOS에서는
+기본 실행에 herdr나 hc가 필요 없습니다. 소스 설치기는 고정된 패치 버전 **OMP 18.20.0**과 **omp-ulw** 오버레이를
 준비합니다. 기본 설치에는 사전에 설치한 OMP나 Cargo가 필요 없고, 일반 배포판 `omp`로
 이 구성을 대체하지 않습니다.
 
 ```bash
 git clone https://github.com/vntrevx/Cataly.git "$HOME/src/Cataly" || exit 1
 cd "$HOME/src/Cataly" || exit 1
-DORI_INSTALL_MODE=side DORI_NO_PULL=1 DORI_SRC="$PWD" \
+CATALY_INSTALL_MODE=side CATALY_NO_PULL=1 CATALY_SRC="$PWD" \
   bash scripts/install-source.sh
 ```
 
-Side 모드는 기본적으로 `~/.omp-dori`를 사용하며 기존 `~/.dori` 설치를 건드리지
-않습니다. Side 홈 설정을 마친 뒤 `omp-dori omp`로 전용 래퍼를 사용하세요. 런타임별
+Side 모드는 기본적으로 `~/.omp-cataly`를 사용하며 기존 `~/.cataly` 설치를 건드리지
+않습니다. `omp-cataly omp`로 바인딩된 OMP를 열어 모델 제공업체를 설정하고,
+`omp-cataly harness up`으로 하네스를 명시적으로 시작하세요. 런타임별
 구성과 실행은 [소스 설치 가이드](docs/releases.md#source-checkouts-for-maintainers)를
-참고하세요. `omp-dori doctor`는 설정을 읽기 전용으로 점검하고, `omp-dori status`는
+참고하세요. `omp-cataly doctor`는 설정을 읽기 전용으로 점검하고, `omp-cataly status`는
 레인 상태를 보여줍니다.
+
+새 세션의 기본 런타임은 headless이며, `cataly harness status`에서
+`RUNTIME headless (from default)`를 확인할 수 있습니다. 이전 설치기가 기록한
+`"runtime": "hc"`나 `"herdr"`를 직접 지울 필요는 없습니다.
+새 세션에도 터미널을 쓰려면 `"sessionRuntime": "hc"` 또는 `"herdr"`를 지정하세요.
+이미 열린 터미널 세션은 기존 런타임 소유로 남습니다.
+
+### 순정 OMP용 Rust 컨트롤러 개발
+
+이 CLI는 위의 기본 소스 설치를 바꾸지 않습니다. Cargo로 빌드한 뒤 설치된
+`cataly` 명령과 충돌하지 않도록 바이너리 경로로 실행하세요.
+
+```bash
+cargo build --locked --release
+./target/release/cataly --omp "$(command -v omp)" doctor
+./target/release/cataly --omp "$(command -v omp)" harness --state-dir ./.cataly-native <<'JSON'
+{"op":"run","id":"request-1","key":"review","prompt":"이 작업을 한 문단으로 설명해줘."}
+{"op":"receipt","id":"request-1"}
+JSON
+```
+
+`doctor`는 프롬프트 없이 RPC를 점검하고 `resume`은 세션 파일과 ID가 정확히
+일치하는지 확인합니다. Unix에서 `harness`는 필요한 레인을 열고 별도 상태
+디렉터리에 저장한 세션을 다음 요청에서 재개합니다. `open`, `status`, `close`로
+상주 세션을 관리할 수도 있습니다. 같은 ID와 입력은 모델 재호출 없이 저장된
+결과를 반환하고, 결과가 불명확한 요청은 재실행하지 않습니다. `run`은 OMP에
+설정된 모델을 사용하며 현재 도구 실행·승인·메신저 회신 없이 텍스트만 반환합니다.
 
 <table width="100%"><tr><td>
 
@@ -191,10 +224,10 @@ macOS arm64 / hc 설치가 가능하지만, 해당 배포본이 게시됐다는 
 | 설치와 운영                                                         | 더 알아보기                                                         |
 | ------------------------------------------------------------------- | ------------------------------------------------------------------- |
 | [설치, 지원, 업데이트와 롤백](docs/releases.md)                     | [런타임 어댑터와 세션 계약](docs/runtime.md)                        |
-| [메신저 설정](skills/dori-mode/references/setup.md)                 | [소스 개발용 컨테이너](docs/container.md)                           |
-| [Dori 운영 규칙](skills/dori-mode/SKILL.md)                         | [스케줄링과 백로그](docs/hourly-loop.md)                            |
-| [레인 명령과 설정](skills/dori-mode/references/scripts.md)          | [공유 잠금과 레인 우선순위](docs/locks.md)                          |
-| [완료 검증 절차](skills/dori-mode/references/done-protocol.md)      | [선택형 유료 Discord 음성 도우미(현재 소스)](docs/discord-voice.md) |
+| [메신저 설정](skills/cataly-mode/references/setup.md)                 | [소스 개발용 컨테이너](docs/container.md)                           |
+| [Cataly 운영 규칙](skills/cataly-mode/SKILL.md)                         | [스케줄링과 백로그](docs/hourly-loop.md)                            |
+| [레인 명령과 설정](skills/cataly-mode/references/scripts.md)          | [공유 잠금과 레인 우선순위](docs/locks.md)                          |
+| [완료 검증 절차](skills/cataly-mode/references/done-protocol.md)      | [선택형 유료 Discord 음성 도우미(현재 소스)](docs/discord-voice.md) |
 | [변경 기록](CHANGELOG.md)                                           |                                                                     |
 
 ## 기여하기
@@ -210,7 +243,7 @@ Cataly는 [dori-superagent](https://github.com/sisyphuslabs/dori-superagent),
 [oh-my-pi](https://github.com/can1357/oh-my-pi),
 [omp-ulw](https://github.com/dbc-hbin/omp-ulw)를 결합합니다. dori-superagent에서
 파생된 부분은 [Sustainable Use License 1.0](LICENSE)을 따릅니다. 기존 OMP 통합
-부분은 [MIT 라이선스와 저작권 고지](LICENSE.omp-dori)를 유지하며, 이 MIT 고지는
+부분은 [MIT 라이선스와 저작권 고지](LICENSE.integration)를 유지하며, 이 MIT 고지는
 저장소 전체에 적용되지 않습니다. 다른 구성 요소에는 각각의 조건이 적용됩니다.
 가져온 소스의 리비전과 수정본 출처는 [라이선스 안내](LICENSING.md)와 [NOTICE](NOTICE)를
 참고하세요.

@@ -6,7 +6,7 @@ import {
   openDiscordAskMailbox,
   routeDiscordAskReply,
   routeUnreferencedDiscordAskText,
-} from "../../skills/dori-mode/scripts/src/messenger/discord-ask-mailbox.ts";
+} from "../../skills/cataly-mode/scripts/src/messenger/discord-ask-mailbox.ts";
 
 const owner = "109867692300000001";
 const channel = "109867692300000002";
@@ -56,7 +56,7 @@ posix("plain owner text is opt-in and delivers the original body once to the exa
     expect(routeDiscordAskReply(root, { ...plainMessage, reference: null }, owner)).toBe(false);
     expect(routeDiscordAskReply(root, { ...plainMessage, reference: channel }, owner)).toBe(false);
     // A fresh receiver process can claim it without sharing publisher state in memory.
-    const source = join(import.meta.dir, "../../skills/dori-mode/scripts/src/messenger/discord-ask-mailbox.ts");
+    const source = join(import.meta.dir, "../../skills/cataly-mode/scripts/src/messenger/discord-ask-mailbox.ts");
     const result = Bun.spawnSync([
       process.execPath,
       "-e",

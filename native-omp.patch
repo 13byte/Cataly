@@ -174,7 +174,7 @@ index 5c3d8a4c521e2dcf858654a5978bf3f5168bc876..0a9673c76784ef61448736a7a846d9a5
  - `normalizeInProgressTask(...)` runs once after the op, not mid-op. A single op (e.g. `init`) can build an intermediate invalid state and rely on final normalization.
  - `storage: "session"` means the session has a session-file backing; it does not mean this tool wrote a durable custom entry.
 diff --git a/docs/tools/wait.md b/docs/tools/wait.md
-index 9b7e73adf1825c7dbaf247ce999f8628da167021..9aa7069a401664535ddce03a5ac2aeb4e0359f32 100644
+index 9b7e73adf1825c7dbaf247ce999f8628da167021..218d49c29079c0c6309935f0967c270d4fa10438 100644
 --- a/docs/tools/wait.md
 +++ b/docs/tools/wait.md
 @@ -17,12 +17,13 @@
@@ -199,7 +199,7 @@ index 9b7e73adf1825c7dbaf247ce999f8628da167021..9aa7069a401664535ddce03a5ac2aeb4
 +
 +## Extension monitor boundary
 +
-+Persistent processes supervised by an extension, such as Dori's monitor tool, are not automatically caller-owned native `AsyncJobManager` jobs or project services. A monitor can still be alive when native `wait` returns “Nothing to wait for”; its matching events arrive through the extension's existing message auto-delivery path. This tool does not adopt those processes or add monitor polling, and that integration boundary is not a native-job admission fix.
++Persistent processes supervised by an extension, such as Cataly's monitor tool, are not automatically caller-owned native `AsyncJobManager` jobs or project services. A monitor can still be alive when native `wait` returns “Nothing to wait for”; its matching events arrive through the extension's existing message auto-delivery path. This tool does not adopt those processes or add monitor polling, and that integration boundary is not a native-job admission fix.
 diff --git a/packages/coding-agent/CHANGELOG.md b/packages/coding-agent/CHANGELOG.md
 index 1bc6d6e17afd80be521ef1425c298c6a7e1a29d1..85843395c0cef935a2354191c9b94751a86f31d0 100644
 --- a/packages/coding-agent/CHANGELOG.md

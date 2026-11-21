@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { isOmpArgv } from "./omp-argv.ts";
-import { object } from "./headless-protocol.ts";
+import { isCatalyEntry, parseCatalyRole } from "../../skills/cataly-mode/scripts/src/session-compat.ts";
+import { goalOf, modelOf, type NativeHarnessRole, object, string } from "./headless-protocol.ts";
 import type { HostStart } from "./headless-record.ts";
 import type { NativeState } from "./headless-remote.ts";
 
@@ -8,29 +8,6 @@ type Wire = Record<string, unknown>;
 const MAX_FRAME = 1024 * 1024;
 const RPC_TIMEOUT = 15_000;
 export class RpcRefusal extends Error {}
-
-const FORBIDDEN_FLAGS =
-  /^(?:--(?:mode|no-ui|no-session|session-dir|session|resume|continue|restore|fork|from-claude|from-codex|provider-session-id|goal|approval-mode|auto-approve|yolo|print)|-[crp].*|--)(?:=|$)/;
-
-/** Headless uses exact native argv, but never accepts a caller-supplied mode or transcript selector. */
-export const headlessArgv = (template: readonly string[], model: string): string[] => {
-  if (template.at(-1) !== "{prompt}" || template.slice(0, -1).some((arg) => arg.includes("{prompt}")))
-    throw new Error("headless agentCommand must end in one positional {prompt}");
-  const argv = template.slice(0, -1).map((arg) => arg.replaceAll("{model}", () => model));
-  if (!isOmpArgv(argv) || argv.some((arg) => FORBIDDEN_FLAGS.test(arg)))
-    throw new Error(
-      "headless lanes require a native OMP agentCommand without mode, session, goal or approval overrides",
-    );
-  const at = argv.findIndex((arg) => arg === "--dori-role" || arg.startsWith("--dori-role="));
-  if (at === -1) argv.push("--dori-role", "lane");
-  else if (
-    !["--dori-role=lane", "--dori-role"].includes(argv[at] ?? "") ||
-    (argv[at] === "--dori-role" && argv[at + 1] !== "lane") ||
-    argv.slice(at + 1).some((arg) => /^--dori-role(?:=|$)/.test(arg))
-  )
-    throw new Error("headless agentCommand may only select the Dori lane role");
-  return argv;
-};
 
 export async function startRpc(
   start: HostStart,
@@ -51,7 +28,7 @@ export async function startRpc(
   });
   const [printed, code] = await Promise.all([new Response(version.stdout).text(), version.exited]);
   if (code !== 0 || !/^(?:omp\s+)?18\.20\.0$/im.test(printed.trim()))
-    throw new Error("headless lanes require OMP 18.20.0");
+    throw new Error("headless sessions require OMP 18.20.0");
   return new HeadlessRpc(
     [...start.argv, "--mode", "rpc-ui", "--approval-mode", "always-ask", "--config", overlay],
     { cwd, env },
@@ -60,28 +37,35 @@ export async function startRpc(
   );
 }
 
-export async function proveLaneRole(
+export async function proveNativeRole(
   rpc: HeadlessRpc,
   readState: () => Promise<NativeState | undefined>,
   expected: string | undefined,
+  harness?: { readonly role: NativeHarnessRole; readonly refId: string },
 ): Promise<NativeState> {
   await rpc.waitReady();
   await rpc.request({ type: "set_ask_dialog", enabled: true });
   const before = await readState();
   const entries = (await rpc.request({ type: "get_entries" }))?.["entries"];
-  const roles = Array.isArray(entries)
-    ? entries.map(object).filter((entry) => entry?.["type"] === "custom" && entry["customType"] === "omp-dori:role")
-    : [];
+  const last = (name: `omp-cataly:${string}`) =>
+    Array.isArray(entries)
+      ? entries
+          .map(object)
+          .findLast((entry) => entry?.["type"] === "custom" && isCatalyEntry(entry["customType"], name))?.["data"]
+      : undefined;
+  const proof = object(last("omp-cataly:harness-role"));
   const current = await readState();
   if (
-    roles.at(-1)?.["data"] !== "lane" ||
+    parseCatalyRole(last("omp-cataly:role")) !== (harness ? "cataly" : "lane") ||
+    (harness && (proof?.["role"] !== harness.role || proof["refId"] !== harness.refId)) ||
     !before ||
     !current ||
     before.sessionId !== current.sessionId ||
     before.sessionFile !== current.sessionFile ||
+    (harness && !(await Bun.file(current.sessionFile).exists())) ||
     (expected !== undefined && expected !== current.sessionId)
   )
-    throw new Error("OMP did not prove a stable persisted session with the Dori lane role");
+    throw new Error(`OMP did not prove a stable persisted session with the Cataly ${harness?.role ?? "lane"} role`);
   return current;
 }
 
@@ -103,12 +87,16 @@ export async function setNativeGoal(
   }
 }
 
-export async function createNativeGoal(rpc: HeadlessRpc, state: NativeState, objective: string): Promise<void> {
-  if (!state.settled || state.goal.status !== "none" || !objective.trim())
-    throw new Error("a fresh settled OMP lane is required to create a goal");
-  const result = await rpc.request({ type: "goal", op: "create", objective });
-  if (object(result?.["goal"])?.["status"] !== "active") throw new Error("OMP did not acknowledge an active goal");
-}
+export const nativeStateOf = (data: Wire | undefined): NativeState | undefined => {
+  const sessionId = string(data?.["sessionId"]);
+  const sessionFile = string(data?.["sessionFile"]);
+  const goal = goalOf(data?.["goal"]);
+  const settled = data?.["isSettled"];
+  if (!sessionId || !sessionFile || !goal || typeof settled !== "boolean") return undefined;
+  const foreground = data?.["isStreaming"] === true || data?.["isCompacting"] === true;
+  const model = modelOf(data?.["model"]);
+  return { sessionId, sessionFile, goal, settled, foreground, ...(model === undefined ? {} : { model }) };
+};
 
 /** This client uses pinned protocol v1: JSONL, one command/response id, and separate native UI events. */
 export class HeadlessRpc {

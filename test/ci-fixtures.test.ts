@@ -13,7 +13,7 @@ afterEach(() => {
 });
 
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), "dori-ci-fixtures-"));
+  const root = mkdtempSync(join(tmpdir(), "cataly-ci-fixtures-"));
   roots.push(root);
   const ulw = join(root, "ref/omp-ulw/index.ts");
   mkdirSync(dirname(ulw), { recursive: true });
@@ -24,7 +24,7 @@ function fixture() {
     root,
     ulw,
     compat,
-    env: { DORI_TEST_OMP_ROOT: nativeHost, DORI_TEST_COMPAT_ULW_ENTRY: compat },
+    env: { CATALY_TEST_OMP_ROOT: nativeHost, CATALY_TEST_COMPAT_ULW_ENTRY: compat },
   };
 }
 
@@ -61,7 +61,7 @@ test.each(["missing-ulw", "directory-ulw", "missing-compat", "relative-compat", 
       rmSync(f.ulw);
       if (kind === "directory-ulw") mkdirSync(f.ulw);
     } else if (kind === "relative-compat") {
-      f.env.DORI_TEST_COMPAT_ULW_ENTRY = "compat.ts";
+      f.env.CATALY_TEST_COMPAT_ULW_ENTRY = "compat.ts";
     } else {
       rmSync(f.compat);
       if (kind === "directory-compat") mkdirSync(f.compat);
@@ -72,7 +72,7 @@ test.each(["missing-ulw", "directory-ulw", "missing-compat", "relative-compat", 
 
 test.each([undefined, "relative/native"])("an absent or relative native host is refused: %j", async (host) => {
   const f = fixture();
-  await expect(checkTestFixtures(f.root, { ...f.env, DORI_TEST_OMP_ROOT: host })).rejects.toThrow(
+  await expect(checkTestFixtures(f.root, { ...f.env, CATALY_TEST_OMP_ROOT: host })).rejects.toThrow(
     "absolute exact native OMP fixture",
   );
 });
@@ -82,7 +82,7 @@ test("a wrong native version cannot pass the prerequisite check", async () => {
   const host = join(f.root, "native");
   mkdirSync(host);
   writeFileSync(join(host, "package.json"), '{"version":"0.0.0"}\n');
-  await expect(checkTestFixtures(f.root, { ...f.env, DORI_TEST_OMP_ROOT: host })).rejects.toThrow("must be 18.20.0");
+  await expect(checkTestFixtures(f.root, { ...f.env, CATALY_TEST_OMP_ROOT: host })).rejects.toThrow("must be 18.20.0");
 });
 
 test("same-version metadata outside the imported native host is still refused", async () => {
@@ -98,14 +98,14 @@ test("same-version metadata outside the imported native host is still refused", 
     mkdirSync(dirname(join(host, path)), { recursive: true });
     writeFileSync(join(host, path), "export {};\n");
   }
-  await expect(checkTestFixtures(f.root, { ...f.env, DORI_TEST_OMP_ROOT: host })).rejects.toThrow(
-    "outside DORI_TEST_OMP_ROOT",
+  await expect(checkTestFixtures(f.root, { ...f.env, CATALY_TEST_OMP_ROOT: host })).rejects.toThrow(
+    "outside CATALY_TEST_OMP_ROOT",
   );
 });
 
 test("the real prerequisite CLI exits nonzero without a successful marker for missing prerequisites", () => {
   const child = Bun.spawnSync([process.execPath, join(source, "scripts/check-test-fixtures.ts")], {
-    env: { ...process.env, DORI_TEST_COMPAT_ULW_ENTRY: "relative.ts" },
+    env: { ...process.env, CATALY_TEST_COMPAT_ULW_ENTRY: "relative.ts" },
     stdin: "ignore",
   });
   expect(child.exitCode).toBe(1);

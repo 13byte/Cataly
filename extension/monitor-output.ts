@@ -11,7 +11,7 @@ export class MonitorOutputFile {
   bytes = 0;
 
   constructor() {
-    const dir = mkdtempSync(join(tmpdir(), "omp-dori-monitor-"));
+    const dir = mkdtempSync(join(tmpdir(), "omp-cataly-monitor-"));
     this.path = join(dir, "output");
     try {
       this.#fd = openSync(this.path, "wx", 0o600);

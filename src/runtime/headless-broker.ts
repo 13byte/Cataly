@@ -1,33 +1,21 @@
-import {
-  answerFrame,
-  dialogOf,
-  entryOf,
-  goalOf,
-  type HeadlessDialog,
-  type HeadlessEntry,
-  type HeadlessObservation,
-  type HeadlessRequest,
-  modelOf,
-  string,
-} from "./headless-protocol.ts";
+import { HeadlessEvents } from "./headless-events.ts";
+import { beginNativeGoal, launchModelFromArgv } from "./headless-launch-model.ts";
+import { answerFrame, type HeadlessObservation, type HeadlessRequest } from "./headless-protocol.ts";
 import { type HostStart, type Reservation, serveHost } from "./headless-record.ts";
 import { deliverLocal, HeadlessRemoteCommands, isRemoteCommand, type NativeState } from "./headless-remote.ts";
-import { createNativeGoal, type HeadlessRpc, proveLaneRole, setNativeGoal, startRpc } from "./headless-rpc.ts";
+import { type HeadlessRpc, nativeStateOf, proveNativeRole, setNativeGoal, startRpc } from "./headless-rpc.ts";
 import type { AgentStatus } from "./types.ts";
 
-type Wire = Record<string, unknown>;
-const RING_SIZE = 40;
-
 class Broker {
-  private readonly dialogs = new Map<string, HeadlessDialog>();
-  private readonly recent: HeadlessEntry[] = [];
+  private readonly events = new HeadlessEvents();
+  private readonly dialogs = this.events.dialogs;
   private readonly remote = new HeadlessRemoteCommands();
   private bound: NativeState | undefined;
   private state: NativeState | undefined;
   private stateRead: Promise<NativeState | undefined> | undefined;
   private rpc: HeadlessRpc | undefined;
+  private expectedModel: string | undefined;
   private detail: string | undefined;
-  private activeSince: number | undefined;
   private mutation = false;
   private stopping = false;
   private fault = false;
@@ -37,12 +25,13 @@ class Broker {
 
   async start(start: HostStart, overlay: string): Promise<number> {
     const { cwd, ref } = this.reservation;
+    this.expectedModel = launchModelFromArgv(start.argv);
     const rpc = await startRpc(
       start,
       cwd,
       ref.id,
       overlay,
-      (frame) => this.event(frame),
+      (frame) => this.events.record(frame),
       () => {
         this.fault = true;
         if (!this.stopping) this.detail = "OMP RPC stream disconnected or became untrustworthy";
@@ -50,61 +39,41 @@ class Broker {
     );
     this.rpc = rpc;
     try {
-      this.bound = await proveLaneRole(rpc, () => this.refresh(), start.expectedResumeId);
+      const role = this.harnessRole;
+      this.bound = await proveNativeRole(
+        rpc,
+        () => this.refresh(),
+        start.expectedResumeId,
+        role ? { role, refId: ref.id } : undefined,
+      );
       return await rpc.exited;
     } catch (error) {
       this.detail = error instanceof Error ? error.message : String(error);
       // A stalled native exit is still live; do not publish a stopped receipt while it owns the session.
-      await rpc.shutdown().catch(() => rpc.exited);
+      if (!this.dialogs.size && this.state?.settled && !this.fault) await rpc.shutdown().catch(() => rpc.exited);
+      else await rpc.exited;
       throw error;
     }
   }
 
-  private event(frame: Wire): void {
-    switch (frame["type"]) {
-      case "extension_ui_request": {
-        if (frame["method"] === "cancel") {
-          const target = string(frame["targetId"]);
-          if (target) this.dialogs.delete(target);
-          break;
-        }
-        const dialog = dialogOf(frame);
-        if (dialog) this.dialogs.set(dialog.id, dialog);
-        break;
-      }
-      case "agent_start":
-        this.activeSince ??= Date.now();
-        break;
-      case "session_settled":
-        this.activeSince = undefined;
-        break;
-    }
-    const entry = entryOf(frame);
-    if (entry) {
-      this.recent.push(entry);
-      if (this.recent.length > RING_SIZE) this.recent.shift();
-    }
+  private get harnessRole() {
+    const { role } = this.reservation;
+    return role === "lead" || role === "duty" ? role : undefined;
   }
 
   private async refresh(): Promise<NativeState | undefined> {
     if (!this.rpc || this.fault || this.stopping) return undefined;
     this.stateRead ??= (async () => {
-      const data = await this.rpc?.request({ type: "get_state" });
-      const sessionId = string(data?.["sessionId"]);
-      const sessionFile = string(data?.["sessionFile"]);
-      const goal = goalOf(data?.["goal"]);
-      const settled = data?.["isSettled"];
-      if (!sessionId || !sessionFile || !goal || typeof settled !== "boolean") return undefined;
-      if (this.bound && (this.bound.sessionId !== sessionId || this.bound.sessionFile !== sessionFile)) {
+      const state = nativeStateOf(await this.rpc?.request({ type: "get_state" }));
+      if (!state) return undefined;
+      if (this.bound && (this.bound.sessionId !== state.sessionId || this.bound.sessionFile !== state.sessionFile)) {
         this.fault = true;
         this.detail = "OMP changed its bound transcript";
         return undefined;
       }
-      const foreground = data?.["isStreaming"] === true || data?.["isCompacting"] === true;
-      const model = modelOf(data?.["model"]);
-      this.state = { sessionId, sessionFile, goal, settled, foreground, ...(model === undefined ? {} : { model }) };
-      if (settled) this.activeSince = undefined;
-      return this.state;
+      this.state = state;
+      if (state.settled) this.events.activeSince = undefined;
+      return state;
     })().finally(() => {
       this.stateRead = undefined;
     });
@@ -133,17 +102,18 @@ class Broker {
       ...(this.rpc ? { pid: this.rpc.pid } : {}),
       ...(this.bound && !this.fault && this.state
         ? {
-            role: "lane",
+            role: this.harnessRole ? "cataly" : "lane",
+            ...(this.harnessRole ? { harnessRole: this.harnessRole } : {}),
             sessionId: this.bound.sessionId,
             sessionFile: this.bound.sessionFile,
             goal: this.state.goal,
             ...(this.state.model === undefined ? {} : { model: this.state.model }),
           }
         : {}),
-      ...(this.activeSince !== undefined ? { activeSince: this.activeSince } : {}),
+      ...(this.events.activeSince !== undefined ? { activeSince: this.events.activeSince } : {}),
       ...(this.detail !== undefined ? { detail: this.detail } : {}),
       dialogs: [...this.dialogs.values()],
-      recent: this.recent.slice(),
+      recent: this.events.recent.slice(),
     };
   }
 
@@ -173,7 +143,8 @@ class Broker {
     if (request.op === "observe") return this.observe();
     const rpc = this.rpc;
     if (!rpc) throw new Error("OMP process has not started");
-    if (isRemoteCommand(request))
+    if (isRemoteCommand(request)) {
+      if (this.harnessRole) throw new Error("native harness roles use the harness controls");
       return this.remote.handle(request, {
         rpc,
         boundSessionId: this.fault ? undefined : this.bound?.sessionId,
@@ -181,6 +152,7 @@ class Broker {
         exclusive: (operation) => this.exclusive(operation),
         shutdown: (session) => this.shutdown(rpc, session),
       });
+    }
     if (request.op === "answer") {
       if (this.fault || this.stopping || !this.bound || request.expectedSessionId !== this.bound.sessionId)
         throw new Error("native dialog session does not match");
@@ -208,16 +180,22 @@ class Broker {
             : { kind: "not-ready", status: this.dialogs.size ? "blocked" : "unknown" };
         }
         case "begin": {
-          await createNativeGoal(rpc, await this.check(request.expectedSessionId), request.objective);
-          return await this.observe();
+          if (this.harnessRole) throw new Error("harness role cannot start a lane goal");
+          const modelReadback = await beginNativeGoal(rpc, request, {
+            reservation: this.reservation,
+            model: this.expectedModel,
+            check: (session) => this.check(session),
+          });
+          return { ...(await this.observe()), ...(modelReadback ? { modelReadback } : {}) };
         }
         case "goal": {
+          if (this.harnessRole) throw new Error("harness role cannot change a lane goal");
           await setNativeGoal(rpc, request.target, () => this.check(request.expectedSessionId));
           return await this.observe();
         }
         case "close": {
           const state = await this.check(request.expectedSessionId);
-          if (!state.settled) throw new Error("only a settled OMP lane can close");
+          if (!state.settled) throw new Error("only a settled OMP session can close");
           await this.shutdown(rpc, state.sessionId);
           return { closed: true };
         }
@@ -246,5 +224,13 @@ class Broker {
 
 if (import.meta.main) {
   const dir = process.argv[2];
-  if (dir) await serveHost(dir, (reservation) => new Broker(reservation));
+  if (dir) {
+    const { NativeLoop } = await import("./headless-loop.ts");
+    await serveHost(dir, (reservation) => {
+      const { role } = reservation;
+      return role === "duty-loop" || role === "hourly-loop"
+        ? new NativeLoop(reservation, role)
+        : new Broker(reservation);
+    });
+  }
 }

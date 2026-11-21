@@ -3,9 +3,10 @@ import { existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { evidenceClock } from "../../skills/dori-mode/scripts/src/evidence.ts";
-import { Registry } from "../../skills/dori-mode/scripts/src/registry.ts";
-import { Reports } from "../../skills/dori-mode/scripts/src/reports.ts";
+import { evidenceClock } from "../../skills/cataly-mode/scripts/src/evidence.ts";
+import { Registry } from "../../skills/cataly-mode/scripts/src/registry.ts";
+import { Reports } from "../../skills/cataly-mode/scripts/src/reports.ts";
+import { toolEvidence } from "../../skills/cataly-mode/scripts/src/tool-evidence.ts";
 import { type Entry, type FakePi, load, useConfig } from "./fake-pi";
 
 const PANE = "w1:p5";
@@ -48,19 +49,19 @@ const result = (id: string, name: string, text: string, isError = false, details
 });
 
 const report = async (pi: FakePi, params: Record<string, unknown>, ctx = pi.ctx()): Promise<string> => {
-  const tool = pi.tools.get("dori_report");
-  if (!tool) throw new Error("dori_report is not registered");
+  const tool = pi.tools.get("cataly_report");
+  if (!tool) throw new Error("cataly_report is not registered");
   const out = await tool.execute("report-call", params, undefined, undefined, ctx);
   return out.content.map((block) => block.text).join("\n");
 };
 
 const lane = async (entries: Entry[]): Promise<FakePi> => {
-  const pi = await load({ session: { id: "lane-session", entries }, flags: { "dori-role": "lane" } });
+  const pi = await load({ session: { id: "lane-session", entries }, flags: { "cataly-role": "lane" } });
   await pi.emit("session_start");
   return pi;
 };
 
-test("dori_report records file and tool evidence; the same evidence again is not new", async () => {
+test("cataly_report records file and tool evidence; the same evidence again is not new", async () => {
   const file = join(dirname(stateDir), "result.txt");
   writeFileSync(file, "first");
   const pi = await lane([
@@ -100,7 +101,7 @@ test("a failed, missing or coordination call is refused and records nothing", as
   const pi = await lane([
     call("failed", "bash", { command: "bun test" }),
     result("failed", "bash", "1 fail", true),
-    call("chatter", "bash", { command: "dori report evidence-lane --kind milestone --text x" }),
+    call("chatter", "bash", { command: "cataly report evidence-lane --kind milestone --text x" }),
     result("chatter", "bash", "[REPORT] evidence-lane | milestone | x"),
   ]);
   for (const id of ["failed", "chatter", "not-on-branch"])
@@ -149,6 +150,7 @@ const settle = (pi: FakePi, id: string, jobId: string, state: string, text: stri
     ctx,
   );
 const receipts = (entries: Entry[]) => entries.filter((entry) => entry.customType === "omp-dori:tool-completion");
+const retainedSource = process.env["CATALY_TEST_V013_SOURCE"];
 
 test("a background call is evidence once its job completes, and a rerun with the same output is not new", async () => {
   const pi = await lane([]);
@@ -158,6 +160,17 @@ test("a background call is evidence once its job completes, and a rerun with the
   await settle(pi, "c1", "j1", "completed", "12 pass");
   await settle(pi, "c1", "j1", "completed", "12 pass");
   expect(receipts(pi.session.entries)).toHaveLength(1);
+  const evidence = toolEvidence(pi.session.entries, "c1", pi.ctx().cwd);
+  const currentDialect = pi.session.entries.map((entry) =>
+    entry.customType === "omp-dori:tool-completion" ? { ...entry, customType: "omp-cataly:tool-completion" } : entry,
+  );
+  expect(toolEvidence(currentDialect, "c1", pi.ctx().cwd)).toEqual(evidence);
+  if (retainedSource) {
+    const retained: { toolEvidence: typeof toolEvidence } = await import(
+      join(retainedSource, "skills/dori-mode/scripts/src/tool-evidence.ts")
+    );
+    expect(retained.toolEvidence(pi.session.entries, "c1", pi.ctx().cwd)).toEqual(evidence);
+  }
   expect(await report(pi, { kind: "milestone", text: "pass", toolCalls: ["c1"] })).toEndWith(
     "1 of 1 evidence items are new; the evidence clock moved",
   );
@@ -193,7 +206,7 @@ test("a late completion is not recorded in another session, branch or agent", as
 });
 
 test("a command call is read in the session cwd it started in, never the cwd at report time", async () => {
-  const scripts = join(import.meta.dir, "../../skills/dori-mode/scripts");
+  const scripts = join(import.meta.dir, "../../skills/cataly-mode/scripts");
   const checkpoint = { command: "bun src/cli.ts checkpoint evidence-lane --step s --result ok" };
   const output = '{"checkpoint":{"step":"s"}}';
   const pi = await lane([
@@ -221,7 +234,7 @@ test("a command call is read in the session cwd it started in, never the cwd at 
   );
 });
 
-test("dori_report runs only in a registered lane's main session", async () => {
+test("cataly_report runs only in a registered lane's main session", async () => {
   const pi = await lane([]);
   for (const agent of [
     { kind: "sub", id: "Sub", parentId: "Main" },
@@ -242,10 +255,10 @@ test("dori_report runs only in a registered lane's main session", async () => {
     "no open lane is registered unambiguously",
   );
   expect(existsSync(new Reports(stateDir).path(other))).toBe(false);
-  const dori = await load({ session: { id: "dori-session", entries: [] }, flags: { "dori-role": "dori" } });
-  await dori.emit("session_start");
-  expect(dori.active).not.toContain("dori_report");
-  await expect(report(dori, { kind: "milestone", text: "x" })).rejects.toThrow("works only in a lane's main session");
+  const cataly = await load({ session: { id: "cataly-session", entries: [] }, flags: { "cataly-role": "cataly" } });
+  await cataly.emit("session_start");
+  expect(cataly.active).not.toContain("cataly_report");
+  await expect(report(cataly, { kind: "milestone", text: "x" })).rejects.toThrow("works only in a lane's main session");
   expect(existsSync(new Reports(stateDir).path(KEY))).toBe(false);
-  await dori.emit("session_shutdown");
+  await cataly.emit("session_shutdown");
 });

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Deps } from "./harness.ts";
+import { legacyRecipeEnv } from "./runtime/recipe-env.ts";
 
 /** An argv template: element 0 is the command; placeholders are substituted per element and never shell-expanded. */
 export type ArgvTemplate = readonly string[];
@@ -15,7 +16,7 @@ export type Hooks = {
 export type HookName = keyof Hooks;
 export type HookVars = Partial<Record<"key" | "text" | "evidence" | "pr" | "repo" | "number" | "sha", string>>;
 
-/** `$DORI_HOME/config.json` is present but its `hooks` value is not the documented shape. */
+/** `$CATALY_HOME/config.json` is present but its `hooks` value is not the documented shape. */
 export class ConfigError extends Error {}
 
 const NAMES: readonly HookName[] = ["onReady", "onReport", "onLost", "reviewCommand"];
@@ -93,7 +94,7 @@ export async function hooksSettled(ms: number = HOOK_SETTLE_MS): Promise<void> {
     for (const hook of pending.values()) {
       hook.killed = true;
       hook.kill?.();
-      process.stderr.write(`dori: hook ${hook.name} failed (timed out after ${ms} ms)\n`);
+      process.stderr.write(`cataly: hook ${hook.name} failed (timed out after ${ms} ms)\n`);
     }
   }
 }
@@ -108,7 +109,7 @@ export function runHook(d: Deps, name: Exclude<HookName, "reviewCommand">, vars:
   const hook: Running = { name };
   const fail = (why: string) => {
     if (hook.killed) return;
-    process.stderr.write(`dori: hook ${name} failed (${why})\n`);
+    process.stderr.write(`cataly: hook ${name} failed (${why})\n`);
   };
   const run = async (): Promise<void> => {
     try {
@@ -116,7 +117,9 @@ export function runHook(d: Deps, name: Exclude<HookName, "reviewCommand">, vars:
       if (!argv) return;
       const [cmd, ...rest] = substitute(argv, vars);
       if (cmd === undefined) return;
+      const env = legacyRecipeEnv(argv, { configFile: join(d.store.root, "config.json"), env: process.env });
       const res = await d.exec(cmd, rest, {
+        ...(env ? { env } : {}),
         onSpawn: (proc) => {
           hook.kill = () => proc.kill();
         },

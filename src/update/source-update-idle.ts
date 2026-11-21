@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { readPaneState } from "../../skills/dori-mode/scripts/src/lane-state.ts";
-import { Registry, RESERVED_LANE_KEY, statusOf } from "../../skills/dori-mode/scripts/src/registry.ts";
+import { readPaneState } from "../../skills/cataly-mode/scripts/src/lane-state.ts";
+import { Registry, RESERVED_LANE_KEY, statusOf } from "../../skills/cataly-mode/scripts/src/registry.ts";
 import { readMonitorSet } from "./deployment-monitors.ts";
 import { captureRuntime, nativeCli } from "./deployment-native.ts";
 import { DeploymentHeld, sameProcess, underProcess } from "./deployment-process.ts";
@@ -38,7 +38,7 @@ export function sourceIdleNow(config: SourceUpdateConfig, runtime: RuntimeIdenti
   const latest = readPaneState(deployment.stateDir, deployment.pane);
   if (
     !latest ||
-    latest.role !== "dori" ||
+    latest.role !== "cataly" ||
     latest.pid !== runtime.pid ||
     latest.sessionId !== runtime.sessionId ||
     latest.startedAt !== runtime.startedAt ||

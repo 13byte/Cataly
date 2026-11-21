@@ -48,7 +48,7 @@ export function distillStep(d: Deps, run: LoopRun): void {
       const procedure = join(root, "prompts", `owner-distill-${today}.md`);
       mkdirSync(join(root, "prompts"), { recursive: true });
       if (!existsSync(procedure)) {
-        const vars = { dori: d.doriCmd, date: today, profile, archive, snapshot: snapshotPath(root, today) };
+        const vars = { cataly: d.catalyCmd, date: today, profile, archive, snapshot: snapshotPath(root, today) };
         writePrivate(procedure, fill(readFileSync(promptFile("owner-distill.md"), "utf8"), vars));
       }
       const text = `[OWNER-DISTILL ${today}] Update the owner profile once for today: read ${procedure} and follow it.`;

@@ -16,7 +16,7 @@ export function fixtureGit(cwd: string, ...argv: string[]): string {
   const git = ["git", "-c", `core.hooksPath=${devNull}`, "-c", "gc.auto=0", "-c", "maintenance.auto=false", ...argv];
   const result = Bun.spawnSync(
     // umask keeps the fixture private on POSIX; the Windows shell has neither command.
-    windows ? git : ["/bin/sh", "-c", 'umask 077; exec "$@"', "dori-source-fixture", ...git],
+    windows ? git : ["/bin/sh", "-c", 'umask 077; exec "$@"', "cataly-source-fixture", ...git],
     {
       cwd,
       env: {
@@ -91,8 +91,12 @@ export function overlayFixture(source: string, checkout: string, native = false,
 }
 
 /** Synthetic addon/viewer bytes exercise admission only; real loading and export are separate installation gates. */
-export function nativeCacheFixture(source: string, home: string, upstream: string): NativeReceipt {
-  const directory = nativeDirectory(source, home);
+export function nativeCacheFixture(
+  source: string,
+  home: string,
+  upstream: string,
+  directory = nativeDirectory(source, home),
+): NativeReceipt {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const bundle = readSourceBundle(source, true);
   const checkout = join(directory, "source");

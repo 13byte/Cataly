@@ -10,11 +10,13 @@ import {
 } from "../setup-files.ts";
 import { setupReadback } from "../setup-readback.ts";
 import { freezeSource } from "../update/source.ts";
+import { installLegacyAliases } from "./aliases.ts";
 import { extractArchive } from "./archive.ts";
 import { setAutomaticEnabled } from "./automatic-state.ts";
 import type { VerifiedBundle } from "./bundle.ts";
 import {
   type ConsumerPaths,
+  isPrimaryConsumer,
   owned,
   pointer,
   readJson,
@@ -23,10 +25,11 @@ import {
   replacePointer,
   saveJson,
 } from "./files.ts";
-import { assertNoLiveDori } from "./live.ts";
+import { assertNoLiveCataly } from "./live.ts";
 import { assertNoConsumerLaunches, waitLaunchGate } from "./launch-leases.ts";
 import { validateReleaseManifest } from "./manifest.ts";
 import { provisionNativeSource } from "./native.ts";
+import { assertUpdateProtocol } from "./profile.ts";
 import { assertLock, provisionDependency } from "./provision.ts";
 import { preflightReferences } from "./references.ts";
 import { consumerConfigPlan } from "./setup.ts";
@@ -42,8 +45,8 @@ import {
 
 export function preflightInstallation(paths: ConsumerPaths): void {
   pointer(paths.live);
-  if (paths.dori === join(paths.home, ".dori")) {
-    const native = pointer(join(paths.dori, "bin/omp"));
+  if (isPrimaryConsumer(paths)) {
+    const native = pointer(join(paths.cataly, "bin/omp"));
     if (native && !/^[a-f0-9]{40}-[a-f0-9]{16}\/scripts\/consumer\/omp$/.test(relative(paths.releases, native)))
       throw new Error("Unmanaged native OMP command; preserve it and move it aside before installing");
   }
@@ -54,8 +57,9 @@ export function preflightInstallation(paths: ConsumerPaths): void {
       throw new Error(`Unmanaged installation link: ${path}; preserve it and move it aside before installing`);
   }
   regularFile(paths.config);
+  installLegacyAliases(paths, false);
   preflightReferences(paths);
-  assertNoLiveDori(paths);
+  assertNoLiveCataly(paths);
 }
 
 function freezeDirectories(root: string): void {
@@ -81,10 +85,10 @@ async function installReferences(
   try {
     assertNoConsumerLaunches(paths, launchOwner);
     preflightInstallation(paths);
-    const plan = consumerConfigPlan(paths, config, source, dependency, manifest.requirements.omp === "18.20.0");
+    const plan = consumerConfigPlan(paths, config, source, dependency, manifest);
     console.error(`SETUP_PREVIEW ${JSON.stringify(setupPreview(config, plan.text, plan.keys))}`);
     const published = publishSetupFile(config, plan.text);
-    if (paths.dori !== join(paths.home, ".dori")) {
+    if (!isPrimaryConsumer(paths)) {
       // Wrappers are release behavior too. Using this updater's renderer would retain newer bytes on rollback.
       const renderer = "src/release/references.ts";
       if (!manifest.source.files.some((file) => file.path === renderer))
@@ -102,6 +106,7 @@ async function installReferences(
       owned(dirname(path));
       if (pointer(path) === undefined) replacePointer(path, undefined, target);
     }
+    if (manifest.source.files.some((file) => file.path === "release-headless.json")) installLegacyAliases(paths);
     const readback = await setupReadback(published, "consumer-updater-reader", {
       path: paths.config,
       home: paths.home,
@@ -128,6 +133,7 @@ export async function installBundle(
   preflightInstallation(paths);
   assertInstalledPointer(paths, before);
   const manifest = validateReleaseManifest(bundle.manifest);
+  assertUpdateProtocol(before?.current, manifest);
   const receipts = readdirSync(paths.manifests)
     .filter((name) => name.endsWith(".json"))
     .map((name) => validateReleaseManifest(readJson(join(paths.manifests, name))));

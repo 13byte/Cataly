@@ -5,14 +5,14 @@ import {
   type Completion,
   completionReceipt,
   toolEvidence,
-} from "../../skills/dori-mode/scripts/src/tool-evidence.ts";
+} from "../../skills/cataly-mode/scripts/src/tool-evidence.ts";
 import type * as AsyncModule from "../../test/fixtures/omp-native-host/node_modules/@oh-my-pi/pi-coding-agent/dist/types/async/index";
 import type * as EvalBackendModule from "../../test/fixtures/omp-native-host/node_modules/@oh-my-pi/pi-coding-agent/dist/types/eval/index";
 import type * as EvalModule from "../../test/fixtures/omp-native-host/node_modules/@oh-my-pi/pi-coding-agent/dist/types/tools/eval";
 import { realpathSync } from "node:fs";
 import { join } from "node:path";
 
-import { Registry } from "../../skills/dori-mode/scripts/src/registry.ts";
+import { Registry } from "../../skills/cataly-mode/scripts/src/registry.ts";
 import type { ModelRegistry } from "../../test/fixtures/omp-native-host/node_modules/@oh-my-pi/pi-coding-agent/dist/types/config/model-registry";
 import type * as SettingsModule from "../../test/fixtures/omp-native-host/node_modules/@oh-my-pi/pi-coding-agent/dist/types/config/settings";
 import type * as MirrorModule from "../../test/fixtures/omp-native-host/node_modules/@oh-my-pi/pi-coding-agent/dist/types/extensibility/extensions/lifecycle-mirror";
@@ -25,11 +25,11 @@ import { useConfig } from "./fake-pi";
 
 type SessionEvent = Parameters<typeof MirrorModule.extensionEventFromSessionEvent>[0];
 
-// The module path is runtime-selected: the exact native host fixture (DORI_TEST_OMP_ROOT) whose module instances its
+// The module path is runtime-selected: the exact native host fixture (CATALY_TEST_OMP_ROOT) whose module instances its
 // extension preparer, compose.ts, uses. The types above are that fixture's declarations.
 const host = async <T>(path: string): Promise<T> => {
   await assertNativeHost();
-  return (await import(join(realpathSync(process.env["DORI_TEST_OMP_ROOT"] ?? ""), "src", path))) as T;
+  return (await import(join(realpathSync(process.env["CATALY_TEST_OMP_ROOT"] ?? ""), "src", path))) as T;
 };
 
 const PANE = "w1:p6";
@@ -54,7 +54,7 @@ afterEach(() => {
 });
 
 /**
- * Dori loaded as a lane by the native loader and runner on an in-memory native session in `cwd`, with no model or
+ * Cataly loaded as a lane by the native loader and runner on an in-memory native session in `cwd`, with no model or
  * provider.
  */
 const nativeLane = async (cwd = import.meta.dir) => {
@@ -76,17 +76,17 @@ const nativeLane = async (cwd = import.meta.dir) => {
   // Loaded only here, as fake-pi does: its host imports need the native fixture this test requires.
   const { nativeExtensionFactory } = await import("../../test/fixtures/omp-native-host/compose.ts");
   const runtime = new loader.ExtensionRuntime();
-  runtime.flagValues.set("dori-role", "lane");
+  runtime.flagValues.set("cataly-role", "lane");
   const session = SessionManager.inMemory(cwd);
   const factory = await nativeExtensionFactory(join(import.meta.dir, "../index.ts"));
-  const dori = await loader.loadExtensionFromFactory(factory, cwd, new EventBus(), runtime, "dori");
+  const cataly = await loader.loadExtensionFromFactory(factory, cwd, new EventBus(), runtime, "cataly");
   const registry = new Proxy({} as ModelRegistry, {
     get: (_target, key) => {
       throw new Error(`native evidence fixture unexpectedly accessed the model registry: ${String(key)}`);
     },
   });
   const settings = Settings.isolated({ "prewalk.auto": "off", "prewalk.enabled": false });
-  const runner = new ExtensionRunner([dori], runtime, cwd, session, registry, undefined, settings);
+  const runner = new ExtensionRunner([cataly], runtime, cwd, session, registry, undefined, settings);
   const errors: unknown[] = [];
   runner.onError((error) => errors.push(error));
   const forbidden = (): never => {
@@ -209,8 +209,8 @@ const nativeLane = async (cwd = import.meta.dir) => {
         },
       }),
     report: async (toolCalls: string[]): Promise<string> => {
-      const tool = runner.getRegisteredTool("dori_report");
-      if (!tool) throw new Error("dori_report is not registered");
+      const tool = runner.getRegisteredTool("cataly_report");
+      if (!tool) throw new Error("cataly_report is not registered");
       const out = await runner.runScoped(() =>
         tool.definition.execute(
           "report",
@@ -270,7 +270,7 @@ test("through the native runner, a background job is evidence once on completion
 test("through the native runner, a relative CLI call is read in the session cwd it started in", async () => {
   const command = "bun src/cli.ts checkpoint native-evidence-lane --step s --result ok";
   const output = '{"checkpoint":{"step":"s"}}';
-  const inSkill = await nativeLane(join(import.meta.dir, "../../skills/dori-mode/scripts"));
+  const inSkill = await nativeLane(join(import.meta.dir, "../../skills/cataly-mode/scripts"));
   try {
     await inSkill.foreground("checkpoint", command, output);
     await expect(inSkill.report(["checkpoint"])).rejects.toThrow("coordinates");

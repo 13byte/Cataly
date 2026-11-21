@@ -1,16 +1,16 @@
 import { isAbsolute } from "node:path";
-import type { HeadRequest, HeadResult } from "../skills/dori-mode/scripts/src/messenger/head-admission.ts";
+import { isHeadAdmissionProtocol } from "../skills/cataly-mode/scripts/src/messenger/head-admission-protocol.ts";
+import type { HeadReply, HeadRequest, HeadResult } from "../skills/cataly-mode/scripts/src/messenger/head-admission.ts";
+import { MONITOR_MESSAGE, SESSION_WIRE } from "../skills/cataly-mode/scripts/src/session-compat.ts";
 import { hasHeadReceipt, headReceipt } from "./head-receipt.ts";
 
 type Head = { id: string; file: string; entries(): readonly unknown[]; ensureOnDisk(): Promise<void> };
+type AdmissionDetails = { ompDoriAdmission: { identity: string; fingerprint: string } };
 type Binding = {
   source: number;
   session: string;
   accepts(content: string): boolean;
-  deliver(
-    content: string,
-    details: { ompDoriAdmission: { identity: string; fingerprint: string } },
-  ): void | Promise<void>;
+  deliver(content: string, details: AdmissionDetails): void | Promise<void>;
 };
 type Pending = {
   source: number;
@@ -26,14 +26,11 @@ export class HeadAdmissions {
   readonly #serial = new Map<string, Promise<HeadResult>>();
   constructor(
     private readonly current: () => Head | undefined,
-    private readonly reject: (details: { ompDoriAdmission: { identity: string; fingerprint: string } }) => void,
+    private readonly reject: (details: AdmissionDetails) => void,
     private readonly changed: (pending: number, unresolved?: string) => void,
   ) {}
 
-  async receive(
-    raw: unknown,
-    binding: Binding,
-  ): Promise<{ request: string; protocol: "dori-head-admission-v1" } & HeadResult> {
+  async receive(raw: unknown, binding: Binding): Promise<HeadReply> {
     if (
       raw === null ||
       typeof raw !== "object" ||
@@ -42,7 +39,7 @@ export class HeadAdmissions {
       raw.request.length === 0 ||
       raw.request.length > 64 ||
       !("protocol" in raw) ||
-      raw.protocol !== "dori-head-admission-v1" ||
+      !isHeadAdmissionProtocol(raw.protocol) ||
       !("op" in raw) ||
       (raw.op !== "prepare" && raw.op !== "dispatch" && raw.op !== "reconcile") ||
       !("identity" in raw) ||
@@ -64,7 +61,7 @@ export class HeadAdmissions {
     try {
       const reply = await result;
       if (reply.outcome === "unresolved") this.changed(this.#pending.size, request.identity);
-      return { protocol: "dori-head-admission-v1", request: request.request, ...reply };
+      return { protocol: request.protocol, request: request.request, ...reply };
     } finally {
       if (this.#serial.get(request.identity) === result) this.#serial.delete(request.identity);
     }
@@ -123,13 +120,19 @@ export class HeadAdmissions {
         message?: {
           customType?: string;
           details?: {
+            ompCatalyAdmission?: { identity?: string; fingerprint?: string };
             ompDoriAdmission?: { identity?: string; fingerprint?: string };
           };
         };
       } | null
     )?.message;
-    const admission = message?.details?.ompDoriAdmission;
-    if (message?.customType !== "dori-monitor" || typeof admission?.identity !== "string") return;
+    const admission =
+      message?.customType === SESSION_WIRE.monitorMessage
+        ? message.details?.ompDoriAdmission
+        : message?.customType === MONITOR_MESSAGE
+          ? message.details?.ompCatalyAdmission
+          : undefined;
+    if (typeof admission?.identity !== "string") return;
     const pending = this.#pending.get(admission.identity);
     if (!pending || pending.fingerprint !== admission.fingerprint) return;
     try {

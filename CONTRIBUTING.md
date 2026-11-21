@@ -39,7 +39,7 @@ A new name does not replace the original authors' credit.
 Submit only work you have the right to contribute. Changes retain the license
 applicable to the affected material: Sustainable Use License 1.0 for
 dori-superagent-derived code, and MIT for the pre-existing OMP integration covered
-by [LICENSE.omp-dori](LICENSE.omp-dori). [LICENSE](LICENSE) explains the scope.
+by [LICENSE.integration](LICENSE.integration). [LICENSE](LICENSE) explains the scope.
 
 For copied or adapted third-party code or prompt text, record provenance in the
 PR's [Provenance section](.github/pull_request_template.md#provenance): upstream
@@ -59,32 +59,34 @@ agreement for this repository.
 ## Source development and public releases
 
 Develop in an ordinary source checkout, never inside a frozen installed release.
-The project is called Cataly; existing `dori`, `omp-dori`, and `omp` commands,
-installation homes, package identities, and published asset names remain in use.
+Use `cataly` for the primary CLI, `cataly-harness` for the standalone harness,
+and `omp-cataly` for isolated operation. `omp` remains the OMP command.
+Historical release names are kept only where the compatibility protocol needs
+them; see [the release guide](docs/releases.md#upgrade-a-v013-installation).
 
 To install a selected checkout alongside a primary installation without pulling:
 
 ```bash
-DORI_INSTALL_MODE=side DORI_NO_PULL=1 DORI_SRC="$PWD" bash scripts/install-source.sh
+CATALY_INSTALL_MODE=side CATALY_NO_PULL=1 CATALY_SRC="$PWD" bash scripts/install-source.sh
 ```
 
-Side mode defaults to `~/.omp-dori`. `OMP_DORI_HOME` selects its home,
-`OMP_DORI_BIN_DIR` selects the command destination, and `OMP_DORI_HC_SESSION`
-overrides its default `omp-dori` hc namespace. Keep the generated `stateDir`,
+Side mode defaults to `~/.omp-cataly`. `OMP_CATALY_HOME` selects its home,
+`OMP_CATALY_BIN_DIR` selects the command destination, and `OMP_CATALY_HC_SESSION`
+overrides its default `omp-cataly` hc namespace. Keep the generated `stateDir`,
 `agentCommand`, wrappers, and skill together. Consumer-managed homes, including
 aliases, are protected from source installation in both primary and side modes.
 See [source installation](docs/releases.md#source-checkouts-for-maintainers).
 
 Current source prepares `native-omp.lock` / `native-omp.patch` and
 `omp-ulw.overlay.lock` / `omp-ulw.patch`. Use the generated primary
-`~/.dori/bin/omp` or side `omp-dori omp`, not stock OMP on `PATH`. The official
+`~/.cataly/bin/omp` or side `omp-cataly omp`, not stock OMP on `PATH`. The official
 addon has its own frozen `native-addon/bun.lock`; no Cargo build is required.
 Changing these defaults requires real isolated installation evidence as well as
 source checks. See [bound source identities](docs/releases.md#current-source-bundle).
 
 Consumers use the [verified release guide](docs/releases.md) and
-`dori update check|install|status|rollback`. Maintainer porting and recovery use
-`dori upstream ... --config FILE`; that separate interface may use configured
+`cataly update check|install|status|rollback`. Maintainer porting and recovery use
+`cataly upstream ... --config FILE`; that separate interface may use configured
 models and publication permissions. Consumer release management uses neither.
 Build fixed assets with `bun scripts/release.ts build --out DIST --prerelease`.
 The [exact-commit release procedure](docs/releases.md#building-and-publishing-releases)
@@ -105,19 +107,19 @@ Prepare the real fixtures before the full local gate:
 
 ```sh
 bun install --frozen-lockfile
-(cd skills/dori-mode/scripts && bun install --frozen-lockfile)
+(cd skills/cataly-mode/scripts && bun install --frozen-lockfile)
 (cd extension && bun install --frozen-lockfile)
 (cd test/fixtures/omp-native-host && bun install --frozen-lockfile)
-export DORI_TEST_OMP_ROOT="$PWD/test/fixtures/omp-native-host/node_modules/@oh-my-pi/pi-coding-agent"
+export CATALY_TEST_OMP_ROOT="$PWD/test/fixtures/omp-native-host/node_modules/@oh-my-pi/pi-coding-agent"
 fixture_home="$(mktemp -d)"
 bun scripts/source-dependencies.ts ulw "$PWD" "$fixture_home" "$PWD/ref/omp-ulw"
 compat_pin=cbfe5ee72e5b2783af01616e7f4d3da5e3f9180d
-compat="$(mktemp -d /tmp/omp-dori-compat-ulw.XXXXXX)"
+compat="$(mktemp -d /tmp/omp-cataly-compat-ulw.XXXXXX)"
 git clone --quiet --no-checkout --shared "$PWD/ref/omp-ulw" "$compat"
 git -C "$compat" fetch --quiet --no-tags https://github.com/dbc-hbin/omp-ulw.git "$compat_pin"
 git -C "$compat" -c advice.detachedHead=false checkout --quiet "$compat_pin"
 test "$(git -C "$compat" rev-parse HEAD)" = "$compat_pin"
-export DORI_TEST_COMPAT_ULW_ENTRY="$compat/index.ts"
+export CATALY_TEST_COMPAT_ULW_ENTRY="$compat/index.ts"
 bun run ci
 ```
 
@@ -159,14 +161,15 @@ mismatch. A missing hc E2E file is a failure, not a skip.
 
 `cross-os.yml` runs **`test-macos`** (`macos-15`, arm64: the root, skill and
 extension suites with prepared fixtures, a 30-second per-test timeout on the root
-suite because the runner is slower, and the genuine Darwin arm64 hc consumer
-release smoke on pushes to `main` and manual runs, never on pull requests) and
+suite because the runner is slower, and the genuine Darwin arm64 consumer
+transition from the historical hc profile to headless on pushes to `main` and
+manual runs, never on pull requests) and
 **`test-windows`** (`windows-2025`: `check`, `typecheck`, `knip`, `lint:loc` and
 the three suites with the native OMP host fixture). Both run on every pull request
 and push to `main`, and a manual run can select one OS with `-f os=macos|windows`.
-They are outside the release gate and outside the product support scope: releases
-are admitted only for linux/x64/herdr and darwin/arm64/hc, so Windows coverage
-finds portability regressions rather than promising a Windows product.
+These jobs are outside the release gate. Current headless consumer profiles
+cover Linux x64 and macOS arm64; Windows CI finds portability regressions
+rather than promising a Windows consumer build.
 
 OS-dependent behaviour belongs in the platform adapter, `src/platform/adapter.ts`
 with its per-OS implementations beside it in `src/platform/`, never in a caller
@@ -203,14 +206,14 @@ it is not the current default overlay.
 `native-prompt-matrix.test.ts` runs 30 scenario/load-order cases, plus native
 parent setup and an orphan-role control, using the pinned `buildSystemPrompt`,
 canonical loader, and `ExtensionRunner` in an isolated Bun child. It covers
-ordinary, ULW, specialized, parent, child, Dori, non-Sol, profile-excluded, and
+ordinary, ULW, specialized, parent, child, Cataly, non-Sol, profile-excluded, and
 user-profile behavior with embedded ULW and both standalone load orders. It
 compares the combined prompt across repeated turns and an ordinary follow-up
 after the native `SessionManager` compaction-entry and `session_compact` hook
 boundary. The child starts with an explicitly selected `monitor` and its
 parent's rendered ULW policy; both must be removed without losing its permitted
-tool or assignment. Dori's main session still advertises `monitor`. A profile
-opt-out preserves the native profile byte-for-byte; Dori's independent Sol lane
+tool or assignment. Cataly's main session still advertises `monitor`. A profile
+opt-out preserves the native profile byte-for-byte; Cataly's independent Sol lane
 bookkeeping remains applicable.
 
 The matrix verifies the local ULW checkout against the locked base and overlay
@@ -228,7 +231,7 @@ holds the pin or release rather than relaxing the test.
 
 Required-source regressions exercise genuine SDK print/RPC initialization against
 synthetic loopback providers. Missing managed overlays must send no request for
-Dori or lane roles, including direct dispatch, while ordinary sessions still
+Cataly or lane roles, including direct dispatch, while ordinary sessions still
 reach the local provider. These tests neither use real provider credentials nor
 establish live TUI, messenger, provider, or external-user behavior.
 
@@ -277,7 +280,7 @@ checks nor permits bypassing the final required remote gates.
 ## Licences and notices
 
 The [licensing guide](LICENSING.md) explains the source boundaries. The
-[Sustainable Use License](LICENSE), separate [MIT notice](LICENSE.omp-dori),
+[Sustainable Use License](LICENSE), separate [MIT notice](LICENSE.integration),
 and [modified-copy attribution](NOTICE) follow the source they cover. Contributions
 retain those applicable terms; a rename does not convert upstream code to MIT.
 Keep third-party notices and the retained upstream CLA intact.

@@ -40,6 +40,7 @@ const cwd = join(context.out, "workspace");
 const sentinels = ["injected", "inherited-command-ran", "selected-command-ran", "substitution-ran", "suffix-ran"];
 for (const name of sentinels) assert(!existsSync(join(cwd, name)), `Injection sentinel exists: ${name}`);
 const forwarded = ["--consumer-smoke-boundary", "literal 'quote';$(touch injected)", ""];
+const explicitRuntime = process.platform === "darwin" ? "hc" : "herdr";
 
 if (!values["exec-boundary"]) {
   assert.equal(positionals.length, 0, "Observer accepts no implicit arguments");
@@ -53,7 +54,7 @@ shift 4
 exec() {
   builtin exec "$observer_bun" "$observer_script" --exec-boundary --side "$observer_side" --expected-source "$observer_source" -- "$@"
 }
-source "$observer_side/bin/dori-harness" "$@"
+source "$observer_side/bin/cataly-harness" "$@"
 `;
   const child = Bun.spawn(
     [
@@ -71,22 +72,22 @@ source "$observer_side/bin/dori-harness" "$@"
       cwd,
       env: {
         ...context.env,
-        DORI_HOME: join(home, ".dori"),
-        DORI_CONFIG: join(home, ".dori/config.json"),
-        DORI_AGENT_CMD: "touch inherited-command-ran",
-        DORI_AGENT_ARGV: '["touch","selected-command-ran"]',
-        DORI_STATE_DIR: "foreign-state",
-        DORI_RUNTIME: "foreign-runtime",
-        DORI_LEAD_PANE: "foreign-lead",
-        DORI_HC_SPACE: "foreign-space",
-        DORI_PROMPTS_DIR: "foreign-prompts",
-        DORI_OMP_ULW_PATH: "/foreign/ulw/index.ts",
-        DORI_MANAGED_STARTUP: "1",
+        CATALY_HOME: join(home, ".cataly"),
+        CATALY_CONFIG: join(home, ".cataly/config.json"),
+        CATALY_AGENT_CMD: "touch inherited-command-ran",
+        CATALY_AGENT_ARGV: '["touch","selected-command-ran"]',
+        CATALY_STATE_DIR: "foreign-state",
+        CATALY_RUNTIME: explicitRuntime,
+        CATALY_LEAD_PANE: "foreign-lead",
+        CATALY_HC_SPACE: "foreign-space",
+        CATALY_PROMPTS_DIR: "foreign-prompts",
+        CATALY_OMP_ULW_PATH: "/foreign/ulw/index.ts",
+        CATALY_MANAGED_STARTUP: "1",
         HC_SESSION: "foreign-session",
         HC_TERMINAL_ID: "foreign-terminal",
         HC_TERMINAL_SOCKET: "foreign-terminal-socket",
         HC_SOCKET: "foreign-socket",
-        DORI_HERDR_SESSION: "foreign-session",
+        CATALY_HERDR_SESSION: "foreign-session",
         HERDR_PANE_ID: "foreign-pane",
         HERDR_WORKSPACE_ID: "foreign-workspace",
       },
@@ -113,18 +114,22 @@ source "$observer_side/bin/dori-harness" "$@"
     "Original final Bun/entrypoint/argv differs",
   );
   assert.equal(process.env["HOME"], home);
-  assert.equal(process.env["DORI_HOME"], side);
-  assert.equal(process.env["DORI_CONFIG"], join(side, "config.json"));
-  assert.equal(process.env["DORI_AGENT_CMD"], join(side, "bin/omp"), "Raw managed legacy export changed");
+  assert.equal(process.env["CATALY_HOME"], side);
+  assert.equal(process.env["CATALY_CONFIG"], join(side, "config.json"));
+  assert.equal(process.env["CATALY_AGENT_CMD"], join(side, "bin/omp"), "Bound agent command was not exported");
+  assert.equal(
+    process.env["CATALY_RUNTIME"],
+    explicitRuntime,
+    "Explicit execution selection did not cross the wrapper",
+  );
   const cleared = [
-    "DORI_AGENT_ARGV",
-    "DORI_STATE_DIR",
-    "DORI_RUNTIME",
-    "DORI_LEAD_PANE",
-    "DORI_HC_SPACE",
-    "DORI_PROMPTS_DIR",
-    "DORI_OMP_ULW_PATH",
-    "DORI_MANAGED_STARTUP",
+    "CATALY_AGENT_ARGV",
+    "CATALY_STATE_DIR",
+    "CATALY_LEAD_PANE",
+    "CATALY_HC_SPACE",
+    "CATALY_PROMPTS_DIR",
+    "CATALY_OMP_ULW_PATH",
+    "CATALY_MANAGED_STARTUP",
     "HC_TERMINAL_ID",
     "HC_TERMINAL_SOCKET",
     "HC_SOCKET",
@@ -134,7 +139,7 @@ source "$observer_side/bin/dori-harness" "$@"
   for (const key of cleared) assert.equal(process.env[key], undefined, `Foreign ${key} crossed the wrapper`);
   const namespace = `omp-dori-${digest(side).slice(0, 12)}`;
   assert.equal(process.env["HC_SESSION"], namespace);
-  assert.equal(process.env["DORI_HERDR_SESSION"], namespace);
+  assert.equal(process.env["CATALY_HERDR_SESSION"], namespace);
   const discovery = join(side, "releases/consumer-discovery", basename(source), "omp.yml");
   assert(lstatSync(discovery).isFile(), "The admitted physical release's discovery config is missing");
   const expected = [
@@ -156,12 +161,12 @@ source "$observer_side/bin/dori-harness" "$@"
       source,
       harnessHash,
       original: positionals,
-      agent: process.env["DORI_AGENT_CMD"],
+      agent: process.env["CATALY_AGENT_CMD"],
       command: deps.agentCmd,
     }),
   );
   const roles: Record<string, { command: string; argv: string[] }> = {};
-  for (const role of ["dori", "lane"]) {
+  for (const role of ["cataly", "lane"]) {
     const command: string = agentCommand(deps, role);
     // Decode literal shell words without eval, substitutions, expansion, or executing the native/model agent.
     const argv: string[] = [];
@@ -192,14 +197,14 @@ source "$observer_side/bin/dori-harness" "$@"
     }
     assert(!quoted, "Unterminated shell quote");
     if (started) argv.push(word);
-    assert.deepEqual(argv, [...expected, "--dori-role", role], `Physical ${role} argv differs`);
+    assert.deepEqual(argv, [...expected, "--cataly-role", role], `Physical ${role} argv differs`);
     for (const once of [
       expected[0],
       "--no-extensions",
       "-e",
       join(source, "extension"),
       discovery,
-      "--dori-role",
+      "--cataly-role",
       role,
     ])
       assert.equal(argv.filter((part) => part === once).length, 1, `Duplicated ${once}`);
@@ -208,6 +213,6 @@ source "$observer_side/bin/dori-harness" "$@"
   }
   for (const name of sentinels) assert(!existsSync(join(cwd, name)), `Injection sentinel exists: ${name}`);
   console.log(
-    JSON.stringify({ source, expected, roles, home, config: process.env["DORI_CONFIG"], cleared, namespace }),
+    JSON.stringify({ source, expected, roles, home, config: process.env["CATALY_CONFIG"], cleared, namespace }),
   );
 }

@@ -5,7 +5,7 @@ import type * as NativeFlags from "../../test/fixtures/omp-native-host/node_modu
 import { classifyOmpArgv } from "../../src/runtime/omp-argv.ts";
 import { NATIVE_VALUE_FLAGS } from "../../src/runtime/omp-options.ts";
 import { NATIVE_BOOLEAN_FLAGS } from "../../src/update/native-argv.ts";
-import { modelLaunchCommand, modelLaunchProblem } from "../../skills/dori-mode/scripts/src/launch-model.ts";
+import { modelLaunchCommand, modelLaunchProblem } from "../../skills/cataly-mode/scripts/src/launch-model.ts";
 
 // CI has no extension peer: exercise the frozen host module boundary instead of an ambient package import.
 const host = resolve(import.meta.dir, "../../test/fixtures/omp-native-host");
@@ -17,7 +17,7 @@ const { STRING_VALUE_FLAGS, VALUELESS_FLAGS }: typeof NativeFlags = await import
 const source = "/fixture/packages/coding-agent/";
 const prefixes = [
   ["omp"],
-  ["omp-dori", "omp"],
+  ["omp-cataly", "omp"],
   ["env", "-i", "--", "omp"],
   ["npm", "exec", "--", "omp"],
   ["npx", "--yes", "@oh-my-pi/pi-coding-agent@18.20.0"],
@@ -45,7 +45,7 @@ test.each(prefixes.map((prefix) => [prefix.join(" "), prefix] as const))(
     for (const delimiter of [[], ["--"]]) {
       const template = [
         ...prefix,
-        "--dori-role",
+        "--cataly-role",
         "lane",
         "--model",
         "{model}",
@@ -60,7 +60,7 @@ test.each(prefixes.map((prefix) => [prefix.join(" "), prefix] as const))(
       expect(modelLaunchProblem(template, "subscription/exact")).toBeNull();
       const command = modelLaunchCommand(template, "subscription/exact", "Do not send yet");
       expect(command.slice(0, prefix.length)).toEqual(prefix);
-      expect(command[prefix.length]).toBe("--dori-launch-model=subscription/exact");
+      expect(command[prefix.length]).toBe("--cataly-launch-model=subscription/exact");
       const classified = classifyOmpArgv(command);
       if (classified.kind !== "omp") throw new Error("native command was lost");
       const argv = classified.command.slice(classified.argsAt);
@@ -70,8 +70,8 @@ test.each(prefixes.map((prefix) => [prefix.join(" "), prefix] as const))(
       expect(early.fileArgs).toEqual([]);
       for (const shadow of [false, true]) {
         const flags = new Map<string, { type: "string" | "boolean" }>([
-          ["dori-role", { type: "string" }],
-          ["dori-launch-model", { type: "string" }],
+          ["cataly-role", { type: "string" }],
+          ["cataly-launch-model", { type: "string" }],
           ["owner-option", { type: "string" }],
         ]);
         if (shadow) {
@@ -82,7 +82,7 @@ test.each(prefixes.map((prefix) => [prefix.join(" "), prefix] as const))(
         expect(parsed.messages).toEqual([]);
         expect(parsed.fileArgs).toEqual([]);
         expect(parsed.unrecognizedFlags).toEqual([]);
-        expect(parsed.unknownFlags.get("dori-launch-model")).toBe("subscription/exact");
+        expect(parsed.unknownFlags.get("cataly-launch-model")).toBe("subscription/exact");
         expect(parsed.unknownFlags.get("owner-option")).toBe("--literal");
         expect(parsed.model).toBe(shadow ? undefined : "subscription/exact");
         expect(parsed.appendSystemPrompt).toBe("--flag-looking value");
@@ -144,7 +144,7 @@ test("opaque shell launchers remain compatible unless strict readback is request
 
 test("managed split empty extension values keep their native meaning without initial work", () => {
   const template = [
-    "/home/user/.dori/bin/omp",
+    "/home/user/.cataly/bin/omp",
     "--no-extensions",
     "-e",
     "/fixture/extension",
@@ -165,7 +165,7 @@ test("managed split empty extension values keep their native meaning without ini
   const parsed = parseArgs(
     command.slice(1),
     new Map([
-      ["dori-launch-model", { type: "string" as const }],
+      ["cataly-launch-model", { type: "string" as const }],
       ["owner-option", { type: "string" as const }],
     ]),
   );

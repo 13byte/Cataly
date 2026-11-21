@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "omp-dori-native-addon",
+      "name": "omp-cataly-native-addon",
       "dependencies": {
         "@oh-my-pi/pi-natives": "18.20.0",
       },

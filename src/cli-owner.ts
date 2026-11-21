@@ -25,18 +25,18 @@ const snapshotOf = (root: string, date: string | undefined): string => {
   return chosen;
 };
 
-/** `dori harness owner init|show|snapshot|check|diff [DATE]|revert SELECTOR`: the owner profile. */
+/** `cataly harness owner init|show|snapshot|check|diff [DATE]|revert SELECTOR`: the owner profile. */
 export function runOwner(d: Deps, a: Args, x: string | undefined): number {
   const root = d.store.root;
   const { profile } = ownerPaths(root);
   if (x === "init") {
-    if (existsSync(profile)) throw new Refusal(`${profile} exists; edit it or use dori harness owner revert`);
+    if (existsSync(profile)) throw new Refusal(`${profile} exists; edit it or use cataly harness owner revert`);
     writeFileSync(profile, TEMPLATE, { flag: "wx", mode: 0o600 });
-    console.log(`OWNER_INIT ${profile}: read it locally with dori harness owner show`);
+    console.log(`OWNER_INIT ${profile}: read it locally with cataly harness owner show`);
     return 0;
   }
   if (!existsSync(profile) && x !== "revert") {
-    if (x !== "show") throw new Refusal(`no owner profile at ${profile}; dori harness owner init creates one`);
+    if (x !== "show") throw new Refusal(`no owner profile at ${profile}; cataly harness owner init creates one`);
     console.log(`NO_OWNER_PROFILE ${profile}: the lead's prompt has no owner section`);
     return 0;
   }
@@ -70,7 +70,7 @@ export function runOwner(d: Deps, a: Args, x: string | undefined): number {
       const saved = revert(root, selector, d.now());
       console.log(`REVERTED ${profile} to ${selector}`);
       if (saved === undefined) console.log("No previous owner profile to back up.");
-      else console.log(`Backup saved at ${saved.path}; undo with dori harness owner revert ${saved.id}`);
+      else console.log(`Backup saved at ${saved.path}; undo with cataly harness owner revert ${saved.id}`);
       return 0;
     }
     default:

@@ -1,6 +1,6 @@
 # Discord voice assistant (opt-in)
 
-`dori voice discord` joins one Discord voice channel and talks with the owner through OpenAI's paid Live API (`/v1/live/sessions`, not the Realtime API). It reads lane and report status, answers information questions with web search, leaves notes in a text channel and forwards work requests to the lead session. It is off by default: installation, boot, text intake and the Discord monitors never start it or load its native codecs.
+`cataly voice discord` joins one Discord voice channel and talks with the owner through OpenAI's paid Live API (`/v1/live/sessions`, not the Realtime API). It reads lane and report status, answers information questions with web search, leaves notes in a text channel and forwards work requests to the lead session. It is off by default: installation, boot, text intake and the Discord monitors never start it or load its native codecs.
 
 Every voice session costs money. Read [Costs and limits](#costs-and-limits) before enabling it.
 
@@ -8,11 +8,11 @@ Every voice session costs money. Read [Costs and limits](#costs-and-limits) befo
 
 Voice has no separate configuration file, token or state root.
 
-- Configuration: the optional `voice` object in the existing Dori config, `~/.dori/config.json` by default, or the path in `DORI_CONFIG`. Managed primary and side wrappers preserve their selected `DORI_HOME` and `DORI_CONFIG`.
-- Discord: the existing bot token in `DORI_DISCORD_TOKEN` and the human owner's user ID in `DORI_DISCORD_OWNER_ID`. Only that owner is listened to; using the bot's own ID as the owner is refused.
+- Configuration: the optional `voice` object in the existing Cataly config, `~/.cataly/config.json` by default, or the path in `CATALY_CONFIG`. Managed primary and side wrappers preserve their selected `CATALY_HOME` and `CATALY_CONFIG`.
+- Discord: the existing bot token in `CATALY_DISCORD_TOKEN` and the human owner's user ID in `CATALY_DISCORD_OWNER_ID`. Only that owner is listened to; using the bot's own ID as the owner is refused.
 - Provider key: an environment variable, `OPENAI_API_KEY` unless `voice.apiKeyEnv` names another. Keys are never read from the config file.
 - Lead: the configured `leadPane` receives forwarded requests.
-- State: `<stateDir>/voice/`, holding the usage ledger, the lead-reply ledger and its offset, and a single-owner lock. A second `dori voice discord` on the same state directory refuses to start.
+- State: `<stateDir>/voice/`, holding the usage ledger, the lead-reply ledger and its offset, and a single-owner lock. A second `cataly voice discord` on the same state directory refuses to start.
 
 ## Configuration
 
@@ -90,9 +90,9 @@ Discord voice is end-to-end encrypted with DAVE. Receiving requires its decrypto
 
 ## Native dependencies
 
-The skill package lists `@discordjs/voice` and `@discordjs/opus` as optional dependencies. DAVE comes from the version of `@snazzah/davey` required by `@discordjs/voice`; no unused second DAVE version is installed. They load only when `dori voice discord` connects. Native Opus and DAVE need compatible platform binaries. This is a source feature, not a claim that the frozen v0.1.2 release contains voice.
+The skill package lists `@discordjs/voice` and `@discordjs/opus` as optional dependencies. DAVE comes from the version of `@snazzah/davey` required by `@discordjs/voice`; no unused second DAVE version is installed. They load only when `cataly voice discord` connects. Native Opus and DAVE need compatible platform binaries. This is a source feature, not a claim that the frozen v0.1.2 release contains voice.
 
-Review the native packages and their install scripts before installation. Bun may run scripts from its default trusted list. From the skill's `scripts` directory, install frozen dependencies and explicitly run the Opus installer with the same Bun runtime that runs Dori:
+Review the native packages and their install scripts before installation. Bun may run scripts from its default trusted list. From the skill's `scripts` directory, install frozen dependencies and explicitly run the Opus installer with the same Bun runtime that runs Cataly:
 
 ```sh
 bun install --frozen-lockfile
@@ -106,7 +106,7 @@ The second command matters when Node.js and Bun report different Node ABI versio
 Export the token, owner ID and provider key in the shell that runs it, then:
 
 ```sh
-dori voice discord
+cataly voice discord
 ```
 
 It runs in the foreground until stopped. A service is optional; see [Running as a user service](#running-as-a-user-service).
@@ -115,7 +115,7 @@ It runs in the foreground until stopped. A service is optional; see [Running as 
 
 - When the owner joins the voice channel, a session opens and greets them. When the owner leaves, the session closes.
 - After `idleCloseSec` (2 minutes by default) of silence with no backend work pending, the session closes. Speaking above `wakeRmsDbfs` opens a new one; the last 2.5 seconds of audio before the wake are sent with it, so the first words are kept.
-- GPT-Live [standby](https://developers.openai.com/api/docs/guides/live-conversations#configure-standby) (`wake_policy`, `idle_timeout_s`, billed at a lower paused rate) is available only for WebRTC sessions. Dori connects over the Live WebSocket, so it does not use standby with any model; closing idle sessions and waking a new one, as above, takes its place.
+- GPT-Live [standby](https://developers.openai.com/api/docs/guides/live-conversations#configure-standby) (`wake_policy`, `idle_timeout_s`, billed at a lower paused rate) is available only for WebRTC sessions. Cataly connects over the Live WebSocket, so it does not use standby with any model; closing idle sessions and waking a new one, as above, takes its place.
 - Speaking over the assistant stops its playback. A discarded lead-reply chunk is not consumed; it is offered again at a later pause or session.
 - A short voice-link interruption mutes output and invalidates queued reply audio without closing the owner's Live session. A disconnect lasting 5 seconds ends that session and rejoins 3 seconds later; all initial and SDK-internal recovery paths have a 30-second readiness deadline. Moving the bot to a different channel stops the bridge rather than playing the owner's answer there.
 - Losing the Discord Gateway suspends voice and discards queued PCM and staged Opus packets. On resume, voice applies replayed channel changes before admitting speech again. After a fresh Gateway session, a guild voice-state snapshot can revalidate both the owner and the bot.
@@ -123,7 +123,7 @@ It runs in the foreground until stopped. A service is optional; see [Running as 
 - Running delegations, hosted searches and tool continuations prevent idle closure. Completed backend work gets the existing 10-second answer window before idle closure can resume.
 - If input backs up past three seconds of pending PCM or playback past five seconds, voice discards the interrupted playback, leaves unfinished lead replies pending, and holds until an explicit restart. Reply offsets require the player to pull all queued speech in the current playback generation, including any final padded frame. That does not prove the listener heard it.
 
-The [Live delegation API](https://developers.openai.com/api/docs/guides/live-delegation) can leave a session open after `responses_validation_failed`. Dori deliberately closes and holds voice on this configuration/provider rejection rather than changing delegation settings or retrying paid work. Correct the configuration before an explicit restart.
+The [Live delegation API](https://developers.openai.com/api/docs/guides/live-delegation) can leave a session open after `responses_validation_failed`. Cataly deliberately closes and holds voice on this configuration/provider rejection rather than changing delegation settings or retrying paid work. Correct the configuration before an explicit restart.
 
 ### Tools
 
@@ -142,7 +142,7 @@ Voice tools do not directly deploy, delete, pay or change production. Every forw
 
 ### Delivery to the lead
 
-Each request gets its own ID and is sent once. Before sending, Dori checks that a live OMP lead process exists with an empty input and no pending approval or question; otherwise the request is held and reported, with no background retry. After sending, confirmation requires the same process and session plus a new user record containing that request's ID. A lead becoming active without that receipt is not confirmation. An unconfirmed or failed send is reported as such and is never resent.
+Each request gets its own ID and is sent once. Before sending, Cataly checks that a live OMP lead process exists with an empty input and no pending approval or question; otherwise the request is held and reported, with no background retry. After sending, confirmation requires the same process and session plus a new user record containing that request's ID. A lead becoming active without that receipt is not confirmation. An unconfirmed or failed send is reported as such and is never resent.
 
 Before the backend result, the assistant may say it is passing the request on, not that it has passed it. Not-sent, held, queued or failed results must remain negative, even if mixed with success wording or `ok:true`. A sent-but-unconfirmed result stays unconfirmed. Only receipt for this request permits a completed-relay claim; quick facts do not. Mention retries only if the result says they are scheduled (this implementation schedules none), and correct an earlier premature claim. Forwarding is not completion.
 
@@ -158,17 +158,17 @@ Recordings and transcripts are not written to disk. Audio and transcripts go to 
 
 ## Costs and limits
 
-- Live speech is billed per second for the whole open session, including silence. Joining the channel opens a session. On 2026-11-20 [OpenAI's pricing](https://developers.openai.com/api/docs/pricing#live-session-duration) listed $0.05 per active minute for both `gpt-live-1` and `gpt-live-1.1`; the $0.02 standby rate applies only to WebRTC standby, which Dori does not use. Check current rates; Dori does not estimate Live charges in dollars.
+- Live speech is billed per second for the whole open session, including silence. Joining the channel opens a session. On 2026-11-20 [OpenAI's pricing](https://developers.openai.com/api/docs/pricing#live-session-duration) listed $0.05 per active minute for both `gpt-live-1` and `gpt-live-1.1`; the $0.02 standby rate applies only to WebRTC standby, which Cataly does not use. Check current rates; Cataly does not estimate Live charges in dollars.
 - Web search and backend/summary calls are billed separately.
 - Daily Live time is capped at `dailyMinuteCap` (30 minutes by default) in `timeZone`; `totalMinuteCap` caps cumulative time and is off at `0`. Estimated backend and summary spending is capped at `backendUsdCap` ($3 by default), cumulatively.
-- Minute limits count billed Live seconds (`liveSeconds` in the ledger): the provider's cumulative usage, or wall time since session start when that is higher. If the provider reports a paused breakdown (`paused_seconds`), its part of the billed time is also recorded as `pausedSeconds`; it is not added on top and still counts toward the minute limits. Paused seconds reported after midnight are recorded on the days that already hold that session's billed time, so a day's `pausedSeconds` never exceeds its `liveSeconds`. Over Dori's WebSocket transport it stays 0.
+- Minute limits count billed Live seconds (`liveSeconds` in the ledger): the provider's cumulative usage, or wall time since session start when that is higher. If the provider reports a paused breakdown (`paused_seconds`), its part of the billed time is also recorded as `pausedSeconds`; it is not added on top and still counts toward the minute limits. Paused seconds reported after midnight are recorded on the days that already hold that session's billed time, so a day's `pausedSeconds` never exceeds its `liveSeconds`. Over Cataly's WebSocket transport it stays 0.
 - At a limit, voice does not start and posts one notice per day. The ledger is `<stateDir>/voice/usage.json`; a corrupt ledger stops voice rather than resetting. A provider usage breakdown with a part larger than its billed total, or with active and paused parts that do not add up to it, ends the session as a provider failure.
 - Backend spending is estimated from your configured prices and per-search value, not from provider billing. Usage already in flight when a limit is reached is still billed, so actual charges can exceed a cap. Use provider-side spending limits as well.
 
 ## DAVE and audio limits
 
-After MLS initialization, commits, welcomes or transitions, Dori opens a finite 30-second window accepting unencrypted owner frames as well as encrypted frames. Outside the window unencrypted frames are dropped; encrypted frames are always decrypted. Discord transport encryption remains in use during this end-to-end-encryption tradeoff. Corrupt frames are dropped and counted; closed owner streams are resubscribed. Audio quality and latency depend on network, provider and platform codec support; this guide makes no latency claim.
+After MLS initialization, commits, welcomes or transitions, Cataly opens a finite 30-second window accepting unencrypted owner frames as well as encrypted frames. Outside the window unencrypted frames are dropped; encrypted frames are always decrypted. Discord transport encryption remains in use during this end-to-end-encryption tradeoff. Corrupt frames are dropped and counted; closed owner streams are resubscribed. Audio quality and latency depend on network, provider and platform codec support; this guide makes no latency claim.
 
 ## Running as a user service
 
-[`examples/discord-voice.service`](../examples/discord-voice.service) is a systemd user unit example. Nothing installs or enables it. To use it, adjust the paths, provide an environment file with mode `0600` holding `DORI_DISCORD_TOKEN`, `DORI_DISCORD_OWNER_ID` and the provider key, then copy it to `~/.config/systemd/user/` and enable it yourself. A running service spends money whenever the owner joins the channel.
+[`examples/discord-voice.service`](../examples/discord-voice.service) is a systemd user unit example. Nothing installs or enables it. To use it, adjust the paths, provide an environment file with mode `0600` holding `CATALY_DISCORD_TOKEN`, `CATALY_DISCORD_OWNER_ID` and the provider key, then copy it to `~/.config/systemd/user/` and enable it yourself. A running service spends money whenever the owner joins the channel.

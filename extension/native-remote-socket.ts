@@ -1,7 +1,7 @@
 import { chmodSync, lstatSync, mkdirSync, unlinkSync } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
 import { dirname } from "node:path";
-import { takeLock } from "../skills/dori-mode/scripts/src/checkpoint-lock.ts";
+import { takeLock } from "../skills/cataly-mode/scripts/src/checkpoint-lock.ts";
 import { validateRemoteSocket, validateRemoteSocketDir } from "../src/remote/socket-path.ts";
 
 const REQUEST_BYTES = 64 * 1024;

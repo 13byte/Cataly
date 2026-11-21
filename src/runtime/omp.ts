@@ -1,13 +1,14 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { parseCatalyRole } from "../../skills/cataly-mode/scripts/src/session-compat.ts";
 import type { Exec } from "./exec.ts";
 import type { ForegroundProcess, Probe } from "./types.ts";
 
 type Env = Readonly<Record<string, string | undefined>>;
 type PaneState = {
   readonly paneId: string;
-  readonly role: "dori" | "lane";
+  readonly role: "cataly" | "lane";
   readonly sessionId: string;
   readonly sessionFile?: string;
   readonly pid: number;
@@ -23,18 +24,18 @@ const expandHome = (path: string): string =>
 
 /** The extension's config/state precedence; callers with loaded config pass stateDir explicitly. */
 export function ompStateDir(env: Env): string {
-  if (env["DORI_STATE_DIR"] !== undefined) return expandHome(env["DORI_STATE_DIR"]);
-  const doriHome = env["DORI_HOME"] ?? join(homedir(), ".dori");
-  const path = env["DORI_CONFIG"] ?? join(doriHome, "config.json");
+  if (env["CATALY_STATE_DIR"] !== undefined) return expandHome(env["CATALY_STATE_DIR"]);
+  const catalyHome = env["CATALY_HOME"] ?? join(homedir(), ".cataly");
+  const path = env["CATALY_CONFIG"] ?? join(catalyHome, "config.json");
   let raw: string;
   try {
     raw = readFileSync(path, "utf8");
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
-    return join(doriHome, "state");
+    return join(catalyHome, "state");
   }
   const config = JSON.parse(raw) as { stateDir?: string };
-  return expandHome(config.stateDir ?? join(doriHome, "state"));
+  return expandHome(config.stateDir ?? join(catalyHome, "state"));
 }
 
 // The one classification of OMP's launch forms: the `omp` command, its published package CLI under Bun or Node, and the
@@ -77,10 +78,11 @@ function readState(stateDir: string, id: string): PaneState | undefined {
   try {
     const state = JSON.parse(
       readFileSync(join(stateDir, "sessions", `${encodeURIComponent(id)}.json`), "utf8"),
-    ) as PaneState;
+    ) as Omit<PaneState, "role"> & { readonly role?: unknown };
+    const role = parseCatalyRole(state.role);
     if (
       state.paneId !== id ||
-      (state.role !== "dori" && state.role !== "lane") ||
+      role === undefined ||
       typeof state.sessionId !== "string" ||
       state.sessionId === "" ||
       !Number.isSafeInteger(state.pid) ||
@@ -95,7 +97,7 @@ function readState(stateDir: string, id: string): PaneState | undefined {
     ) {
       return undefined;
     }
-    return state;
+    return { ...state, role };
   } catch {
     return undefined;
   }

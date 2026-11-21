@@ -75,7 +75,7 @@ linux("a linked-worktree Git file is rejected before executing Git or GitHub", a
 
 linux("consumer installation state fences the source command", async () => {
   const f = await gitSourceFixture();
-  const paths = consumerPaths(f.config.deployment.home, f.config.deployment.doriHome);
+  const paths = consumerPaths(f.config.deployment.home, f.config.deployment.catalyHome);
   saveDeploymentJson(paths.state, { version: 1 });
   await expect(currentSource(f.config)).rejects.toThrow("consumer installation");
   expect(existsSync(f.requests)).toBe(false);

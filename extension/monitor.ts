@@ -1,9 +1,14 @@
 /**
- * Persistent monitors for the Dori session: a command runs in the background (argv, never a shell) and every
- * stdout/stderr line matching its filter wakes the session. This is the "your monitor tool" the Dori setup
+ * Persistent monitors for the Cataly session: a command runs in the background (argv, never a shell) and every
+ * stdout/stderr line matching its filter wakes the session. This is the "your monitor tool" the Cataly setup
  * expects; omp has no built-in equivalent.
  */
 import type { Subprocess } from "bun";
+import {
+  HEAD_ADMISSION_PROTOCOL,
+  isHeadAdmissionProtocol,
+} from "../skills/cataly-mode/scripts/src/messenger/head-admission-protocol.ts";
+import { legacyRecipeEnv, recipePaths, type RecipeContext } from "../src/runtime/recipe-env.ts";
 import type { MonitorSpec } from "../src/update/deployment-types.ts";
 import type { HeadAdmissions } from "./head-admission.ts";
 import { MonitorOutputFile, readMonitorOutput } from "./monitor-output";
@@ -80,18 +85,24 @@ export class Monitors {
   readonly #currentSession: () => string | undefined;
   readonly #batchMs: number;
   readonly #restartMs: number;
+  readonly #recipeContext: RecipeContext | undefined;
 
   constructor(
     deliver: Deliver,
     currentSession: () => string | undefined,
     batchMs = BATCH_MS,
     restart: number | HeadAdmissions = 5_000,
+    recipeContext?: RecipeContext,
   ) {
     this.#deliver = deliver;
     this.#currentSession = currentSession;
     this.#batchMs = batchMs;
     this.#restartMs = typeof restart === "number" ? restart : 5_000;
     this.#admissions = typeof restart === "number" ? undefined : restart;
+    this.#recipeContext = recipeContext && {
+      ...recipePaths(recipeContext.configFile, recipeContext.installationHome),
+      env: recipeContext.env,
+    };
   }
 
   start(
@@ -122,6 +133,9 @@ export class Monitors {
     const { restart, mode, recordId } = options;
     if (argv.length === 0) throw new Error("argv must name the command to run");
     const pattern = new RegExp(filter);
+    const env = this.#recipeContext
+      ? (legacyRecipeEnv(argv, this.#recipeContext) ?? this.#recipeContext.env)
+      : process.env;
     let entry: Running;
     const proc = Bun.spawn([...argv], {
       cwd,
@@ -130,11 +144,16 @@ export class Monitors {
       stderr: "pipe",
       ...(this.#admissions
         ? {
-            env: { ...process.env, DORI_MONITOR_ADMISSION: "1" },
+            env: {
+              ...env,
+              CATALY_MONITOR_ADMISSION: "1",
+              CATALY_MONITOR_ADMISSION_PROTOCOL: HEAD_ADMISSION_PROTOCOL,
+              DORI_MONITOR_ADMISSION: "1",
+            },
             serialization: "json" as const,
             ipc: (message: unknown) => this.#ipc(entry, message),
           }
-        : {}),
+        : { env }),
     });
     entry = {
       name,
@@ -324,7 +343,7 @@ export class Monitors {
       raw === null ||
       typeof raw !== "object" ||
       !("protocol" in raw) ||
-      raw.protocol !== "dori-head-admission-v1"
+      !isHeadAdmissionProtocol(raw.protocol)
     )
       return;
     const fail = () => {
@@ -539,7 +558,7 @@ export class Monitors {
 }
 
 export const MONITOR_DESCRIPTION = [
-  "Persistent background monitors for this Dori session.",
+  "Persistent background monitors for this Cataly session.",
   'mode "once" retains restore intent until the job exits cleanly, output is delivered, and completion is recorded. Managed restarts wait for unfinished once work.',
   'op "start" runs `argv` (an argument array, never a shell string) in the session cwd and reads its stdout and stderr line by line. Matching `filter` lines wake this session as a message `[name] line`; lines arriving together are delivered in one message. Exits are reported unless an explicit `restart: "on-failure"` schedules a retry. That option retries nonzero exits or signals up to three times in a failure streak, after five seconds each. Clean exits are never retried.',
   "Lines over 64 KiB are streamed to a private temporary file instead of filtered or truncated. An immediate warning gives its path; completion gives its raw byte count. Batches are limited to 64 KiB including prefixes and separators; an oversized rendered message is preserved in a file too. Read those files for the complete output. They survive monitor stop; remove them only when no longer needed. Storage/read failure stops the monitor and reports potentially incomplete output.",

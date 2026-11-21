@@ -19,7 +19,7 @@ function home() {
   return { d, paths, cli };
 }
 
-describe("dori harness owner", () => {
+describe("cataly harness owner", () => {
   test("one competing snapshot publishes the complete baseline", async () => {
     const { paths, d } = home();
     const profile = "- (2026-11-20) Synthetic baseline.\n".repeat(32_768);
@@ -54,10 +54,10 @@ describe("dori harness owner", () => {
     writeFileSync(paths.profile, changed);
 
     const first = (await cli("revert", "2026-11-20")).out;
-    const id = /undo with dori harness owner revert (\S+)$/.exec(first)![1]!;
+    const id = /undo with cataly harness owner revert (\S+)$/.exec(first)![1]!;
     const backup = join(paths.history, `${id}.md`);
     const second = (await cli("revert", id)).out;
-    const secondId = /undo with dori harness owner revert (\S+)$/.exec(second)![1]!;
+    const secondId = /undo with cataly harness owner revert (\S+)$/.exec(second)![1]!;
 
     expect(readFileSync(paths.profile)).toEqual(changed);
     expect(secondId).not.toBe(id);
@@ -161,7 +161,7 @@ describe("dori harness owner", () => {
     expect(readdirSync(paths.history).filter((name) => name.startsWith("pre-revert-"))).toHaveLength(1);
 
     const next = (await cli("revert", "2026-11-19")).out;
-    const id = /undo with dori harness owner revert (\S+)$/.exec(next)![1]!;
+    const id = /undo with cataly harness owner revert (\S+)$/.exec(next)![1]!;
     expect(readFileSync(join(paths.history, `${id}.md`), "utf8")).toBe("first snapshot\n");
     expect(readFileSync(paths.profile, "utf8")).toBe("second snapshot\n");
   });

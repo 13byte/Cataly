@@ -3,15 +3,15 @@ import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-import { Checkpoints } from "../../skills/dori-mode/scripts/src/checkpoints.ts";
-import { evidenceClock, fileEvidence } from "../../skills/dori-mode/scripts/src/evidence.ts";
-import { recordExecution } from "../../skills/dori-mode/scripts/src/lane-run.ts";
-import { type Lane, Registry } from "../../skills/dori-mode/scripts/src/registry.ts";
-import { Reports, reportScope } from "../../skills/dori-mode/scripts/src/reports.ts";
+import { Checkpoints } from "../../skills/cataly-mode/scripts/src/checkpoints.ts";
+import { evidenceClock, fileEvidence } from "../../skills/cataly-mode/scripts/src/evidence.ts";
+import { recordExecution } from "../../skills/cataly-mode/scripts/src/lane-run.ts";
+import { type Lane, Registry } from "../../skills/cataly-mode/scripts/src/registry.ts";
+import { Reports, reportScope } from "../../skills/cataly-mode/scripts/src/reports.ts";
 import { type FakePi, type FakeSession, load, useConfig } from "./fake-pi";
 
-test("dori_report scopes reopened evidence while sharing the journal acceptance sequence", async () => {
-  const names = ["DORI_CONFIG", "DORI_STATE_DIR", "HERDR_PANE_ID", "HC_TERMINAL_ID"] as const;
+test("cataly_report scopes reopened evidence while sharing the journal acceptance sequence", async () => {
+  const names = ["CATALY_CONFIG", "CATALY_STATE_DIR", "HERDR_PANE_ID", "HC_TERMINAL_ID"] as const;
   const saved = Object.fromEntries(names.map((name) => [name, process.env[name]]));
   let pi: FakePi | undefined;
   try {
@@ -53,10 +53,10 @@ test("dori_report scopes reopened evidence while sharing the journal acceptance 
       );
     });
     await registry.write({ ...priorLane, openedAt: "2026-01-02T00:00:00.000Z", lifecycleEpoch: generation });
-    pi = await load({ session: { id: "generation-session", entries: [] }, flags: { "dori-role": "lane" } });
+    pi = await load({ session: { id: "generation-session", entries: [] }, flags: { "cataly-role": "lane" } });
     await pi.emit("session_start");
-    const tool = pi.tools.get("dori_report");
-    if (!tool) throw new Error("dori_report is not registered");
+    const tool = pi.tools.get("cataly_report");
+    if (!tool) throw new Error("cataly_report is not registered");
     const params = { kind: "milestone", text: "new generation report", files: [source] };
     const first = await tool.execute("first-report", params, undefined, undefined, pi.ctx());
     expect(first.content.map((block) => block.text).join("\n")).toEndWith(
@@ -82,8 +82,8 @@ test("dori_report scopes reopened evidence while sharing the journal acceptance 
   }
 });
 
-test("dori_report accepts only the verified native run and scopes both journals to it", async () => {
-  const names = ["DORI_CONFIG", "DORI_STATE_DIR", "HERDR_PANE_ID", "HC_TERMINAL_ID", "DORI_LANE_RUN"] as const;
+test("cataly_report accepts only the verified native run and scopes both journals to it", async () => {
+  const names = ["CATALY_CONFIG", "CATALY_STATE_DIR", "HERDR_PANE_ID", "HC_TERMINAL_ID", "CATALY_LANE_RUN"] as const;
   const saved = Object.fromEntries(names.map((name) => [name, process.env[name]]));
   let pi: FakePi | undefined;
   try {
@@ -134,7 +134,7 @@ test("dori_report accepts only the verified native run and scopes both journals 
       nativeRef: { sessionId: session.id, ref: { runtime: "herdr" as const, id: lane.pane } },
     };
     process.env.HERDR_PANE_ID = lane.pane;
-    process.env.DORI_LANE_RUN = lane.runId;
+    process.env.CATALY_LANE_RUN = lane.runId;
     delete process.env.HC_TERMINAL_ID;
     const registry = new Registry(stateDir);
     await registry.write(oldRun);
@@ -163,11 +163,11 @@ test("dori_report accepts only the verified native run and scopes both journals 
       if (!current || current.runId !== lane.runId) throw new Error("current execution is not registered");
       recordExecution(stateDir, current, now);
     });
-    const root = await load({ session, flags: { "dori-role": "lane" } });
+    const root = await load({ session, flags: { "cataly-role": "lane" } });
     pi = root;
     await root.emit("session_start");
-    const tool = root.tools.get("dori_report");
-    if (!tool) throw new Error("dori_report is not registered");
+    const tool = root.tools.get("cataly_report");
+    if (!tool) throw new Error("cataly_report is not registered");
     const params = { kind: "milestone", text: "current run", files: [oldSource, currentSource] };
     const invoke = () => tool.execute("verified-report", params, undefined, undefined, root.ctx());
     await expect(invoke()).rejects.toThrow("requires the registered execution's verified native session");

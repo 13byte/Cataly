@@ -14,7 +14,7 @@ describe("lanes", () => {
     const lane = await startLane(d, "fix-login", brief, { group: "w1" });
     const pane = w.panes.get(lane.paneId)!;
     expect(pane.ran[0]).toStartWith("omo 'Read your brief at ");
-    expect(await Bun.file(lane.brief).text()).toContain("dori ready fix-login --text");
+    expect(await Bun.file(lane.brief).text()).toContain("cataly ready fix-login --text");
     expect(lead.received).toEqual([`[START fix-login] lane opened in ${lane.paneId}`]);
     await expect(startLane(d, "fix-login", brief, { group: "w1" })).rejects.toThrow(Refusal);
   });
@@ -40,7 +40,7 @@ describe("lanes", () => {
     await expect(ready(d, "fix-login", "fixed", [])).rejects.toThrow("evidence");
     await ready(d, "fix-login", "fixed", ["https://github.com/o/r/pull/1"]);
     expect(lead.received.at(-1)).toBe("[READY fix-login] fixed\nevidence: https://github.com/o/r/pull/1");
-    expect(w.usage.map((e) => e.name)).toEqual(["dori.lane_started", "dori.lane_ready"]);
+    expect(w.usage.map((e) => e.name)).toEqual(["cataly.lane_started", "cataly.lane_ready"]);
     expect(JSON.stringify(w.usage)).not.toContain("fix-login");
     await done(d, "fix-login");
     expect(w.panes.has(lane.paneId)).toBe(false);
@@ -86,10 +86,10 @@ describe("startLane group fallback", () => {
     });
     const run = w.hc.calls.find((args) => args[0] === "run")!;
     expect(run).toBeDefined();
-    const group = run.find((a) => a.startsWith("dori.group="))!;
-    expect(group).toMatch(/^dori\.group=[0-9a-f]{8}$/);
-    expect(run.filter((a) => a.startsWith("dori.group="))).toEqual([`dori.group=${groupId(d.store.root)}`]);
-    expect(run).toContain(`DORI_HOME=${d.store.root}`);
+    const group = run.find((a) => a.startsWith("cataly.group="))!;
+    expect(group).toMatch(/^cataly\.group=[0-9a-f]{8}$/);
+    expect(run.filter((a) => a.startsWith("cataly.group="))).toEqual([`cataly.group=${groupId(d.store.root)}`]);
+    expect(run).toContain(`CATALY_HOME=${d.store.root}`);
     expect(run).not.toContain("w9");
     expect(run).not.toContain("w9:p9");
     expect(run).not.toContain("--workspace");

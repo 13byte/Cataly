@@ -8,6 +8,7 @@ import { initializeExtensions } from "@oh-my-pi/pi-coding-agent/modes/runtime-in
 import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import type { HeadAdmissions } from "../../../extension/head-admission.ts";
+import { SESSION_WIRE } from "../../../skills/cataly-mode/scripts/src/session-compat.ts";
 import { SOL_MODEL } from "./compose.ts";
 
 /** Real AgentSession, extension dispatch and file persistence; only the provider is a canned in-process stream. */
@@ -32,7 +33,7 @@ export async function nativeMessageHead(root: string, manager: SessionManager, a
       stream.end(message);
     })().catch((error) => stream.fail(error));
     return stream;
-  }, "dori-native-admission-fixture");
+  }, "cataly-native-admission-fixture");
   const settings = Settings.isolated({ "prewalk.auto": "off", "prewalk.enabled": false });
   let api: ExtensionAPI | undefined;
   let nativeManager: SessionManager | undefined;
@@ -55,7 +56,7 @@ export async function nativeMessageHead(root: string, manager: SessionManager, a
       });
       extension.on("message_end", async (event) => {
         const message = event.message;
-        if (message.role !== "custom" || message.customType !== "dori-monitor") return;
+        if (message.role !== "custom" || message.customType !== SESSION_WIRE.monitorMessage) return;
         const details = message.details as { ompDoriAdmission: { identity: string; fingerprint: string } };
         const published = readFileSync(manager.getSessionFile()!, "utf8").includes(JSON.stringify(details.ompDoriAdmission.identity));
         await admissions.messageEnded(event);
@@ -78,7 +79,7 @@ export async function nativeMessageHead(root: string, manager: SessionManager, a
     manager: nativeManager,
     send(content: string, details: unknown) {
       process.send?.({ event: "native-send", streaming: session.isStreaming, requests });
-      nativeApi.sendMessage({ customType: "dori-monitor", content, display: true, details }, { deliverAs: "aside", triggerTurn: true });
+      nativeApi.sendMessage({ customType: SESSION_WIRE.monitorMessage, content, display: true, details }, { deliverAs: "aside", triggerTurn: true });
     },
     async close() {
       release.resolve();

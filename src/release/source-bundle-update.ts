@@ -38,7 +38,7 @@ export async function prepareUlwUpdate(
   try {
     const git = (argv: readonly string[], cwd = source) => bundleGit(argv, cwd, temporary);
     const sourceCommit = await git(["rev-parse", "--verify", "HEAD^{commit}"]);
-    if (!SHA.test(sourceCommit)) throw new Error("ULW update requires a committed Dori source");
+    if (!SHA.test(sourceCommit)) throw new Error("ULW update requires a committed Cataly source");
     for (const file of ULW_UPDATE_FILES) {
       if ((await git(["hash-object", "--no-filters", "--", file])) !== (await git(["rev-parse", `HEAD:${file}`])))
         throw new Error("ULW bundle has local changes; preserve them before automatic preparation");
@@ -110,7 +110,7 @@ export async function prepareUlwUpdate(
       readFileSync(join(source, "omp-ulw.lock"), "utf8").trim() !== before.lock.commit ||
       (await git(["rev-parse", "HEAD"])) !== sourceCommit
     )
-      throw new Error("Dori source changed while preparing the ULW candidate");
+      throw new Error("Cataly source changed while preparing the ULW candidate");
     const candidate: UlwCandidate = {
       version: 1,
       sourceCommit,

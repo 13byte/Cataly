@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { saveActiveDeployment } from "./deployment-active.ts";
+import { matchesDeploymentConfigHash } from "./deployment-config.ts";
 import { ownReleaseRoot, saveDeploymentJson, switchPointer } from "./deployment-files.ts";
 import { captureHandoff, captureStartedMonitors, prepareLauncher } from "./deployment-handoff.ts";
 import { observeDeploymentHealth, waitDeploymentHealth } from "./deployment-health.ts";
@@ -28,7 +29,7 @@ export async function deployRelease(
   beforeForwardStop?: (record: DeploymentRecord) => Promise<void> | Promise<() => void>,
 ): Promise<DeploymentRecord> {
   const inputHash = digest(JSON.stringify(input));
-  const configHash = digest(JSON.stringify(config));
+  const configHash = previous?.configHash ?? digest(JSON.stringify(config));
   const id = previous?.id ?? randomUUID();
   const record: DeploymentRecord = previous ?? {
     version: 1,
@@ -81,6 +82,7 @@ export async function deployRelease(
   try {
     if (
       !/^[A-Za-z0-9-]+$/.test(id) ||
+      !matchesDeploymentConfigHash(config, configHash) ||
       current.inputHash !== inputHash ||
       current.configHash !== configHash ||
       current.directory !== join(config.releaseRoot, "transactions", id) ||

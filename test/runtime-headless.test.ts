@@ -1,24 +1,24 @@
 import { expect, test } from "bun:test";
 import { existsSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { defaultConfig, loadConfig } from "../skills/dori-mode/scripts/src/config.ts";
-import { claimDone, closeLane, type FlowDeps } from "../skills/dori-mode/scripts/src/done-flow.ts";
-import { freshnessTick } from "../skills/dori-mode/scripts/src/freshness.ts";
-import { launchLane } from "../skills/dori-mode/scripts/src/launch.ts";
-import { parkLane } from "../skills/dori-mode/scripts/src/park.ts";
-import { pauseLane, resumeLane } from "../skills/dori-mode/scripts/src/pause.ts";
-import { statusOf } from "../skills/dori-mode/scripts/src/registry.ts";
-import { reopenLane } from "../skills/dori-mode/scripts/src/reopen.ts";
-import { Reports } from "../skills/dori-mode/scripts/src/reports.ts";
-import { ChosenRuntimes, runtimesOf } from "../skills/dori-mode/scripts/src/run.ts";
-import { resolveSession } from "../skills/dori-mode/scripts/src/session-id.ts";
-import { laneStatus } from "../skills/dori-mode/scripts/src/status.ts";
-import { tellLane } from "../skills/dori-mode/scripts/src/tell.ts";
+import { defaultConfig, loadConfig } from "../skills/cataly-mode/scripts/src/config.ts";
+import { claimDone, closeLane, type FlowDeps } from "../skills/cataly-mode/scripts/src/done-flow.ts";
+import { freshnessTick } from "../skills/cataly-mode/scripts/src/freshness.ts";
+import { launchLane } from "../skills/cataly-mode/scripts/src/launch.ts";
+import { parkLane } from "../skills/cataly-mode/scripts/src/park.ts";
+import { pauseLane, resumeLane } from "../skills/cataly-mode/scripts/src/pause.ts";
+import { statusOf } from "../skills/cataly-mode/scripts/src/registry.ts";
+import { reopenLane } from "../skills/cataly-mode/scripts/src/reopen.ts";
+import { Reports } from "../skills/cataly-mode/scripts/src/reports.ts";
+import { ChosenRuntimes, runtimesOf } from "../skills/cataly-mode/scripts/src/run.ts";
+import { resolveSession } from "../skills/cataly-mode/scripts/src/session-id.ts";
+import { laneStatus } from "../skills/cataly-mode/scripts/src/status.ts";
+import { tellLane } from "../skills/cataly-mode/scripts/src/tell.ts";
 import { type HeadlessObservation, HeadlessRuntime, headlessArgv } from "../src/runtime/headless.ts";
 import { formatRef, parseRef, type SessionRef } from "../src/runtime/types.ts";
 import { headlessFixture, noExternal } from "./fixtures/runtime-headless.ts";
 
-const skillCli = resolve(import.meta.dir, "../skills/dori-mode/scripts/src/cli.ts");
+const skillCli = resolve(import.meta.dir, "../skills/cataly-mode/scripts/src/cli.ts");
 
 async function waitFor<T>(read: () => Promise<T | undefined>): Promise<T> {
   for (let tries = 0; tries < 100; tries++) {
@@ -29,18 +29,18 @@ async function waitFor<T>(read: () => Promise<T | undefined>): Promise<T> {
   throw new Error("native readback did not reach the expected state");
 }
 
-test("headless runtime is opt-in, preserving the terminal default and explicit config precedence", async () => {
+test("legacy terminal preferences keep native execution and explicit lane overrides remain available", async () => {
   const f = headlessFixture();
   try {
     expect(defaultConfig(f.home).laneRuntime).toBeUndefined();
     expect((await loadConfig(f.path, f.home, f.env)).laneRuntime).toBe("headless");
-    expect((await loadConfig(f.path, f.home, { ...f.env, DORI_LANE_RUNTIME: "terminal" })).laneRuntime).toBe(
+    expect((await loadConfig(f.path, f.home, { ...f.env, CATALY_LANE_RUNTIME: "terminal" })).laneRuntime).toBe(
       "terminal",
     );
-    expect(runtimesOf(f.deps).default.kind).toBe("hc");
+    expect(runtimesOf(f.deps).default.kind).toBe(process.platform === "win32" ? "hc" : "headless");
     expect(() => headlessArgv(["omp", "--mode", "json", "{prompt}"], "test")).toThrow();
     expect(() => headlessArgv(["omp", "--resume", "some-session", "{prompt}"], "test")).toThrow();
-    expect(() => headlessArgv(["omp", "--dori-role", "dori", "{prompt}"], "test")).toThrow();
+    expect(() => headlessArgv(["omp", "--cataly-role", "cataly", "{prompt}"], "test")).toThrow();
     expect(() => headlessArgv(["node", "-e", "work", "{prompt}"], "test")).toThrow();
   } finally {
     rmSync(f.home, { recursive: true, force: true });
@@ -154,7 +154,9 @@ test.skipIf(process.platform === "win32")(
       expect(existsSync(cost)).toBe(true);
       const frames = f.frames();
       expect(frames.filter((frame) => frame["type"] === "extension_ui_response")).toHaveLength(2);
-      expect(frames.filter((frame) => frame["type"] === "follow_up" && frame["message"] === literal)).toHaveLength(1);
+      expect(frames.filter((frame) => frame["type"] === "prompt" && frame["message"] === literal)).toEqual([
+        expect.objectContaining({ streamingBehavior: "followUp" }),
+      ]);
       expect(frames.filter((frame) => frame["type"] === "goal" && frame["op"] === "create")).toHaveLength(1);
       expect(frames.filter((frame) => frame["type"] === "abort")).toHaveLength(1);
     } finally {

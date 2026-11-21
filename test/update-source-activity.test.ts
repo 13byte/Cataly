@@ -13,7 +13,7 @@ bunTest("activity is opt-in and requires an absolute path", () => {
 });
 
 bunTest.skipIf(platform.supportsProcessReaders)("an unsupported host does not create an activity writer", () => {
-  const root = mkdtempSync(join(tmpdir(), "dori-unsupported-activity-"));
+  const root = mkdtempSync(join(tmpdir(), "cataly-unsupported-activity-"));
   try {
     const directory = join(root, "activity");
     expect(() => inboundActivity(join(directory, "discord.json"), "discord")).toThrow(
@@ -26,7 +26,7 @@ bunTest.skipIf(platform.supportsProcessReaders)("an unsupported host does not cr
 });
 
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), "dori-inbound-activity-"));
+  const root = mkdtempSync(join(tmpdir(), "cataly-inbound-activity-"));
   const path = join(root, "discord.json");
   let at = 1000;
   const writer = inboundActivity(path, "discord", () => at)!;

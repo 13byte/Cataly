@@ -93,15 +93,15 @@ import { join } from "node:path";
 import { consumerPaths, pointer } from ${JSON.stringify(resolve(import.meta.dir, "../src/release/files.ts"))};
 import { activateRelease, loadInstalled, releasePath } from ${JSON.stringify(resolve(import.meta.dir, "../src/release/state.ts"))};
 const { home, before, after, phase } = JSON.parse(process.argv[1]);
-const paths = consumerPaths(home);
+const paths = consumerPaths(home, join(home, ".dori"));
 const omp = join(paths.dori, "bin/omp");
 const target = releasePath(paths, after.current);
 const native = after.current.requirements.omp === "18.20.0" ? join(target, "scripts/consumer/omp") : undefined;
 activateRelease({
   ...paths,
-  get dori() {
+  get cataly() {
     if (phase === "journal" && existsSync(paths.journal)) process.exit(73);
-    return paths.dori;
+    return paths.cataly;
   },
   get live() {
     if (phase === "native" && existsSync(paths.journal) && pointer(omp) === native) process.exit(73);

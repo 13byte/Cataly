@@ -1,16 +1,17 @@
 import type { ExtensionAPI, FileEntry } from "@oh-my-pi/pi-coding-agent";
-import type { DoriApi, DoriContext } from "./index.ts";
-import type { DoriRole } from "../skills/dori-mode/scripts/src/lane-state.ts";
-import { checkPolicyCommand } from "../skills/dori-mode/scripts/src/lane-policy-actions.ts";
-import { PolicyError } from "../skills/dori-mode/scripts/src/lane-policy.ts";
+import type { CatalyApi, CatalyContext } from "./index.ts";
+import type { CatalyRole } from "../skills/cataly-mode/scripts/src/lane-state.ts";
+import { checkPolicyCommand } from "../skills/cataly-mode/scripts/src/lane-policy-actions.ts";
+import { PolicyError } from "../skills/cataly-mode/scripts/src/lane-policy.ts";
+import { isCatalyEntry, SESSION_WIRE } from "../skills/cataly-mode/scripts/src/session-compat.ts";
 
-const ENTRY = "omp-dori:lane-policy";
+const ENTRY = "omp-cataly:lane-policy";
 type Binding = string | { readonly error: string };
-type Branch = ReturnType<DoriContext["sessionManager"]["getBranch"]>;
-type Inherited = { readonly role: DoriRole | undefined; readonly binding: Binding | undefined };
+type Branch = ReturnType<CatalyContext["sessionManager"]["getBranch"]>;
+type Inherited = { readonly role: CatalyRole | undefined; readonly binding: Binding | undefined };
 const agentPolicies = new Map<string, Inherited>();
 const recordedBinding = (branch: Branch): Binding | undefined => {
-  const entry = branch.findLast((entry) => entry.type === "custom" && entry.customType === ENTRY);
+  const entry = branch.findLast((entry) => entry.type === "custom" && isCatalyEntry(entry.customType, ENTRY));
   return entry === undefined
     ? undefined
     : typeof entry.data === "string"
@@ -19,8 +20,9 @@ const recordedBinding = (branch: Branch): Binding | undefined => {
 };
 
 export const lanePolicyHook = (
-  pi: DoriApi & { pi?: Pick<ExtensionAPI["pi"], "loadSessionFile" | "SessionEntryIndex"> },
-  recordedRole: (branch: Branch) => DoriRole | undefined,
+  pi: CatalyApi & { pi?: Pick<ExtensionAPI["pi"], "loadSessionFile" | "SessionEntryIndex"> },
+  recordedRole: (branch: Branch) => CatalyRole | undefined,
+  launchedBinding: string | undefined,
 ) => {
   let binding: Binding | undefined;
   pi.on("tool_call", (event) => {
@@ -53,7 +55,7 @@ export const lanePolicyHook = (
       };
   });
   return {
-    inherit: async (ctx: DoriContext): Promise<Inherited> => {
+    inherit: async (ctx: CatalyContext): Promise<Inherited> => {
       try {
         const own = ctx.sessionManager.getBranch();
         const saved = { role: recordedRole(own), binding: recordedBinding(own) };
@@ -81,8 +83,8 @@ export const lanePolicyHook = (
       }
     },
     sync: (
-      role: DoriRole | undefined,
-      ctx: DoriContext,
+      role: CatalyRole | undefined,
+      ctx: CatalyContext,
       eventName: string,
       event: unknown,
       flaggedRole: boolean,
@@ -100,11 +102,10 @@ export const lanePolicyHook = (
           event.reason === "new";
         if (recorded !== undefined) binding = recorded;
         else if (!carried)
-          binding =
-            eventName === "session_start" && flaggedRole ? process.env["DORI_LANE_POLICY"] || undefined : undefined;
+          binding = eventName === "session_start" && flaggedRole ? launchedBinding || undefined : undefined;
       }
       if (recorded === undefined && binding !== undefined)
-        pi.appendEntry(ENTRY, typeof binding === "string" ? binding : null);
+        pi.appendEntry(SESSION_WIRE.lanePolicy, typeof binding === "string" ? binding : null);
       agentPolicies.set(ctx.agent.id, { role, binding });
     },
   };

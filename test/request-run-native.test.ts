@@ -2,15 +2,15 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { laneStartCommand } from "../skills/dori-mode/scripts/src/launch-session.ts";
-import { quoteForPane } from "../skills/dori-mode/scripts/src/launch-footer.ts";
+import { laneStartCommand } from "../skills/cataly-mode/scripts/src/launch-session.ts";
+import { quoteForPane } from "../skills/cataly-mode/scripts/src/launch-footer.ts";
 
 // POSIX-only: launch uses the user's shell's process-scoped assignment syntax.
 test.skipIf(process.platform === "win32")(
   "native Bash passes the launched run to the real report CLI",
   async () => {
     const root = resolve(import.meta.dir, "..");
-    const home = mkdtempSync(join(tmpdir(), "dori-request-native-"));
+    const home = mkdtempSync(join(tmpdir(), "cataly-request-native-"));
     const runId = "00000000-0000-4000-8000-0000000000aa";
     try {
       const command = laneStartCommand({ key: "native-request", thread: "none", runId }, [
@@ -20,7 +20,11 @@ test.skipIf(process.platform === "win32")(
         root,
         home,
       ]);
-      const restart = [process.execPath, "-e", "console.log(JSON.stringify({ restartRun: process.env.DORI_LANE_RUN }))"]
+      const restart = [
+        process.execPath,
+        "-e",
+        "console.log(JSON.stringify({ restartRun: process.env.CATALY_LANE_RUN }))",
+      ]
         .map(quoteForPane)
         .join(" ");
       const child = Bun.spawn(["sh", "-c", `${command} && ${restart}`], {
@@ -31,8 +35,8 @@ test.skipIf(process.platform === "win32")(
           TMPDIR: home,
           NO_COLOR: "1",
           PI_CODING_AGENT_DIR: join(home, "agent"),
-          DORI_LANE_RUN: "",
-          DORI_TEST_OMP_ROOT: process.env["DORI_TEST_OMP_ROOT"],
+          CATALY_LANE_RUN: "",
+          CATALY_TEST_OMP_ROOT: process.env["CATALY_TEST_OMP_ROOT"],
         },
         stdout: "pipe",
         stderr: "pipe",

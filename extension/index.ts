@@ -1,30 +1,30 @@
 /**
- * omp-dori: Dori mode on omp. Installed in the global extensions directory, so every omp session loads it, but only
- * sessions with a Dori role change behaviour; every other session runs exactly as without it.
+ * omp-cataly: Cataly mode on omp. Installed in the global extensions directory, so every omp session loads it, but only
+ * sessions with a Cataly role change behaviour; every other session runs exactly as without it.
  *
- * - Role: `--dori-role dori|lane` is recorded in the session file on session_start and re-read from the session
+ * - Role: `--cataly-role cataly|lane` is recorded in the session file on session_start and re-read from the session
  *   branch on every session change, so `--resume` and herdr restores keep it without the flag. Subagents inherit
  *   their spawning agent's role.
  * - A nonempty config `ompUlwPath` applies omp-ulw through a gated API: its event, command and tool handlers run
  *   only in role sessions; load-time registrations stay visible everywhere. Source installs leave it empty for OMP loading.
- * - Pane state (`{stateDir}/sessions/<pane>.json`, read by the `dori` CLI): session id, goal status and open tool
- *   approvals of the Dori/lane session running in HERDR_PANE_ID or HC_TERMINAL_ID.
+ * - Pane state (`{stateDir}/sessions/<pane>.json`, read by the `cataly` CLI): session id, goal status and open tool
+ *   approvals of the Cataly/lane session running in HERDR_PANE_ID or HC_TERMINAL_ID.
  * - Lanes without a goal get omp's `goal` tool so the agent can create its goal from the lane brief.
- * - The Dori session gets the `monitor` tool (monitor.ts).
- * - Root Dori/lane agents get compact role guidance on each turn; children do not.
- * - A lane's main agent gets the `dori_report` tool: `dori report` for the lane registered to its pane, with evidence
+ * - The Cataly session gets the `monitor` tool (monitor.ts).
+ * - Root Cataly/lane agents get compact role guidance on each turn; children do not.
+ * - A lane's main agent gets the `cataly_report` tool: `cataly report` for the lane registered to its pane, with evidence
  *   it selects fingerprinted here, including completed tool results on its current branch, which the CLI cannot read.
  * - A lane's main agent on GPT-6.1 Sol is told to carry lane bookkeeping along with real work (lane-bookkeeping.ts).
  */
 import { spawnSync } from "node:child_process";
 import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { Checkpoints } from "../skills/dori-mode/scripts/src/checkpoints.ts";
-import { loadConfig } from "../skills/dori-mode/scripts/src/config";
-import { EvidenceError, fileEvidence, novelEvidence } from "../skills/dori-mode/scripts/src/evidence.ts";
-import { runContext } from "../skills/dori-mode/scripts/src/lane-run.ts";
+import { Checkpoints } from "../skills/cataly-mode/scripts/src/checkpoints.ts";
+import { loadConfig } from "../skills/cataly-mode/scripts/src/config";
+import { EvidenceError, fileEvidence, novelEvidence } from "../skills/cataly-mode/scripts/src/evidence.ts";
+import { runContext } from "../skills/cataly-mode/scripts/src/lane-run.ts";
 import {
-  type DoriRole,
+  type CatalyRole,
   type GoalStatus,
   type ModelReadback,
   type PaneState,
@@ -32,38 +32,62 @@ import {
   paneStatePath,
   readPaneState,
   writePaneState,
-} from "../skills/dori-mode/scripts/src/lane-state";
+} from "../skills/cataly-mode/scripts/src/lane-state";
 import {
   Registry,
   RESERVED_LANE_KEY,
   sameLaneGeneration,
   sessionOf,
-} from "../skills/dori-mode/scripts/src/registry.ts";
-import { ReportError } from "../skills/dori-mode/scripts/src/report-events.ts";
-import { type ReportKind, Reports, reportLine, reportScope } from "../skills/dori-mode/scripts/src/reports.ts";
+} from "../skills/cataly-mode/scripts/src/registry.ts";
+import { ReportError } from "../skills/cataly-mode/scripts/src/report-events.ts";
+import { type ReportKind, Reports, reportLine, reportScope } from "../skills/cataly-mode/scripts/src/reports.ts";
+import {
+  isCatalyEntry,
+  MONITOR_MESSAGE,
+  parseCatalyRole,
+  SESSION_WIRE,
+} from "../skills/cataly-mode/scripts/src/session-compat.ts";
 import {
   COMPLETION_ENTRY,
   type Completion,
   completionReceipt,
   toolEvidence,
-} from "../skills/dori-mode/scripts/src/tool-evidence.ts";
+} from "../skills/cataly-mode/scripts/src/tool-evidence.ts";
 import { SourceBundleError } from "../src/release/source-bundle.ts";
+import {
+  HEADLESS_LAUNCH_MODEL_ENTRY,
+  LAUNCH_MODEL_FLAG,
+  LEGACY_LAUNCH_MODEL_FLAG,
+} from "../src/runtime/headless-launch-model.ts";
+import { laneEntry as headlessEntry } from "../src/runtime/headless-record.ts";
 import { selfSession } from "../src/runtime/registry.ts";
 import type { MonitorSpec } from "../src/update/deployment-types.ts";
-import { bootstrapMonitors, MONITOR_BOOTSTRAP_FLAG, recordedIntake } from "./bootstrap.ts";
+import {
+  bootstrapMonitors,
+  LEGACY_MONITOR_BOOTSTRAP_FLAG,
+  MONITOR_BOOTSTRAP_FLAG,
+  recordedIntake,
+} from "./bootstrap.ts";
 import { RuntimeHealthWriter } from "./deployment-health.ts";
 import { DiscordAsk, routeFor } from "./discord-ask.ts";
 import { type AskLane, automaticDiscordAskRoute, bindAskLane } from "./discord-ask-auto.ts";
 import { DiscordLane } from "./discord-lane.ts";
 import { HeadAdmissions } from "./head-admission.ts";
+import { extensionInstallation } from "./installation.ts";
 import { type PromptModel, withLaneBookkeeping } from "./lane-bookkeeping.ts";
 import { lanePolicyHook } from "./lane-policy.ts";
 import { BATCH_MS, MONITOR_DESCRIPTION, Monitors } from "./monitor";
 import { MONITOR_ENTRY, recordedMonitors, recordedMonitorStates, type RecordedMonitor } from "./monitor-state.ts";
 import { sameMonitorSpecs } from "../src/update/deployment-monitors.ts";
 import { NativeRemote } from "./native-remote.ts";
-import { ROLE_INVARIANTS } from "./role-invariants.ts";
-import { bumpAttempts, MAX_CONTINUATIONS, openOwes, recordOwes, reminder } from "../skills/dori-mode/scripts/src/owes";
+import { DUTY_INVARIANTS, ROLE_INVARIANTS } from "./role-invariants.ts";
+import {
+  bumpAttempts,
+  MAX_CONTINUATIONS,
+  openOwes,
+  recordOwes,
+  reminder,
+} from "../skills/cataly-mode/scripts/src/owes";
 
 interface SessionEntry {
   id?: string;
@@ -71,11 +95,11 @@ interface SessionEntry {
   customType?: string;
   data?: unknown;
   mode?: string;
-  /** A `message` entry's native message (toolResult, assistant tool calls); read only by dori_report evidence. */
+  /** A `message` entry's native message (toolResult, assistant tool calls); read only by cataly_report evidence. */
   message?: unknown;
   content?: unknown;
 }
-export interface DoriContext {
+export interface CatalyContext {
   cwd: string;
   mode: string;
   hasUI?: boolean;
@@ -128,18 +152,18 @@ export interface ToolDefinition<Params = Record<string, unknown>> {
     params: Params,
     signal: AbortSignal | undefined,
     onUpdate: unknown,
-    ctx: DoriContext,
+    ctx: CatalyContext,
   ): Promise<ToolResult>;
 }
 export interface CommandOptions {
   description?: string;
-  handler(args: string, ctx: DoriContext): Promise<void>;
+  handler(args: string, ctx: CatalyContext): Promise<void>;
 }
 interface Schema {
   optional(): Schema;
   describe(description: string): Schema;
 }
-type Handler = (event: unknown, ctx: DoriContext) => unknown;
+type Handler = (event: unknown, ctx: CatalyContext) => unknown;
 /** OMP's tool_execution_start/update/end events, read only for the start cwd and background job completions. */
 type ToolEvent = {
   toolCallId?: unknown;
@@ -149,7 +173,7 @@ type ToolEvent = {
   isError?: unknown;
 };
 type ToolFrame = { details?: { async?: { state?: unknown; jobId?: unknown } } } | null | undefined;
-export interface DoriApi {
+export interface CatalyApi {
   zod: {
     object(shape: Record<string, Schema>): Schema;
     string(): Schema;
@@ -166,11 +190,11 @@ export interface DoriApi {
   registerTool<Params>(tool: ToolDefinition<Params>): void;
   on(
     event: "goal_updated",
-    handler: (event: { goal: Goal | null; state?: { enabled?: boolean } }, ctx: DoriContext) => unknown,
+    handler: (event: { goal: Goal | null; state?: { enabled?: boolean } }, ctx: CatalyContext) => unknown,
   ): void;
   on(
     event: "tool_approval_requested" | "tool_approval_resolved",
-    handler: (event: { toolCallId: string; sessionId?: string }, ctx: DoriContext) => unknown,
+    handler: (event: { toolCallId: string; sessionId?: string }, ctx: CatalyContext) => unknown,
   ): void;
   on(event: string, handler: Handler): void;
   appendEntry(customType: string, data?: unknown): void;
@@ -184,18 +208,23 @@ export interface DoriApi {
   setActiveTools(toolNames: string[]): Promise<void>;
 }
 
-const ROLE_FLAG = "dori-role";
-const ROLE_ENTRY = "omp-dori:role";
-const REMOTE_OWNER_ENTRY = "omp-dori:native-remote-owner";
-const ONLY_IN_ROLE = "works only in Dori sessions (omp --dori-role dori|lane)";
+const ROLE_FLAG = "cataly-role";
+const LEGACY_ROLE_FLAG = "dori-role";
+const ROLE_ENTRY = "omp-cataly:role";
+const HARNESS_ROLE_ENTRY = "omp-cataly:harness-role";
+const NATIVE_REF_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+const RECEIVER_FLAG = "cataly-lane-receiver";
+const LEGACY_RECEIVER_FLAG = "dori-lane-receiver";
+const RECEIVER_ENTRY = "omp-cataly:discord-lane-receiver";
+const ONLY_IN_ROLE = "works only in Cataly sessions (omp --cataly-role cataly|lane)";
 // A path the managed overlay owns. A POSIX path is cut at `/` only; a backslash is an ordinary name character there,
 // so only Windows reads it as a separator.
 const MANAGED_OVERLAY =
   process.platform === "win32"
-    ? /[\\/](?:consumer-dependencies[\\/]omp-ulw-[a-f0-9]{40}-[a-f0-9]{64}|\.cache[\\/]omp-dori[\\/]omp-ulw-[a-f0-9]{64})(?:[\\/]index\.ts)?$/
-    : /\/(?:consumer-dependencies\/omp-ulw-[a-f0-9]{40}-[a-f0-9]{64}|\.cache\/omp-dori\/omp-ulw-[a-f0-9]{64})(?:\/index\.ts)?$/;
+    ? /[\\/](?:consumer-dependencies[\\/]omp-ulw-[a-f0-9]{40}-[a-f0-9]{64}|\.cache[\\/](?:omp-cataly|omp-dori)[\\/]omp-ulw-[a-f0-9]{64})(?:[\\/]index\.ts)?$/
+    : /\/(?:consumer-dependencies\/omp-ulw-[a-f0-9]{40}-[a-f0-9]{64}|\.cache\/(?:omp-cataly|omp-dori)\/omp-ulw-[a-f0-9]{64})(?:\/index\.ts)?$/;
 // budget-limited halts the goal until a person raises the budget; unknown statuses must never read as "none",
-// which `dori pause` treats as nothing-to-pause.
+// which `cataly pause` treats as nothing-to-pause.
 const GOAL_STATUS: Record<string, GoalStatus> = {
   active: "active",
   paused: "paused",
@@ -204,24 +233,35 @@ const GOAL_STATUS: Record<string, GoalStatus> = {
   dropped: "dropped",
 };
 
-const parseRole = (value: unknown): DoriRole | undefined => (value === "dori" || value === "lane" ? value : undefined);
-
-const headlessRemoteId = (ctx: DoriContext, role: DoriRole | undefined): string | undefined => {
-  const id = process.env.CATALY_HEADLESS_ID;
-  if (
-    ctx.mode === "rpc" &&
-    ctx.hasUI === true &&
-    role === "lane" &&
-    id &&
-    /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(id)
-  )
-    return `headless:${id}`;
+const nativeHarnessRole = (): "lead" | "duty" | undefined => {
+  const role = process.env.CATALY_HARNESS_ROLE;
+  return role === "lead" || role === "duty" ? role : undefined;
 };
 
-const recordedRole = (branch: readonly SessionEntry[]): DoriRole | undefined => {
-  let role: DoriRole | undefined;
+const nativeHeadlessId = (ctx: CatalyContext): string | undefined => {
+  const id = process.env.CATALY_HEADLESS_ID;
+  return ctx.mode === "rpc" && ctx.hasUI === true && id && NATIVE_REF_ID.test(id) ? id : undefined;
+};
+
+const restrictArchivedLead = (branch: readonly SessionEntry[]): boolean => {
+  const entry = branch.findLast((row) => row.type === "custom" && row.customType === HARNESS_ROLE_ENTRY);
+  if (!entry) return false;
+  const proof = entry.data as { refId?: unknown; role?: unknown } | null | undefined;
+  // The newest valid duty receipt restricts a resume; an invalid receipt cannot turn a duty into a lead.
+  // Even a valid lead receipt is not evidence of a live native owner.
+  return proof?.role !== "lead" || typeof proof.refId !== "string" || !NATIVE_REF_ID.test(proof.refId);
+};
+
+const headlessRemoteId = (ctx: CatalyContext, role: CatalyRole | undefined): string | undefined => {
+  const id = nativeHeadlessId(ctx);
+  if (role === "lane" && id) return `headless:${id}`;
+};
+
+const recordedRole = (branch: readonly SessionEntry[]): CatalyRole | undefined => {
+  let role: CatalyRole | undefined;
   for (const entry of branch)
-    if (entry.type === "custom" && entry.customType === ROLE_ENTRY) role = parseRole(entry.data) ?? role;
+    if (entry.type === "custom" && isCatalyEntry(entry.customType, ROLE_ENTRY))
+      role = parseCatalyRole(entry.data) ?? role;
   return role;
 };
 
@@ -253,8 +293,8 @@ type StartupGoalPause = {
 
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-const DORI_REPORT_DESCRIPTION = [
-  "Record a lane report in its journal, as `dori report` does, and return the [REPORT] line to forward to the lead.",
+const CATALY_REPORT_DESCRIPTION = [
+  "Record a lane report in its journal, as `cataly report` does, and return the [REPORT] line to forward to the lead.",
   "Attach the evidence the report rests on: `files` whose current bytes it describes, and `toolCalls`, the ids of",
   "completed, successful tool calls on this session whose results show it (a call that started a background job, once",
   "that job completed successfully). Only evidence not recorded before moves",
@@ -266,26 +306,45 @@ const DORI_REPORT_DESCRIPTION = [
   "or a direct Bash result for those calls rather than repeating an already completed effect.",
 ].join(" ");
 
-export default async function ompDori(pi: DoriApi): Promise<void> {
+export default async function ompCataly(pi: CatalyApi): Promise<void> {
   pi.registerFlag(ROLE_FLAG, {
-    description: "Run as a Dori-mode session: dori (the messenger session) or lane; kept on resume",
+    description: "Run as a Cataly-mode session: cataly (the messenger session) or lane; kept on resume",
     type: "string",
   });
   pi.registerFlag(MONITOR_BOOTSTRAP_FLAG, {
     description: "Private session-bound monitor bootstrap for an explicit managed legacy handoff",
     type: "string",
   });
-  pi.registerFlag("dori-lane-receiver", {
+  pi.registerFlag(RECEIVER_FLAG, {
     description: "Take over an existing separately scoped Discord receiver for this lane",
     type: "boolean",
   });
-  pi.registerFlag("dori-launch-model", {
+  pi.registerFlag(LAUNCH_MODEL_FLAG, {
     description: "Require this exact provider/model before accepting a lane launch brief",
     type: "string",
   });
+  for (const name of [LEGACY_ROLE_FLAG, LEGACY_MONITOR_BOOTSTRAP_FLAG, LEGACY_LAUNCH_MODEL_FLAG])
+    pi.registerFlag(name, { type: "string" });
+  pi.registerFlag(LEGACY_RECEIVER_FLAG, { type: "boolean" });
+  const installation = extensionInstallation();
+  // Legacy launch authorizations are not implicitly imported by a canonical launch or a flagless resume.
+  const launchEnv =
+    pi.getFlag(ROLE_FLAG) === undefined && parseCatalyRole(pi.getFlag(LEGACY_ROLE_FLAG)) !== undefined
+      ? installation.env
+      : process.env;
 
-  const policy = lanePolicyHook(pi, recordedRole);
-  let role: DoriRole | undefined;
+  const launchModelFlag = () => pi.getFlag(LAUNCH_MODEL_FLAG) ?? pi.getFlag(LEGACY_LAUNCH_MODEL_FLAG);
+
+  const policy = lanePolicyHook(pi, recordedRole, launchEnv["CATALY_LANE_POLICY"]);
+  let archivedLeadRestricted = false;
+  const restrictedLead = () => nativeHarnessRole() === "duty" || archivedLeadRestricted;
+  const appendRole = (role: CatalyRole): void => {
+    // A retired native duty transcript is not a v0.1.3 lead. Its release-specific owner must not acquire intake.
+    if (role === "cataly" && restrictedLead()) pi.appendEntry(ROLE_ENTRY, role);
+    else pi.appendEntry(SESSION_WIRE.role, role === "cataly" ? "dori" : role);
+  };
+  let role: CatalyRole | undefined;
+  const isLead = (): boolean => role === "cataly" && !restrictedLead();
   let stateDir: string | undefined;
   let loadError: string | undefined;
   let requiredLoadError: SourceBundleError | undefined;
@@ -303,10 +362,9 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       }
     | undefined;
   const launchSessionIds = new Set<string>();
-  const modelReadback = (ctx: DoriContext): ModelReadback => {
-    const selector = launchSessionIds.has(ctx.sessionManager.getSessionId())
-      ? pi.getFlag("dori-launch-model")
-      : undefined;
+  let headlessKickoff: { readonly sessionId: string; providerChecked: boolean; complete: boolean } | undefined;
+  const modelReadback = (ctx: CatalyContext): ModelReadback => {
+    const selector = launchSessionIds.has(ctx.sessionManager.getSessionId()) ? launchModelFlag() : undefined;
     const requested = typeof selector === "string" ? exactModelIdentity(selector) : null;
     const model = ctx.model;
     const observed = model?.provider ? { provider: model.provider, id: model.id } : null;
@@ -332,15 +390,17 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       return { ...base, status: "unknown", billing: "unknown" };
     }
   };
-  const assertLaunchModel = (ctx: DoriContext): void => {
-    if (ctx.agent.kind !== "main" || pi.getFlag("dori-launch-model") === undefined) return;
-    if (launchSessionIds.size > 0 && !launchSessionIds.has(ctx.sessionManager.getSessionId())) return;
+  const assertLaunchModel = (ctx: CatalyContext): void => {
+    if (ctx.agent.kind !== "main" || launchModelFlag() === undefined) return;
+    const id = ctx.sessionManager.getSessionId();
+    if (launchSessionIds.size > 0 && !launchSessionIds.has(id)) return;
+    if (headlessKickoff?.sessionId === id && headlessKickoff.complete) return;
     const readback = modelReadback(ctx);
     if (role === "lane" && readback.status === "matched") return;
     ctx.abort();
     throw new Error(`STARTUP_MODEL_HOLD: exact launch model ${readback.status}; no automatic substitution`);
   };
-  const reportRun = process.env["DORI_LANE_RUN"];
+  const reportRun = launchEnv["CATALY_LANE_RUN"];
   // These observations belong to the active root session, not to all events running in the same process.
   const callDirs = new Map<string, string | null>();
   const backgroundCalls = new Map<
@@ -358,12 +418,13 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
   let goalToolAdded = false;
   let paneWritten: string | undefined;
   const approvals = new Set<string>();
-  const discordAsk = new DiscordAsk();
-  const discordLane = new DiscordLane();
+  const discordApiOverride = installation.env["CATALY_DISCORD_API_BASE"] ?? "";
+  const discordAsk = new DiscordAsk(undefined, discordApiOverride);
+  const discordLane = new DiscordLane(undefined, discordApiOverride);
   const nativeRemote = new NativeRemote(pi);
   let remoteActivation = 0;
   let evidenceActivation: number | undefined;
-  const isCurrentLane = (ctx: DoriContext): boolean =>
+  const isCurrentLane = (ctx: CatalyContext): boolean =>
     role === "lane" &&
     evidenceActivation === remoteActivation &&
     ctx.agent.kind === "main" &&
@@ -371,12 +432,12 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
     session.id === ctx.sessionManager.getSessionId();
   let askLane: AskLane | undefined;
   let ownsDiscordReceiver = false;
-  let managedRestorePending = process.env.DORI_MANAGED_STARTUP === "1";
-  let headContext: DoriContext | undefined;
+  let managedRestorePending = launchEnv.CATALY_MANAGED_STARTUP === "1";
+  let headContext: CatalyContext | undefined;
   const admissions = new HeadAdmissions(
     () => {
       const ctx = headContext;
-      if (role !== "dori" || !ctx || !stateDir || requiredLoadError || typeof process.getuid !== "function") return;
+      if (!isLead() || !ctx || !stateDir || requiredLoadError || typeof process.getuid !== "function") return;
       const manager = ctx.sessionManager;
       const id = manager.getSessionId();
       const file = manager.getSessionFile();
@@ -393,10 +454,10 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
         },
       };
     },
-    (details) => pi.appendEntry("omp-dori:admission-rejected", details),
+    (details) => pi.appendEntry(SESSION_WIRE.admissionRejected, details),
     (pending, unresolved) => {
       headContext?.ui.setStatus?.(
-        "dori-head-admission",
+        "cataly-head-admission",
         pending ? `${pending} inbound item(s) awaiting native receipt` : undefined,
       );
       if (unresolved)
@@ -411,11 +472,11 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       const root = stateDir;
       if (!delivery.isCurrent()) return;
       // Commit the obligation before admission; a native receipt is only proof of the aside, not authority.
-      if (role === "dori" && root !== undefined) await recordOwes(root, content, Date.now(), delivery.signal);
+      if (isLead() && root !== undefined) await recordOwes(root, content, Date.now(), delivery.signal);
       if (delivery.isCurrent())
         pi.sendMessage(
           {
-            customType: "dori-monitor",
+            customType: delivery.details === undefined ? MONITOR_MESSAGE : SESSION_WIRE.monitorMessage,
             content,
             display: true,
             ...(delivery.details === undefined ? {} : { details: delivery.details }),
@@ -423,9 +484,10 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
           { triggerTurn: true, deliverAs: "aside" },
         );
     },
-    () => (role === "dori" ? session?.id : undefined),
+    () => (isLead() ? session?.id : undefined),
     BATCH_MS,
     typeof process.getuid === "function" ? admissions : undefined,
+    installation,
   );
   const runtimeHealth = new RuntimeHealthWriter(monitors);
 
@@ -491,14 +553,39 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
     return !(ps.status === 0 && Number.isFinite(started) && started > Date.parse(existing.startedAt));
   };
 
-  const savePane = (ctx: DoriContext): void => {
+  const savePane = (ctx: CatalyContext): void => {
+    // Do not advertise a retired duty TUI to consumers of the lead/lane pane ABI.
+    if (role === "cataly" && !isLead()) {
+      removePane();
+      return;
+    }
+    const nativeId = nativeHeadlessId(ctx);
+    if (nativeId && stateDir !== undefined && session) {
+      if (role === "cataly" && nativeHarnessRole() === "lead" && ctx.sessionManager.getSessionId() === session.id) {
+        const entry = headlessEntry(stateDir, { runtime: "headless", id: nativeId });
+        if (entry?.reservation.role === "lead")
+          runtimeHealth.update({
+            stateDir,
+            paneId: nativeId,
+            role,
+            sessionId: session.id,
+            startedAt: entry.reservation.startedAt,
+            wanted: recordedMonitors(ctx.sessionManager.getBranch()),
+            presetLoaded: loadError === undefined,
+          });
+        else runtimeHealth.stop();
+      } else runtimeHealth.stop();
+      return;
+    }
     const paneId = process.env.HC_TERMINAL_ID || process.env.HERDR_PANE_ID;
     if (!paneId || stateDir === undefined || !session) return;
     // Only an interactive session taking over the pane clears an inactive resume pointer. Print/RPC children
     // inherit pane ids too, but do not own the terminal. A record another live process owns stays untouched.
     if (!role) {
       removePane();
-      if (ctx.mode === "tui" && !paneHeldByAnother(paneId)) rmSync(paneStatePath(stateDir, paneId), { force: true });
+      // A globally discovered extension must not clear another installation's resume pointer before a role is known.
+      if (installation.ordinaryPaneRoot && ctx.mode === "tui" && !paneHeldByAnother(paneId))
+        rmSync(paneStatePath(stateDir, paneId), { force: true });
       return;
     }
     if (paneHeldByAnother(paneId)) return;
@@ -532,7 +619,7 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       approvalPending: approvals.size > 0,
       modelReadback: modelReadback(ctx),
     });
-    if (role === "dori")
+    if (role === "cataly")
       runtimeHealth.update({
         stateDir,
         paneId,
@@ -579,14 +666,14 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
     renameSync(tmp, path);
   };
 
-  const startMonitor = ({ spec, id }: RecordedMonitor, ctx: DoriContext) => {
+  const startMonitor = ({ spec, id }: RecordedMonitor, ctx: CatalyContext) => {
     const owner = ctx.sessionManager.getSessionId();
     return monitors.start(spec.name, spec.argv, spec.filter, spec.cwd, owner, {
       ...(spec.mode ? { mode: spec.mode } : {}),
       ...(spec.restart ? { restart: spec.restart } : {}),
       ...(id ? { recordId: id } : {}),
       async onExit(exit) {
-        const owns = () => role === "dori" && session?.id === owner && ctx.sessionManager.getSessionId() === owner;
+        const owns = () => isLead() && session?.id === owner && ctx.sessionManager.getSessionId() === owner;
         if (!owns()) return;
         const state = () => recordedMonitorStates(ctx.sessionManager.getBranch()).get(spec.name);
         const current = state();
@@ -615,10 +702,10 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
   const syncTools = async (): Promise<void> => {
     const active = pi.getActiveTools();
     const next = new Set(active);
-    if (role === "dori") next.add("monitor");
+    if (isLead()) next.add("monitor");
     else next.delete("monitor");
-    if (role === "lane") next.add("dori_report");
-    else next.delete("dori_report");
+    if (role === "lane") next.add("cataly_report");
+    else next.delete("cataly_report");
     // A session with its own goal keeps whatever omp decided. omp does not take the tool back when the session
     // changes, so ours is removed from any later goal-less session that is not a lane.
     if (goal.status === "none" && role === "lane") {
@@ -675,7 +762,7 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       pi.on(event, (payload, ctx) => nativeRemote.event(event, payload, ctx));
     pi.on("message_end", (event, ctx) => {
       if (
-        role === "dori" &&
+        isLead() &&
         headContext &&
         ctx.agent.kind === "main" &&
         ctx.agent.id === headContext.agent.id &&
@@ -691,24 +778,26 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       if (
         root &&
         currentRole &&
+        (currentRole === "lane" || isLead()) &&
         ctx.agent.kind === "main" &&
         id === session?.id &&
         approvals.size === 0 &&
         !headlessRemoteId(ctx, currentRole)
       )
         return discordAsk.arm(event, ctx.ui, root, id, async () => {
-          const route = await automaticDiscordAskRoute(root, currentRole, id, askLane);
+          const route = await automaticDiscordAskRoute(root, currentRole, id, askLane, installation.env);
           return approvals.size === 0 ? route : undefined;
         });
     });
     pi.on("tool_execution_end", (event) => discordAsk.finish(event));
     pi.on("session_shutdown", (_event, ctx) => {
       if (ctx.agent.kind === "main") {
+        if (role === "lane") discordLane.retire?.(goal.status);
         remoteActivation++;
         backgroundCalls.clear();
         callDirs.clear();
         nativeRemote.stop();
-        headContext?.ui.setStatus?.("dori-head-admission", undefined);
+        headContext?.ui.setStatus?.("cataly-head-admission", undefined);
         headContext = undefined;
       }
       discordLane.stop();
@@ -769,7 +858,7 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
     });
   };
 
-  const syncRemote = async (ctx: DoriContext, activation: number): Promise<void> => {
+  const syncRemote = async (ctx: CatalyContext, activation: number): Promise<void> => {
     if (activation !== remoteActivation) return;
     const root = stateDir;
     const owner = session;
@@ -780,6 +869,7 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       !root ||
       !owner ||
       !ownerRole ||
+      (ownerRole === "cataly" && !isLead()) ||
       requiredLoadError ||
       ctx.sessionManager.getSessionId() !== owner.id ||
       typeof process.getuid !== "function" ||
@@ -815,14 +905,14 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
     });
   };
 
-  const syncMain = async (ctx: DoriContext, branch: readonly SessionEntry[], bootstrap = false): Promise<void> => {
+  const syncMain = async (ctx: CatalyContext, branch: readonly SessionEntry[], bootstrap = false): Promise<void> => {
     const sessionId = ctx.sessionManager.getSessionId();
     const initialStart = bootstrap && session === undefined;
     startupPause = undefined;
-    // Monitors belong to the Dori session that started them; their lines must not wake whatever session comes next.
+    // Monitors belong to the Cataly session that started them; their lines must not wake whatever session comes next.
     discordLane.stop();
     if (session?.id !== sessionId || !role) discordAsk.clear();
-    if (session?.id !== sessionId || role !== "dori") monitors.stopAll();
+    if (session?.id !== sessionId || !isLead()) monitors.stopAll();
     if (session?.id !== sessionId || session.agentId !== ctx.agent.id) {
       session = { id: sessionId, agentId: ctx.agent.id, startedAt: new Date().toISOString() };
       approvals.clear();
@@ -831,7 +921,7 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       agentStatus = "idle";
     }
     if (role && !lifecycleRegistered) registerLifecycle();
-    if (bootstrap && role === "dori") {
+    if (bootstrap && isLead()) {
       try {
         if (bootstrapMonitors(pi, branch, sessionId, recordedMonitors(branch))) branch = ctx.sessionManager.getBranch();
         rejectedBootstrap = undefined;
@@ -851,40 +941,53 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       initialStart &&
       role === "lane" &&
       ctx.mode === "tui" &&
-      process.env.DORI_DISCORD_WAKE_SESSION === sessionId &&
+      launchEnv.CATALY_DISCORD_WAKE_SESSION === sessionId &&
       goal.status === "active"
     ) {
       // A cold TUI emits session_start before it reconciles the goal and appends its own PAUSE.
       startupPause = {
         session: sessionId,
-        activeEntry: process.env.DORI_DISCORD_WAKE_GOAL === "active" ? mode?.id : undefined,
+        activeEntry: launchEnv.CATALY_DISCORD_WAKE_GOAL === "active" ? mode?.id : undefined,
       };
     }
     if (role && loadError && !warned) {
       warned = true;
       ctx.ui.notify(
-        `omp-dori: ${loadError}. ${requiredLoadError ? "Required bound source failed; role requests are blocked." : "Running without omo presets."}`,
+        `omp-cataly: ${loadError}. ${requiredLoadError ? "Required bound source failed; role requests are blocked." : "Running without omo presets."}`,
         "warning",
       );
     }
     await syncTools();
     savePane(ctx);
-    if (role === "lane" && stateDir && !requiredLoadError)
-      discordLane.start(pi, stateDir, ctx, askLane, ownsDiscordReceiver, {
-        idle: () => agentStatus === "idle" && approvals.size === 0,
-        goalAllows: (optedIn, claimed) => {
-          if (startupPause && startupPause.pausedEntry === undefined) return false;
-          if (goal.status === "blocked") return false;
-          if (goal.status !== "paused") return true;
-          if (!optedIn || !startupPause || (startupPause.used && !claimed)) return false;
-          const mode = ctx.sessionManager.getBranch().findLast((entry) => entry.type === "mode_change");
-          return mode?.id === startupPause.pausedEntry;
+    if (role === "lane" && stateDir && !requiredLoadError) {
+      const nativeId = nativeHeadlessId(ctx);
+      const native = nativeId ? ({ runtime: "headless", id: nativeId } as const) : undefined;
+      discordLane.start(
+        pi,
+        stateDir,
+        ctx,
+        askLane,
+        ownsDiscordReceiver,
+        {
+          idle: () => agentStatus === "idle" && approvals.size === 0,
+          approvalFree: () => approvals.size === 0,
+          goalAllows: (optedIn, claimed) => {
+            if (startupPause && startupPause.pausedEntry === undefined) return false;
+            if (goal.status === "blocked") return false;
+            if (goal.status !== "paused") return true;
+            if (!optedIn || !startupPause || (startupPause.used && !claimed)) return false;
+            const mode = ctx.sessionManager.getBranch().findLast((entry) => entry.type === "mode_change");
+            return mode?.id === startupPause.pausedEntry;
+          },
+          consumePause: () => {
+            if (startupPause) startupPause.used = true;
+          },
         },
-        consumePause: () => {
-          if (startupPause) startupPause.used = true;
-        },
-      });
-    if (role === "dori") {
+        native,
+        launchEnv,
+      );
+    }
+    if (isLead()) {
       headContext = ctx;
       restoreMonitors(ctx, branch, managedRestorePending);
       managedRestorePending = false;
@@ -893,7 +996,7 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
 
   // Bring the running set in line with what this branch recorded: restart what a resumed session lost, stop what a
   // tree move or branch took back. Restored monitors are announced without starting a turn.
-  const restoreMonitors = (ctx: DoriContext, branch: readonly SessionEntry[], managedStartup = false): void => {
+  const restoreMonitors = (ctx: CatalyContext, branch: readonly SessionEntry[], managedStartup = false): void => {
     if (!session) return;
     const wanted = recordedMonitors(branch);
     const records = recordedMonitorStates(branch);
@@ -923,10 +1026,10 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       ...(failed.length ? [`[monitor] could not restore: ${failed.join("; ")}`] : []),
     ];
     pi.sendMessage(
-      { customType: "dori-monitor", content: lines.join("\n"), display: true },
+      { customType: MONITOR_MESSAGE, content: lines.join("\n"), display: true },
       { triggerTurn: failed.length > 0 && !managedStartup },
     );
-    if (failed.length) ctx.ui.notify(`omp-dori: ${lines.at(-1)}`, "warning");
+    if (failed.length) ctx.ui.notify(`omp-cataly: ${lines.at(-1)}`, "warning");
   };
 
   // Registered before omp-ulw so its restore handlers see this event's role.
@@ -940,7 +1043,7 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       }
       if (eventName !== "session_start" && ctx.agent.kind === "main") {
         discordAsk.clear();
-        headContext?.ui.setStatus?.("dori-head-admission", undefined);
+        headContext?.ui.setStatus?.("cataly-head-admission", undefined);
         headContext = undefined;
         monitors.invalidateAdmissions();
       }
@@ -949,12 +1052,9 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       let flaggedRole = false;
       if (ctx.agent.kind === "sub") {
         role = inherited?.role;
+        archivedLeadRestricted = false;
       } else {
-        if (
-          eventName === "session_start" &&
-          launchSessionIds.size === 0 &&
-          pi.getFlag("dori-launch-model") !== undefined
-        )
+        if (eventName === "session_start" && launchSessionIds.size === 0 && launchModelFlag() !== undefined)
           launchSessionIds.add(ctx.sessionManager.getSessionId());
         const recorded = recordedRole(branch);
         // `/new` emits `session_switch` with `reason: "new"`; its empty branch has no role entry to read. Adopting
@@ -966,25 +1066,29 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
           event !== null &&
           "reason" in event &&
           event.reason === "new";
-        role = recorded ?? (carried ? role : undefined);
-        const flagged = pi.getFlag(ROLE_FLAG);
+        // A new branch cannot borrow the archived duty's runtime proof. Leave it roleless rather than upgrade it.
+        const carryRole = carried && (role !== "cataly" || isLead()) ? role : undefined;
+        archivedLeadRestricted = restrictArchivedLead(branch);
+        role = recorded ?? carryRole;
+        const flagged = pi.getFlag(ROLE_FLAG) ?? pi.getFlag(LEGACY_ROLE_FLAG);
         if (role === undefined && eventName === "session_start" && flagged !== undefined) {
-          role = parseRole(flagged);
+          role = parseCatalyRole(flagged);
           if (role) flaggedRole = true;
-          else ctx.ui.notify(`omp-dori: --${ROLE_FLAG} must be "dori" or "lane", got "${String(flagged)}"`, "error");
+          else
+            ctx.ui.notify(`omp-cataly: --${ROLE_FLAG} must be "cataly" or "lane", got "${String(flagged)}"`, "error");
         }
         if (eventName !== "session_start" && rejectedBootstrap === ctx.sessionManager.getSessionId()) role = undefined;
         if (carried && role === "lane" && session && launchSessionIds.has(session.id))
           launchSessionIds.add(ctx.sessionManager.getSessionId());
         // Re-record the role and desired monitor starts: an exited child is not a recorded stop, and the fresh
         // branch otherwise loses the intent that `syncMain` uses to restore it.
-        if (carried && role && recorded === undefined) pi.appendEntry(ROLE_ENTRY, role);
+        if (carried && role && recorded === undefined) appendRole(role);
         askLane =
           role === "lane"
             ? bindAskLane(
                 branch,
                 ctx.sessionManager.getSessionId(),
-                flaggedRole ? process.env["CATALY_ASK_LAUNCHED_LANE"] : undefined,
+                flaggedRole ? launchEnv["CATALY_ASK_LAUNCHED_LANE"] : undefined,
                 (kind, binding) => pi.appendEntry(kind, binding),
               )
             : undefined;
@@ -992,26 +1096,25 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
         ownsDiscordReceiver =
           role === "lane" &&
           branch.some(
-            (entry) =>
-              entry.type === "custom" && entry.customType === "omp-dori:discord-lane-receiver" && entry.data === id,
+            (entry) => entry.type === "custom" && isCatalyEntry(entry.customType, RECEIVER_ENTRY) && entry.data === id,
           );
         if (
           role === "lane" &&
           !ownsDiscordReceiver &&
           eventName === "session_start" &&
-          pi.getFlag("dori-lane-receiver") === true
+          (pi.getFlag(RECEIVER_FLAG) === true || pi.getFlag(LEGACY_RECEIVER_FLAG) === true)
         ) {
-          pi.appendEntry("omp-dori:discord-lane-receiver", id);
+          pi.appendEntry(SESSION_WIRE.laneReceiver, id);
           ownsDiscordReceiver = true;
         }
-        if (carried && role === "dori" && recorded === undefined) {
+        if (carried && role === "cataly" && isLead() && recorded === undefined) {
           for (const spec of session?.monitorSpecs ?? [])
             pi.appendEntry(MONITOR_ENTRY, {
               op: "start",
               ...spec,
               id: crypto.randomUUID(),
             });
-          if (session?.intake) pi.appendEntry("omp-dori:intake", session.intake);
+          if (session?.intake) pi.appendEntry(SESSION_WIRE.intake, session.intake);
         }
       }
       try {
@@ -1023,23 +1126,28 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
           ctx.mode === "tui" &&
           role === "lane" &&
           !requiredLoadError &&
-          process.env["DORI_DISCORD_WAKE_SESSION"] === ctx.sessionManager.getSessionId()
+          launchEnv["CATALY_DISCORD_WAKE_SESSION"] === ctx.sessionManager.getSessionId()
         )
-          pi.appendEntry(ROLE_ENTRY, role);
+          appendRole(role);
         if (ctx.agent.kind === "main") {
           const pane = process.env.HC_TERMINAL_ID || process.env.HERDR_PANE_ID;
+          const nativeId = nativeHeadlessId(ctx);
+          const nativeRole = role === "cataly" && nativeId ? nativeHarnessRole() : undefined;
+          const harness = nativeRole === "lead" && !isLead() ? undefined : nativeRole;
           if (
             (eventName === "session_start" || eventName === "session_switch") &&
             stateDir &&
             role &&
             !requiredLoadError &&
-            (headlessRemoteId(ctx, role) || (ctx.mode === "tui" && (!pane || !paneHeldByAnother(pane)))) &&
+            (harness ||
+              headlessRemoteId(ctx, role) ||
+              (ctx.mode === "tui" && (role === "lane" || isLead()) && (!pane || !paneHeldByAnother(pane)))) &&
             ctx.sessionManager.ensureOnDisk
           ) {
             // Native resume is read-only until an append: take the OMP transcript lease before publishing the
             // exact session ID. A conflicting native owner causes OMP to use a distinct sibling ID.
             try {
-              pi.appendEntry(REMOTE_OWNER_ENTRY, { pid: process.pid });
+              pi.appendEntry(SESSION_WIRE.remoteOwner, { pid: process.pid });
               await ctx.sessionManager.ensureOnDisk();
             } catch (error) {
               remoteJournalReady = false;
@@ -1047,11 +1155,23 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
             }
           }
           await syncMain(ctx, ctx.sessionManager.getBranch(), eventName === "session_start");
+          if (
+            harness &&
+            nativeId &&
+            remoteJournalReady &&
+            !requiredLoadError &&
+            role === "cataly" &&
+            eventName === "session_start" &&
+            ctx.sessionManager.ensureOnDisk
+          ) {
+            pi.appendEntry(HARNESS_ROLE_ENTRY, { role: harness, refId: nativeId });
+            await ctx.sessionManager.ensureOnDisk();
+          }
           if (remoteJournalReady && activation === remoteActivation) evidenceActivation = activation;
         } else {
           // Explicit native tool selection can activate a defaultInactive manager tool.
           const active = pi.getActiveTools();
-          const next = active.filter((name) => name !== "monitor" && name !== "dori_report");
+          const next = active.filter((name) => name !== "monitor" && name !== "cataly_report");
           if (next.length !== active.length) await pi.setActiveTools(next);
         }
       } catch (error) {
@@ -1060,8 +1180,21 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       } finally {
         // Preserve the ordinary child's runtime-only role; only a protected child needs a recoverable record.
         const persistRole = flaggedRole || (ctx.agent.kind === "sub" && inherited?.binding !== undefined);
-        if (persistRole && role && !recordedRole(ctx.sessionManager.getBranch())) pi.appendEntry(ROLE_ENTRY, role);
+        if (persistRole && role && !recordedRole(ctx.sessionManager.getBranch())) appendRole(role);
         policy.sync(role, ctx, eventName, event, flaggedRole, inherited);
+      }
+      if (
+        eventName === "session_start" &&
+        ctx.agent.kind === "main" &&
+        !requiredLoadError &&
+        headlessRemoteId(ctx, role)
+      ) {
+        const sessionId = ctx.sessionManager.getSessionId();
+        const refId = process.env["CATALY_HEADLESS_ID"];
+        if (launchSessionIds.has(sessionId) && refId) {
+          headlessKickoff = { sessionId, providerChecked: false, complete: false };
+          pi.appendEntry(HEADLESS_LAUNCH_MODEL_ENTRY, { refId, sessionId, proof: modelReadback(ctx) });
+        }
       }
       if (activation !== undefined && activation === remoteActivation) {
         if (remoteJournalReady) await syncRemote(ctx, activation);
@@ -1113,6 +1246,8 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
   pi.on("agent_end", (event, ctx) => {
     if (ctx.agent.kind !== "main" || !role) return;
     nativeRemote.event("agent_end", event, ctx);
+    if (headlessKickoff?.sessionId === ctx.sessionManager.getSessionId() && headlessKickoff.providerChecked)
+      headlessKickoff.complete = true;
     agentStatus = "idle";
     savePane(ctx);
     if (role === "lane") discordLane.agentEnd?.(ctx.sessionManager.getSessionId(), event);
@@ -1123,7 +1258,7 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
    * MAX_CONTINUATIONS limits the reminder loop; lanes and subagents never receive this gate.
    */
   pi.on("session_stop", (_event, ctx) => {
-    if (role !== "dori" || ctx.agent.kind !== "main" || stateDir === undefined) return;
+    if (!isLead() || ctx.agent.kind !== "main" || stateDir === undefined) return;
     const owes = openOwes(stateDir, Date.now());
     if (owes.length === 0) return;
     const attempts = bumpAttempts(
@@ -1142,12 +1277,18 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       throw requiredLoadError;
     }
     assertLaunchModel(ctx);
+    if (
+      ctx.agent.kind === "main" &&
+      headlessKickoff?.sessionId === ctx.sessionManager.getSessionId() &&
+      !headlessKickoff.complete
+    )
+      headlessKickoff.providerChecked = false;
     if (!role || ctx.agent.kind !== "main" || typeof event !== "object" || event === null) return;
     nativeRemote.event("before_agent_start", event, ctx);
     if (role === "lane") await discordLane.beforeAgentStart?.(event, ctx);
     const original = "systemPrompt" in event ? event.systemPrompt : undefined;
     if (!Array.isArray(original) || !original.every((block) => typeof block === "string")) return;
-    const invariant = ROLE_INVARIANTS[role];
+    const invariant = role === "cataly" && !isLead() ? DUTY_INVARIANTS : ROLE_INVARIANTS[role];
     const withRole = original.includes(invariant) ? original : [...original, invariant];
     const systemPrompt = role === "lane" ? (withLaneBookkeeping(withRole, ctx.model) ?? withRole) : withRole;
     if (systemPrompt !== original) return { systemPrompt };
@@ -1159,6 +1300,12 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       throw requiredLoadError;
     }
     assertLaunchModel(ctx);
+    if (
+      ctx.agent.kind === "main" &&
+      headlessKickoff?.sessionId === ctx.sessionManager.getSessionId() &&
+      goal.status === "active"
+    )
+      headlessKickoff.providerChecked = true;
     if (role === "lane" && ctx.agent.kind === "main") discordLane.beforeProviderRequest?.(ctx);
   });
 
@@ -1185,8 +1332,8 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       restart: z.enum(["on-failure"]).optional().describe("retry unexpected exits for this monitor only (start)"),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (role !== "dori" || ctx.agent.kind !== "main" || !session)
-        throw new Error("monitor works only in the Dori session (omp --dori-role dori)");
+      if (!isLead() || ctx.agent.kind !== "main" || !session)
+        throw new Error("monitor works only in the Cataly session (omp --cataly-role cataly)");
       let text: string;
       if (params.op === "start") {
         if (!params.name || !params.argv || params.filter === undefined)
@@ -1241,9 +1388,9 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
   });
 
   pi.registerTool<{ kind: ReportKind; text: string; files?: string[]; toolCalls?: string[] }>({
-    name: "dori_report",
-    label: "Dori report",
-    description: DORI_REPORT_DESCRIPTION,
+    name: "cataly_report",
+    label: "Cataly report",
+    description: CATALY_REPORT_DESCRIPTION,
     defaultInactive: true,
     loadMode: "essential",
     parameters: z.object({
@@ -1260,9 +1407,9 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (!isCurrentLane(ctx))
-        throw new ReportError("dori_report works only in a lane's main session (omp --dori-role lane)");
+        throw new ReportError("cataly_report works only in a lane's main session (omp --cataly-role lane)");
       if (stateDir === undefined || requiredLoadError)
-        throw new ReportError(`dori_report needs the Dori config: ${loadError ?? "not loaded"}`);
+        throw new ReportError(`cataly_report needs the Cataly config: ${loadError ?? "not loaded"}`);
       const activation = evidenceActivation;
       const source = ctx.sessionManager.getSessionId();
       const ownRef = selfSession(process.env);
@@ -1277,7 +1424,7 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
         throw new ReportError("no open lane is registered unambiguously for this pane");
       const requireCurrentSession = () => {
         if (activation !== evidenceActivation || !isCurrentLane(ctx) || source !== ctx.sessionManager.getSessionId())
-          throw new ReportError("dori_report lane session changed before acceptance");
+          throw new ReportError("cataly_report lane session changed before acceptance");
       };
       requireCurrentSession();
       // Capture evidence before contending for the writer lock. Refused files or calls record no report.
@@ -1306,7 +1453,7 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
           (toolEvidenceTip && !ctx.sessionManager.getBranch().includes(toolEvidenceTip)) ||
           toolCalls.some((id) => callDirs.get(id) === null)
         )
-          throw new ReportError("dori_report tool evidence changed before acceptance");
+          throw new ReportError("cataly_report tool evidence changed before acceptance");
         const ref = current && sessionOf(current);
         if (
           !current ||
@@ -1318,10 +1465,10 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
           ref.runtime !== ownRef.runtime ||
           ref.id !== ownRef.id
         )
-          throw new ReportError("dori_report lane registration changed before acceptance");
+          throw new ReportError("cataly_report lane registration changed before acceptance");
         if (ref.runtime === "headless") {
           if (headlessRemoteId(ctx, role) !== `headless:${ref.id}`)
-            throw new ReportError("dori_report lane session does not own the registered headless runtime");
+            throw new ReportError("cataly_report lane session does not own the registered headless runtime");
         } else {
           const pane = readPaneState(reports.stateDir, ref.id);
           if (
@@ -1330,16 +1477,16 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
             pane.sessionId !== source ||
             pane.startedAt !== session?.startedAt
           )
-            throw new ReportError("dori_report lane session does not own the registered terminal");
+            throw new ReportError("cataly_report lane session does not own the registered terminal");
         }
         if (
           (current.session !== undefined && current.session !== source) ||
           (askLane?.sessionId === source && askLane.key !== current.key)
         )
-          throw new ReportError("dori_report lane registration belongs to another native session");
+          throw new ReportError("cataly_report lane registration belongs to another native session");
         const execution = runContext(reports, current, reportRun);
         if (!execution || execution.generation !== current.lifecycleEpoch)
-          throw new ReportError("dori_report has no matching registered execution");
+          throw new ReportError("cataly_report has no matching registered execution");
         const provenance = execution.provenance;
         if (current.requestId !== undefined || reportRun) {
           const native = provenance?.nativeRef;
@@ -1353,7 +1500,7 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
             native.ref.runtime !== ref.runtime ||
             native.ref.id !== ref.id
           )
-            throw new ReportError("dori_report requires the registered execution's verified native session");
+            throw new ReportError("cataly_report requires the registered execution's verified native session");
         }
         const scope = reportScope(current);
         const novel = novelEvidence(
@@ -1423,7 +1570,7 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
   });
 
   try {
-    const config = await loadConfig();
+    const config = await loadConfig(installation.configFile, undefined, installation.env);
     stateDir = config.stateDir;
     // An empty ompUlwPath means a standalone omp-ulw extension already serves every session; importing it again
     // would register its commands and handlers twice.
@@ -1444,7 +1591,7 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
     }
   } catch (error) {
     if (error instanceof SourceBundleError) requiredLoadError = error;
-    loadError = `Dori config not loaded (${errorText(error)}); omp-ulw and pane state are off`;
+    loadError = `Cataly config not loaded (${errorText(error)}); omp-ulw and pane state are off`;
   }
-  pi.setLabel("omp-dori");
+  pi.setLabel("omp-cataly");
 }

@@ -1,20 +1,20 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { takeLock } from "../../skills/dori-mode/scripts/src/checkpoint-lock.ts";
-import { openOwes } from "../../skills/dori-mode/scripts/src/owes.ts";
+import { takeLock } from "../../skills/cataly-mode/scripts/src/checkpoint-lock.ts";
+import { openOwes } from "../../skills/cataly-mode/scripts/src/owes.ts";
 import { BATCH_MS, Monitors } from "../monitor.ts";
 import { recordedMonitorStates } from "../monitor-state.ts";
 import { load, until, useConfig } from "./fake-pi.ts";
 
 const inbound = 'INBOUND discord 20 100 from=owner ref=- "question"';
 afterEach(() => {
-  delete process.env.DORI_CONFIG;
+  delete process.env.CATALY_CONFIG;
 });
 
 test("once completion waits for real owner admission before sealing", async () => {
   const root = useConfig(join(import.meta.dir, "fake-ulw.ts"));
-  const pi = await load({ session: { id: "owner", entries: [] }, flags: { "dori-role": "dori" } });
+  const pi = await load({ session: { id: "owner", entries: [] }, flags: { "cataly-role": "cataly" } });
   await pi.emit("session_start");
   mkdirSync(join(root, "owes"), { recursive: true, mode: 0o700 });
   const lock = takeLock(join(root, "owes", "inbound.jsonl.lock"), Date.now(), (message) => new Error(message));
@@ -61,7 +61,7 @@ test("once completion waits for real owner admission before sealing", async () =
 
 test("failed owner admission retains unfinished once intent", async () => {
   const root = useConfig(join(import.meta.dir, "fake-ulw.ts"));
-  const pi = await load({ session: { id: "owner", entries: [] }, flags: { "dori-role": "dori" } });
+  const pi = await load({ session: { id: "owner", entries: [] }, flags: { "cataly-role": "cataly" } });
   await pi.emit("session_start");
   writeFileSync(join(root, "owes"), "block admission storage");
   try {

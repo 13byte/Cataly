@@ -1,7 +1,7 @@
 import { expect, test as bunTest } from "bun:test";
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { writePaneState } from "../skills/dori-mode/scripts/src/lane-state.ts";
+import { writePaneState } from "../skills/cataly-mode/scripts/src/lane-state.ts";
 import { platform } from "../src/platform/index.ts";
 import { saveDeploymentJson } from "../src/update/deployment-files.ts";
 import { DeploymentHeld, sameProcess } from "../src/update/deployment-process.ts";

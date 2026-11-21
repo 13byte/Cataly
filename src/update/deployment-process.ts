@@ -55,7 +55,7 @@ export function underProcess(pid: number, root: number): boolean {
   return false;
 }
 
-/** The prepared parent and its descendants use the same fence and pinned Dori extension. */
+/** The prepared parent and its descendants use the same fence and pinned Cataly extension. */
 export function managedOmpCommand(toolchain: ToolchainReceipt, source: string | undefined): readonly string[] {
   if (toolchain.ompUlw && source !== toolchain.ompUlw.source)
     throw new DeploymentHeld("managed extension source differs from its prepared toolchain");
@@ -73,22 +73,22 @@ export function actorEnv(config: DeploymentConfig, toolchain?: ToolchainReceipt)
     HOME: config.home,
     PATH: [
       dirname(toolchain?.bun ?? config.bun),
-      dirname(toolchain?.omp ?? config.omp ?? join(config.doriHome, "bin/omp")),
+      dirname(toolchain?.omp ?? config.omp ?? join(config.catalyHome, "bin/omp")),
       dirname(runtimeBinary(config)),
-      join(config.doriHome, "bin"),
+      join(config.catalyHome, "bin"),
       join(config.home, ".bun", "bin"),
       "/usr/bin",
       "/bin",
     ].join(":"),
     TERM: "xterm-256color",
     LANG: "C.UTF-8",
-    DORI_HOME: config.doriHome,
-    DORI_CONFIG: config.doriConfig,
-    DORI_STATE_DIR: config.stateDir,
+    CATALY_HOME: config.catalyHome,
+    CATALY_CONFIG: config.catalyConfig,
+    CATALY_STATE_DIR: config.stateDir,
     ...(toolchain?.nativeSource || toolchain?.nativeOverride
-      ? { DORI_AGENT_ARGV: JSON.stringify(managedOmpCommand(toolchain, toolchain.ompUlw?.source)) }
+      ? { CATALY_AGENT_ARGV: JSON.stringify(managedOmpCommand(toolchain, toolchain.ompUlw?.source)) }
       : {}),
-    ...(toolchain?.ompUlw ? { DORI_OMP_ULW_PATH: join(toolchain.ompUlw.directory, "index.ts") } : {}),
+    ...(toolchain?.ompUlw ? { CATALY_OMP_ULW_PATH: join(toolchain.ompUlw.directory, "index.ts") } : {}),
     ...(process.env["OMP_ULW_SCOPE_FILE"] === undefined
       ? {}
       : { OMP_ULW_SCOPE_FILE: process.env["OMP_ULW_SCOPE_FILE"] }),
@@ -97,9 +97,9 @@ export function actorEnv(config: DeploymentConfig, toolchain?: ToolchainReceipt)
       : {
           HERDR_PANE_ID: config.pane,
           HERDR_WORKSPACE_ID: config.pane.slice(0, config.pane.indexOf(":")),
-          ...(config.herdrSession ? { DORI_HERDR_SESSION: config.herdrSession } : {}),
+          ...(config.herdrSession ? { CATALY_HERDR_SESSION: config.herdrSession } : {}),
         }),
-    DORI_TELEMETRY: "0",
+    CATALY_TELEMETRY: "0",
     DO_NOT_TRACK: "1",
   };
 }

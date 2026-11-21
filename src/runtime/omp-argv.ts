@@ -1,4 +1,4 @@
-// What a configured argv runs: OMP's launch forms behind the prefixes Dori reads. Process lines are omp.ts's.
+// What a configured argv runs: OMP's launch forms behind the prefixes Cataly reads. Process lines are omp.ts's.
 import { platform } from "../platform/index.ts";
 import { OMP_EXECUTABLE, sourceOmpArgv } from "./omp.ts";
 import { ASSIGNMENT, envCommandAt, LAUNCHERS, launcherCommandAt, RUNNER, RUNNERS, SHELLS } from "./omp-prefixes.ts";
@@ -30,7 +30,7 @@ const names = (words: readonly string[]): boolean => {
   });
 };
 // OMP's package, by name or alias (`npm:@oh-my-pi/pi-coding-agent@1`, `x@npm:…`): its only bin is omp. A package
-// manager form Dori does not read exactly (`npm --silent exec`, `pnpm dlx`, an alias) that names it is unreadable.
+// manager form Cataly does not read exactly (`npm --silent exec`, `pnpm dlx`, an alias) that names it is unreadable.
 const OMP_PACKAGE_MENTION = /(?:^|[\s:=])@oh-my-pi\/pi-coding-agent(?:@|\s|$)/;
 const runsOmpPackage = (argv: readonly string[]): boolean =>
   argv.some((_, at) => isRunner(argv, at)) && argv.some((word) => OMP_PACKAGE_MENTION.test(word));
@@ -69,6 +69,7 @@ function prefixEnd(argv: readonly string[]): {
     while (ASSIGNMENT.test(argv[at] ?? "")) at++;
     const word = platform.programName(argv[at] ?? "");
     const subcommand = argv[at + 1];
+    const sideWrapper = word === "omp-cataly" || word === "omp-dori";
     // Bun's command word can be `x`; an `x` after a script is that script's data, not a package runner.
     const bunCommand = word === "bun" ? argv.slice(at + 1).find((arg) => !arg.startsWith("-")) : undefined;
     if (LAUNCHERS[word]?.forks || RUNNERS.includes(word) || bunCommand === "x") forking ??= word;
@@ -84,14 +85,14 @@ function prefixEnd(argv: readonly string[]): {
       [next, runner] = [launcherCommandAt(argv, at + 2, RUNNER), true];
       // npm parses even trailing options unless its command immediately follows `--`; inserted OMP guards would vanish.
       if (word === "npm" && next !== undefined && argv[next - 1] !== "--") next = undefined;
-    } else if (word === "omp-dori" && subcommand === "omp") {
+    } else if (sideWrapper && subcommand === "omp") {
       // The side wrapper's `omp` subcommand runs this home's OMP with the arguments that follow.
       next = at + 1;
     } else return { at, launched, forking };
     if (next === undefined) return { at, launched, stuck: word, forking };
     at = next;
     launched ||= word !== "env";
-    if (word === "omp-dori") return { at, launched, forking };
+    if (sideWrapper) return { at, launched, forking };
     // A runner's package spec names the package whose bin it runs: OMP's package runs OMP (its only bin).
     if (runner && OMP_PACKAGE.test(argv[at] ?? "")) return { at, launched, runner: true, forking };
   }
@@ -109,11 +110,11 @@ export function classifyOmpArgv(argv: readonly string[]): OmpArgv {
   }
   const command = argv.slice(at);
   const classified = classifyCommand(command);
-  // A launcher option Dori misread (`timeout --unknown 5 600 omp`) leaves a command that only names OMP: refuse it
+  // A launcher option Cataly misread (`timeout --unknown 5 600 omp`) leaves a command that only names OMP: refuse it
   // rather than drop the guard. An external wrapper behind a launcher must declare its engine the same way, as must a
   // command handed OMP's path in a removed assignment (`env OMP_BIN=/x/omp sh -c 'exec "$OMP_BIN"'`).
   if (classified.kind !== "other") return classified;
-  // A package manager running a command (`pnpm exec omp`) is read like a launcher Dori cannot fully parse.
+  // A package manager running a command (`pnpm exec omp`) is read like a launcher Cataly cannot fully parse.
   return ((launched || isRunner(command, 0)) && (names(command) || runsOmpPackage(argv))) || assignsOmp(argv, at)
     ? { kind: "unparsed" }
     : classified;
@@ -133,7 +134,7 @@ function classifyCommand(command: readonly string[]): OmpArgv {
   if (sourceOmpArgv(command)) return { kind: "omp", command, argsAt: command[3] === "--preload" ? 6 : 4 };
   const name = platform.programName(command[0] ?? "");
   if (isOmpExecutable(command[0] ?? "")) return { kind: "omp", command, argsAt: 1 };
-  // A shell runs a script Dori cannot read: one that names OMP must declare its engine.
+  // A shell runs a script Cataly cannot read: one that names OMP must declare its engine.
   if (SHELLS.has(name)) return names(command) ? { kind: "unparsed" } : { kind: "other", command };
   if (name !== "bun" && name !== "node") return { kind: "other", command };
   let script = 1;

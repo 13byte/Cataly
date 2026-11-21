@@ -1,8 +1,11 @@
 import { writeFileSync } from "node:fs";
-import { discordInbound, formatDiscordInbound } from "../../skills/dori-mode/scripts/src/messenger/discord-inbound.ts";
-import { discordInboundQueue } from "../../skills/dori-mode/scripts/src/messenger/discord-inbound-queue.ts";
-import { headEmitter, reconcileHead } from "../../skills/dori-mode/scripts/src/messenger/head-admission.ts";
-import { discordRestWorld, ownerMessage } from "../../skills/dori-mode/scripts/test/discord-inbound-fakes.ts";
+import {
+  discordInbound,
+  formatDiscordInbound,
+} from "../../skills/cataly-mode/scripts/src/messenger/discord-inbound.ts";
+import { discordInboundQueue } from "../../skills/cataly-mode/scripts/src/messenger/discord-inbound-queue.ts";
+import { headEmitter, reconcileHead } from "../../skills/cataly-mode/scripts/src/messenger/head-admission.ts";
+import { discordRestWorld, ownerMessage } from "../../skills/cataly-mode/scripts/test/discord-inbound-fakes.ts";
 
 const [stateDir, exitFile, mode] = process.argv.slice(2);
 if (!stateDir || !exitFile) throw new Error("receiver fixture needs its isolated queue and exit marker");

@@ -13,7 +13,7 @@ import { nativeExtensionFactory } from "./compose.ts";
 export async function requiredSourceRequest(
   entry: string,
   cwd: string,
-  role: "lane" | "dori" | undefined,
+  role: "lane" | "cataly" | undefined,
   boundary: "session" | "provider",
   launchModel?: string,
 ): Promise<{ requests: number; errors: Array<{ event: string; error: string }> }> {
@@ -70,7 +70,7 @@ export async function requiredSourceRequest(
     if (launchModel)
       registry.registerProvider(model.provider, { api: model.api, baseUrl: model.baseUrl, apiKey: "local-fixture-only", models: [model] });
     const manager = SessionManager.inMemory(cwd);
-    if (role) manager.appendCustomEntry("omp-dori:role", role);
+    if (role) manager.appendCustomEntry("omp-cataly:role", role);
     ({ session } = await createAgentSession({
       cwd,
       agentDir: join(cwd, "agent"),
@@ -88,7 +88,7 @@ export async function requiredSourceRequest(
       extensions: [async (api) => factory(launchModel ? new Proxy(api, {
         get(target, key) {
           return key === "getFlag"
-            ? (name: string) => name === "dori-launch-model" ? launchModel : target.getFlag(name)
+            ? (name: string) => name === "cataly-launch-model" ? launchModel : target.getFlag(name)
             : Reflect.get(target, key);
         },
       }) : api)],

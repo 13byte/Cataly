@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import { runContext } from "../skills/dori-mode/scripts/src/lane-run.ts";
-import { launchLane } from "../skills/dori-mode/scripts/src/launch.ts";
-import { parkLane } from "../skills/dori-mode/scripts/src/park.ts";
-import { Reports } from "../skills/dori-mode/scripts/src/reports.ts";
-import { reopenLane } from "../skills/dori-mode/scripts/src/reopen.ts";
+import { runContext } from "../skills/cataly-mode/scripts/src/lane-run.ts";
+import { launchLane } from "../skills/cataly-mode/scripts/src/launch.ts";
+import { parkLane } from "../skills/cataly-mode/scripts/src/park.ts";
+import { Reports } from "../skills/cataly-mode/scripts/src/reports.ts";
+import { reopenLane } from "../skills/cataly-mode/scripts/src/reopen.ts";
 import { HeadlessRuntime } from "../src/runtime/headless.ts";
 import type { SessionRef } from "../src/runtime/types.ts";
 import { headlessFixture, noExternal } from "./fixtures/runtime-headless.ts";

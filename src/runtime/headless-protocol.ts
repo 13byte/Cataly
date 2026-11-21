@@ -1,6 +1,9 @@
 import type { AgentStatus, DeliverOptions, Probe, SessionRef } from "./types.ts";
 import type { HeadlessRemoteRequest } from "./headless-remote.ts";
 
+export type NativeHarnessRole = "lead" | "duty";
+export type NativeLoopRole = "duty-loop" | "hourly-loop";
+
 export type HeadlessGoal = {
   readonly status: "none" | "active" | "paused" | "complete" | "dropped" | "blocked";
   readonly objective?: string;
@@ -39,7 +42,8 @@ export type HeadlessObservation = {
   readonly updatedAt: string;
   readonly status: AgentStatus;
   readonly pid?: number;
-  readonly role?: "lane";
+  readonly role?: "lane" | "cataly";
+  readonly harnessRole?: NativeHarnessRole | NativeLoopRole;
   readonly sessionId?: string;
   readonly sessionFile?: string;
   readonly goal?: HeadlessGoal;
@@ -77,6 +81,7 @@ export const headlessRead = (seen: HeadlessObservation, lines: number): string =
 export type HeadlessRequest =
   | HeadlessRemoteRequest
   | { readonly op: "observe" }
+  | { readonly op: "stop-loop" }
   | { readonly op: "begin"; readonly expectedSessionId: string; readonly objective: string }
   | { readonly op: "deliver"; readonly text: string; readonly options: DeliverOptions }
   | { readonly op: "goal"; readonly expectedSessionId: string; readonly target: "paused" | "active" }
@@ -98,7 +103,7 @@ export const modelOf = (value: unknown): string | undefined => {
   const model = object(value);
   const provider = string(model?.["provider"]);
   const id = string(model?.["id"]);
-  return provider && id ? `${provider}/${id}` : undefined;
+  return provider && !provider.includes("/") && id ? `${provider}/${id}` : undefined;
 };
 
 export const entryOf = (frame: Record<string, unknown>): HeadlessEntry | undefined => {

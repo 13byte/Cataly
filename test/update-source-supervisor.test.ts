@@ -22,8 +22,8 @@ import { appendFileSync, mkdirSync, readFileSync, renameSync, symlinkSync } from
 const calls = ${JSON.stringify(calls)};
 const count = readFileSync(calls, "utf8").split("\n").filter(Boolean).length;
 appendFileSync(calls, JSON.stringify({ args: process.argv.slice(2), env: {
-  gh: process.env.GH_TOKEN, github: process.env.GITHUB_TOKEN, discord: process.env.DORI_DISCORD_TOKEN, sudo: process.env.SUDO_USER,
-  telemetry: process.env.DORI_TELEMETRY, tracking: process.env.DO_NOT_TRACK,
+  gh: process.env.GH_TOKEN, github: process.env.GITHUB_TOKEN, discord: process.env.CATALY_DISCORD_TOKEN, sudo: process.env.SUDO_USER,
+  telemetry: process.env.CATALY_TELEMETRY, tracking: process.env.DO_NOT_TRACK,
 } }) + "\n");
 if (${options.handoff === true}) {
   const previous = ${JSON.stringify(join(f.root, "previous-controller"))};
@@ -57,7 +57,7 @@ process.exit(codes[count] ?? 2);
         PATH: process.env["PATH"],
         GH_TOKEN: "fixture-gh",
         GITHUB_TOKEN: "fixture-github",
-        DORI_DISCORD_TOKEN: "fixture-discord",
+        CATALY_DISCORD_TOKEN: "fixture-discord",
         SUDO_USER: "fixture-sudo",
       },
       stdin: "ignore",
@@ -89,12 +89,12 @@ process.exit(codes[count] ?? 2);
 posix("source supervisor runs only idle source apply and resumes durable recovery on a wakeup", async () => {
   const f = await supervise([6, 2]);
   expect(f.code).toBe(2);
-  expect(f.stdout).toContain("DORI_SUPERVISOR_READY");
+  expect(f.stdout).toContain("CATALY_SUPERVISOR_READY");
   expect(f.stderr).toContain("source=recovery-pending");
   expect(f.invocations).toHaveLength(2);
   for (const invocation of f.invocations) {
     expect(invocation.args).toEqual([
-      join(f.config.deployment.liveSource, "skills/dori-mode/scripts/src/cli.ts"),
+      join(f.config.deployment.liveSource, "skills/cataly-mode/scripts/src/cli.ts"),
       "update",
       "source",
       "apply",
@@ -123,6 +123,6 @@ for (const options of [{ wrongController: true }, { mode: "unknown" }, { unprote
       const f = await supervise([0], options);
       expect(f.code).toBe(2);
       expect(f.invocations).toHaveLength(0);
-      expect(f.stdout).not.toContain("DORI_SUPERVISOR_READY");
+      expect(f.stdout).not.toContain("CATALY_SUPERVISOR_READY");
     },
   );
