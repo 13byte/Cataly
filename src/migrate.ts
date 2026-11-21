@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { need, one, USAGE, type Args } from "./cli-args.ts";
 import { shq } from "./delivery.ts";
 import {
@@ -14,6 +15,7 @@ import { Refusal } from "./refusal.ts";
 import { askCheckpoint, capture, type MigrateOpts, type Subject } from "./migrate-capture.ts";
 import { swapAgent, swapLoop } from "./migrate-swap.ts";
 import { refText } from "./refs.ts";
+import { readRuntimeChoice } from "./runtime/select.ts";
 import type { SessionRef } from "./runtime/types.ts";
 import {
   createJournal,
@@ -165,6 +167,11 @@ export async function migrate(d: Deps, t: Target, opts: MigrateOpts): Promise<nu
       : [];
   const roles = t.all ? [...AGENT_ROLES, ...LOOP_ROLES] : t.role ? [t.role] : [];
   if (lanes.length + roles.length === 0) throw new Refusal(`give --lane K, --role R or --all\n\n${USAGE}`);
+  const registeredRoles = d.store.roles();
+  for (const role of roles) {
+    if (registeredRoles[role]?.runtime === "headless")
+      throw new Refusal(`headless role ${role} cannot migrate to a terminal; use cataly harness stop first`);
+  }
   let code = 0;
   for (const key of lanes) {
     const lane = d.store.lane(key);
@@ -172,7 +179,7 @@ export async function migrate(d: Deps, t: Target, opts: MigrateOpts): Promise<nu
     code = Math.max(code, await migrateName(d, key, lane.sessionRef, opts, () => laneSubject(d, key)));
   }
   for (const role of roles) {
-    const ref = d.store.roles()[role];
+    const ref = registeredRoles[role];
     if (!ref) {
       if (t.all) continue;
       throw new Refusal(`no ${role} session registered`);
@@ -185,7 +192,13 @@ export async function migrate(d: Deps, t: Target, opts: MigrateOpts): Promise<nu
 const ROLE_NAMES: readonly Role[] = [...AGENT_ROLES, ...LOOP_ROLES];
 
 export async function runMigrate(d: Deps, a: Args): Promise<number> {
-  const to = one(a, "to") ?? d.choice().kind;
+  const to =
+    one(a, "to") ??
+    readRuntimeChoice({
+      env: process.env,
+      configPath: process.env["CATALY_CONFIG"] ?? join(d.store.root, "config.json"),
+      terminalOnly: true,
+    }).kind;
   if (to !== "herdr" && to !== "hc") throw new Refusal(`--to must be herdr or hc`);
   const role = one(a, "role") as Role | undefined;
   if (role !== undefined && !ROLE_NAMES.includes(role))

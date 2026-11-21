@@ -36,6 +36,7 @@ const ROOT_RUNTIME: Readonly<Record<string, true>> = {
   ".qa-home": true,
   evidence: true,
 };
+const NATIVE_OUTPUT: Readonly<Record<string, true>> = { target: true, ".cataly-native": true };
 const ULW_LIBRARY = "ref/omp-ulw";
 const excluded = (path: string): boolean => {
   const parts = path.split("/");
@@ -43,6 +44,7 @@ const excluded = (path: string): boolean => {
   if (parts[0] === "ref" && path !== "ref" && !library) return true;
   const relative = library ? parts.slice(2) : parts;
   return (
+    NATIVE_OUTPUT[path] === true ||
     (path !== "ref" && ROOT_RUNTIME[relative[0] ?? ""] === true) ||
     parts.some(
       (part) =>
@@ -65,6 +67,7 @@ export function assertSourceAdmission(manifest: SourceManifest, kind: SourceKind
       kind !== "local" ||
       !(
         path === "config.json" ||
+        NATIVE_OUTPUT[path] === true ||
         [".DS_Store", ".env", "auth.json", "credentials.json"].includes(name) ||
         /^\.env\.(?!example$|sample$)/.test(name) ||
         /\.(?:pem|key|p12|pfx)$/.test(name) ||
@@ -87,7 +90,7 @@ export function sourceManifest(root: string): SourceManifest {
       const full = join(root, path);
       const stat = lstatSync(full);
       if (excluded(path)) {
-        if ((name === ".git" || name === "node_modules") && !stat.isDirectory())
+        if ((name === ".git" || name === "node_modules" || NATIVE_OUTPUT[path] === true) && !stat.isDirectory())
           throw new UpdateError(`source metadata must be a real directory: ${path}`);
         omitted.push(path);
         continue;

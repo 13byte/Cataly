@@ -48,7 +48,9 @@ impl Store {
         let reader = match File::open(self.root.join(format!("{key}.json"))) {
             Ok(reader) => reader,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(if self.root.join(format!("{key}.starting")).try_exists()? {
+                let starting = self.root.join(format!("{key}.starting")).try_exists()?
+                    || self.root.join(format!("{key}.sessions")).try_exists()?;
+                return Ok(if starting {
                     Record::Starting
                 } else {
                     Record::New
@@ -68,18 +70,20 @@ impl Store {
     }
 
     pub fn reserve(&self, key: &str) -> Result<PathBuf> {
-        let dir = self.root.join(format!("{key}.sessions"));
-        DirBuilder::new()
-            .mode(0o700)
-            .create(&dir)
-            .context("reserving a fresh Cataly session directory")?;
         OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o600)
             .open(self.root.join(format!("{key}.starting")))?
             .sync_all()?;
-        File::open(&self.root)?.sync_all()?;
+        let root = File::open(&self.root)?;
+        root.sync_all()?;
+        let dir = self.root.join(format!("{key}.sessions"));
+        DirBuilder::new()
+            .mode(0o700)
+            .create(&dir)
+            .context("reserving a fresh Cataly session directory")?;
+        root.sync_all()?;
         Ok(dir)
     }
 

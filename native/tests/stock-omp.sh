@@ -100,6 +100,22 @@ jq -es '
 ' <<< "$held"
 test ! -e "$work/cataly/interrupted.sessions"
 
+# A session directory left by the pre-marker reservation order is also held.
+mkdir -m 700 "$work/cataly/orphaned.sessions"
+orphaned=$(
+  "${supervisor[@]}" <<'JSON'
+{"op":"status","key":"orphaned"}
+{"op":"open","key":"head"}
+{"op":"open","key":"orphaned"}
+JSON
+)
+jq -es '
+  .[0] == {state:"unconfirmed", key:"orphaned"} and
+  .[1].state == "open" and
+  (.[2].error | contains("unconfirmed start"))
+' <<< "$orphaned"
+test -z "$(ls -A "$work/cataly/orphaned.sessions")"
+
 # Keep the first controller alive while the second tries to take the same state.
 coproc OWNER { "${supervisor[@]}"; }
 owner_pid=$OWNER_PID

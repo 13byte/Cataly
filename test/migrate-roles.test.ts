@@ -46,6 +46,36 @@ describe("cataly migrate: roles and loops", () => {
     expect(w.hc.sent[0]!.text).toBe("cataly loop");
   });
 
+  test("bulk migration holds before opening a replacement when a headless role is registered", async () => {
+    const { d, opts, order } = rolesWorld();
+    const native = { runtime: "headless", id: "9fb0af3f-aad9-4384-b052-e5953b40d960" } as const;
+    d.store.setRole("hourly-loop", native);
+    expect(d.store.roles()["hourly-loop"]).toEqual(native);
+
+    await expect(migrate(d, { all: true }, opts())).rejects.toThrow(/headless role hourly-loop/);
+
+    expect(d.store.roles()["hourly-loop"]).toEqual(native);
+    expect(d.store.lane("k")?.sessionRef).toEqual(OLD);
+    expect(order()).toEqual([]);
+    expect(readJournal(d.store.root, "hourly-loop")).toBeUndefined();
+  });
+
+  test("a terminal migration preview uses the legacy runtime when --to is omitted", () => {
+    const { d } = rolesWorld();
+    const config = join(d.store.root, "config.json");
+    writeFileSync(config, JSON.stringify({ runtime: "hc" }));
+    const child = Bun.spawnSync(
+      [process.execPath, join(import.meta.dir, "../src/cli.ts"), "migrate", "--role", "hourly-loop", "--dry-run"],
+      { env: { PATH: process.env["PATH"], CATALY_HOME: d.store.root, CATALY_CONFIG: config } },
+    );
+
+    expect({ code: child.exitCode, message: child.stdout.toString().trim() }).toEqual({
+      code: 0,
+      message: "PLAN hourly-loop w1:p5 -> hc (inbox entries: 0)",
+    });
+    expect(d.store.roles()["hourly-loop"]).toEqual(href("w1:p5"));
+  });
+
   test("lead: handoff from its prompt file, roles.json switched, its inbox moved", async () => {
     const { w, d, lines, opts } = rolesWorld();
     const observation = "- (2026-11-19) Local profile migration marker.";
