@@ -10,3 +10,6 @@ node_modules
 ref/
 .qa-home/
 evidence/
+/target/
+/.cataly-native/
+__pycache__/

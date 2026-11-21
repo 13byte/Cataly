@@ -186,6 +186,27 @@ Side 모드는 기본적으로 `~/.omp-cataly`를 사용하며 기존 `~/.cataly
 새 세션에도 터미널을 쓰려면 `"sessionRuntime": "hc"` 또는 `"herdr"`를 지정하세요.
 이미 열린 터미널 세션은 기존 런타임 소유로 남습니다.
 
+### 순정 OMP용 Rust 컨트롤러 개발
+
+이 CLI는 위의 기본 소스 설치를 바꾸지 않습니다. Cargo로 빌드한 뒤 설치된
+`cataly` 명령과 충돌하지 않도록 바이너리 경로로 실행하세요.
+
+```bash
+cargo build --locked --release
+./target/release/cataly --omp "$(command -v omp)" doctor
+./target/release/cataly --omp "$(command -v omp)" harness --state-dir ./.cataly-native <<'JSON'
+{"op":"run","id":"request-1","key":"review","prompt":"이 작업을 한 문단으로 설명해줘."}
+{"op":"receipt","id":"request-1"}
+JSON
+```
+
+`doctor`는 프롬프트 없이 RPC를 점검하고 `resume`은 세션 파일과 ID가 정확히
+일치하는지 확인합니다. Unix에서 `harness`는 필요한 레인을 열고 별도 상태
+디렉터리에 저장한 세션을 다음 요청에서 재개합니다. `open`, `status`, `close`로
+상주 세션을 관리할 수도 있습니다. 같은 ID와 입력은 모델 재호출 없이 저장된
+결과를 반환하고, 결과가 불명확한 요청은 재실행하지 않습니다. `run`은 OMP에
+설정된 모델을 사용하며 현재 도구 실행·승인·메신저 회신 없이 텍스트만 반환합니다.
+
 <table width="100%"><tr><td>
 
 **중요**

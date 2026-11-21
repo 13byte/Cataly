@@ -199,6 +199,30 @@ follow CI-passing main with idle and quiet admission, same-session restart,
 monitor health, and rollback. This is separate from consumer release updates
 and the model-assisted `cataly upstream` workflow.
 
+### Develop the Rust controller for stock OMP
+
+This opt-in CLI does not change the default source installation above. Build
+it with Cargo, then run it by path so it does not replace an installed
+`cataly` command:
+
+```bash
+cargo build --locked --release
+./target/release/cataly --omp "$(command -v omp)" doctor
+./target/release/cataly --omp "$(command -v omp)" harness --state-dir ./.cataly-native <<'JSON'
+{"op":"run","id":"request-1","key":"review","prompt":"Explain the task in one paragraph."}
+{"op":"receipt","id":"request-1"}
+JSON
+```
+
+`doctor` probes RPC without submitting a prompt. `resume` verifies an exact
+OMP session file and ID. On Unix, `harness` starts a lane on demand and can
+resume it from a separate state directory on the next request. `open`, `status`,
+and `close` also manage resident sessions explicitly. Repeating a request ID
+with the same input retrieves the stored receipt without another model call;
+uncertain requests are held, not replayed. `run` uses the configured OMP model
+and currently returns text only. It does not handle tools, approvals, or
+messenger delivery.
+
 <table width="100%"><tr><td>
 
 **Important**
