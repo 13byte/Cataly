@@ -208,6 +208,7 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
           acts.push({ kind: "stalled", lane: lane.key, detail: progress.lastEvent.text });
         }
         if (!supervisedHung) return;
+        if (incompleteSample && supervisionError !== undefined && previous?.state === "stalled") return;
       }
       // An idle host without a goal may be a registered launch whose kickoff never landed.
       const nudgeObservation =
