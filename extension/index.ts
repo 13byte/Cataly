@@ -12,13 +12,17 @@
  * - Lanes without a goal get omp's `goal` tool so the agent can create its goal from the lane brief.
  * - The Dori session gets the `monitor` tool (monitor.ts).
  * - Root Dori/lane agents get compact role guidance on each turn; children do not.
+ * - A lane's main agent gets the `dori_report` tool: `dori report` for the lane registered to its pane, with evidence
+ *   it selects fingerprinted here, including completed tool results on its current branch, which the CLI cannot read.
  * - A lane's main agent on GPT-6.1 Sol is told to carry lane bookkeeping along with real work (lane-bookkeeping.ts).
  */
 import { spawnSync } from "node:child_process";
 import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { Checkpoints } from "../skills/dori-mode/scripts/src/checkpoints.ts";
 import { loadConfig } from "../skills/dori-mode/scripts/src/config";
-import { SourceBundleError } from "../src/release/source-bundle.ts";
+import { EvidenceError, fileEvidence, novelEvidence } from "../skills/dori-mode/scripts/src/evidence.ts";
+import { runContext } from "../skills/dori-mode/scripts/src/lane-run.ts";
 import {
   type DoriRole,
   type GoalStatus,
@@ -29,6 +33,22 @@ import {
   readPaneState,
   writePaneState,
 } from "../skills/dori-mode/scripts/src/lane-state";
+import {
+  Registry,
+  RESERVED_LANE_KEY,
+  sameLaneGeneration,
+  sessionOf,
+} from "../skills/dori-mode/scripts/src/registry.ts";
+import { ReportError } from "../skills/dori-mode/scripts/src/report-events.ts";
+import { type ReportKind, Reports, reportLine, reportScope } from "../skills/dori-mode/scripts/src/reports.ts";
+import {
+  COMPLETION_ENTRY,
+  type Completion,
+  completionReceipt,
+  toolEvidence,
+} from "../skills/dori-mode/scripts/src/tool-evidence.ts";
+import { SourceBundleError } from "../src/release/source-bundle.ts";
+import { selfSession } from "../src/runtime/registry.ts";
 import type { MonitorSpec } from "../src/update/deployment-types.ts";
 import { bootstrapMonitors, MONITOR_BOOTSTRAP_FLAG, recordedIntake } from "./bootstrap.ts";
 import { RuntimeHealthWriter } from "./deployment-health.ts";
@@ -48,6 +68,8 @@ interface SessionEntry {
   customType?: string;
   data?: unknown;
   mode?: string;
+  /** A `message` entry's native message (toolResult, assistant tool calls); read only by dori_report evidence. */
+  message?: unknown;
   content?: unknown;
 }
 export interface DoriContext {
@@ -114,6 +136,15 @@ interface Schema {
   describe(description: string): Schema;
 }
 type Handler = (event: unknown, ctx: DoriContext) => unknown;
+/** OMP's tool_execution_start/update/end events, read only for the start cwd and background job completions. */
+type ToolEvent = {
+  toolCallId?: unknown;
+  toolName?: unknown;
+  partialResult?: unknown;
+  result?: unknown;
+  isError?: unknown;
+};
+type ToolFrame = { details?: { async?: { state?: unknown; jobId?: unknown } } } | null | undefined;
 export interface DoriApi {
   zod: {
     object(shape: Record<string, Schema>): Schema;
@@ -268,6 +299,19 @@ const recordedMonitors = (branch: readonly SessionEntry[]): Map<string, MonitorS
 
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
+const DORI_REPORT_DESCRIPTION = [
+  "Record a lane report in its journal, as `dori report` does, and return the [REPORT] line to forward to the lead.",
+  "Attach the evidence the report rests on: `files` whose current bytes it describes, and `toolCalls`, the ids of",
+  "completed, successful tool calls on this session whose results show it (a call that started a background job, once",
+  "that job completed successfully). Only evidence not recorded before moves",
+  "the lane's evidence clock: rewording a report, repeating it, touching a file or rerunning a call with the same",
+  "result does not. Reports, messages and other coordination calls are not evidence. A command needs its recorded",
+  "start directory or the host-resolved explicit cwd; select file evidence if that information is unavailable.",
+  "For a launched request, tool evidence must come from calls observed in that execution.",
+  "Native eval run events omit their execution directory, and async eval frames omit image bytes. Select files",
+  "or a direct Bash result for those calls rather than repeating an already completed effect.",
+].join(" ");
+
 export default async function ompDori(pi: DoriApi): Promise<void> {
   pi.registerFlag(ROLE_FLAG, {
     description: "Run as a Dori-mode session: dori (the messenger session) or lane; kept on resume",
@@ -297,6 +341,7 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
   let session:
     | {
         id: string;
+        agentId: string;
         startedAt: string;
         monitorSpecs?: readonly MonitorSpec[];
         intake?: ReturnType<typeof recordedIntake>;
@@ -340,6 +385,18 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
     ctx.abort();
     throw new Error(`STARTUP_MODEL_HOLD: exact launch model ${readback.status}; no automatic substitution`);
   };
+  const reportRun = process.env["DORI_LANE_RUN"];
+  // These observations belong to the active root session, not to all events running in the same process.
+  const callDirs = new Map<string, string | null>();
+  const backgroundCalls = new Map<
+    string,
+    {
+      name: string;
+      cwd: string;
+      job?: string;
+      pending: Map<string, { receipt: Completion; leaf: SessionEntry } | null>;
+    }
+  >();
   let goal: PaneState["goal"] = { status: "none" };
   let startupPause: StartupGoalPause | undefined;
   let agentStatus: "idle" | "working" = "idle";
@@ -350,6 +407,13 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
   const discordLane = new DiscordLane();
   const nativeRemote = new NativeRemote(pi);
   let remoteActivation = 0;
+  let evidenceActivation: number | undefined;
+  const isCurrentLane = (ctx: DoriContext): boolean =>
+    role === "lane" &&
+    evidenceActivation === remoteActivation &&
+    ctx.agent.kind === "main" &&
+    session?.agentId === ctx.agent.id &&
+    session.id === ctx.sessionManager.getSessionId();
   let askLane: AskLane | undefined;
   let ownsDiscordReceiver = false;
   let managedRestorePending = process.env.DORI_MANAGED_STARTUP === "1";
@@ -565,6 +629,8 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
     const next = new Set(active);
     if (role === "dori") next.add("monitor");
     else next.delete("monitor");
+    if (role === "lane") next.add("dori_report");
+    else next.delete("dori_report");
     // A session with its own goal keeps whatever omp decided. omp does not take the tool back when the session
     // changes, so ours is removed from any later goal-less session that is not a lane.
     if (goal.status === "none" && role === "lane") {
@@ -651,6 +717,8 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
     pi.on("session_shutdown", (_event, ctx) => {
       if (ctx.agent.kind === "main") {
         remoteActivation++;
+        backgroundCalls.clear();
+        callDirs.clear();
         nativeRemote.stop();
         headContext?.ui.setStatus?.("dori-head-admission", undefined);
         headContext = undefined;
@@ -659,6 +727,57 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
       discordAsk.clear();
       monitors.stopAll();
       retirePane();
+    });
+    // A terminal frame can precede the returned job ID. Keep only its fingerprint/refusal pending that binding.
+    pi.on("tool_execution_update", (event, ctx) => {
+      const { toolCallId, toolName, partialResult } = event as ToolEvent;
+      if (!isCurrentLane(ctx) || typeof toolCallId !== "string") return;
+      const started = backgroundCalls.get(toolCallId);
+      const job = (partialResult as ToolFrame)?.details?.async;
+      if (!started || started.name !== toolName || typeof job?.jobId !== "string" || job.jobId === "") return;
+      if (job.state !== "completed" && job.state !== "failed" && job.state !== "cancelled") return;
+      if (started.job !== undefined && started.job !== job.jobId) return;
+      const branch = ctx.sessionManager.getBranch();
+      const receipt = completionReceipt(branch, toolCallId, toolName, partialResult, started.cwd);
+      if (started.job === undefined) {
+        const leaf = branch.at(-1);
+        if (!started.pending.has(job.jobId)) started.pending.set(job.jobId, receipt && leaf ? { receipt, leaf } : null);
+        return;
+      }
+      backgroundCalls.delete(toolCallId);
+      if (receipt) pi.appendEntry(COMPLETION_ENTRY, receipt);
+    });
+    pi.on("tool_execution_start", (event, ctx) => {
+      const { toolCallId, toolName } = event as ToolEvent;
+      if (!isCurrentLane(ctx) || typeof toolCallId !== "string" || typeof toolName !== "string") return;
+      if (callDirs.has(toolCallId)) {
+        // The native branch cannot disambiguate repeated IDs within the same session.
+        callDirs.set(toolCallId, null);
+        backgroundCalls.delete(toolCallId);
+        return;
+      }
+      callDirs.set(toolCallId, ctx.cwd);
+      backgroundCalls.set(toolCallId, { name: toolName, cwd: ctx.cwd, pending: new Map() });
+    });
+    pi.on("tool_execution_end", (event, ctx) => {
+      const { toolCallId, toolName, result, isError } = event as ToolEvent;
+      if (!isCurrentLane(ctx) || typeof toolCallId !== "string") return;
+      const started = backgroundCalls.get(toolCallId);
+      if (!started || started.name !== toolName || started.job !== undefined) return;
+      const job = (result as ToolFrame)?.details?.async;
+      if (isError === true || job?.state !== "running" || typeof job.jobId !== "string" || job.jobId === "") {
+        backgroundCalls.delete(toolCallId);
+        return;
+      }
+      if (started.pending.has(job.jobId)) {
+        const pending = started.pending.get(job.jobId);
+        backgroundCalls.delete(toolCallId);
+        if (pending && ctx.sessionManager.getBranch().includes(pending.leaf))
+          pi.appendEntry(COMPLETION_ENTRY, pending.receipt);
+        return;
+      }
+      started.job = job.jobId;
+      started.pending.clear();
     });
   };
 
@@ -716,9 +835,11 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
     discordLane.stop();
     if (session?.id !== sessionId || !role) discordAsk.clear();
     if (session?.id !== sessionId || role !== "dori") monitors.stopAll();
-    if (session?.id !== sessionId) {
-      session = { id: sessionId, startedAt: new Date().toISOString() };
+    if (session?.id !== sessionId || session.agentId !== ctx.agent.id) {
+      session = { id: sessionId, agentId: ctx.agent.id, startedAt: new Date().toISOString() };
       approvals.clear();
+      backgroundCalls.clear();
+      callDirs.clear();
       agentStatus = "idle";
     }
     if (role && !lifecycleRegistered) registerLifecycle();
@@ -830,7 +951,10 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
     pi.on(eventName, async (event, ctx) => {
       const activation = ctx.agent.kind === "main" ? ++remoteActivation : undefined;
       let remoteJournalReady = true;
-      if (activation !== undefined) nativeRemote.revoke();
+      if (activation !== undefined) {
+        nativeRemote.revoke();
+        backgroundCalls.clear();
+      }
       if (eventName !== "session_start" && ctx.agent.kind === "main") {
         discordAsk.clear();
         headContext?.ui.setStatus?.("dori-head-admission", undefined);
@@ -944,10 +1068,12 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
             }
           }
           await syncMain(ctx, ctx.sessionManager.getBranch(), eventName === "session_start");
+          if (remoteJournalReady && activation === remoteActivation) evidenceActivation = activation;
         } else {
           // Explicit native tool selection can activate a defaultInactive manager tool.
           const active = pi.getActiveTools();
-          if (active.includes("monitor")) await pi.setActiveTools(active.filter((name) => name !== "monitor"));
+          const next = active.filter((name) => name !== "monitor" && name !== "dori_report");
+          if (next.length !== active.length) await pi.setActiveTools(next);
         }
       } catch (error) {
         if (activation !== undefined && remoteActivation === activation) nativeRemote.stop();
@@ -1113,6 +1239,156 @@ export default async function ompDori(pi: DoriApi): Promise<void> {
             : running.map((m) => `${m.name} (pid ${m.pid}) /${m.filter}/: ${m.argv.join(" ")}`).join("\n");
       }
       return { content: [{ type: "text", text }] };
+    },
+  });
+
+  pi.registerTool<{ kind: ReportKind; text: string; files?: string[]; toolCalls?: string[] }>({
+    name: "dori_report",
+    label: "Dori report",
+    description: DORI_REPORT_DESCRIPTION,
+    defaultInactive: true,
+    loadMode: "essential",
+    parameters: z.object({
+      kind: z.enum(["milestone", "blocker", "question", "halted", "done"]).describe("the report's kind"),
+      text: z.string().describe("the report for the lead: what was done, what is next"),
+      files: z
+        .array(z.string())
+        .optional()
+        .describe("files whose current bytes are this report's evidence (relative to the session's cwd)"),
+      toolCalls: z
+        .array(z.string())
+        .optional()
+        .describe("ids of completed, successful tool calls on this session whose results are this report's evidence"),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (!isCurrentLane(ctx))
+        throw new ReportError("dori_report works only in a lane's main session (omp --dori-role lane)");
+      if (stateDir === undefined || requiredLoadError)
+        throw new ReportError(`dori_report needs the Dori config: ${loadError ?? "not loaded"}`);
+      const activation = evidenceActivation;
+      const source = ctx.sessionManager.getSessionId();
+      const ownRef = selfSession(process.env);
+      const registry = new Registry(stateDir);
+      if (!ownRef) throw new ReportError("no open lane is registered for this pane");
+      const matching = (await registry.open()).filter((candidate) => {
+        const ref = sessionOf(candidate);
+        return candidate.key !== RESERVED_LANE_KEY && ref?.runtime === ownRef.runtime && ref.id === ownRef.id;
+      });
+      const lane = matching[0];
+      if (!lane || matching.length !== 1)
+        throw new ReportError("no open lane is registered unambiguously for this pane");
+      const requireCurrentSession = () => {
+        if (activation !== evidenceActivation || !isCurrentLane(ctx) || source !== ctx.sessionManager.getSessionId())
+          throw new ReportError("dori_report lane session changed before acceptance");
+      };
+      requireCurrentSession();
+      // Capture evidence before contending for the writer lock. Refused files or calls record no report.
+      const branch = ctx.sessionManager.getBranch();
+      const toolCalls = params.toolCalls ?? [];
+      const toolEvidenceTip = toolCalls.length > 0 ? branch.at(-1) : undefined;
+      const evidence = [
+        ...(params.files ?? []).map((path) => fileEvidence(path, ctx.cwd)),
+        ...toolCalls.map((id) => {
+          const cwd = callDirs.get(id);
+          if (cwd === null)
+            throw new EvidenceError(
+              `tool call ${id} is not evidence: this process did not see an unambiguous execution`,
+            );
+          const ref = toolEvidence(branch, id, cwd);
+          if (lane.requestId !== undefined && cwd === undefined)
+            throw new EvidenceError(`tool call ${id} is not evidence: this execution did not observe its start`);
+          return ref;
+        }),
+      ];
+      const reports = new Reports(stateDir);
+      const checkpoints = new Checkpoints(stateDir);
+      const { entry, novel } = await registry.withCurrent(lane.key, (current) => {
+        requireCurrentSession();
+        if (
+          (toolEvidenceTip && !ctx.sessionManager.getBranch().includes(toolEvidenceTip)) ||
+          toolCalls.some((id) => callDirs.get(id) === null)
+        )
+          throw new ReportError("dori_report tool evidence changed before acceptance");
+        const ref = current && sessionOf(current);
+        if (
+          !current ||
+          current.key !== lane.key ||
+          !sameLaneGeneration(lane, current) ||
+          current.requestId !== lane.requestId ||
+          current.runId !== lane.runId ||
+          !ref ||
+          ref.runtime !== ownRef.runtime ||
+          ref.id !== ownRef.id
+        )
+          throw new ReportError("dori_report lane registration changed before acceptance");
+        if (ref.runtime === "headless") {
+          if (headlessRemoteId(ctx, role) !== `headless:${ref.id}`)
+            throw new ReportError("dori_report lane session does not own the registered headless runtime");
+        } else {
+          const pane = readPaneState(reports.stateDir, ref.id);
+          if (
+            pane?.pid !== process.pid ||
+            pane.role !== "lane" ||
+            pane.sessionId !== source ||
+            pane.startedAt !== session?.startedAt
+          )
+            throw new ReportError("dori_report lane session does not own the registered terminal");
+        }
+        if (
+          (current.session !== undefined && current.session !== source) ||
+          (askLane?.sessionId === source && askLane.key !== current.key)
+        )
+          throw new ReportError("dori_report lane registration belongs to another native session");
+        const execution = runContext(reports, current, reportRun);
+        if (!execution || execution.generation !== current.lifecycleEpoch)
+          throw new ReportError("dori_report has no matching registered execution");
+        const provenance = execution.provenance;
+        if (current.requestId !== undefined || reportRun) {
+          const native = provenance?.nativeRef;
+          if (
+            current.runId !== reportRun ||
+            !provenance ||
+            provenance.requestId !== current.requestId ||
+            provenance.runId !== current.runId ||
+            !native ||
+            native.sessionId !== source ||
+            native.ref.runtime !== ref.runtime ||
+            native.ref.id !== ref.id
+          )
+            throw new ReportError("dori_report requires the registered execution's verified native session");
+        }
+        const scope = reportScope(current);
+        const novel = novelEvidence(
+          [
+            ...(reports.read(current.key, scope)?.evidenced ?? []),
+            ...checkpoints
+              .read(current.key)
+              .filter(
+                (checkpoint) =>
+                  checkpoint.provenance?.requestId === scope.requestId && checkpoint.provenance?.runId === scope.runId,
+              ),
+          ],
+          evidence,
+        ).length;
+        const entry = reports.report(
+          current.key,
+          params.kind,
+          params.text,
+          Date.now(),
+          execution.generation,
+          undefined,
+          provenance,
+          evidence,
+        );
+        return { entry, novel };
+      });
+      const clock =
+        evidence.length === 0
+          ? "no evidence attached; the evidence clock did not move"
+          : novel === 0
+            ? "the same evidence was recorded before; the evidence clock did not move"
+            : `${novel} of ${evidence.length} evidence items are new; the evidence clock moved`;
+      return { content: [{ type: "text", text: `${reportLine(entry)}\n${clock}` }] };
     },
   });
 

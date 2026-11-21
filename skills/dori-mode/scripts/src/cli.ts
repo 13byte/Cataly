@@ -116,6 +116,7 @@ const flags = parseArgs({
     step: { type: "string" },
     result: { type: "string" },
     "remote-effect": { type: "string", multiple: true },
+    "evidence-file": { type: "string", multiple: true },
     "wall-minutes": { type: "string" },
     "token-limit": { type: "string" },
     "cost-limit": { type: "string" },
@@ -230,7 +231,6 @@ try {
   }
   await handler(makeCli(command, rest, flags, config, deps));
 } catch (e) {
-  // Import the original classes only on failure; cross-group errors keep their existing identity and formatting.
   const { LaunchError } = await import("./launch.ts");
   const { messengerErrors } = await import("./cli-messenger.ts");
   const { journalErrors } = await import("./cli-journal.ts");

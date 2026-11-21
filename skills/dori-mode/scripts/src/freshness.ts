@@ -10,7 +10,8 @@ import { ReportError } from "./report-events.ts";
 import { type Progress, Reports, reportScope } from "./reports.ts";
 import { runtimesOf } from "./run.ts";
 import { readScreen } from "./sessions.ts";
-import { Supervision, type SupervisionResult } from "./supervision.ts";
+import { Supervision } from "./supervision.ts";
+import type { SupervisionResult } from "./supervision-observe.ts";
 
 export type SweepAct = {
   readonly kind:
@@ -122,7 +123,7 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
         }
         // Another sweep owns this lane through its effect baseline; don't replace its result with screen inference.
         if (supervised?.busy) continue;
-        supervisionError = supervised?.observationError ?? supervisionError;
+        supervisionError = supervised?.observationError ?? supervisionError ?? supervised?.evidenceError;
         incompleteSample = supervised?.observationIncomplete === true;
       } catch (error) {
         supervisionError = error instanceof Error ? error.message : String(error);
@@ -141,6 +142,8 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
         current.runId !== lane.runId
       )
         return;
+      // An uncommitted sweep must not apply its stale screen after another writer won.
+      if (supervised?.enabled === false) return;
       const nativeStatus =
         native?.held === false &&
         native.dialogs.length === 0 &&
@@ -178,6 +181,7 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
       for (const alert of supervised?.alertEvents ?? []) {
         acts.push({ ...alert, lane: lane.key });
       }
+      const supervisedHung = Boolean(supervised?.hung || supervised?.heldHung);
       let progress: Progress | null = null;
       try {
         // Deliver durable reports even when this sample cannot support an inferred transition.
@@ -189,7 +193,7 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
             screen ?? "",
             now,
             deps.config.nudgeAfterMin * 60_000,
-            !supervised?.hung,
+            supervisionError === undefined && !supervisedHung,
             scope,
             nativeStatus,
           );
@@ -199,11 +203,12 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
         return;
       }
       if (progress?.state === "stalled") {
-        // Only supervision's own hung result replaces the stall line; a usage warning is not a stall.
-        if (!incompleteSample && previous?.state !== "stalled" && !supervised?.hung) {
+        // A held evidence stall keeps its own alert, but its durable report still reaches the thread.
+        if (!incompleteSample && previous?.state !== "stalled" && !supervisedHung) {
           acts.push({ kind: "stalled", lane: lane.key, detail: progress.lastEvent.text });
         }
-        return;
+        if (!supervisedHung) return;
+        if (incompleteSample && supervisionError !== undefined && previous?.state === "stalled") return;
       }
       // An idle host without a goal may be a registered launch whose kickoff never landed.
       const nudgeObservation =

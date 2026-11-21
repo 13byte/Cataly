@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { mkdirSync, realpathSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { freshnessTick } from "../src/freshness.ts";
@@ -36,7 +36,7 @@ test.each(layouts)("freshness preserves tracked Git activity but not its writer 
     const stateDir = layout === "state symlink" ? alias : actualState;
     const key = "git-lock-lane";
     const lanePath = `dori-state/lanes/${key}`;
-    const trackedPath = `${lanePath}/tracked.txt`;
+    const trackedPath = lexicalParentOnWindows ? "lane-cwd/tracked.txt" : `${lanePath}/tracked.txt`;
     const git = async (...args: string[]) => {
       const result = await run(["git", "-C", repo, ...args]);
       if (result.code !== 0) throw new Error(`git ${args.join(" ")}: ${result.err}`);
@@ -46,7 +46,7 @@ test.each(layouts)("freshness preserves tracked Git activity but not its writer 
     writeFileSync(emptyExcludes, "");
     await git("config", "core.excludesFile", emptyExcludes);
     mkdirSync(join(repo, lanePath), { recursive: true });
-    // A tracked file here keeps Git from collapsing this lane's lock into an untracked directory entry.
+    // Keep the user change in the lane cwd even when Windows resolves the alias parent beside the state directory.
     writeFileSync(join(repo, trackedPath), "initial\n");
     writeFileSync(
       join(repo, ".gitignore"),
@@ -113,11 +113,11 @@ test.each(layouts)("freshness preserves tracked Git activity but not its writer 
       const entries = result.out.split("\0");
       if (throughParent) {
         // Sample the same native worktree with no pathspec while the sweep owns its writer lock.
-        const unfiltered = await run(argv.slice(0, 7), opts);
-        const writer = "?? dori-state/lanes/.supervision-writers/";
+        const unfiltered = await run([...argv.slice(0, 6), "--untracked-files=all"], opts);
+        const writer = /^\?\? dori-state\/lanes\/\.supervision-writers\/[^/]+\.lock$/;
         expect(unfiltered.code, unfiltered.err).toBe(0);
-        expect(unfiltered.out.split("\0")).toContain(writer);
-        expect(entries).not.toContain(writer);
+        expect(unfiltered.out.split("\0").filter((row) => writer.test(row))).toHaveLength(1);
+        expect(entries.some((row) => writer.test(row))).toBe(false);
       }
       statuses.push(entries);
       for (const entry of entries) {
@@ -133,10 +133,16 @@ test.each(layouts)("freshness preserves tracked Git activity but not its writer 
       }
       return result;
     };
-    const tick = (minutes: number) => {
+    const wall = Date.now();
+    const tick = async (minutes: number) => {
       clock.at = T0 + minutes * MIN;
       world.screen = `Working ${21 + minutes}m`;
-      return freshnessTick({ ...deps, run: sample }, fixture.dir);
+      const now = spyOn(Date, "now").mockImplementation(() => wall + minutes * MIN);
+      try {
+        return await freshnessTick({ ...deps, run: sample }, fixture.dir);
+      } finally {
+        now.mockRestore();
+      }
     };
 
     expect(await tick(0)).toEqual([]);

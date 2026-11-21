@@ -44,8 +44,8 @@ beforeEach(async () => {
 afterEach(() => state.done());
 
 test("status joins live identity, journals, decisions and monitor metadata without writing or sending", async () => {
-  new Reports(state.dir).report(lane.key, "question", "Which option?", now - 1000);
-  new Checkpoints(state.dir).write(
+  await new Reports(state.dir).report(lane.key, "question", "Which option?", now - 1000);
+  await new Checkpoints(state.dir).write(
     lane.key,
     { step: "first", result: "tested", evidence: ["/report"], remoteEffects: [] },
     now - 2000,
@@ -158,7 +158,7 @@ test("approval, paused registry and last recorded sweep reasons stay distinct", 
 
 test("damaged journals are explicit, closed lanes are opt-in, invalid keys never escape the registry", async () => {
   const reports = new Reports(state.dir);
-  reports.report(lane.key, "milestone", "ok", now);
+  await reports.report(lane.key, "milestone", "ok", now);
   writeFileSync(reports.path(lane.key), "{broken");
   expect((await laneStatus(deps())).lanes[0]?.errors).toEqual(["report journal unreadable"]);
   await deps().registry.write({ ...lane, closedAt: new Date(now).toISOString() });
@@ -169,7 +169,12 @@ test("damaged journals are explicit, closed lanes are opt-in, invalid keys never
 });
 
 test("board scrubs reports, bounds one message and ignores observation time when nothing changed", async () => {
-  new Reports(state.dir).report(lane.key, "milestone", "file /home/test/secret.md pane w1:p2 @everyone $(cmd)", now);
+  await new Reports(state.dir).report(
+    lane.key,
+    "milestone",
+    "file /home/test/secret.md pane w1:p2 @everyone $(cmd)",
+    now,
+  );
   const snapshot = await laneStatus(deps());
   const body = renderBoard(snapshot, "/home/test", 1960);
   expect(body).not.toContain("/home/test");

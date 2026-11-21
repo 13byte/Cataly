@@ -52,7 +52,7 @@ test("incomplete decision and monitor journals are unknown, not authoritative ze
 test("board removes all local path forms but keeps web evidence links", async () => {
   const deps = depsFor(newWorld(), fakeClock(now), state.dir);
   await deps.registry.write(lane);
-  new Reports(state.dir).report(
+  await new Reports(state.dir).report(
     lane.key,
     "milestone",
     String.raw`/tmp/result.log /srv/private/project ~/private/report.md C:\private\report.md Log:/srv/private/project [/tmp/result.log] \\server\share\secret.txt https://example.test/report`,
@@ -67,7 +67,7 @@ test("board removes all local path forms but keeps web evidence links", async ()
 const renderLinkBoard = async (platform: "discord" | "telegram", clock = fakeClock(now)): Promise<string> => {
   const deps = depsFor(newWorld(), clock, state.dir);
   await deps.registry.write(lane);
-  new Reports(state.dir).report(
+  await new Reports(state.dir).report(
     lane.key,
     "milestone",
     "https://bad%host/INVALID_PRIVATE 'https://O'MALLEY_USER:PRIVATE_PASS@example.test:8443/build/42?X-Amz-Signature=PRIVATE'SIGNATURE#PRIVATE_FRAGMENT' /srv/LOCAL_PRIVATE proof 'https://example.test/public'. ['https://example.test/bracketed'] {'https://example.test/braced'} https://example.test/team's-report",

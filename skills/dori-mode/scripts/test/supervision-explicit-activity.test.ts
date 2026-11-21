@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import {
   existsSync,
   mkdirSync,
@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 
+import { fileEvidence } from "../src/evidence.ts";
 import { freshnessTick } from "../src/freshness.ts";
 import { Reports } from "../src/reports.ts";
 import { run, type Runner } from "../src/run.ts";
@@ -34,7 +35,7 @@ for (const scenario of ["without-git", "worktree-edit", "stage-through-alias", "
   const deletion = scenario === "stage-deletion";
   const stage = alias || deletion;
   const mode = gitActivity ? scenario : "without Git";
-  test(`freshness credits an external explicit activity edit during read-only usage (${mode})`, async () => {
+  test(`freshness ${stage ? "does not count staging identical bytes" : "credits a watched edit"} during read-only usage (${mode})`, async () => {
     const fixture = withState();
     try {
       const cwd = join(fixture.dir, "worktree");
@@ -115,7 +116,6 @@ for (const scenario of ["without-git", "worktree-edit", "stage-through-alias", "
       await deps.registry.write(lane);
       reports.report(lane.key, "milestone", "started", T0, lane.lifecycleEpoch);
       const journalPath = reports.path(lane.key);
-      const initialJournal = readFileSync(journalPath, "utf8");
       const observation = () => readObservation(join(dirname(journalPath), "supervision.json"), lane);
       const watchedEntry = () => {
         if (deletion) {
@@ -142,23 +142,34 @@ for (const scenario of ["without-git", "worktree-edit", "stage-through-alias", "
         }
         return deps.run(argv, opts);
       };
-      const tick = (minutes: number) => {
+      const wall = Date.now();
+      const tick = async (minutes: number) => {
         clock.at = T0 + minutes * MIN;
         world.screen = `Working ${21 + minutes}m`;
-        return freshnessTick({ ...deps, run: observer }, fixture.dir);
+        const now = spyOn(Date, "now").mockImplementation(() => wall + minutes * MIN);
+        try {
+          return await freshnessTick({ ...deps, run: observer }, fixture.dir);
+        } finally {
+          now.mockRestore();
+        }
       };
 
       expect(await tick(0)).toEqual([]);
       const baseline = observation();
       expect(baseline).toMatchObject({ ...scope, at: T0, activeAt: T0, timer: 21 * 60 });
-      expect(JSON.parse(baseline?.activity ?? "null")).toMatchObject({
-        files: alias ? expect.arrayContaining([watchedEntry()]) : [watchedEntry()],
-        changes: stage ? [beforeStage] : [],
-      });
+      const fingerprint = () => (deletion ? null : fileEvidence(watchPath, watchRoot).fingerprint);
+      expect(baseline?.files?.[watchPath]?.[1]).toBe(fingerprint());
+      const beforeRefs = reports.read(lane.key, scope)?.evidenced.length;
+      const beforeJournal = readFileSync(journalPath, "utf8");
       const held = tick(10);
       try {
         expect(await Promise.race([entered.promise.then(() => "held"), held.then(() => "finished")])).toBe("held");
-        expect(observation()).toEqual(baseline);
+        expect(observation()).toMatchObject({
+          at: baseline?.at,
+          activity: baseline?.activity,
+          activeAt: baseline?.activeAt,
+          files: baseline?.files,
+        });
         if (stage) {
           const before = watchedEntry();
           await git("add", "--", filename);
@@ -176,17 +187,23 @@ for (const scenario of ["without-git", "worktree-edit", "stage-through-alias", "
         await held;
       }
       expect(await held).toEqual([]);
+      if (stage) {
+        expect((await tick(20)).map((act) => act.kind)).toEqual(["stalled"]);
+        expect(reports.read(lane.key, scope)?.state).toBe("stalled");
+        expect(reports.read(lane.key, scope)?.evidenced).toHaveLength(beforeRefs ?? 0);
+        expect(observation()).toMatchObject({ activeAt: T0, lastEvidenceAt: baseline?.lastEvidenceAt });
+        return;
+      }
 
       // The timer has the same origin on every sweep. The old deadline must not consume the edit.
       expect(await tick(20)).toEqual([]);
       expect(reports.read(lane.key, scope)?.state).toBe("running");
-      expect(readFileSync(journalPath, "utf8")).toBe(initialJournal);
+      expect(readFileSync(journalPath, "utf8").startsWith(beforeJournal)).toBe(true);
+      expect(reports.read(lane.key, scope)?.evidenced).toHaveLength((beforeRefs ?? 0) + 1);
       const reset = observation();
       expect(reset).toMatchObject({ ...scope, at: clock.at, activeAt: clock.at, timer: 41 * 60 });
-      expect(JSON.parse(reset?.activity ?? "null")).toMatchObject({
-        files: alias ? expect.arrayContaining([watchedEntry()]) : [watchedEntry()],
-        changes: stage ? [afterStage] : gitActivity ? [` M ${filename}`] : [],
-      });
+      expect(reset?.files?.[watchPath]?.[1]).toBe(fingerprint());
+      expect(reset?.lastEvidenceAt).toBe(iso(clock.at));
 
       expect(await tick(39)).toEqual([]);
       expect(reports.read(lane.key, scope)?.state).toBe("running");

@@ -1,15 +1,47 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { mkdirSync } from "node:fs";
+import { resolve } from "node:path";
 
 import { takeLock } from "./checkpoint-lock.ts";
-import type { Checkpoint } from "./checkpoints.ts";
+import type { DoriConfig } from "./config.ts";
 import { withDeliveryLock } from "./delivery-lock.ts";
-import { type Lane, sameLaneGeneration } from "./registry.ts";
-import type { Progress } from "./reports.ts";
-import type { ReportProvenance } from "./request-identity.ts";
-import { type ActivitySample, laneActivity, writerDir } from "./supervision-activity.ts";
-import type { SupervisionDeps } from "./supervision.ts";
+import { type Lane, type Registry, sameLaneGeneration, statusOf } from "./registry.ts";
+import type { Reports } from "./reports.ts";
+import type { Clock, Runner } from "./run.ts";
+import { writerDir } from "./supervision-activity.ts";
+import type { Observation } from "./supervision-evidence-state.ts";
+
+export type { Observation } from "./supervision-evidence-state.ts";
+export { readObservation } from "./supervision-evidence-state.ts";
+
+export type SupervisionDeps = {
+  readonly stateDir: string;
+  readonly config?: Pick<DoriConfig, "stateDir" | "sessionsDir" | "defaultCwd">;
+  readonly run: Runner;
+  readonly reports?: Reports;
+  readonly alert?: (lane: SupervisedLane, message: string) => void | Promise<void>;
+} & (
+  | { readonly registry: Registry; readonly clock: Clock }
+  | { readonly registry?: undefined; readonly clock: Pick<Clock, "now"> }
+);
+
+export type SupervisionAlert = { readonly kind: "blocked" | "stalled" | "warning"; readonly detail: string };
+export type SupervisionResult = {
+  readonly enabled: boolean;
+  readonly state: "running" | "stalled" | "blocked" | "halted" | "done" | null;
+  readonly alerts: readonly string[];
+  readonly alertEvents: readonly SupervisionAlert[];
+  readonly usage: UsageSnapshot | null;
+  readonly hung: boolean;
+  readonly heldHung: boolean;
+  readonly coverageComplete: boolean;
+  readonly lastReportAt: string | null;
+  readonly lastEvidenceAt: string | null;
+  readonly evidenceError?: string;
+  readonly observationError?: string;
+  readonly observationIncomplete?: true;
+  readonly busy?: true;
+};
 
 export type BudgetLimits = {
   readonly wallMinutes?: number | null | undefined;
@@ -25,6 +57,30 @@ export type UsageSnapshot = Usage & {
   readonly costBasis?: string;
   readonly issues?: readonly string[];
 };
+
+/** Independent of evidence availability: a failed observation must never hide a reached ceiling. */
+export const observeBudget = (options: SupervisionOptions, lane: SupervisedLane, now: number, usage: Usage) => {
+  const limits = {
+    wallMinutes: null,
+    tokens: null,
+    costUsd: null,
+    ...options.defaults,
+    ...options.lanes?.[lane.key],
+    ...lane.budget,
+  };
+  const actual = { ...usage, wallMinutes: (now - Date.parse(lane.openedAt)) / 60_000 };
+  const violations = (["wallMinutes", "tokens", "costUsd"] as const).flatMap((name) => {
+    const ceiling = limits[name];
+    const value = actual[name];
+    return typeof ceiling === "number" && Number.isFinite(ceiling) && ceiling >= 0 && value !== null && value >= ceiling
+      ? [`${name} ceiling reached (${ceiling})`]
+      : [];
+  });
+  const unavailable = (["tokens", "costUsd"] as const)
+    .filter((name) => typeof limits[name] === "number" && usage[name] === null)
+    .map((name) => `${name} ceiling cannot be checked: usage unavailable`);
+  return { violations, unavailable };
+};
 export type SupervisedLane = Lane & { readonly activityPaths?: readonly string[]; readonly budget?: BudgetLimits };
 export type SupervisionOptions = {
   readonly hungAfterMinutes?: number;
@@ -37,55 +93,16 @@ export type SupervisionOptions = {
   readonly activityPaths?: readonly string[];
   readonly gitActivity?: boolean;
 };
+/** The sweep must not act on a paused, closed, replaced or rebound run. */
+export const currentSupervisionLane = (seen: SupervisedLane, current: Lane | null): current is Lane =>
+  current !== null &&
+  statusOf(current) === "working" &&
+  !current.nativeCloseIntent &&
+  sameLaneGeneration(seen, current) &&
+  current.requestId === seen.requestId &&
+  current.runId === seen.runId;
 
-export type Observation = {
-  readonly openedAt: string;
-  readonly generation?: string;
-  readonly provenance?: ReportProvenance;
-  readonly at: number;
-  readonly timer: number | null;
-  readonly timerKind: string | null;
-  readonly activity: string | null;
-  readonly activeAt: number;
-  readonly alerts: readonly string[];
-};
-
-type Resample = {
-  readonly path: string;
-  readonly observation: Observation;
-  readonly progress: Progress | null;
-  readonly checkpoint: Checkpoint | null;
-  readonly before: ActivitySample;
-};
-
-export const readObservation = (path: string, lane: SupervisedLane): Observation | null => {
-  if (!existsSync(path)) return null;
-  const saved = JSON.parse(readFileSync(path, "utf8")) as Observation | null;
-  return saved?.openedAt === lane.openedAt &&
-    saved.generation === lane.lifecycleEpoch &&
-    saved.provenance?.requestId === lane.requestId &&
-    saved.provenance?.runId === lane.runId
-    ? saved
-    : null;
-};
-
-export const saveObservation = (path: string, observation: Observation): void => {
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const temporary = `${path}.${process.pid}.tmp`;
-  writeFileSync(temporary, JSON.stringify(observation), { mode: 0o600 });
-  renameSync(temporary, path);
-};
-
-// A failed initial activity sample can still settle budget alerts without advancing the last verified baseline.
-export const retainObservationAlerts = (path: string, previous: Observation | null, current: Observation): void => {
-  const { alerts } = current;
-  if (alerts.length === (previous?.alerts.length ?? 0) && alerts.every((alert, i) => alert === previous?.alerts[i])) {
-    return;
-  }
-  saveObservation(path, previous ? { ...previous, alerts } : current);
-};
-
-/** Serialize the provisional and final baselines without blocking lane delivery or pause. */
+/** Serialize planning, settlement and effect baselines without holding up lane delivery. */
 export const withSupervisionWriter = async <T>(
   stateDir: string,
   lane: SupervisedLane,
@@ -94,10 +111,8 @@ export const withSupervisionWriter = async <T>(
 ): Promise<T | undefined> => {
   const directory = writerDir(stateDir);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
-  // A reopened generation can proceed while the old sweep winds down. Its writes still use the delivery lock.
-  const runIdentity = lane.requestId === undefined ? [] : [lane.requestId, lane.runId];
   const identity = createHash("sha256")
-    .update(JSON.stringify([lane.openedAt, lane.lifecycleEpoch, ...runIdentity]))
+    .update(JSON.stringify([lane.openedAt, lane.lifecycleEpoch, lane.requestId, lane.runId]))
     .digest("hex");
   const fail = (message: string) => new Error(`supervision writer lock ${message}`);
   const release = takeLock(resolve(directory, `${lane.key}.${identity}.lock`), now, fail, { keepLiveOwner: true });
@@ -114,42 +129,15 @@ export const withCurrentSupervision = async <T>(
   lane: SupervisedLane,
   action: () => T | Promise<T>,
 ): Promise<T | undefined> => {
+  if (statusOf(lane) !== "working" || lane.nativeCloseIntent) return;
   if (deps.registry === undefined) return action();
   const held = await withDeliveryLock(deps, lane.key, async () => {
-    const current = await deps.registry.read(lane.key);
-    if (
-      !current ||
-      current.nativeCloseIntent ||
-      !sameLaneGeneration(lane, current) ||
-      current.requestId !== lane.requestId ||
-      current.runId !== lane.runId
-    )
-      return;
-    return action();
+    if (currentSupervisionLane(lane, await deps.registry.read(lane.key))) return action();
   });
   return held.ok ? held.value : undefined;
 };
 
-/** Refresh only the observation written by the current serialized sweep, and only if its lane is still current. */
-export const resampleActivity = async (
-  deps: SupervisionDeps,
-  options: SupervisionOptions,
-  lane: SupervisedLane,
-  refresh: Resample,
-): Promise<string | undefined> => {
-  try {
-    const sample = await laneActivity(deps, options, lane, refresh.before);
-    await withCurrentSupervision(deps, lane, () => {
-      const activity = sample.signature(refresh.progress, refresh.checkpoint);
-      saveObservation(refresh.path, { ...refresh.observation, activity });
-    });
-  } catch (error) {
-    return `post-effect activity sample failed: ${error instanceof Error ? error.message : String(error)}`;
-  }
-};
-
-type WorkingTimer = { kind: string; seconds: number; step: number };
-
+export type WorkingTimer = { readonly kind: string; readonly seconds: number; readonly step: number };
 // Match only an explicit duration on a visible Working/Running line. step is the smallest unit shown, in seconds:
 // "25m" is rounded to the minute, so two readings can place the same call's start up to a minute apart.
 export const workingTimer = (screen: string): WorkingTimer | null => {
@@ -193,6 +181,16 @@ export const isHungTimer = (
   timer.seconds >= (options.hungAfterMinutes ?? 20) * 60 &&
   now - activeAt >= (options.staleAfterMinutes ?? 20) * 60_000;
 
+export const timerFromScreen = (
+  screen: string | null,
+  now: number,
+  activeSince: number | undefined,
+): WorkingTimer | null => {
+  if (screen === null) return null;
+  if (activeSince === undefined) return workingTimer(screen);
+  if (!Number.isFinite(activeSince) || activeSince < 0 || activeSince > now) return null;
+  return { kind: "native working", seconds: Math.floor((now - activeSince) / 1_000), step: 1 };
+};
 export const parseUsage = (output: string): Usage => {
   try {
     const value: unknown = JSON.parse(output);
@@ -207,28 +205,4 @@ export const parseUsage = (output: string): Usage => {
     // Malformed external JSON remains unknown, never zero.
     return { tokens: null, costUsd: null };
   }
-};
-
-export const observeBudget = (options: SupervisionOptions, lane: SupervisedLane, now: number, usage: Usage) => {
-  const limits = {
-    wallMinutes: null,
-    tokens: null,
-    costUsd: null,
-    ...options.defaults,
-    ...options.lanes?.[lane.key],
-    ...lane.budget,
-  };
-  const violations: string[] = [];
-  const exceeds = (name: keyof BudgetLimits, actual: number | null): void => {
-    const ceiling = limits[name];
-    if (typeof ceiling === "number" && Number.isFinite(ceiling) && ceiling >= 0 && actual !== null && actual >= ceiling)
-      violations.push(`${name} ceiling reached (${ceiling})`);
-  };
-  exceeds("wallMinutes", (now - Date.parse(lane.openedAt)) / 60_000);
-  exceeds("tokens", usage.tokens);
-  exceeds("costUsd", usage.costUsd);
-  const unavailable = (["tokens", "costUsd"] as const)
-    .filter((name) => typeof limits[name] === "number" && usage[name] === null)
-    .map((name) => `${name} ceiling cannot be checked: usage unavailable`);
-  return { violations, unavailable };
 };

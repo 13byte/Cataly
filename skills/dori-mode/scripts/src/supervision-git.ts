@@ -9,13 +9,16 @@ const pathspecEnv = {
   GIT_NOGLOB_PATHSPECS: "0",
 };
 const probeOptions = { timeoutMs: 10_000, preserveOutput: true } as const;
-export const noWorktree = ({ code, out, err }: Ran): boolean =>
-  code === 128 &&
-  !out &&
-  (err === "fatal: not a git repository (or any of the parent directories): .git" ||
-    err === "fatal: this operation must be run in a work tree" ||
-    (err.startsWith("fatal: not a git repository (or any parent up to mount point ") &&
-      err.endsWith(")\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).")));
+export const noWorktree = ({ code, out, err }: Ran): boolean => {
+  if (code !== 128 || out) return false;
+  const detail = err.trimEnd().replaceAll("\r\n", "\n");
+  return (
+    detail === "fatal: not a git repository (or any of the parent directories): .git" ||
+    detail === "fatal: this operation must be run in a work tree" ||
+    (detail.startsWith("fatal: not a git repository (or any parent up to mount point ") &&
+      detail.endsWith(")\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set)."))
+  );
+};
 
 export class IncompleteGitObservation extends Error {}
 
@@ -54,7 +57,10 @@ const childGitEnv = (env: RunOptions["env"]): GitEnv => ({
   GIT_GRAFT_FILE: undefined,
 });
 
-type Status = Ran & { readonly root?: string };
+type Status = Ran & {
+  readonly root?: string;
+  readonly submodules?: readonly { readonly root: string; readonly out: string }[];
+};
 export const gitStatus = (run: Runner, rawCwd: string, cwd: string, writers: string, hasWatches: boolean) => {
   const explicitWorktree = Boolean(process.env["GIT_DIR"] || process.env["GIT_WORK_TREE"]);
   return status(run, rawCwd, cwd, writers, process.env, explicitWorktree, hasWatches);
@@ -128,15 +134,20 @@ async function status(
           ],
           { ...probeOptions, env: { ...env, ...pathspecEnv } },
         );
-        if (diff.code === 1) break;
-        if (diff.code !== 0) throw new IncompleteGitObservation(`git submodule diff exited ${diff.code}`);
+        if (diff.code !== 0 && diff.code !== 1)
+          throw new IncompleteGitObservation(`git submodule diff exited ${diff.code}`);
         const inner = await status(run, module, module, writers, childGitEnv(env), false);
         if (inner.code !== 0) throw new IncompleteGitObservation(`git submodule status exited ${inner.code}`);
-        if (!inner.out) {
+        if (diff.code === 0 && !inner.out) {
           if (row[0] === " ") rows.splice(i, 1);
           else rows[i] = `${row[0]} ${row.slice(2)}`;
           return { ...result, out: rows.join("\0") };
         }
+        if (inner.out)
+          return {
+            ...result,
+            submodules: [{ root: inner.root ?? module, out: inner.out }, ...(inner.submodules ?? [])],
+          };
         break;
       }
     }

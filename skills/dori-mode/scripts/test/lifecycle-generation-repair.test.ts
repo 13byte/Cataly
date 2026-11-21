@@ -63,7 +63,7 @@ const park = async () => {
 };
 
 test("Boot and status ignore old Done after a registry reopen without a durable marker", async () => {
-  const oldDone = reports.report(lane.key, "done", "previous generation finished", clock.now());
+  const oldDone = await reports.report(lane.key, "done", "previous generation finished", clock.now());
   const oldJournal = await journal();
   const dir = join(f.state.dir, "monitors");
   mkdirSync(dir);
@@ -119,7 +119,7 @@ test("Boot and status ignore old Done after a registry reopen without a durable 
 });
 
 test("freshness durably reports a genuine wall ceiling in the same generation", async () => {
-  reports.report(lane.key, "milestone", "old generation is still working", clock.now());
+  await reports.report(lane.key, "milestone", "old generation is still working", clock.now());
   const acts = await freshnessTick(deps, f.state.dir);
   expect(acts).toContainEqual({ kind: "blocked", lane: lane.key, detail: ceiling });
   expect((await status())?.progress).toMatchObject({
@@ -130,7 +130,7 @@ test("freshness durably reports a genuine wall ceiling in the same generation", 
 });
 
 test("a freshness sweep held in usage cannot block or overwrite a reopened generation", async () => {
-  reports.report(lane.key, "milestone", "old generation is still working", clock.now());
+  await reports.report(lane.key, "milestone", "old generation is still working", clock.now());
   const oldJournal = await journal();
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
@@ -171,7 +171,7 @@ test("a freshness sweep held in usage cannot block or overwrite a reopened gener
       at: new Date(clock.now()).toISOString(),
       ...(reopened.lane.lifecycleEpoch ? { generation: reopened.lane.lifecycleEpoch } : {}),
     };
-    reports.append(currentReport);
+    await reports.append(currentReport);
     expect(await freshnessTick(deps, f.state.dir)).toEqual([]);
     const observation = Bun.file(join(dirname(reports.path(lane.key)), "supervision.json"));
     const currentObservation = await observation.text();

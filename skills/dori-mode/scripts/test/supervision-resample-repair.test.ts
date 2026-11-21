@@ -3,6 +3,7 @@ import { lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSy
 import { join } from "node:path";
 import { Checkpoints } from "../src/checkpoints.ts";
 import { withDeliveryLock } from "../src/delivery-lock.ts";
+import { fileEvidence } from "../src/evidence.ts";
 import { pauseLane } from "../src/pause.ts";
 import type { Runner } from "../src/run.ts";
 import { sent } from "./fakes.ts";
@@ -63,7 +64,7 @@ test("the second Git status after usage does not hold the delivery lock against 
   }
 });
 
-test("a lane checkpoint recorded during the read-only usage hook resets the same timer's staleness", async () => {
+test("new checkpoint evidence during the read-only usage hook resets the same timer's staleness", async () => {
   const f = fixture({ gitActivity: false, usageArgv: [usageCommand] });
   try {
     await f.seed();
@@ -89,9 +90,17 @@ test("a lane checkpoint recorded during the read-only usage hook resets the same
       );
       // Model the lane's own writer; the usage runner only supplies usage and does not write the checkpoint.
       const checkpoints = new Checkpoints(f.state.dir);
-      const { checkpoint, unchanged } = checkpoints.write(
+      const path = join(f.state.dir, "build-result.txt");
+      writeFileSync(path, "built");
+      const { checkpoint, unchanged } = await checkpoints.write(
         f.lane.key,
-        { step: "build", result: "ok", evidence: [], remoteEffects: [] },
+        {
+          step: "build",
+          result: "ok",
+          evidence: [],
+          remoteEffects: [],
+          evidenceRefs: [fileEvidence(path, f.state.dir)],
+        },
         f.clock.now(),
       );
       expect(unchanged).toBe(false);
@@ -180,7 +189,7 @@ test("an absent ancestor remains a valid watched-path sample until the file is c
     const observation = join(f.state.dir, "lanes", f.lane.key, "supervision.json");
     const parent = join(f.state.dir, "missing", "nested");
     const initial = JSON.parse(readFileSync(observation, "utf8"));
-    expect(JSON.parse(initial.activity).files).toEqual([[join(parent, "work.txt"), null]]);
+    expect(initial.files).toEqual({ [join(parent, "work.txt")]: ["missing", null] });
 
     mkdirSync(parent, { recursive: true });
     writeFileSync(join(parent, "work.txt"), "new lane work");

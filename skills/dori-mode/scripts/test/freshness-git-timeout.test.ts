@@ -1,108 +1,7 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { freshnessTick } from "../src/freshness.ts";
-import type { Lane } from "../src/registry.ts";
-import { Reports } from "../src/reports.ts";
-import { run, type Runner } from "../src/run.ts";
-import type { Observation } from "../src/supervision-observe.ts";
-import { depsFor, fakeClock, newWorld, withState } from "./fakes.ts";
-
-const T0 = Date.parse("2026-01-01T12:00:00Z");
-const MIN = 60_000;
-const key = "freshness-git-timeout";
-const probes = ["rev-parse", "status"] as const;
-type Probe = (typeof probes)[number];
-
-const setup = async (home: string, budget: boolean, watch = false) => {
-  const repo = join(home, "repo");
-  const cwd = join(repo, "app");
-  // Error fixtures require a writer exclusion. The nested watch must also work with state outside the repository.
-  const stateDir = join(watch ? home : repo, "dori-state");
-  mkdirSync(cwd, { recursive: true });
-  const git = async (...args: string[]) => {
-    const result = await run(["git", "-C", repo, ...args]);
-    if (result.code !== 0) throw new Error(`git ${args.join(" ")}: ${result.err}`);
-  };
-  await git("init", "--quiet");
-  await git("config", "core.excludesFile", "/dev/null");
-  writeFileSync(join(repo, ".git", "info", "exclude"), "/dori-state/\n");
-  writeFileSync(join(cwd, "work.txt"), "staged work\n");
-  await git("add", "--", "app/work.txt");
-
-  const lane: Lane = {
-    key,
-    title: "Freshness Git timeout",
-    thread: budget ? "none" : "123",
-    pane: "w:p1",
-    brief: "/b.md",
-    done: "",
-    openedAt: new Date(T0).toISOString(),
-    reportProtocol: "jsonl-v1",
-    cwd,
-  };
-  const clock = fakeClock(T0);
-  const world = newWorld();
-  world.panes = [{ pane_id: "w:p1", workspace_id: "w", agent: "omo", agent_status: "working" }];
-  const deps = depsFor(world, clock, stateDir, {
-    nudgeAfterMin: 999,
-    postAfterMin: 22,
-    hooks: { threadReply: ["notify", "{thread}", "{text}"] },
-    supervision: {
-      hungAfterMinutes: 20,
-      staleAfterMinutes: 20,
-      ...(watch ? { activityPaths: ["work.txt"], usageArgv: ["fixture-usage"] } : {}),
-      ...(budget ? { defaults: { wallMinutes: 5, tokens: 10 }, usageArgv: ["fixture-usage"] } : {}),
-    },
-  });
-  await deps.registry.write(lane);
-  const reports = new Reports(stateDir);
-  const journalPath = reports.path(key);
-  reports.report(key, "milestone", "staged the initial change", T0);
-  const posted: string[][] = [];
-  let usageReads = 0;
-  let usageHold: (() => Promise<void>) | undefined;
-  return {
-    reports,
-    posted,
-    edit: () => writeFileSync(join(cwd, "work.txt"), "unstaged work after the verified sample\n"),
-    stage: () => git("add", "--", "app/work.txt"),
-    holdUsage: (hold: () => Promise<void>) => {
-      usageHold = hold;
-    },
-    usageReads: () => usageReads,
-    stored: () => deps.registry.read(key),
-    journal: () => readFileSync(journalPath, "utf8"),
-    observation: (): Observation => JSON.parse(readFileSync(join(dirname(journalPath), "supervision.json"), "utf8")),
-    tick: async (minutes: number, failure?: Probe, code = 124) => {
-      let injected = false;
-      const runner: Runner = (argv, opts) => {
-        if (argv[0] === "git") {
-          if (!injected && failure !== undefined && argv[3] === failure) {
-            injected = true;
-            return Promise.resolve({ code, out: "", err: code === 124 ? "timeout" : "fatal: index file corrupt" });
-          }
-          return run(argv, opts);
-        }
-        if (argv[0] === "notify") posted.push([...argv.slice(1)]);
-        if (argv[0] === "fixture-usage") {
-          usageReads++;
-          return Promise.resolve(usageHold?.()).then(() => ({
-            code: 0,
-            out: JSON.stringify({ tokens: minutes < 5 ? 1 : 10 }),
-            err: "",
-          }));
-        }
-        return deps.run(argv, opts);
-      };
-      clock.at = T0 + minutes * MIN;
-      world.screen = `Working ${21 + minutes}m`;
-      const acts = await freshnessTick({ ...deps, run: runner }, home);
-      expect(injected).toBe(failure !== undefined);
-      return acts;
-    },
-  };
-};
+import { fileEvidence } from "../src/evidence.ts";
+import { withState } from "./fakes.ts";
+import { key, MIN, probes, setup, T0 } from "./freshness-git-timeout.fixture.ts";
 
 test("an unreadable Git index cannot revive a stalled lane or replace its verified dirty baseline", async () => {
   const fixture = withState();
@@ -125,14 +24,16 @@ test("an unreadable Git index cannot revive a stalled lane or replace its verifi
   }
 });
 
-test("staging a watched file below the Git root during a read-only usage hook is lane progress", async () => {
+test("staging unchanged watched bytes below the root during usage does not reset the evidence clock", async () => {
   const fixture = withState();
   try {
     const f = await setup(fixture.dir, false, true);
     f.edit();
     await f.tick(0);
     const before = f.observation();
-    expect(JSON.parse(before.activity ?? "{}").changes).toEqual(["AM app/work.txt"]);
+    const fingerprint = fileEvidence(f.source, fixture.dir).fingerprint;
+    expect(before.files?.[f.source]?.[1]).toBe(fingerprint);
+    expect(await f.status()).toBe("AM app/work.txt\0");
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
     f.holdUsage(() => {
@@ -148,10 +49,15 @@ test("staging a watched file below the Git root during a read-only usage hook is
       await sweep;
     }
     expect(f.observation().activity).toBe(before.activity);
-    expect(await f.tick(20)).toEqual([]);
-    expect(f.observation().activeAt).toBe(T0 + 20 * MIN);
-    expect(JSON.parse(f.observation().activity ?? "{}").changes).toEqual(["A  app/work.txt"]);
-    expect((await f.tick(40)).map((act) => act.kind)).toEqual(["stalled"]);
+    expect(await f.status()).toBe("A  app/work.txt\0");
+    expect((await f.tick(20)).map((act) => act.kind)).toEqual(["stalled"]);
+    const after = f.observation();
+    expect(after.activeAt).toBe(before.activeAt);
+    expect(after.lastEvidenceAt).toBe(before.lastEvidenceAt);
+    expect(after.files?.[f.source]?.[1]).toBe(fingerprint);
+    expect((await f.tick(40)).map((act) => act.kind)).toEqual(["posted"]);
+    expect(await f.tick(41)).toEqual([]);
+    expect(f.reports.read(key)?.state).toBe("stalled");
   } finally {
     fixture.done();
   }
@@ -197,10 +103,8 @@ test.each(probes)("an initial Git %s timeout still applies and deduplicates wall
     expect(f.reports.read(key)?.state).toBe("running");
     expect(f.usageReads()).toBe(1);
     const verified = f.observation();
-    if (verified.activity === null) throw new Error("missing verified activity sample");
-    const previous = JSON.parse(verified.activity);
-    expect(previous.changes).toEqual(["A  app/work.txt"]);
-    expect(previous.files).toHaveLength(1);
+    expect(verified.lastEvidenceAt).toBe(new Date(T0).toISOString());
+    expect(verified.files?.[f.source]?.[1]).toBe(fileEvidence(f.source, fixture.dir).fingerprint);
     f.edit();
 
     const ceilings = ["wallMinutes ceiling reached (5)", "tokens ceiling reached (10)"];
@@ -219,7 +123,11 @@ test.each(probes)("an initial Git %s timeout still applies and deduplicates wall
     expect(f.usageReads()).toBe(3);
     expect(f.journal()).toBe(blocked);
     // The alert receipt changes, but the verified Git signature and activity clock do not.
-    expect(f.observation()).toEqual({ ...verified, alerts: ceilings });
+    expect(f.observation()).toEqual({
+      ...verified,
+      alerts: ceilings,
+      evidenceError: expect.stringContaining(`git ${probe} exited 124`),
+    });
   } finally {
     fixture.done();
   }
@@ -237,7 +145,8 @@ test("budget alerts before any successful Git sample do not create an activity b
     expect(await f.tick(6, "status")).toEqual([]);
     expect(await f.tick(7)).toEqual([]);
     expect(f.observation()).toMatchObject({
-      activity: expect.stringContaining("A  app/work.txt"),
+      files: { [f.source]: expect.arrayContaining([fileEvidence(f.source, fixture.dir).fingerprint]) },
+      lastEvidenceAt: new Date(T0 + 7 * MIN).toISOString(),
       activeAt: T0 + 7 * MIN,
       alerts: ceilings,
     });

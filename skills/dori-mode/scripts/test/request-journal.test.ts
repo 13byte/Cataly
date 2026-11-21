@@ -93,7 +93,7 @@ test("a legacy checkpoint is never promoted to a sourced record by a later run",
     const stateDir = dirname(f.tmp);
     await seedRequest(stateDir);
     const journal = new Checkpoints(stateDir);
-    const legacy = journal.write(
+    const legacy = await journal.write(
       KEY,
       { step: "push", result: "ok", evidence: ["log"], remoteEffects: ["push:abc123"] },
       T0,
