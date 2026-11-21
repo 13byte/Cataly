@@ -5,6 +5,8 @@
 /** Every `dori` command: cli.ts's own and its command tables. */
 export const DORI_COMMANDS: Record<string, true> = {
   adopt: true,
+  artifact: true,
+  artifacts: true,
   board: true,
   boot: true,
   "can-launch": true,
@@ -101,6 +103,9 @@ export const DORI_VALUE_OPTIONS: Record<string, true> = {
   result: true,
   "remote-effect": true,
   "evidence-file": true,
+  artifact: true,
+  sha256: true,
+  receipt: true,
   "wall-minutes": true,
   "token-limit": true,
   "cost-limit": true,

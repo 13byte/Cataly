@@ -6,8 +6,6 @@ import { USAGE } from "./cli-usage.ts";
 import type { FlowDeps } from "./done-flow.ts";
 const [command = "", ...rest] = process.argv.slice(2);
 const renderTablesUsage = "--render-tables requires dori send discord (with or without --edit)";
-// The harness grammar distinguishes a flag from message text and lock argv.
-// The sentinel lets it identify the unsupported flag even as the last token.
 if (
   rest.includes("--render-tables") &&
   (command === "--version" ||
@@ -86,6 +84,10 @@ const flags = parseArgs({
     cwd: { type: "string" },
     pane: { type: "string" },
     evidence: { type: "string" },
+    artifact: { type: "string", multiple: true },
+    sha256: { type: "string" },
+    receipt: { type: "string" },
+    public: { type: "boolean" },
     reason: { type: "string", multiple: true },
     note: { type: "string" },
     abandon: { type: "boolean" },
@@ -213,6 +215,10 @@ switch (command) {
   case "inbound-lag":
   case "transcribe":
     commands = (await import("./cli-messenger.ts")).messengerCommands;
+    break;
+  case "artifact":
+  case "artifacts":
+    commands = (await import("./cli-artifacts.ts")).artifactCommands;
     break;
   case "inbound-abandon":
     commands = { "inbound-abandon": (await import("./cli-discord-recovery.ts")).abandonDiscordInbound };

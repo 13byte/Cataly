@@ -39,6 +39,9 @@ export const USAGE = `dori <command> [options]
                                        record a completed step once; a conflicting rewrite is refused
                                        --evidence-file fingerprints the file's bytes: only new bytes are progress
   checkpoints <key>                    read completed steps before resuming remote work
+  artifact add <key> <path> [--title T] [--public] / artifact delivered <key> <id> --sha256 HASH --receipt REF
+  artifacts <key> [--json]             inspect files, immutable versions and operator-reported delivery receipts
+                                       checkpoint --artifact ID binds its evidence to the current registered hash
   verify-pr <owner/repo> <num> [--loop N] [--cwd DIR]
                                        check every commit's author/committer email and PR-level tests; print the UI test loop (not run)
   pr track <owner/repo#N|pull-url> [--lane K] [--thread REF] / pr untrack <ref> / pr list
