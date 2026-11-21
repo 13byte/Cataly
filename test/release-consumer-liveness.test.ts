@@ -10,13 +10,15 @@ import { processExists } from "../src/update/proc.ts";
 import { fixture } from "./release-consumer-setup.ts";
 
 test("process existence query distinguishes the current process from an exited child", async () => {
-  const child = spawn(process.execPath, ["-e", "process.exit(0)"]);
-  const pid = child.pid;
-  if (pid === undefined) throw new Error("Could not start the disposable child");
-  await once(child, "exit");
+  const child = Bun.spawn([process.execPath, "-e", "process.exit(0)"], {
+    stdin: "ignore",
+    stdout: "ignore",
+    stderr: "ignore",
+  });
+  expect(await child.exited).toBe(0);
 
   expect(processExists(process.pid)).toBe(true);
-  expect(processExists(pid)).toBe(false);
+  expect(processExists(child.pid)).toBe(false);
 });
 
 const darwin = test.skipIf(process.platform !== "darwin");
