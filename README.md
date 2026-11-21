@@ -163,6 +163,11 @@ start OMP through the generated wrapper. Follow the
 for your runtime and messenger. Use `omp-dori doctor` for a read-only setup
 check and `omp-dori status` to see your lanes.
 
+Opt-in [source updates](skills/dori-mode/references/scripts.md#ci-gated-source-updates)
+follow CI-passing main with idle and quiet admission, same-session restart,
+monitor health, and rollback. This is separate from consumer release updates
+and the model-assisted `dori upstream` workflow.
+
 <table width="100%"><tr><td>
 
 **Important**

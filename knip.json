@@ -27,6 +27,8 @@
         "test/record-discord-inbound.ts",
         "test/record-discord-gateway.ts",
         "test/record-fetch.ts",
+        "test/record-inbound-activity-failure.ts",
+        "test/record-slack-activity-backlog.ts",
         "test/record-discord.ts",
         "test/record-telegram-startup.ts"
       ],

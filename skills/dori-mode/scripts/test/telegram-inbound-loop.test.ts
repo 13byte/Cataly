@@ -98,6 +98,61 @@ test("--loop re-polls after a poll whose updates were all gate-dropped", async (
   expect(sleeps).toEqual([60_000]);
 });
 
+test("activity stays unavailable for a full batch until the backlog is drained", async () => {
+  const { http } = telegramFake([
+    Array.from({ length: 100 }, (_, i) => ({ update_id: 400 + i, message: msg(999, 999, "private", "ignored") })),
+    [],
+  ]);
+  const states: boolean[] = [];
+  const stop = new Error("STOP");
+  await expect(
+    telegramInboundLoop(
+      mk(http),
+      fileTgInboundStore(join(state.dir, "tg-off-health")),
+      { ownerId: OWNER },
+      1,
+      () => {},
+      () => {},
+      async () => {
+        throw stop;
+      },
+      (available) => states.push(available),
+    ),
+  ).rejects.toBe(stop);
+  expect(states).toEqual([false, true]);
+});
+
+test("poll errors revoke activity health and a failed healthy observer escapes", async () => {
+  const states: boolean[] = [];
+  const http: Http = async () => ({ status: 401, headers: {}, body: "{}" });
+  await telegramInboundLoop(
+    mk(http),
+    fileTgInboundStore(join(state.dir, "tg-off-error")),
+    { ownerId: OWNER },
+    0,
+    () => {},
+    () => {},
+    undefined,
+    (available) => states.push(available),
+  );
+  expect(states).toEqual([false]);
+  const failure = new Error("activity write failed");
+  await expect(
+    telegramInboundLoop(
+      mk(telegramFake([[]]).http),
+      fileTgInboundStore(join(state.dir, "tg-off-write")),
+      { ownerId: OWNER },
+      0,
+      () => {},
+      () => {},
+      undefined,
+      () => {
+        throw failure;
+      },
+    ),
+  ).rejects.toBe(failure);
+});
+
 test.each([8, 3_600])("Telegram honors a %is Retry-After floor or stops when it exceeds budget", async (seconds) => {
   const store = fileTgInboundStore(join(state.dir, "tg-off-rate"));
   const transportWaits: number[] = [];

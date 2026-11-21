@@ -4,7 +4,7 @@
  * module costs nothing on installs without voice.
  */
 import type * as Voice from "@discordjs/voice";
-import { discordClock, openDiscordSocket } from "../cli-discord.ts";
+import { discordClock, openDiscordSocket } from "../cli-discord-gateway.ts";
 import type { Discord } from "../messenger/discord.ts";
 import type { Playback } from "./audio.ts";
 import type { OpusCodec, VoiceDriver, VoiceLink } from "./discord-link.ts";

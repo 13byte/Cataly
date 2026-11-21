@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-
+import { InboundActivityError } from "../../../../../src/update/source-activity.ts";
 import { inboundPollRetryDelay } from "./http.ts";
 import type { Telegram } from "./telegram.ts";
 
@@ -52,10 +52,6 @@ export const envInt = (name: string, raw: string | undefined): number => {
 
 export type TgInboundStore = { load(): number; save(offset: number): void };
 
-/**
- * A one-shot (loopMin <= 0) does one bounded poll. In loop mode, re-poll immediately
- * if any updates arrived (even gate-dropped), otherwise sleep before polling again.
- */
 export const telegramInboundLoop = async (
   tg: Telegram,
   store: TgInboundStore,
@@ -64,16 +60,21 @@ export const telegramInboundLoop = async (
   emit: (inbound: TgInbound) => void = () => {},
   warn: (message: string) => void = () => {},
   sleep: (ms: number) => Promise<void> = (ms) => Bun.sleep(ms),
+  observe?: (available: boolean) => void,
 ): Promise<void> => {
   for (;;) {
     let wait = loopMin * 60_000;
+    let updates: number | undefined;
     try {
-      const { updates } = await pollTelegramInbound(tg, store, opts, emit);
-      if (loopMin > 0 && updates > 0) continue;
-    } catch (e) {
-      wait = inboundPollRetryDelay(e, wait);
-      warn(e instanceof Error ? e.message : String(e));
+      ({ updates } = await pollTelegramInbound(tg, store, opts, emit));
+    } catch (error) {
+      if (error instanceof InboundActivityError) throw error;
+      observe?.(false);
+      wait = inboundPollRetryDelay(error, wait);
+      warn(error instanceof Error ? error.message : String(error));
     }
+    if (updates !== undefined) observe?.(updates < 100);
+    if (loopMin > 0 && updates) continue;
     if (loopMin <= 0) return; // one-shot: one bounded drain
     await sleep(wait);
   }

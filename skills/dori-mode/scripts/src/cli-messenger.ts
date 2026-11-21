@@ -1,24 +1,31 @@
 /** dori send, presence, inbound, thread, react and transcribe: the messengers. */
 import { existsSync } from "node:fs";
+import { InboundActivityError } from "../../../../src/update/source-activity.ts";
 
 import { type Command, die, envSlackToken, every, messageText, slackAuth } from "./cli-context.ts";
 import { reactDiscord, sendDiscord, threadDiscord } from "./cli-discord-ops.ts";
 import { channelDiscord } from "./cli-discord-purpose.ts";
-import { discordClock, discordInboundCommand, openDiscordSocket, untilStopped } from "./cli-discord.ts";
+import { discordClock, openDiscordSocket, untilStopped } from "./cli-discord-gateway.ts";
+import { inboundCommand } from "./cli-inbound.ts";
 import { ChannelPurposeError } from "./messenger/discord-channels.ts";
 import { discordPresence } from "./messenger/discord-presence.ts";
-import { fetchHttp, inboundPollRetryDelay, MessengerError, UnsafeMessageError } from "./messenger/http.ts";
+import { fetchHttp, MessengerError, UnsafeMessageError } from "./messenger/http.ts";
 import { Slack } from "./messenger/slack.ts";
-import { formatSlackInbound, pollSlackInbound } from "./messenger/slack-inbound.ts";
 import { slackPresence } from "./messenger/slack-presence.ts";
 import { Telegram } from "./messenger/telegram.ts";
 import { lagOfLine, readLagTail, summarizeLag } from "./messenger/telegram-lag.ts";
-import { slackScope, type SlackScope, ThreadLedger } from "./messenger/thread-ledger.ts";
+import { ThreadLedger } from "./messenger/thread-ledger.ts";
 import { transcribe, TranscriptionError, withLocalAudio } from "./messenger/voice.ts";
 import { realClock, run } from "./run.ts";
 
 /** Messenger errors are one line, never a stack. */
-export const messengerErrors = [MessengerError, UnsafeMessageError, TranscriptionError, ChannelPurposeError] as const;
+export const messengerErrors = [
+  MessengerError,
+  UnsafeMessageError,
+  TranscriptionError,
+  ChannelPurposeError,
+  InboundActivityError,
+] as const;
 
 const NO_SLACK_TOKEN = "DORI_SLACK_TOKEN is not set (nor DORI_SLACK_TOKEN_FILE)";
 
@@ -96,53 +103,10 @@ const presence: Command = async ({ key }) => {
   } else die("presence needs slack or discord");
 };
 
-const inbound: Command = async ({ key, loopMinutes, config, deps, values, strings }) => {
-  const minutes = loopMinutes();
-  const context = values["context"] === true;
-  if (context && key !== "discord") die("--context is supported for discord only");
-  const wake = values["wake-lanes"] === true;
-  if (wake && key !== "discord") die("--wake-lanes is supported for discord only");
-  if (key === "telegram") return await (await import("./cli-telegram.ts")).telegramInbound(config, minutes);
-  if (key === "discord")
-    return await discordInboundCommand(deps, {
-      gateway: values["gateway"] === true,
-      pollMinutes: values["loop"] === undefined ? 3 / 60 : minutes,
-      context,
-      wake,
-    });
-  if (key !== "slack") die("inbound supports slack, telegram or discord");
-  let adoptScope: SlackScope | undefined;
-  if (values["adopt-legacy-threads"] !== undefined) {
-    const requested = strings("adopt-legacy-threads");
-    const parts = requested[0]?.split(":");
-    if (requested.length !== 1 || parts?.length !== 2)
-      return die("--adopt-legacy-threads needs exactly one WORKSPACE:ACCOUNT");
-    adoptScope = slackScope(parts[0], parts[1]);
-  }
-  const auth = slackAuth(envSlackToken() ?? die(NO_SLACK_TOKEN));
-  const ledger = new ThreadLedger(`${config.stateDir}/slack-threads.json`);
-  const slack = new Slack(fetchHttp, realClock, auth, undefined, ledger);
-  const scope = await slack.identity();
-  if (adoptScope) {
-    if (adoptScope.teamId !== scope.teamId || adoptScope.userId !== scope.userId)
-      return die("legacy adoption does not match the authenticated Slack workspace/account");
-    console.log(`SLACK_THREADS_ADOPTED ${JSON.stringify(await ledger.adoptLegacy(scope))}`);
-    return;
-  }
-  ledger.assertScoped();
-  const qualifiedRoutes = values["qualified-routes"] === true;
-  console.log(`INBOUND_READY slack${qualifiedRoutes ? ` workspace=${scope.teamId} account=${scope.userId}` : ""}`);
-  await every(
-    minutes,
-    () => pollSlackInbound(slack, ledger, {}, (i) => console.log(formatSlackInbound(i, qualifiedRoutes))),
-    inboundPollRetryDelay,
-  );
-};
-
 export const messengerCommands: Readonly<Record<string, Command>> = {
   send,
   presence,
-  inbound,
+  inbound: inboundCommand,
   thread: async (cli) => (cli.key === "discord" ? await threadDiscord(cli) : die("thread supports discord")),
   react: async (cli) => (cli.key === "discord" ? await reactDiscord(cli) : die("react supports discord")),
   channel: async (cli) => (cli.key === "discord" ? await channelDiscord(cli) : die("channel supports discord")),

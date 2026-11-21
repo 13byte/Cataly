@@ -2,6 +2,9 @@ export const USAGE = `dori <command> [options]
 
   harness <command> [args...]          dispatch every upstream harness command (up, inbox, duty, review, merge, loop, backlog, migrate...)
   update <command> [options]           verified releases: check, install, status, rollback, cache [--version TAG] [--from DIST]
+  update source check|status|apply     own main source updates; apply requires --when idle [--config FILE]
+  idle-check [--owner-quiet 30m]       source update eligibility; exit 0 if idle, else 4 [--config FILE]
+  lead restart --when idle            same-session managed restart [--config FILE]
   upstream <command> --config FILE     maintainer staging: check, stage, watch, status, snapshot, restore, recover, restart
   remote --help                       opt-in cross-machine management of native Cataly sessions
   headless --help                     observe a headless lane or answer its exact native dialog locally
@@ -102,7 +105,7 @@ export const USAGE = `dori <command> [options]
                                        the operator's purpose note per channel or thread, shown by inbound --context
   presence <slack|discord>             keep the account shown as online until stopped
   transcribe <audio-file|url>           run hooks.transcribe and print the text; HTTP(S) downloads are private and temporary
-  inbound slack|telegram|discord [--loop MIN] [--gateway] [--context]
+  inbound slack|telegram|discord [--loop MIN] [--gateway] [--context] [--activity-file PATH]
                                        Slack defaults to INBOUND_READY slack and physical channel IDs;
                                        --qualified-routes opts into account-qualified readiness and destinations
                                        Slack: --adopt-legacy-threads WORKSPACE:ACCOUNT explicitly binds an old unscoped ledger

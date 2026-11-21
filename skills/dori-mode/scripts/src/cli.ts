@@ -4,7 +4,6 @@ import { releaseVersion } from "../../../../src/release/version.ts";
 import type { Command } from "./cli-context.ts";
 import { USAGE } from "./cli-usage.ts";
 import type { FlowDeps } from "./done-flow.ts";
-import { QueueError, TemplateError } from "./launch-errors.ts";
 const [command = "", ...rest] = process.argv.slice(2);
 const renderTablesUsage = "--render-tables requires dori send discord (with or without --edit)";
 // The harness grammar distinguishes a flag from message text and lock argv.
@@ -47,8 +46,14 @@ if (command === "--version") {
   console.log(releaseVersion);
   process.exit(0);
 }
+if (command === "update" && rest[0] === "source")
+  process.exit(await (await import("../../../../src/update/source-update-cli.ts")).runSourceUpdate(rest.slice(1)));
 if (command === "update") process.exit(await (await import("../../../../src/release/cli.ts")).runConsumerUpdate(rest));
 if (command === "upstream") process.exit(await (await import("../../../../src/update/cli.ts")).runUpdate(rest));
+if (command === "idle-check")
+  process.exit(await (await import("../../../../src/update/source-update-cli.ts")).runSourceUpdate([command, ...rest]));
+if (command === "lead")
+  process.exit(await (await import("../../../../src/update/source-update-cli.ts")).runSourceUpdate([command, ...rest]));
 if (command === "remote") process.exit(await (await import("./cli-remote.ts")).runRemote(rest));
 if (command === "headless") process.exit(await (await import("./cli-headless.ts")).runHeadless(rest));
 if (command === "usage") process.exit(await (await import("./cli-usage-report.ts")).runUsageReport(command, rest));
@@ -92,6 +97,7 @@ const flags = parseArgs({
     gateway: { type: "boolean" },
     "qualified-routes": { type: "boolean" },
     context: { type: "boolean" },
+    "activity-file": { type: "string" },
     "wake-lanes": { type: "boolean" },
     "adopt-legacy-threads": { type: "string", multiple: true },
     purpose: { type: "string" },
@@ -137,6 +143,7 @@ const flags = parseArgs({
     self: { type: "string" },
   },
 });
+if (flags.values["activity-file"] !== undefined && command !== "inbound") die("--activity-file requires dori inbound");
 if (flags.values.runtime !== undefined && command !== "launch") die("--runtime is supported only by dori launch");
 if (flags.values["render-tables"] !== undefined && (command !== "send" || flags.positionals[0] !== "discord")) {
   if (command === "send" && ["slack", "telegram"].includes(flags.positionals[0] ?? ""))
@@ -232,19 +239,5 @@ try {
   }
   await handler(makeCli(command, rest, flags, config, deps));
 } catch (e) {
-  const { LaunchError } = await import("./launch.ts");
-  const { PolicyError } = await import("./lane-policy.ts");
-  const { messengerErrors } = await import("./cli-messenger.ts");
-  const { journalErrors } = await import("./cli-journal.ts");
-  const { decisionErrors } = await import("./cli-decisions.ts");
-  const { prErrors } = await import("./cli-pr.ts");
-  const { statusErrors } = await import("./cli-status.ts");
-  const launchErrors = [LaunchError, PolicyError, QueueError, TemplateError, ...statusErrors];
-  if (
-    [...launchErrors, ...messengerErrors, ...journalErrors, ...decisionErrors, ...prErrors].some(
-      (type) => e instanceof type,
-    )
-  )
-    die((e as Error).message);
-  throw e;
+  await (await import("./cli-errors.ts")).reportCommandError(e);
 }

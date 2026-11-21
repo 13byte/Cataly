@@ -30,6 +30,8 @@ type Msg = {
 };
 type ThreadView = { readonly root_msg?: Msg & { readonly channel?: string }; readonly unread_replies?: readonly Msg[] };
 type Counted = { readonly id: string; readonly has_unreads?: boolean; readonly mention_count?: number };
+type Page = { readonly has_more?: boolean; readonly response_metadata?: { readonly next_cursor?: string } };
+const completePage = (page: Page): boolean => page.has_more !== true && !page.response_metadata?.next_cursor;
 
 export type InboundOptions = { readonly threadsViewLimit?: number };
 
@@ -52,7 +54,7 @@ export const pollSlackInbound = async (
   ledger: ThreadLedger,
   opts: InboundOptions,
   emit: (message: Inbound) => void | Promise<void>,
-): Promise<void> => {
+): Promise<boolean> => {
   const scope = await slack.identity();
   ledger.assertScoped();
   const out: Inbound[] = [];
@@ -74,9 +76,10 @@ export const pollSlackInbound = async (
   };
   const fromOthers = (m: Msg) => m.user !== undefined && m.user !== scope.userId && !m.bot_id;
 
-  const view = (await slack.call("subscriptions.thread.getView", { limit: opts.threadsViewLimit ?? 20 })) as {
+  const view = (await slack.call("subscriptions.thread.getView", { limit: opts.threadsViewLimit ?? 20 })) as Page & {
     threads?: readonly ThreadView[];
   };
+  let complete = completePage(view);
   for (const t of view.threads ?? []) {
     const channel = t.root_msg?.channel;
     if (!channel) continue;
@@ -105,7 +108,8 @@ export const pollSlackInbound = async (
       oldest: t.seenTs,
       inclusive: false,
       limit: 50,
-    })) as { messages?: readonly Msg[] };
+    })) as Page & { messages?: readonly Msg[] };
+    complete &&= completePage(r);
     let newest = t.seenTs;
     for (const m of r.messages ?? []) {
       checkParent(m, t.channel, t.rootTs);
@@ -117,7 +121,7 @@ export const pollSlackInbound = async (
     if (newest !== t.seenTs) seenUpTo.push({ channel: t.channel, rootTs: t.rootTs, ts: newest });
   }
 
-  const counts = (await slack.call("client.counts", {})) as {
+  const counts = (await slack.call("client.counts", {})) as Page & {
     channels?: readonly Counted[];
     ims?: readonly Counted[];
     mpims?: readonly Counted[];
@@ -132,4 +136,5 @@ export const pollSlackInbound = async (
   }
   for (const message of out) await emit(message);
   await ledger.markSeen(scope, seenUpTo);
+  return complete && completePage(counts);
 };

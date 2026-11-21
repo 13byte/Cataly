@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { release, tryTake } from "../../../../src/lock-owner.ts";
 import { alive } from "./checkpoint-lock.ts";
 import { type Command, die } from "./cli-context.ts";
-import { untilStopped } from "./cli-discord.ts";
+import { untilStopped } from "./cli-discord-gateway.ts";
 import { Discord } from "./messenger/discord.ts";
 import { discordInboundEnv } from "./messenger/discord-inbound-state.ts";
 import { fetchHttp } from "./messenger/http.ts";

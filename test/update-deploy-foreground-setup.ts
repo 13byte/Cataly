@@ -11,7 +11,7 @@ import type { MonitorSet, RuntimeHealth, RuntimeIdentity } from "../src/update/d
 import { foregroundCli } from "./update-deploy-foreground-cli.ts";
 import { foregroundActor } from "./update-deploy-foreground-readiness.ts";
 import { processName } from "./proc-name.ts";
-import { deploymentConfig } from "./update-deploy-setup.ts";
+import { deploymentConfig, type ForegroundFixtureOptions } from "./update-deploy-setup.ts";
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
   const errors: unknown[] = [];
@@ -26,18 +26,7 @@ afterEach(async () => {
   if (errors.length > 1) throw new AggregateError(errors, "foreground fixture cleanup failed");
 });
 /** Real exec-launched native group and script children; herdr supplies only their observed metadata. */
-export async function foregroundFixture(
-  options: {
-    unknown?: boolean;
-    parentShell?: boolean;
-    rollback?: boolean;
-    paneShell?: boolean;
-    stoppable?: boolean;
-    subshell?: boolean;
-    transient?: boolean;
-    bunOnly?: boolean;
-  } = {},
-) {
+export async function foregroundFixture(options: ForegroundFixtureOptions = {}) {
   const root = mkdtempSync(join(tmpdir(), "dori-foreground-"));
   let closing = false;
   cleanups.push(async () => rmSync(root, { recursive: true, force: true }));
@@ -71,12 +60,16 @@ export async function foregroundFixture(
   writeFileSync(unknown, shell, { mode: 0o700 });
   writeFileSync(dori, `#!${process.execPath}\nconsole.log("ready"); await Bun.stdin.text();\n`, { mode: 0o700 });
   writeFileSync(presence, `#!/bin/bash\nexec ${JSON.stringify(dori)} "$@"\n`, { mode: 0o700 });
+  const activityPath = join(config.stateDir, "activity", "discord.json");
+  const intakeArgv = options.activity
+    ? [process.execPath, new URL("./update-source-intake-setup.ts", import.meta.url).pathname, activityPath]
+    : [options.bunOnly ? process.execPath : "/bin/bash", script];
   const specs = [
-    { name: "intake", argv: options.bunOnly ? [process.execPath, script] : [script], filter: ".", cwd: root },
+    { name: "intake", argv: options.activity || options.bunOnly ? intakeArgv : [script], filter: ".", cwd: root },
     { name: "dori-watch", argv: [presence], filter: ".", cwd: root },
   ];
   // Direct shebang exec names /proc/comm after the script; explicit Bash reproduces the production foreground.
-  const commands = [[options.bunOnly ? process.execPath : "/bin/bash", script], [presence]];
+  const commands = [intakeArgv, [presence]];
   if (options.unknown) commands.push(["/bin/bash", unknown]);
   writeFileSync(
     config.omp,
@@ -146,7 +139,11 @@ export async function foregroundFixture(
     sessionId: runtime.sessionId,
     runtime,
     monitors: specs,
-    intake: { path: join(root, "heartbeat"), monitor: "intake", maxAgeMs: 5_000 },
+    intake: {
+      path: options.activity ? `${activityPath}.heartbeat` : join(root, "heartbeat"),
+      monitor: "intake",
+      maxAgeMs: 5_000,
+    },
     running: specs.map(({ name }, index) => {
       const pid = observed.monitors[index]!;
       return { name, pid, identity: processIdentity(pid)! };

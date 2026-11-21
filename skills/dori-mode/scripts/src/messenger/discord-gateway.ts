@@ -30,6 +30,7 @@ export type GatewayOptions = {
   replayDispatches?: boolean;
   /** The current socket has been retired; cached admission must wait for READY/RESUMED. */
   onDisconnect?: () => void;
+  onHealth?: (available: boolean) => void;
   /** Dispatches after establishment, plus authenticated resume replay only when explicitly opted in. */
   onDispatch?: (type: string, data: unknown) => void;
 };
@@ -65,7 +66,6 @@ export const discordGateway = (
   let backoff = 5_000;
   /** The established connection's sender: set on READY/RESUMED, cleared whenever that socket is retired. */
   let deliver: ((frame: unknown) => boolean) | undefined;
-
   const dispose = (code: number) => {
     const previous = socket;
     socket = undefined;
@@ -75,6 +75,7 @@ export const discordGateway = (
     heartbeat = handshake = undefined;
     previous?.close(code);
     if (previous) options.onDisconnect?.();
+    options.onHealth?.(false);
   };
   const finish = (error?: MessengerError) => {
     stopped = true;
@@ -189,6 +190,7 @@ export const discordGateway = (
         if (!session && authenticated) lastIdentify = clock.now();
       } else if (m.op === 11 && awaitingAck) {
         awaitingAck = false;
+        if (deliver) options.onHealth?.(true);
         if (!acknowledged) {
           acknowledged = true;
           report(`${options.label}_ACK discord seq=${heartbeatSeq ?? "-"}`);
