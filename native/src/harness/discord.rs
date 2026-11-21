@@ -127,8 +127,7 @@ impl Harness<'_, '_> {
             receipt.claim.lane == key.0,
             "Discord origin does not match the run receipt"
         );
-        let text = receipt.discord_text();
-        let parts = split(text);
+        let parts = reply_parts(&receipt);
         match action {
             DeliveryAction::Next { .. } => self.store.next_discord_part(origin, &id, &parts, 0),
             DeliveryAction::Ack { part, remote, .. } => {
@@ -140,8 +139,21 @@ impl Harness<'_, '_> {
     }
 }
 
+fn reply_parts(receipt: &super::work::RunReceipt) -> Vec<std::borrow::Cow<'_, str>> {
+    let text = receipt.discord_text();
+    if receipt.fenced_replies() {
+        crate::discord_split::partition(text)
+    } else {
+        // Existing send intents bind the historical text digest and part number.
+        split(text)
+            .into_iter()
+            .map(std::borrow::Cow::Borrowed)
+            .collect()
+    }
+}
+
 /// Discord counts UTF-16 code units. Prefer a word boundary without dropping text.
-pub fn split(mut remainder: &str) -> Vec<&str> {
+fn split(mut remainder: &str) -> Vec<&str> {
     const LIMIT: usize = 2_000;
     let mut parts = Vec::new();
     while !remainder.is_empty() {

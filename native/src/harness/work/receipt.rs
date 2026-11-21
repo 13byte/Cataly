@@ -38,6 +38,14 @@ pub struct RunClaim {
     pub(super) fingerprint: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) tool: Option<RunTool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) reply_format: Option<ReplyFormat>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum ReplyFormat {
+    FencedV1,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -78,6 +86,9 @@ impl RunReceipt {
     pub(super) const README_UNAVAILABLE: &'static str =
         "This OMP does not support the optional README approval tool.";
 
+    pub(in crate::harness) const fn fenced_replies(&self) -> bool {
+        matches!(self.claim.reply_format, Some(ReplyFormat::FencedV1))
+    }
     pub(in crate::harness) fn discord_text(&self) -> &str {
         match &self.outcome {
             Outcome::Completed { text } if !text.trim().is_empty() => text.trim(),

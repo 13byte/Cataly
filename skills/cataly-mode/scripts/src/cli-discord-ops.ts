@@ -1,5 +1,6 @@
 /** Discord send/thread/react operations. */
 import { type Command, die, messageText } from "./cli-context.ts";
+import { discordNativeBinary } from "./cli-discord-binary.ts";
 import { type DcChannel, Discord, isForumType } from "./messenger/discord.ts";
 import { discordInboundEnv, isDiscordSnowflake } from "./messenger/discord-inbound-state.ts";
 import { renderDiscordTables } from "./messenger/discord-markdown.ts";
@@ -51,12 +52,8 @@ export const sendDiscord: Command = async (cli) => {
   // An edit replaces one message, so it is never split: over the limit it is refused before the channel lookup.
   if (edit !== undefined && text.length > DISCORD_LIMIT)
     die(`--edit text exceeds ${DISCORD_LIMIT} UTF-16 code units; shorten the text or send without --edit`);
-  const native = process.env["CATALY_DISCORD_NATIVE_BIN"];
-  if (
-    native &&
-    (edit !== undefined || text.length <= DISCORD_LIMIT || !text.includes("```")) &&
-    Buffer.byteLength(text) <= 256 * 1024
-  ) {
+  const native = discordNativeBinary();
+  if (native && Buffer.byteLength(text) <= 256 * 1024) {
     const destination = thread === undefined ? { to: to! } : { thread: discordInboundEnv("--thread", thread) };
     const { channel, ids, replyConfirmed } = await (
       await import("./cli-discord-native-send.ts")

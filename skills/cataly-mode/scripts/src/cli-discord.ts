@@ -27,6 +27,7 @@ import { runNativeDiscord } from "./cli-discord-native.ts";
 import { headEmitter, reconcileHead } from "./messenger/head-admission.ts";
 import { headUnresolved } from "./messenger/head-admission-state.ts";
 import { fetchHttp } from "./messenger/http.ts";
+import { discordNativeBinary } from "./cli-discord-binary.ts";
 import { applyDiscordAvatarDefault, messengerProfileDefaultsEnabled } from "./messenger/profile-defaults.ts";
 import { recordOwes } from "./owes.ts";
 import { realClock } from "./run.ts";
@@ -62,8 +63,21 @@ export const discordInboundCommand = async (
     idList(env[name]).map((id) => discordInboundEnv(name, id)),
   );
   if (!all && channelIds.length === 0) discordInboundEnv("CATALY_DISCORD_CHANNEL_ID", env["CATALY_DISCORD_CHANNEL_ID"]);
-  const executable = env["CATALY_DISCORD_NATIVE_BIN"];
-  if (executable) return await runNativeDiscord(executable, { ...options, stateDir, channels: channelIds });
+  const executable = discordNativeBinary();
+  // Never replace the lead's IPC, tracked replies or auto-discovered thread routes.
+  const explicit = Boolean(env["CATALY_DISCORD_NATIVE_BIN"]);
+  const standalone = !process.connected && !all && !threads && !context && !wake && options.activityFile === undefined;
+  if (
+    executable &&
+    (explicit || (standalone && (env["CATALY_DISCORD_NATIVE_WORKSPACE"] || deps.config.laneWorkspace)))
+  ) {
+    return await runNativeDiscord(executable, {
+      ...options,
+      stateDir,
+      channels: channelIds,
+      workspace: deps.config.laneWorkspace,
+    });
+  }
   const token = env["CATALY_DISCORD_TOKEN"] || die("CATALY_DISCORD_TOKEN is not set");
   const mode = env["CATALY_MONITOR_ADMISSION"];
   const native = mode === "1";

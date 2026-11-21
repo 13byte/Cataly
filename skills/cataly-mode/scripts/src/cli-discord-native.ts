@@ -7,6 +7,7 @@ import { messengerProfileDefaultsEnabled } from "./messenger/profile-defaults.ts
 type Config = {
   readonly stateDir: string;
   readonly channels: readonly string[];
+  readonly workspace?: string;
   readonly pollMinutes: number;
   readonly gateway: boolean;
   readonly context: boolean;
@@ -16,7 +17,7 @@ type Config = {
 
 /** Compatibility entry point only: Rust owns sockets, cursors, approval and replies. */
 export async function runNativeDiscord(executable: string, config: Config): Promise<void> {
-  const workspace = process.env["CATALY_DISCORD_NATIVE_WORKSPACE"];
+  const workspace = process.env["CATALY_DISCORD_NATIVE_WORKSPACE"] || config.workspace;
   if (!isAbsolute(executable) || !workspace || !isAbsolute(workspace)) {
     throw new Error("Set absolute CATALY_DISCORD_NATIVE_BIN and CATALY_DISCORD_NATIVE_WORKSPACE paths");
   }
@@ -47,6 +48,10 @@ export async function runNativeDiscord(executable: string, config: Config): Prom
   if (messengerProfileDefaultsEnabled()) {
     argv.push("--default-avatar", fileURLToPath(new URL("../../assets/cataly-avatar.jpg", import.meta.url)));
   }
+  await runNativeDiscordChild(argv);
+}
+
+export async function runNativeDiscordChild(argv: string[]): Promise<void> {
   const child = Bun.spawn(argv, { stdin: "ignore", stdout: "inherit", stderr: "inherit" });
   const stop = () => child.kill("SIGTERM");
   process.once("SIGINT", stop);
@@ -54,7 +59,7 @@ export async function runNativeDiscord(executable: string, config: Config): Prom
   process.once("disconnect", stop);
   try {
     const code = await child.exited;
-    if (code !== 0) throw new Error(`Native Discord monitor exited with status ${code}`);
+    if (code !== 0) throw new Error(`Native Discord command exited with status ${code}`);
   } finally {
     process.off("SIGINT", stop);
     process.off("SIGTERM", stop);

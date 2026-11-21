@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { InboundActivityError } from "../../../../src/update/source-activity.ts";
 
 import { type Command, die, envSlackToken, every, messageText, slackAuth } from "./cli-context.ts";
+import { discordNativeBinary } from "./cli-discord-binary.ts";
 import { reactDiscord, sendDiscord, threadDiscord } from "./cli-discord-ops.ts";
 import { channelDiscord } from "./cli-discord-purpose.ts";
 import { discordClock, openDiscordSocket, untilStopped } from "./cli-discord-gateway.ts";
@@ -101,6 +102,11 @@ const presence: Command = async ({ key }) => {
     console.log("PRESENCE_READY slack");
     await every(1, async () => console.log(`PRESENCE slack ${await p.hold()}`));
   } else if (key === "discord") {
+    const binary = discordNativeBinary();
+    if (binary) {
+      const { runNativeDiscordChild } = await import("./cli-discord-native.ts");
+      return await runNativeDiscordChild([binary, "discord-presence"]);
+    }
     const token = process.env["CATALY_DISCORD_TOKEN"] || die("CATALY_DISCORD_TOKEN is not set");
     await untilStopped(discordPresence(openDiscordSocket, token, discordClock, (line) => console.log(line)));
   } else die("presence needs slack or discord");

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { cpSync, existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { parseArgs } from "node:util";
+import { readArchive } from "../src/release/archive.ts";
 import { validateReleaseManifest } from "../src/release/manifest.ts";
 import type { ReleaseManifest } from "../src/release/types.ts";
 import { platform } from "../src/platform/index.ts";
@@ -52,25 +53,19 @@ const readManifest = (dist: string) => validateReleaseManifest(JSON.parse(readFi
 async function build(source: string, dist: string): Promise<void> {
   const clean = await run("clean-committed-snapshot", [git, "-C", source, "status", "--porcelain"]);
   assert.equal(clean.stdout, "");
-  await run("build-committed-release", [
-    bun,
-    join(source, "scripts/release.ts"),
-    "build",
-    "--out",
-    dist,
-    "--prerelease",
-  ]);
+  await run(
+    "build-committed-release",
+    [bun, join(source, "scripts/release.ts"), "build", "--out", dist, "--prerelease"],
+    { producer: true },
+  );
   const verify =
     "const {verifyDistribution}=await import(process.argv[1]); " +
     "console.log(JSON.stringify((await verifyDistribution(process.argv[2],process.argv[3])).manifest));";
-  await run("verify-committed-distribution", [
-    bun,
-    "-e",
-    verify,
-    join(source, "scripts/release-build.ts"),
-    source,
-    dist,
-  ]);
+  await run(
+    "verify-committed-distribution",
+    [bun, "-e", verify, join(source, "scripts/release-build.ts"), source, dist],
+    { producer: true },
+  );
 }
 
 await run("headless-tools", [
@@ -83,13 +78,11 @@ await build(sourceA, distA);
 const working = values["working-tree"]
   ? JSON.parse(
       (
-        await run("package-working-candidate", [
-          bun,
-          join(sourceB, "scripts/consumer-smoke-candidate.ts"),
-          sourceB,
-          join(out, "candidate-tree"),
-          distB,
-        ])
+        await run(
+          "package-working-candidate",
+          [bun, join(sourceB, "scripts/consumer-smoke-candidate.ts"), sourceB, join(out, "candidate-tree"), distB],
+          { producer: true },
+        )
       ).stdout,
     )
   : undefined;
@@ -99,6 +92,18 @@ const b = readManifest(distB);
 assert.equal(a.tag, "v0.1.3");
 assert.equal(a.commit, "97371823c4936f7e83f656cfa6ca9d446ecf1995", "Source A must be the actual old tagged updater");
 assert.equal(b.tag, "v0.1.4");
+const controllerPath = "native-bin/linux-x64/cataly";
+const controller = b.source.files.find(({ path }) => path === controllerPath);
+if (process.platform === "linux") {
+  assert(controller?.executable, "Linux release lacks an executable native controller");
+  const archive = readFileSync(join(distB, b.archive.name));
+  const payload = readArchive(archive, b).find(({ path }) => path === controllerPath);
+  assert(payload && payload.bytes.length > 20, "Linux release lacks the native executable payload");
+  assert.equal(payload.bytes.subarray(0, 6).toString("hex"), "7f454c460201", "Expected little-endian ELF64");
+  assert.equal(payload.bytes.readUInt16LE(18), 62, "Expected machine type x86-64");
+} else {
+  assert.equal(controller, undefined, "Darwin smoke must remain source-only");
+}
 for (const resource of ["SKILL.md", "references/setup.md", "assets/cataly-avatar.png"]) {
   const canonical = b.source.files.find((file) => file.path === `skills/cataly-mode/${resource}`);
   const historical = b.source.files.find((file) => file.path === `skills/dori-mode/${resource}`);

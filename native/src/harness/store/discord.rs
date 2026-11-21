@@ -36,10 +36,11 @@ impl Store {
         &self,
         origin: Origin,
         id: &RunId,
-        parts: &[&str],
+        parts: &[impl AsRef<str>],
         start: usize,
     ) -> Result<DeliveryReply> {
-        for (part, &text) in parts.iter().enumerate().skip(start) {
+        for (part, text) in parts.iter().enumerate().skip(start) {
+            let text = text.as_ref();
             let (sending, posted) = self.discord_paths(id, part);
             let attempt = Attempt {
                 origin,

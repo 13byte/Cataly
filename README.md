@@ -251,25 +251,30 @@ The existing `cataly inbound discord` can launch the Rust monitor with:
 
 | Setting | Value |
 | --- | --- |
-| `CATALY_DISCORD_NATIVE_BIN` | Absolute path to the Rust binary (`target/release/cataly`). |
-| `CATALY_DISCORD_NATIVE_WORKSPACE` | Absolute path to the workspace whose `README.md` may be approved. |
+| `CATALY_DISCORD_NATIVE_BIN` | Optional absolute Rust binary override; set `off` for legacy Discord commands. |
+| `CATALY_DISCORD_NATIVE_WORKSPACE` | Optional absolute workspace override for the native monitor; otherwise it uses `laneWorkspace`. |
 | `CATALY_DISCORD_NATIVE_CHANNEL_ID` | Optional exact channel or thread ID from the inbound list. If unset, use all explicitly listed inbound channels, not auto-discovered channels. |
 | `CATALY_OMP` / `CATALY_DISCORD_NATIVE_MODEL` | Optional OMP executable and model overrides. |
 
 Rust owns Gateway heartbeat and resume, REST history and sends, button
 callbacks, and the OMP lane. It only watches explicitly listed channels or
 threads. Stop the legacy monitor before switching; the compatibility launcher
-imports the existing channel cursor on first use. Legacy head/ASK routing and
-the `--context`, `--wake-lanes`, and `--activity-file` flags stay with the legacy
-command configuration, without `CATALY_DISCORD_NATIVE_BIN`.
+imports the existing channel cursor on first use. Legacy head/ASK routing,
+auto-discovered threads, and the `--context`, `--wake-lanes`, and
+`--activity-file` flags stay with the legacy monitor. For standalone native
+inbound, explicitly list channels and set `CATALY_DISCORD_THREADS=off`.
 
-With the same `CATALY_DISCORD_NATIVE_BIN`, `cataly send discord` uses Rust
-for text, replies and edits. You can also run it without Bun or OMP:
+When the native binary is installed or bundled, `cataly send discord` and
+`cataly presence discord` select it automatically. To run without Bun or OMP:
 `target/release/cataly discord-send --thread "$THREAD_ID" < reply.txt`.
 Use `--reply MESSAGE_ID` to reply or `--edit MESSAGE_ID` to update a single
 message. For a channel, use `--to CHANNEL_ID` or a unique `--to '#name'`
 in `CATALY_DISCORD_GUILD_ID`. The direct command emits a JSON delivery receipt.
-Multi-part fenced Markdown stays on the compatibility send path.
+Long fenced Markdown closes and reopens its code block at each UTF-16-safe cut.
+Use `target/release/cataly discord-presence` to run only the Gateway presence connection.
+Linux x64 release archives contain the checksummed Rust binary. Source installs
+on supported Unix hosts build it with Cargo when a toolchain is available.
+Existing installations without that binary keep working through the legacy CLI.
 
 Ordinary owner text runs with OMP's tools disabled; attachments are not
 downloaded. Follow-ups reuse the saved session, and the OMP process exits

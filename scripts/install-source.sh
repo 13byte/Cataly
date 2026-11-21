@@ -350,12 +350,12 @@ if [ "$mode" = side ]; then
   destinations=("$base" "$src" "$src/skills/cataly-mode/scripts" "$src/extension" "$ulw" "$bin_dir"
     "$base/config.json" "$base/.omp-cataly" "$base/.omp-cataly-ulw" "$base/env.sh" "$base/omp.yml"
     "$base/skills" "$base/skills/omp-cataly-mode" "$base/state" "$base/bin"
-    "$base/bin/cataly" "$base/bin/omp" "$base/bin/omp-cataly")
+    "$base/bin/cataly" "$base/bin/cataly-native" "$base/bin/omp" "$base/bin/omp-cataly")
 else
   protected=("$current_side" "$legacy_side")
   if [ "$base" != "$legacy_primary" ]; then protected+=("$legacy_primary"); fi
   destinations=("$base" "$src" "$src/skills/cataly-mode/scripts" "$src/extension" "$ulw" "$bin_dir"
-    "$base/bin" "$base/bin/omp" "$skills" "$extensions")
+    "$base/bin" "$base/bin/cataly-native" "$base/bin/omp" "$skills" "$extensions")
   [ -z "$legacy_primary_cli" ] || destinations+=("$legacy_primary_cli")
 fi
 if [ -n "$omp_bin" ]; then destinations+=("$omp_bin"); fi
@@ -562,6 +562,39 @@ write_generated() (
   mv -f "$scratch" "$path"
 )
 
+install_native_controller() (
+  local binary="" host candidate rust_host build_dir
+  if [ -d "$src/native-bin" ]; then
+    host="$("$bun_bin" -e 'console.log(`${process.platform}-${process.arch}`)')"
+    candidate="$src/native-bin/$host/cataly"
+    if present "$candidate"; then
+      [ ! -L "$src/native-bin" ] && [ ! -L "$src/native-bin/$host" ] ||
+        fail "Native Cataly package must not traverse a directory link: $candidate"
+      binary="$candidate"
+    fi
+  fi
+  if [ -z "$binary" ]; then
+    # Older source trees have no Rust crate; keep their install and Bun CLI unchanged.
+    [ -f "$src/Cargo.toml" ] && [ -f "$src/Cargo.lock" ] && [ -f "$src/native/src/main.rs" ] || return 0
+    if ! command -v cargo >/dev/null || ! rust_host="$(rustc -vV | awk '$1 == "host:" { print $2 }')" ||
+      [[ ! "$rust_host" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+      echo "Native Cataly needs a Rust toolchain; keeping the existing CLI." >&2
+      return 0
+    fi
+    build_dir="$(mktemp -d "${TMPDIR:-/tmp}/cataly-native-build.XXXXXX")"
+    trap 'rm -rf "$build_dir"' EXIT
+    if ! (cd "$src" && cargo build --locked --release --bin cataly --target "$rust_host" --target-dir "$build_dir"); then
+      echo "Native Cataly build failed; keeping the existing CLI." >&2
+      return 0
+    fi
+    binary="$build_dir/$rust_host/release/cataly"
+  fi
+  [ -f "$binary" ] && [ -x "$binary" ] && [ ! -L "$binary" ] ||
+    fail "Native Cataly is not an executable regular file: $binary"
+  (umask 077; mkdir -p "$base/bin")
+  write_generated "$base/bin/cataly-native" 700 < "$binary"
+)
+
 if [ "$mode" = primary ]; then
   mkdir -p "$skills" "$extensions"
   link "$src/skills/cataly-mode" "$skills/cataly-mode" || true
@@ -588,6 +621,7 @@ if [ "$mode" = primary ] && [ "$bin_dir/cataly" != "$primary_cli" ]; then
     fail "$bin_dir/cataly exists and is not a link; leaving it alone. Choose another OMP_CATALY_BIN_DIR."
   fi
 fi
+install_native_controller
 
 if [ "$mode" = side ] && [ -n "$ulw_explicit" ]; then
   if [ "$ulw" -ef "$base/omp-ulw" ]; then

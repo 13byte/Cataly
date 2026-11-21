@@ -29,6 +29,7 @@ impl Harness<'_, '_> {
             session_id: "cataly-memory".to_owned(),
             fingerprint,
             tool: Some(RunTool::Memory),
+            reply_format: None,
         };
         self.store.claim(&claim)?;
         let outcome = match remember() {

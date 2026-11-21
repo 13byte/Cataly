@@ -12,7 +12,7 @@ use crate::rpc::tools::{Approval, Tools};
 #[cfg(feature = "discord")]
 mod memory;
 mod receipt;
-use receipt::{Outcome, RunTool};
+use receipt::{Outcome, ReplyFormat, RunTool};
 pub use receipt::{RunClaim, RunId, RunReceipt};
 
 #[derive(Deserialize)]
@@ -30,6 +30,7 @@ pub(super) struct RunOptions {
     pub(super) cancel: Option<oneshot::Receiver<()>>,
     pub(super) approvals: Option<mpsc::Sender<Approval>>,
     pub(super) memory_context: Option<String>,
+    pub(super) fenced_replies: bool,
 }
 
 impl Harness<'_, '_> {
@@ -174,6 +175,7 @@ impl Harness<'_, '_> {
             session_id: live.binding.session.id.clone(),
             fingerprint,
             tool: readme.then_some(RunTool::ReadReadme),
+            reply_format: options.fenced_replies.then_some(ReplyFormat::FencedV1),
         };
         self.store.claim(&claim)?;
         if readme && tools.is_none() {

@@ -30,6 +30,14 @@ def exercise_send(binary: str, env: dict[str, str], world: "World") -> None:
     assert "message_reference" not in second and first["content"] + second["content"] == text
     assert first["allowed_mentions"] == {"parse": [], "replied_user": False}
 
+    body = "가😀code\n" * 530
+    fenced = "```rust\n" + body + "```"
+    pieces = sent(fenced, ("--thread", "20"), False, 3)
+    contents = [part["content"] for part in pieces]
+    assert all(part.startswith("```rust\n") and part.endswith("\n```") for part in contents), contents
+    assert all(len(part.encode("utf-16-le")) // 2 <= 2000 for part in contents)
+    assert "".join(part.removeprefix("```rust\n").removesuffix("```") for part in contents) == body
+
     world.force_plain_reply = True
     sent("server did not confirm reply", ("--thread", "20", "--reply", "100"), False, 1)
     world.force_plain_reply = False

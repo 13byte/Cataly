@@ -11,9 +11,11 @@ mod api;
 mod gateway;
 mod intake;
 mod monitor;
+mod presence;
 mod send;
 mod wake;
 pub use api::{Destination, ReplyExtras};
+pub use presence::presence;
 pub use send::{SendOptions, send};
 
 #[derive(Args, Debug)]
@@ -167,6 +169,16 @@ fn endpoint(var: &str, default: &str, scheme: &str) -> Result<Url> {
     Ok(url)
 }
 
+fn gateway_url() -> Result<Url> {
+    let mut url = endpoint(
+        "CATALY_DISCORD_GATEWAY_URL",
+        "wss://gateway.discord.gg/",
+        "ws",
+    )?;
+    url.set_query(Some("v=10&encoding=json"));
+    Ok(url)
+}
+
 fn configured_api() -> Result<(api::DiscordApi, String)> {
     let mut base = endpoint(
         "CATALY_DISCORD_API_BASE",
@@ -177,13 +189,18 @@ fn configured_api() -> Result<(api::DiscordApi, String)> {
         let path = format!("{}/", base.path());
         base.set_path(&path);
     }
+    let token = discord_token()?;
+    Ok((api::DiscordApi::new(base, &token)?, token))
+}
+
+fn discord_token() -> Result<String> {
     let token = std::env::var("CATALY_DISCORD_TOKEN")
         .context("set CATALY_DISCORD_TOKEN for native Discord")?;
     ensure!(
         !token.is_empty(),
         "set CATALY_DISCORD_TOKEN for native Discord"
     );
-    Ok((api::DiscordApi::new(base, &token)?, token))
+    Ok(token)
 }
 
 pub struct Transport {

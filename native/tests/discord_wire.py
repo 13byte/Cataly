@@ -27,6 +27,7 @@ class World:
         self.seq = 10
         self.force_plain_reply = False
         self.reject_text = None
+        self.presence = Queue()
 
     def dispatch(self, name, data):
         self.seq += 1
@@ -188,5 +189,7 @@ class Discord(BaseHTTPRequestHandler):
                     if frame["op"] == 1:
                         self.world.heartbeat.set()
                         self.ws_send({"op": 11})
+                    elif frame["op"] == 3:
+                        self.world.presence.put(frame["d"])
         except (EOFError, BrokenPipeError, ConnectionResetError):
             return

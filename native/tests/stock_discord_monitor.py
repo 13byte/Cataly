@@ -32,10 +32,39 @@ def exercise_monitor(command, env, root, calls, results):
         gateway(prefix, wire_env, root, world, calls, results)
         memory_checkpoint(prefix, wire_env, root, world)
         exercise_send(command[0], wire_env, world)
+        presence(command[0], wire_env, world)
     finally:
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+def presence(binary, env, world):
+    online = {"since": None, "activities": [], "status": "online", "afk": False}
+    world.heartbeat.clear()
+    with subprocess.Popen(
+        [binary, "--omp", "/no-omp-needed-for-presence", "discord-presence"],
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    ) as child:
+        try:
+            identify = world.auth.get(timeout=5)
+            assert identify["op"] == 2 and identify["d"]["presence"] == online, identify
+            assert identify["d"]["intents"] == 1 << 9
+            assert world.heartbeat.wait(5)
+            world.events.put({"op": 7})
+            resumed = world.auth.get(timeout=12)
+            assert resumed["op"] == 6 and resumed["d"]["session_id"] == "local-session", resumed
+            assert world.presence.get(timeout=5) == online
+            child.terminate()
+            out, err = child.communicate(timeout=8)
+            assert child.returncode == 0, (out, err)
+            for line in (b"PRESENCE_READY discord event=READY", b"PRESENCE_ACK discord",
+                         b"PRESENCE_READY discord event=RESUMED", b"PRESENCE_STOPPED discord"):
+                assert line in out, (out, err)
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.communicate(timeout=5)
 
 
 def memory_checkpoint(prefix, env, root, world):

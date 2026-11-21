@@ -8,7 +8,7 @@ use anyhow::{Result, ensure};
 use sha2::{Digest, Sha256};
 use tokio::sync::{mpsc, oneshot, watch};
 
-use super::{DeliveryReply, Origin, Snowflake, memory::Memory, split};
+use super::{DeliveryReply, Origin, Snowflake, memory::Memory, reply_parts};
 use crate::discord::{Destination, ReplyExtras, Transport};
 use crate::harness::{Harness, Options, store::Store, work::RunOptions};
 use crate::omp::Executable;
@@ -111,9 +111,7 @@ impl<'a, 'b> Worker<'a, 'b> {
                         memory.remember(origin, text)
                     })
             })?;
-            return self
-                .deliver(transport, origin, receipt.discord_text(), stop)
-                .await;
+            return self.deliver(transport, origin, &receipt, stop).await;
         }
         let explicit = text
             .strip_prefix("!cataly ")
@@ -130,6 +128,7 @@ impl<'a, 'b> Worker<'a, 'b> {
             cancel: Some(cancel_signal),
             approvals: readme.then_some(send),
             memory_context: self.memory_context(origin),
+            fenced_replies: true,
         };
         let mut card = None;
         let result = {
@@ -190,15 +189,14 @@ impl<'a, 'b> Worker<'a, 'b> {
         if receipt.completed() {
             self.checkpoint(origin, text);
         }
-        self.deliver(transport, origin, receipt.discord_text(), stop)
-            .await
+        self.deliver(transport, origin, &receipt, stop).await
     }
 
     async fn deliver(
         &self,
         transport: &Transport,
         origin: Origin,
-        text: &str,
+        receipt: &crate::harness::work::RunReceipt,
         stop: &watch::Receiver<bool>,
     ) -> Result<bool> {
         let destination = Destination {
@@ -206,7 +204,7 @@ impl<'a, 'b> Worker<'a, 'b> {
             message: origin.message,
         };
         let id = origin.id();
-        let parts = split(text);
+        let parts = reply_parts(receipt);
         let mut next = 0;
         loop {
             if *stop.borrow() {
