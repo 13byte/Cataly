@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -87,7 +87,11 @@ test.each(cwdCases)("schedule add/list and one-shot scheduler preserve argv and 
   expect(readFileSync(job.last.output, "utf8")).toContain(literal);
   expect(readFileSync(job.last.output, "utf8")).toContain("stderr");
   expect(invoke(["scheduler", "--loop", "0"]).code).toBe(0);
-  expect(job.cwd).toBe(realpathSync.native(cwd));
+  // A native child can report an equivalent short Win32 or /private macOS pathname.
+  const expectedDirectory = statSync(cwd, { bigint: true });
+  const storedDirectory = statSync(job.cwd, { bigint: true });
+  expect(expectedDirectory.ino).not.toBe(0n);
+  expect([storedDirectory.dev, storedDirectory.ino]).toEqual([expectedDirectory.dev, expectedDirectory.ino]);
   expect(readFileSync(join(cwd, "runs"), "utf8")).toBe("x");
 });
 
