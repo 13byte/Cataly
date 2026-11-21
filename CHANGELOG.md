@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add opt-in `dori update source check|status|apply`, `idle-check`, and `lead restart` on the existing managed deployment engine. The source supervisor checks CI and stops only at a verified idle and quiet boundary; service and upstream update defaults are unchanged.
+
 - Report the currently verified managed source and native runtime separately from historic deployment receipts.
 
 - Record terminal monitor outcomes and opt-in once completion, preserving interrupted work and holding managed restarts while once work remains unfinished.

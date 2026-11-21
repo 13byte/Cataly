@@ -15,6 +15,7 @@ type Intake = ThreadIntake & {
 
 export type DiscordInboundLive = { done: Promise<void>; close(): void };
 export type DiscordInboundLifecycle = { ready(): void; disconnect(): void };
+type Activity = { received(message: Message): void; healthy(): void; unavailable(): void };
 
 /**
  * Scoped dispatches and backfills share the durable FIFO. Unknown thread scope is resolved in bounded RAM
@@ -29,6 +30,7 @@ export const discordInboundLive = (
   report: (line: string) => void,
   queue: DiscordInboundFifo,
   lifecycle?: DiscordInboundLifecycle,
+  activity?: Activity,
 ): DiscordInboundLive => {
   const admission = new AbortController();
   const cancelled = new Error("Discord inbound closed before ledger admission");
@@ -38,6 +40,18 @@ export const discordInboundLive = (
   let draining = false;
   let failure: unknown;
   let dead = false;
+  let synced = false;
+  let connected = false;
+  let connection = 0;
+  let gateway: ReturnType<typeof discordGateway> | undefined;
+  const observe = (action: () => void): void => {
+    if (dead) return;
+    try {
+      action();
+    } catch (error) {
+      fail(error);
+    }
+  };
   let timer: unknown;
   let wake: (() => void) | undefined;
   const pause = (ms: number) => {
@@ -47,9 +61,15 @@ export const discordInboundLive = (
     return promise;
   };
   const backfill = async () => {
+    const generation = connection;
     for (let delay = 2_000; ; delay = Math.min(delay * 2, 30_000)) {
       try {
-        return await intake.sync(deliver, queue, metadata.flushKnown);
+        await intake.sync(deliver, queue, metadata.flushKnown);
+        if (!dead && connected && generation === connection) {
+          synced = true;
+          if (!metadata.pending()) observe(() => activity?.healthy());
+        }
+        return;
       } catch (error) {
         const wait = transientRetryDelay(error, delay);
         if (dead || wait === undefined) throw error;
@@ -60,7 +80,7 @@ export const discordInboundLive = (
     }
   };
   const fail = (error: unknown) => {
-    failure = error;
+    failure ??= error;
     dead = true; // Preserve every committed record and its admission position.
     close();
   };
@@ -101,6 +121,7 @@ export const discordInboundLive = (
       parent ??= intake.parentFor?.(data.channel_id);
     }
     queue.push(kind, data, after, parent);
+    if (kind === "message" && data) observe(() => activity?.received(data));
     drain(); // Persist first; each caller owns propagation of a storage failure.
   };
   const metadata = discordThreadAdmission(
@@ -110,13 +131,33 @@ export const discordInboundLive = (
     report,
     fail,
   );
-  const gateway = discordGateway(open, token, clock, report, {
+  const close = () => {
+    observe(() => activity?.unavailable());
+    admission.abort(cancelled);
+    dead = true;
+    metadata.close();
+    if (timer !== undefined) clock.clearTimeout(timer);
+    wake?.();
+    gateway?.close();
+  };
+  gateway = discordGateway(open, token, clock, report, {
     label: "DISCORD_GATEWAY",
     intents: GUILD_MESSAGES | DIRECT_MESSAGES | MESSAGE_CONTENT,
     online: false,
     onDisconnect: () => lifecycle?.disconnect(),
+    onHealth: (available) => {
+      if (!available) {
+        connection++;
+        connected = synced = false;
+        observe(() => activity?.unavailable());
+      } else if (synced && !queue.first() && !metadata.pending()) observe(() => activity?.healthy());
+    },
     onReady: () => {
       try {
+        connection++;
+        connected = true;
+        synced = false;
+        observe(() => activity?.unavailable());
         lifecycle?.ready();
         enqueue("sync");
       } catch (error) {
@@ -128,20 +169,13 @@ export const discordInboundLive = (
       try {
         const message = data as Message;
         if (intake.accepts(message)) enqueue("message", message);
-        else metadata.push(message);
+        else if (metadata.push(message)) observe(() => activity?.received(message));
       } catch (error) {
         fail(error);
       }
     },
   });
-  const close = () => {
-    admission.abort(cancelled);
-    dead = true;
-    metadata.close();
-    if (timer !== undefined) clock.clearTimeout(timer);
-    wake?.();
-    gateway.close();
-  };
+  if (dead) gateway.close();
   const done = gateway.done.finally(async () => {
     close();
     await metadata.done();

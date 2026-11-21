@@ -35,6 +35,8 @@ test("the dori command vocabulary is every command the CLI dispatches", () => {
     ["harness", "cli-harness.ts"],
     ["update", "/src/release/cli.ts"],
     ["upstream", "/src/update/cli.ts"],
+    ["idle-check", "/src/update/source-update-cli.ts"],
+    ["lead", "/src/update/source-update-cli.ts"],
     ["remote", "cli-remote.ts"],
     ["headless", "cli-headless.ts"],
     ["inbound-abandon", "cli-discord-recovery.ts"],

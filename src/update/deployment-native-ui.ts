@@ -30,6 +30,20 @@ export async function requestNativeUiExit(cli: DeploymentCli, pane: string): Pro
   }
 }
 
+export function forwardStopStarted(config: DeploymentConfig, record: DeploymentRecord): boolean {
+  return Boolean(
+    record.nativeExitObservedAt ||
+    (config.nativeStopMode === "ui" ? record.nativeUiExitRequestedAt : record.stopRequestedAt),
+  );
+}
+
+/** A retry window never authorizes a native effect after its durable deadline. */
+export function assertRetryDeadline(config: DeploymentConfig, record: DeploymentRecord): void {
+  if (forwardStopStarted(config, record) || record.retryDeadlineAt === undefined) return;
+  if (!(Date.now() < Date.parse(record.retryDeadlineAt)))
+    throw new DeploymentHeld("deployment pre-stop retry deadline expired or is invalid");
+}
+
 /** Never certify a possibly exiting old actor as restored; keep both consumers' forward intent resumable. */
 export function holdPendingNativeUiExit(record: DeploymentRecord): boolean {
   if (!record.nativeUiExitRequestedAt || record.step !== "stop") return false;

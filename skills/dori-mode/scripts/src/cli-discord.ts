@@ -1,14 +1,15 @@
 /** The Discord Gateway plumbing shared by `dori presence discord` and `dori inbound discord --gateway`. */
 import { join } from "node:path";
+import { inboundActivity, InboundActivityError } from "../../../../src/update/source-activity.ts";
 import { takeLock } from "./checkpoint-lock.ts";
 import { die, every, exitOnDisconnect } from "./cli-context.ts";
+import { discordClock, openDiscordSocket, untilStopped } from "./cli-discord-gateway.ts";
 import { withDeliveryLock } from "./delivery-lock.ts";
 import { discordLaneMonitor } from "./discord-lane-monitor.ts";
 import { isDiscordWakePending } from "./discord-lane-wake-pending.ts";
 import type { FlowDeps } from "./done-flow.ts";
 import { Discord } from "./messenger/discord.ts";
 import { DiscordChannels } from "./messenger/discord-channels.ts";
-import type { GatewayClock, GatewaySocket } from "./messenger/discord-gateway.ts";
 import { routeDiscordAskReply, routeUnreferencedDiscordAskText } from "./messenger/discord-ask-mailbox.ts";
 import { type DiscordAskReceiverPublication, openDiscordAskReceiver } from "./messenger/discord-ask-receiver.ts";
 import {
@@ -18,7 +19,7 @@ import {
   markDiscordInboundSeen,
 } from "./messenger/discord-inbound.ts";
 import { inboundContext } from "./messenger/discord-inbound-context.ts";
-import { type Emit, transientRetryDelay } from "./messenger/discord-inbound-api.ts";
+import { type Emit, isOwnerMessage, transientRetryDelay } from "./messenger/discord-inbound-api.ts";
 import { discordInboundLive } from "./messenger/discord-inbound-live.ts";
 import { discordInboundQueue } from "./messenger/discord-inbound-queue.ts";
 import { discordInboundEnv } from "./messenger/discord-inbound-state.ts";
@@ -28,36 +29,6 @@ import { headUnresolved } from "./messenger/head-admission-state.ts";
 import { fetchHttp, MessengerError } from "./messenger/http.ts";
 import { recordOwes } from "./owes.ts";
 import { realClock } from "./run.ts";
-export const openDiscordSocket = (url: string): GatewaySocket => {
-  const ws = new WebSocket(url);
-  return {
-    send: (data) => ws.send(data),
-    close: (code) => ws.close(code),
-    onMessage: (cb) => ws.addEventListener("message", (event) => cb(String(event.data))),
-    onClose: (cb) => ws.addEventListener("close", (event) => cb(event.code)),
-    onError: (cb) => ws.addEventListener("error", () => cb()),
-  };
-};
-export const discordClock: GatewayClock = {
-  now: realClock.now,
-  random: Math.random,
-  setTimeout: (cb, ms) => setTimeout(cb, ms),
-  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
-};
-
-/** Waits for a Gateway connection to end, closing it on SIGINT or SIGTERM. */
-export const untilStopped = async (gateway: { done: Promise<void>; close(): void }): Promise<void> => {
-  const stop = () => gateway.close();
-  process.once("SIGINT", stop);
-  process.once("SIGTERM", stop);
-  try {
-    await gateway.done;
-  } finally {
-    process.removeListener("SIGINT", stop);
-    process.removeListener("SIGTERM", stop);
-    gateway.close();
-  }
-};
 const idList = (value: string | undefined): string[] =>
   (value ?? "")
     .split(",")
@@ -74,6 +45,7 @@ export const discordInboundCommand = async (
     readonly pollMinutes: number;
     readonly context: boolean;
     readonly wake: boolean;
+    readonly activityFile?: string;
   },
 ) => {
   const { gateway, pollMinutes, context, wake } = options;
@@ -101,11 +73,16 @@ export const discordInboundCommand = async (
   let receiver: DiscordAskReceiverPublication | undefined;
   let laneInbox: ReturnType<typeof openDiscordLaneInbox> | undefined;
   let releaseWake: (() => void) | undefined;
+  let activity: ReturnType<typeof inboundActivity>;
   const close = () => {
-    releaseWake?.();
-    receiver?.close();
-    laneInbox?.close();
-    queue.close();
+    try {
+      activity?.close();
+    } finally {
+      releaseWake?.();
+      receiver?.close();
+      laneInbox?.close();
+      queue.close();
+    }
   };
   const unregisterDisconnect = native ? exitOnDisconnect(close) : undefined;
   try {
@@ -120,6 +97,7 @@ export const discordInboundCommand = async (
     await reconcileHead(queue);
     if (!gateway && queue.first())
       die("Discord inbound has pending Gateway work; restart with --gateway before REST mode");
+    activity = inboundActivity(options.activityFile, "discord");
     const discord = new Discord(fetchHttp, realClock, token);
     const intake = await discordInbound(discord, queue.storeFor, {
       ownerId,
@@ -157,6 +135,7 @@ export const discordInboundCommand = async (
     });
     const emit: Emit = async (message, signal) => {
       signal?.throwIfAborted();
+      activity?.received();
       if (
         routeDiscordAskReply(stateDir, message, ownerId) ||
         (message.unreferencedText && routeUnreferencedDiscordAskText(stateDir, message, ownerId))
@@ -208,9 +187,12 @@ export const discordInboundCommand = async (
           await intake.poll(emit);
           receiver?.refresh();
           if (serviceLanes && laneInbox) await serviceLanes(laneInbox, intake.channels());
+          activity?.healthy();
         },
         (error, interval) => {
           receiver?.suspend();
+          if (error instanceof InboundActivityError) return false;
+          activity?.unavailable();
           return error instanceof DiscordLaneIntakeHold ? interval : (transientRetryDelay(error, interval) ?? false);
         },
       );
@@ -231,17 +213,33 @@ export const discordInboundCommand = async (
       },
     };
     await untilStopped(
-      discordInboundLive(live, openDiscordSocket, token, discordClock, emit, (line) => console.log(line), queue, {
-        ready() {
-          connected = true;
-          generation++;
+      discordInboundLive(
+        live,
+        openDiscordSocket,
+        token,
+        discordClock,
+        emit,
+        (line) => console.log(line),
+        queue,
+        {
+          ready() {
+            connected = true;
+            generation++;
+          },
+          disconnect() {
+            connected = false;
+            generation++;
+            receiver?.suspend();
+          },
         },
-        disconnect() {
-          connected = false;
-          generation++;
-          receiver?.suspend();
+        activity && {
+          healthy: activity.healthy,
+          unavailable: activity.unavailable,
+          received: (message) => {
+            if (isOwnerMessage(message, ownerId, intake.botId)) activity?.received();
+          },
         },
-      }),
+      ),
     );
   } finally {
     unregisterDisconnect?.();

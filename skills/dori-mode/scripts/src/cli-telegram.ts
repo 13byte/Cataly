@@ -1,3 +1,4 @@
+import { inboundActivity } from "../../../../src/update/source-activity.ts";
 import { die } from "./cli-context.ts";
 import type { DoriConfig } from "./config.ts";
 import { fetchHttp, MessengerError } from "./messenger/http.ts";
@@ -7,7 +8,7 @@ import { inboundLagLog } from "./messenger/telegram-lag.ts";
 import { formatTelegramInbound } from "./messenger/telegram-line.ts";
 import { realClock } from "./run.ts";
 
-export const telegramInbound = async (config: DoriConfig, minutes: number): Promise<void> => {
+export const telegramInbound = async (config: DoriConfig, minutes: number, activityFile?: string): Promise<void> => {
   const { stateDir } = config;
   const tg = new Telegram(
     fetchHttp,
@@ -46,40 +47,51 @@ export const telegramInbound = async (config: DoriConfig, minutes: number): Prom
     throw new MessengerError("Telegram getWebhookInfo returned an invalid webhook status", 0);
   if (webhook.url !== "")
     throw new MessengerError("Telegram inbound refused an active webhook; use a polling bot (webhook unchanged)", 409);
-  console.log(`INBOUND_READY telegram owner=${ownerId} group=${groupChatId ?? "-"} topic=${topicId ?? "-"}`);
   // The INBOUND line stays exactly as monitors parse it; receive lag goes to its own jsonl.
   const recall = config.recall?.enabled
     ? (await import("./messenger/recall-telegram.ts")).telegramOwnerRecall(config, identity.id, ownerId)
     : undefined;
   const recordLag = inboundLagLog(`${stateDir}/telegram-lag.jsonl`, (m) => console.log(`WARN ${m}`.slice(0, 300)));
-  await telegramInboundLoop(
-    tg,
-    store,
-    {
-      ownerId,
-      ...(groupChatId !== undefined ? { groupChatId } : {}),
-      ...(topicId !== undefined ? { topicId } : {}),
-    },
-    minutes,
-    (i) => {
-      console.log(formatTelegramInbound(i));
-      recordLag(i, realClock.now());
-      // Read receipt: the owner sees the message was picked up the moment it is received.
-      // One reaction only (never a bubble — it would clear the typing indicator), and a
-      // failed reaction must never cost the message, so it is warned once and dropped.
-      if (i.kind === "message" && i.messageId !== undefined) {
-        const recalled = recall?.(i);
-        if (recalled) console.log(recalled);
-        const target = { chatId: i.chat, ...(i.thread !== undefined && i.thread !== 1 ? { threadId: i.thread } : {}) };
-        void tg.react(target, i.messageId, "👀").catch((e: unknown) => {
-          if (reactWarned) return;
-          reactWarned = true;
-          console.log(
-            `WARN reaction failed (${e instanceof Error ? e.message : String(e)}); still answering`.slice(0, 300),
-          );
-        });
-      }
-    },
-    (m) => console.log(`WARN ${m}`.slice(0, 300)),
-  );
+  const activity = inboundActivity(activityFile, "telegram");
+  try {
+    console.log(`INBOUND_READY telegram owner=${ownerId} group=${groupChatId ?? "-"} topic=${topicId ?? "-"}`);
+    await telegramInboundLoop(
+      tg,
+      store,
+      {
+        ownerId,
+        ...(groupChatId !== undefined ? { groupChatId } : {}),
+        ...(topicId !== undefined ? { topicId } : {}),
+      },
+      minutes,
+      (i) => {
+        activity?.received();
+        console.log(formatTelegramInbound(i));
+        recordLag(i, realClock.now());
+        // Read receipt: the owner sees the message was picked up the moment it is received.
+        // One reaction only (never a bubble — it would clear the typing indicator), and a
+        // failed reaction must never cost the message, so it is warned once and dropped.
+        if (i.kind === "message" && i.messageId !== undefined) {
+          const recalled = recall?.(i);
+          if (recalled) console.log(recalled);
+          const target = {
+            chatId: i.chat,
+            ...(i.thread !== undefined && i.thread !== 1 ? { threadId: i.thread } : {}),
+          };
+          void tg.react(target, i.messageId, "👀").catch((e: unknown) => {
+            if (reactWarned) return;
+            reactWarned = true;
+            console.log(
+              `WARN reaction failed (${e instanceof Error ? e.message : String(e)}); still answering`.slice(0, 300),
+            );
+          });
+        }
+      },
+      (m) => console.log(`WARN ${m}`.slice(0, 300)),
+      undefined,
+      activity ? (available) => (available ? activity.healthy() : activity.unavailable()) : undefined,
+    );
+  } finally {
+    activity?.close();
+  }
 };

@@ -6,7 +6,12 @@ import type { Exec } from "../runtime/exec.ts";
 import type { LegacyRollbackForeground } from "./deployment-legacy-monitors.ts";
 import { attestMonitorForeground } from "./deployment-monitor-receipts.ts";
 import { assertMonitorStopSafe } from "./deployment-monitors.ts";
-import { assertNativeUiIdle, requestNativeUiExit } from "./deployment-native-ui.ts";
+import {
+  assertNativeUiIdle,
+  assertRetryDeadline,
+  forwardStopStarted,
+  requestNativeUiExit,
+} from "./deployment-native-ui.ts";
 import {
   actorEnv,
   DeploymentBusy,
@@ -69,8 +74,7 @@ export async function captureRuntime(
   const state = readPaneState(config.stateDir, config.pane);
   const current = await cli.probe(config.pane, "deployment held", config.stateDir);
   if (
-    !state ||
-    state.role !== "dori" ||
+    state?.role !== "dori" ||
     state.sessionId !== config.sessionId ||
     state.paneId !== config.pane ||
     current.pid !== state.pid ||
@@ -145,13 +149,6 @@ export async function captureRuntime(
   return { ...runtime, busy, approvalPending: latest.approvalPending };
 }
 
-/** A retry window never authorizes a native effect after its durable deadline. */
-export function assertRetryDeadline(record: DeploymentRecord): void {
-  if (record.stopRequestedAt || record.retryDeadlineAt === undefined) return;
-  if (!(Date.now() < Date.parse(record.retryDeadlineAt)))
-    throw new DeploymentHeld("deployment pre-stop retry deadline expired or is invalid");
-}
-
 /** One identity-bound forward stop; rollback cleanup retains its bound signal path. */
 export async function stopRuntime(
   config: DeploymentConfig,
@@ -159,14 +156,17 @@ export async function stopRuntime(
   record: DeploymentRecord,
   persist: (record: DeploymentRecord) => void,
   allowQuiesce = false,
+  finalAdmission?: () => void,
 ): Promise<void> {
   const expected = record.oldRuntime;
   if (!expected) throw new DeploymentHeld("native stop has no journaled owner identity");
   if (!sameProcess(expected)) {
     if (processIdentity(expected.pid)) throw new DeploymentHeld("native PID has been reused");
     await requireShell(config, cli, expected);
-    assertRetryDeadline(record);
+    assertRetryDeadline(config, record);
+    if (!forwardStopStarted(config, record)) finalAdmission?.();
     record.stopRequestedAt ??= new Date().toISOString();
+    record.nativeExitObservedAt ??= new Date().toISOString();
     persist(record);
     consumeQuiesceCheckpoint(config, record);
     return;
@@ -191,7 +191,8 @@ export async function stopRuntime(
       throw new DeploymentHeld("previous source changed after its handoff journal");
     if (ui) await assertNativeUiIdle(config, cli, record, expected);
     assertMonitorStopSafe(config, record);
-    assertRetryDeadline(record);
+    assertRetryDeadline(config, record);
+    if (!forwardStopStarted(config, record)) finalAdmission?.();
     record.stopRequestedAt ??= new Date().toISOString();
     persist(record);
     consumeQuiesceCheckpoint(config, record);

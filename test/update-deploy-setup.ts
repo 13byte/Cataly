@@ -4,6 +4,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseDeploymentConfig } from "../src/update/deployment.ts";
 
+export type ForegroundFixtureOptions = {
+  activity?: boolean;
+  bunOnly?: boolean;
+  unknown?: boolean;
+  parentShell?: boolean;
+  rollback?: boolean;
+  paneShell?: boolean;
+  stoppable?: boolean;
+  subshell?: boolean;
+  transient?: boolean;
+};
+
 export function deploymentConfig(root: string) {
   return parseDeploymentConfig(
     {

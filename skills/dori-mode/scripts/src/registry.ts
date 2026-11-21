@@ -217,18 +217,20 @@ export class Registry {
       .map((f) => this.readNow(basename(f, ".json")))
       .filter((lane) => lane !== null);
   }
-
   /** Isolate unreadable and miskeyed rows; strict scans also flag a row that vanishes during the read. */
   async scan(strict = false): Promise<{ lanes: Lane[]; unreadable: string[] }> {
+    return this.scanNow(strict);
+  }
+  scanNow(strict = false): { lanes: Lane[]; unreadable: string[] } {
     const lanes: Lane[] = [];
     const unreadable: string[] = [];
     for (const f of this.files()) {
       try {
         const lane: unknown = this.readNow(basename(f, ".json"));
         if (lane === null && !strict) continue;
-        if (lane === null || typeof lane !== "object" || !("key" in lane) || lane.key !== basename(f, ".json"))
-          throw new Error("not a lane record");
-        lanes.push(lane as Lane);
+        if (lane && typeof lane === "object" && "key" in lane && lane.key === basename(f, ".json"))
+          lanes.push(lane as Lane);
+        else unreadable.push(f);
       } catch {
         unreadable.push(f);
       }
