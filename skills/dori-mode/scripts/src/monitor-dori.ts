@@ -33,6 +33,7 @@ export const DORI_COMMANDS: Record<string, true> = {
   "object-done": true,
   park: true,
   pause: true,
+  policy: true,
   pr: true,
   presence: true,
   queue: true,

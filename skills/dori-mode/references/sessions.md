@@ -70,6 +70,33 @@ Starting rechecks every predecessor's closed status, successful normal-completio
 
 Starts are serialized with immediate launch/adopt for the same key, independently of pause/tell delivery so startup checks cannot block an operator interruption. Different queued keys sharing the state directory serialize the host-capacity check through terminal creation, not startup confirmation. Dependency graph updates are serialized across keys to prevent concurrent requeues from adding a cycle. A durable `starting` record precedes terminal creation; a crash or uncertain startup never triggers an automatic retry. Inspect the registry and terminal: cancellation can release an unregistered attempt, but a registered lane must use its ordinary lifecycle controls. A `started` receipt means the launch attempt was recorded, not that the goal finished; inspect the printed `STARTUP_*` result.
 
+## Lane Bash policy (opt-in)
+
+`lanePolicy` in Dori's configuration adds Bash tool-call rules to new native lanes:
+
+```json
+{
+  "lanePolicy": {
+    "denyBash": ["\\bsudo\\b"],
+    "perLane": { "docs-*": { "allowBash": ["sudo -l"] } }
+  }
+}
+```
+
+Lane globs support `*`; other accepted glob characters are literal. Deny expressions search the command string, while an exception has to match the whole command string. Malformed rules fail configuration validation. With no lane policy, ordinary launches are unchanged.
+
+The policy requires fresh, unambiguous OMP argv with one `--dori-role lane`. The launch writes its private snapshot after registering the lane and before starting OMP. Dry-run writes nothing and adoption does not retrofit a policy. The extension records the bound snapshot generation in the native transcript, restores it on resume and `/new`, and inherits it through subagents. A protected subagent needs a persisted parent session. A missing or unreadable binding is not a reason to let a protected Bash call run.
+
+A blocked call records the rule IDs and the command's SHA-256, not the command text. After the owner approves the exact blocked command, the owner or lead may record one attempt from outside the protected session:
+
+```sh
+dori policy allow-once demo-lane 'denyBash[0]' --reason "Owner approved the blocked attempt"
+```
+
+Every matching deny rule needs its own grant. An unused grant is idempotent; a grant is consumed for one attempt, even if OMP's independent approval gate subsequently declines it. This command sends or executes nothing. The lane must explicitly retry.
+
+This policy is a local guardrail, not a sandbox or another authorization service. It sees the native Bash tool's command string, not script contents or all possible execution routes. Keep the native approval and OS account boundaries in place.
+
 ## The registry
 
 One JSON file per lane under `<stateDir>/lanes/`, written atomically (temp file + rename), so two writers never leave a half-written file. Each lane records:

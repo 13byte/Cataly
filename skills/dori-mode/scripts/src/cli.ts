@@ -167,6 +167,7 @@ switch (command) {
   case "launch":
   case "queue":
   case "adopt":
+  case "policy":
   case "claim-done":
   case "object-done":
   case "close":
@@ -232,16 +233,15 @@ try {
   await handler(makeCli(command, rest, flags, config, deps));
 } catch (e) {
   const { LaunchError } = await import("./launch.ts");
+  const { PolicyError } = await import("./lane-policy.ts");
   const { messengerErrors } = await import("./cli-messenger.ts");
   const { journalErrors } = await import("./cli-journal.ts");
   const { decisionErrors } = await import("./cli-decisions.ts");
   const { prErrors } = await import("./cli-pr.ts");
   const { statusErrors } = await import("./cli-status.ts");
+  const launchErrors = [LaunchError, PolicyError, QueueError, TemplateError, ...statusErrors];
   if (
-    e instanceof LaunchError ||
-    e instanceof QueueError ||
-    e instanceof TemplateError ||
-    [...messengerErrors, ...journalErrors, ...decisionErrors, ...prErrors, ...statusErrors].some(
+    [...launchErrors, ...messengerErrors, ...journalErrors, ...decisionErrors, ...prErrors].some(
       (type) => e instanceof type,
     )
   )

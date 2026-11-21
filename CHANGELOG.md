@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add opt-in Bash rules to fresh native lanes, with launch-bound snapshots, inherited restrictions and an auditable one-attempt grant. Native approvals and default unconfigured lanes are unchanged.
+
 - Supervised Discord lead intake records the original source and native dispatch attempt in the existing SQLite FIFO and requires an on-disk receipt before advancing the cursor. Lost acknowledgements reconcile without redispatch; an unresolved attempt holds intake. Explicit `inbound-abandon` retains the source and operator decision without resending. Native admission is separate from ASK, tool approval, authorization, Discord delivery and completion.
 
 - Serialize owner-obligation snapshot writers during lock recovery, while preserving cancellation, the original JSONL files and compatibility with an existing live writer.

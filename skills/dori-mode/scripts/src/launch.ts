@@ -9,6 +9,8 @@ import type { FlowDeps } from "./done-flow.ts";
 import { parseOwnershipRef, withDeliveryLock, withLaunchLock, withTerminalAdoptionLock } from "./delivery-lock.ts";
 import { runContext } from "./lane-run.ts";
 import type { ModelReadback } from "./lane-state.ts";
+import { requirePolicyLaneCommand } from "./lane-policy-launch.ts";
+import { policyBinding, prepareLanePolicy, writeLanePolicy } from "./lane-policy-store.ts";
 import { BRIEF_START, footer, originalBrief } from "./launch-footer.ts";
 import { deliverModelBrief, modelLaunchCommand, modelLaunchProblem, unavailableLaunchModel } from "./launch-model.ts";
 import { selectionFor } from "./launch-selection.ts";
@@ -60,6 +62,7 @@ export const adoptLane = async (
 export const prepareLaunch = async (deps: FlowDeps, input: LaunchInput, queuedBrief?: string) => {
   await validateLaunch(deps, input, LaunchError);
   const { agentCommand, requireModelReadback } = deps.config;
+  requirePolicyLaneCommand(agentCommand, deps.config.lanePolicy, LaunchError);
   const model = input.model ?? deps.config.defaultModel;
   let modelReadback: ModelReadback | undefined;
   if ((input.runtime ?? deps.config.laneRuntime) === "headless") {
@@ -142,6 +145,7 @@ export const openLaunch = async (deps: FlowDeps, input: LaunchInput, queuedBrief
   const rts = runtimesOf(deps);
   const runtime = input.runtime ?? (deps.config.laneRuntime === "headless" ? "headless" : undefined);
   const group = runtime === "headless" ? undefined : deps.config.laneWorkspace || undefined;
+  const policy = prepareLanePolicy(deps.config.stateDir, input.key, deps.config.lanePolicy);
   let argv: readonly string[] | undefined;
   if (runtime === "headless") {
     try {
@@ -152,16 +156,13 @@ export const openLaunch = async (deps: FlowDeps, input: LaunchInput, queuedBrief
   }
   let env: Record<string, string>;
   try {
-    if (runtime === "headless") {
-      const callerEnv = deps.env ?? process.env;
-      env = laneLaunchEnv(callerEnv, callerEnv["DORI_CONFIG"] ?? configPath(), deps.config);
-    } else {
-      env = laneLaunchEnv(process.env, configPath(), deps.config);
-      if (draft.requestId !== undefined) env["DORI_LANE_RUN"] = "";
-    }
+    const callerEnv = runtime === "headless" ? (deps.env ?? process.env) : process.env;
+    env = laneLaunchEnv(callerEnv, callerEnv["DORI_CONFIG"] ?? configPath(), deps.config);
+    if (runtime !== "headless" && draft.requestId !== undefined) env["DORI_LANE_RUN"] = "";
   } catch (e) {
     throw e instanceof TokenFileError ? new LaunchError(`token file refused: ${e.message}`) : e;
   }
+  env["DORI_LANE_POLICY"] = policy ? policyBinding(policy) : "";
   const cwd = input.cwd ?? deps.config.defaultCwd;
   const spec = { name: input.key, role: "lane", container: "tab", cwd, env } as const;
   const opened = await openLaneSession(deps.registry, rts, group === undefined ? spec : { ...spec, group }, draft, {
@@ -174,6 +175,7 @@ export const openLaunch = async (deps: FlowDeps, input: LaunchInput, queuedBrief
     throw new LaunchError(`${opened.what}: ${why}`);
   }
   if (opened.kind === "taken") throw new LaunchError(`lane ${input.key} is already registered`);
+  if (policy) writeLanePolicy(policy, opened.lane);
   return {
     warnings,
     start: () =>

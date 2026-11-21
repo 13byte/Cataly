@@ -22,6 +22,7 @@ import {
 import { readSourceBundle } from "../src/release/source-bundle.ts";
 import { releasePath } from "../src/release/state.ts";
 import { sourceManifest } from "../src/update/source.ts";
+import { isPolicyLaneCommand } from "../skills/dori-mode/scripts/src/lane-policy-launch.ts";
 import { archive, type ConsumerFixture, fixture, withArchive } from "./release-consumer-setup.ts";
 import { fixtureGit, nativeCacheFixture, overlayFixture } from "./source-bundle-setup.ts";
 
@@ -97,6 +98,14 @@ posix(
       "{prompt}",
     ]);
     expect(configured.agentCommand[0]).toBe(join(f.paths.dori, "bin/omp"));
+    expect(
+      isPolicyLaneCommand(
+        resolveConsumerOmpCommand([join(f.paths.dori, "bin/omp"), "--dori-role", "lane", "{prompt}"], {
+          home: f.paths.home,
+          sourceRoot: sourceOne,
+        }),
+      ),
+    ).toBe(true);
     const second = bundledRelease(f, "second", first.source);
     const two = await installBundle(f.paths, second.bundle, one);
     const sourceTwo = releasePath(f.paths, two.current);

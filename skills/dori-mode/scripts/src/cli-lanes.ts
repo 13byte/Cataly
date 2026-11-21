@@ -1,6 +1,7 @@
 /** dori launch, adopt, claim-done, object-done, close, pause, resume and tell. */
 import { resolve } from "node:path";
 import { type Command, die } from "./cli-context.ts";
+import { policyCommand } from "./cli-lane-policy.ts";
 import { enqueueLaunch, startQueued, cancelQueued } from "./launch-queue.ts";
 import { LaunchQueue } from "./launch-queue-store.ts";
 import { autoTrackLinks } from "./cli-pr.ts";
@@ -158,6 +159,7 @@ const tell: Command = async ({ key, need, values, positionals, lane, deps }) => 
 
 export const laneCommands: Readonly<Record<string, Command>> = {
   launch,
+  policy: policyCommand,
   queue: async ({ key: action, positionals, values, deps }) => {
     if (action === "list") {
       const scan = new LaunchQueue(deps.config.stateDir).scan();
