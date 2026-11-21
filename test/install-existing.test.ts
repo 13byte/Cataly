@@ -44,7 +44,8 @@ posix("the historical primary source checkout upgrades in place without rewritin
   git(s.upstream, "commit", "-qm", "historical source skill layout");
   git(s.root, "clone", "-q", s.upstream, checkout);
   git(s.upstream, "mv", "skills/dori-mode", "skills/cataly-mode");
-  git(s.upstream, "commit", "-qm", "current source skill layout");
+  writeFileSync(join(s.upstream, s.cli), "console.log(process.env.CATALY_CONFIG, process.argv[2]);\n");
+  git(s.upstream, "commit", "-qam", "current source skill layout");
   const original = `${JSON.stringify({
     runtime: "herdr",
     agentCommand: [join(base, "bin/omp"), "--dori-role", "lane", "--model", "{model}", "{prompt}"],
@@ -60,6 +61,9 @@ posix("the historical primary source checkout upgrades in place without rewritin
   const oldCommand = join(s.home, "global-bin/dori");
   symlinkSync(join(checkout, "extension"), oldExtension);
   symlinkSync(join(checkout, "skills/dori-mode/scripts/src/cli.ts"), oldCommand);
+  mkdirSync(join(base, "bin"));
+  const oldHomeCommand = join(base, "bin/dori");
+  symlinkSync(join(checkout, "skills/dori-mode/scripts/src/cli.ts"), oldHomeCommand);
 
   const upgraded = s.install({ CATALY_SRC: "" });
 
@@ -69,9 +73,13 @@ posix("the historical primary source checkout upgrades in place without rewritin
   expect(readFileSync(join(base, ".omp-dori"), "utf8")).toBe("primary\n");
   expect(readFileSync(join(base, ".omp-cataly"), "utf8")).toBe("primary\n");
   expect(readFileSync(join(base, "state/owner-data"), "utf8")).toBe("retained\n");
-  expect(readlinkSync(oldCommand)).toBe(join(checkout, "skills/dori-mode/scripts/src/cli.ts"));
   expect(readlinkSync(join(s.home, "global-bin/cataly"))).toBe(join(base, "bin/cataly"));
   expect(readFileSync(join(base, "bin/cataly"), "utf8")).toContain(`export CATALY_HOME=${base}`);
+  for (const command of [oldCommand, oldHomeCommand, join(s.home, "global-bin/cataly")]) {
+    const launched = Bun.spawnSync([command, "hook-probe"], { env: s.env() });
+    expect(launched.exitCode, launched.stderr.toString()).toBe(0);
+    expect(launched.stdout.toString()).toBe(`${join(base, "config.json")} hook-probe\n`);
+  }
   expect(upgraded.out).toContain(`"selectedConfig":"${join(base, "config.json")}"`);
   expect(existsSync(oldExtension)).toBe(false);
   const backups = readdirSync(join(base, "backups"));
@@ -126,6 +134,7 @@ const configPath = process.env.CATALY_CONFIG;
 console.log(JSON.stringify({
   runtime: readRuntimeChoice({ env: process.env, configPath }),
   agentCommand: (await loadConfig(configPath)).agentCommand,
+  namespace: process.env.HC_SESSION,
 }));
 `;
     const select = (extra: Record<string, string> = {}) =>
@@ -159,6 +168,7 @@ console.log(JSON.stringify({
     expect(JSON.parse(defaultRuntime.stdout.toString())).toEqual({
       runtime: { kind: "headless", source: "default" },
       agentCommand: [join(base, "bin/omp"), "--cataly-role", "lane", "{prompt}"],
+      namespace: "omp-dori",
     });
     const overriddenRuntime = select({ CATALY_RUNTIME: "hc" });
     expect(overriddenRuntime.exitCode, overriddenRuntime.stderr.toString()).toBe(0);

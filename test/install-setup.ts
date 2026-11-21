@@ -84,7 +84,7 @@ export function setup() {
   // Record package-manager mutations without installing or linking anything on the host.
   writeFileSync(
     join(bin, "bun"),
-    `#!/bin/sh\ncase "$1" in\n--version) echo "\${INSTALL_TEST_BUN_VERSION:-1.4.4}" ;;\n-e|*/source-dependencies.ts|*/source-configuration.ts) exec ${JSON.stringify(process.execPath)} "$@" ;;\n*) echo "$*" >> ${JSON.stringify(join(root, "bun.log"))} ;;\nesac\n`,
+    `#!/bin/sh\ncase "$1" in\n--version) echo "\${INSTALL_TEST_BUN_VERSION:-1.4.4}" ;;\n-e|*/source-dependencies.ts|*/source-configuration.ts|*/skills/cataly-mode/scripts/src/cli.ts) exec ${JSON.stringify(process.execPath)} "$@" ;;\n*) echo "$*" >> ${JSON.stringify(join(root, "bun.log"))} ;;\nesac\n`,
   );
   chmodSync(join(bin, "bun"), 0o755);
   writeFileSync(
@@ -96,7 +96,7 @@ export function setup() {
     writeFileSync(join(upstream, cli), text);
     git(upstream, "commit", "-qam", text.trim());
   };
-  const env = (extra: Record<string, string> = {}) => ({
+  const env = (extra: Record<string, string | undefined> = {}) => ({
     ...gitEnv,
     HOME: home,
     BUN_INSTALL: join(home, ".bun"),
@@ -127,7 +127,7 @@ export function setup() {
     PATH: `${bin}:${process.env["PATH"]}`,
     ...extra,
   });
-  const install = (extra: Record<string, string> = {}, argv: readonly string[] = []) => {
+  const install = (extra: Record<string, string | undefined> = {}, argv: readonly string[] = []) => {
     const r = Bun.spawnSync([script, ...argv], { env: env(extra), stdin: "ignore" });
     return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
   };

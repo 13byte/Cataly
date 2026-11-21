@@ -13,6 +13,17 @@
 # and OMP_CATALY_HC_SPACE names a Herdr app space. Neither selects the session runtime.
 set -euo pipefail
 
+# Translate only source-installer inputs. An explicitly set Cataly spelling, even empty, wins.
+for selector in CATALY_INSTALL_MODE:DORI_INSTALL_MODE CATALY_SRC:DORI_SRC CATALY_NO_PULL:DORI_NO_PULL \
+  CATALY_OMP:DORI_OMP OMP_CATALY_HOME:OMP_DORI_HOME OMP_CATALY_BIN_DIR:OMP_DORI_BIN_DIR \
+  OMP_CATALY_HC_SESSION:OMP_DORI_HC_SESSION OMP_CATALY_HC_SPACE:OMP_DORI_HC_SPACE; do
+  canonical_selector="${selector%:*}"
+  legacy_selector="${selector#*:}"
+  if [ -z "${!canonical_selector+x}" ] && [ -n "${!legacy_selector+x}" ]; then
+    export "$canonical_selector=${!legacy_selector}"
+  fi
+done
+
 fail() { echo "$1" >&2; exit 1; }
 preview=0
 if [ "$#" -gt 0 ]; then
@@ -109,6 +120,8 @@ linked_primary_source() {
   checkout="$(cd -P "$extensions/$link_name" && cd .. && pwd -P)" || return 1
   source_checkout "$checkout" || return 1
   if [ "$bin_dir/$command_name" -ef "$checkout/skills/$skill_name/scripts/src/cli.ts" ] ||
+    { [ "$command_name" = dori ] && mode_marker "$root/.omp-dori" primary &&
+      [ "$(readlink "$bin_dir/dori")" = "$checkout/skills/dori-mode/scripts/src/cli.ts" ]; } ||
     { mode_marker "$root/.omp-cataly" primary && [ "$bin_dir/$command_name" -ef "$root/bin/cataly" ]; }; then
     printf '%s\n' "$checkout"
   else
@@ -178,22 +191,27 @@ if [ "$mode" = primary ] && [ -n "$consumer" ]; then fail "$consumer_hold"; fi
 
 if [ "$mode" = side ]; then base="$side_home"; else base="$primary_home"; fi
 legacy_install=""
-if [ "$base" = "$legacy_primary" ] || [ -n "$legacy_side_owned" ] ||
+if { [ "$mode" = primary ] && [ "$base" = "$legacy_primary" ]; } ||
+  { [ "$mode" = side ] && [ -n "$legacy_side_owned" ]; } ||
   mode_marker "$base/.omp-dori" "$mode"; then
   legacy_install=1
 fi
 source_default="$base/src"
+legacy_side_source=""
+if [ "$mode" = side ] && [ -n "$legacy_install" ]; then
+  for reference in "$base/skills/omp-dori-mode/scripts" "$base/skills/omp-cataly-mode/scripts"; do
+    [ -L "$reference" ] || continue
+    discovered="$(cd -P "$reference" 2>/dev/null && cd ../../.. && pwd -P)" || continue
+    if source_checkout "$discovered"; then legacy_side_source="$discovered"; break; fi
+  done
+fi
 if [ -z "${CATALY_SRC:-}" ] && ! present "$source_default"; then
   if [ "$mode" = primary ]; then
     discovered="$(linked_primary_source "$base" omp-cataly cataly cataly-mode 2>/dev/null || true)"
     if [ "$base" = "$legacy_primary" ]; then discovered="${discovered:-$legacy_primary_source}"; fi
     if [ -n "$discovered" ]; then source_default="$discovered"; fi
-  elif [ "$mode" = side ] && [ -n "$legacy_install" ]; then
-    for reference in "$base/skills/omp-cataly-mode/scripts" "$base/skills/omp-dori-mode/scripts"; do
-      [ -L "$reference" ] || continue
-      discovered="$(cd -P "$reference" 2>/dev/null && cd ../../.. && pwd -P)" || continue
-      if source_checkout "$discovered"; then source_default="$discovered"; break; fi
-    done
+  elif [ -n "$legacy_side_source" ]; then
+    source_default="$legacy_side_source"
   fi
 fi
 src="$(absolute "${CATALY_SRC:-$source_default}")"
@@ -206,6 +224,9 @@ if [ "$mode" = primary ] && [ "$base" = "$legacy_primary" ]; then
   primary_cli="$legacy_primary_cli"
 fi
 configuration_helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/source-configuration.ts"
+source_legacy() {
+  BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 "$bun_bin" "$configuration_helper" historical "$@"
+}
 configuration() {
   CATALY_SOURCE_LEGACY="$legacy_install" BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 \
     "$bun_bin" "$configuration_helper" "$1" "$base" "$src" "$mode"
@@ -217,16 +238,24 @@ if [ "$preview" = 0 ]; then setup_snapshot="$(configuration capture)"; fi
 # including aliased parents, and catches hard links without trusting an existing wrapper's source.
 check_omp_wrapper_collision() {
   local name command_link traverses
-  for name in omp cataly omp-cataly; do
-    if [ "$mode" = primary ] && [ "$name" != omp ] && { [ "$name" != cataly ] || [ -z "$legacy_primary_cli" ]; }; then
-      continue
-    fi
+  local wrappers=(omp) command_links
+  if [ "$mode" = side ]; then
+    wrappers+=(cataly omp-cataly)
+    [ -z "$legacy_side_cli" ] || wrappers+=(dori)
+    command_links=("$bin_dir/omp-cataly")
+  else
+    [ -z "$legacy_primary_cli" ] || wrappers+=(cataly)
+    command_links=("$bin_dir/cataly")
+    [ -z "$legacy_home_link" ] || command_links+=("$base/bin/dori")
+    [ -z "$legacy_global_link" ] || command_links+=("$bin_dir/dori")
+  fi
+  for name in "${wrappers[@]}"; do
     if [ "$omp_bin" -ef "$base/bin/$name" ]; then
       fail "Selected OMP executable $omp_bin aliases generated wrapper $base/bin/$name; choose an independent executable with CATALY_OMP."
     fi
   done
-  if [ "$mode" = primary ]; then command_link="$bin_dir/cataly"; else command_link="$bin_dir/omp-cataly"; fi
-  if [ -L "$command_link" ]; then
+  for command_link in "${command_links[@]}"; do
+    [ -L "$command_link" ] || continue
     # Relinking changes a pathname, not its target inode. Preserve independent paths to that same target.
     traverses="$("$bun_bin" -e '
       const { lstatSync, readlinkSync, realpathSync } = require("node:fs");
@@ -251,11 +280,8 @@ check_omp_wrapper_collision() {
       }
     ' "$omp_bin" "$command_link")" || fail "Could not inspect selected OMP path $omp_bin before command publication."
     [ "$traverses" != yes ] || fail "Selected OMP executable $omp_bin traverses installation command link $command_link; choose an independent executable with CATALY_OMP."
-  fi
+  done
 }
-if [ "$preview" = 0 ] && [ -n "$omp_bin" ]; then
-  check_omp_wrapper_collision
-fi
 
 # Checkouts of every supported revision have these files; older revisions have no package.json.
 is_ulw() { [ -f "$1/index.ts" ] && [ -f "$1/presets.ts" ]; }
@@ -330,6 +356,7 @@ else
   if [ "$base" != "$legacy_primary" ]; then protected+=("$legacy_primary"); fi
   destinations=("$base" "$src" "$src/skills/cataly-mode/scripts" "$src/extension" "$ulw" "$bin_dir"
     "$base/bin" "$base/bin/omp" "$skills" "$extensions")
+  [ -z "$legacy_primary_cli" ] || destinations+=("$legacy_primary_cli")
 fi
 if [ -n "$omp_bin" ]; then destinations+=("$omp_bin"); fi
 # Resolve existing links and missing suffixes before any checkout, dependency or config mutation.
@@ -396,7 +423,33 @@ if [ "$preview" = 1 ]; then
   exit 0
 fi
 
+legacy_side_cli=""
+legacy_home_link=""
+legacy_global_link=""
+hc_session="${OMP_CATALY_HC_SESSION:-}"
+if [ "$mode" = side ]; then
+  if [ -z "$hc_session" ] && owned_directory "$base" && marked "$base" side; then
+    hc_session="$(source_legacy namespace "$base")"
+    hc_session="${hc_session%.}"
+  fi
+  if [ -n "$legacy_install" ]; then
+    hc_session="${hc_session:-omp-dori}"
+    legacy_side_sources=("$src" "$base/src")
+    [ -z "$legacy_side_source" ] || legacy_side_sources+=("$legacy_side_source")
+    legacy_side_cli="$(source_legacy side-cli "$base" "${legacy_side_sources[@]}")"
+  fi
+  hc_session="${hc_session:-omp-cataly}"
+elif [ -n "$legacy_primary_cli" ]; then
+  legacy_primary_sources=("$src" "$base/src")
+  [ -z "$legacy_primary_source" ] || legacy_primary_sources+=("$legacy_primary_source")
+  legacy_home_link="$(source_legacy primary-link "$base/bin/dori" "${legacy_primary_sources[@]}")"
+  if ! [ "$bin_dir" -ef "$base/bin" ]; then
+    legacy_global_link="$(source_legacy primary-link "$bin_dir/dori" "${legacy_primary_sources[@]}")"
+  fi
+fi
+
 if [ -n "$omp_bin" ]; then
+  check_omp_wrapper_collision
   omp_version="$("$omp_bin" --version)"
   [[ "$omp_version" =~ ([0-9]+(\.[0-9]+){2}) ]] || fail "could not read CATALY_OMP version"
   at_least "$min_omp" "${BASH_REMATCH[1]}" || fail "CATALY_OMP must be $min_omp or newer"
@@ -580,6 +633,21 @@ if [ "$mode" = primary ]; then
     link "$primary_cli" "$bin_dir/cataly" ||
       fail "cataly command was not installed; choose another OMP_CATALY_BIN_DIR."
   fi
+  if [ -n "$legacy_primary_cli" ]; then
+    # Preserve an installer-owned old entry point that saved hook argv may still name.
+    for entry in home global; do
+      if [ "$entry" = home ]; then
+        [ -n "$legacy_home_link" ] || continue
+        old_command="$base/bin/dori"
+      else
+        [ -n "$legacy_global_link" ] || continue
+        old_command="$bin_dir/dori"
+      fi
+      owns_command="$(source_legacy primary-link "$old_command" "${legacy_primary_sources[@]}")"
+      [ "$owns_command" = owned ] || continue
+      link "$primary_cli" "$old_command"
+    done
+  fi
   CATALY_SETUP_SNAPSHOT="$setup_snapshot" configuration readback
   cat <<EOF
 Installed.
@@ -596,7 +664,6 @@ EOF
   exit 0
 fi
 
-hc_session="${OMP_CATALY_HC_SESSION:-omp-cataly}"
 skill="$base/skills/omp-cataly-mode"
 mkdir -p "$base/bin" "$base/state" "$base/skills"
 mkdir -p "$skill"
@@ -633,6 +700,14 @@ wrapper() {
   { printf '#!/usr/bin/env bash\nset -euo pipefail\n. %q\n' "$base/env.sh"; cat; } | write_generated "$base/bin/$1" 755
 }
 printf 'exec %q %q "$@"\n' "$bun_bin" "$src/skills/cataly-mode/scripts/src/cli.ts" | wrapper cataly
+if [ -n "$legacy_side_cli" ]; then
+  owns_command="$(source_legacy side-cli "$base" "${legacy_side_sources[@]}")"
+  if [ "$owns_command" = owned ]; then
+    # The old omp-dori dispatcher (including its existing global link) calls bin/dori.
+    { printf '#!/usr/bin/env bash\n'; printf 'exec %q "$@"\n' "$base/bin/cataly"; } |
+      write_generated "$base/bin/dori" 755
+  fi
+fi
 { ulw_guard; printf 'exec %q --no-extensions -e %q -e %q --config %q "$@"\n' "$omp_bin" "$src/extension" "$ulw" "$base/omp.yml"; } | wrapper omp
 printf 'case "${1:-}" in\n  omp) shift; exec %q "$@" ;;\n  hc) shift; exec hc "$@" ;;\n  *) exec %q "$@" ;;\nesac\n' \
   "$base/bin/omp" "$base/bin/cataly" | wrapper omp-cataly

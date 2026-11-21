@@ -14,6 +14,7 @@ import {
 } from "../src/setup-files.ts";
 import { setupOverrideKeys, setupReadback } from "../src/setup-readback.ts";
 import { canonical } from "../src/update/config.ts";
+import { inspectHistoricalSource } from "./source-legacy.ts";
 
 type Snapshot = {
   version: 1;
@@ -231,6 +232,7 @@ function sourceReadback(snapshot: Snapshot, scope: string): void {
 
 async function main(): Promise<void> {
   const [action, baseArg, sourceArg, mode] = process.argv.slice(2);
+  if (action === "historical") return inspectHistoricalSource(process.argv.slice(3));
   if (!baseArg || !sourceArg || (mode !== "primary" && mode !== "side") || process.argv.length !== 6)
     throw new Error("Expected action, absolute installation home, source checkout and primary|side mode");
   if (!["capture", "preview", "publish-json", "publish-yaml", "readback", "probe-readback"].includes(action ?? ""))
