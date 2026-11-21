@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Report the currently verified managed source and native runtime separately from historic deployment receipts.
+
 - Record terminal monitor outcomes and opt-in once completion, preserving interrupted work and holding managed restarts while once work remains unfinished.
 
 - Add opt-in Bash rules to fresh native lanes, with launch-bound snapshots, inherited restrictions and an auditable one-attempt grant. Native approvals and default unconfigured lanes are unchanged.
