@@ -7,7 +7,7 @@ import { isOn, OS_TYPE, otlpLogs, rejectedRecords } from "./telemetry-otlp.ts";
 
 // Anonymous usage counts, sent the way omo sends its own: OTLP/HTTP JSON logs to the omo collector.
 // Only counts and fixed enums leave the machine: never paths, repo names, PR numbers, lane keys or message text.
-// Off with CATALY_TELEMETRY=0 or DO_NOT_TRACK=1.
+// Opt in with CATALY_TELEMETRY=1; DO_NOT_TRACK=1 still disables it.
 
 const HOUR_MS = 3_600_000;
 
@@ -37,12 +37,10 @@ export interface Usage {
 }
 
 export const NOTICE =
-  "cataly sends anonymous usage counts (no paths, names or text). Turn it off with CATALY_TELEMETRY=0.";
+  "cataly telemetry is enabled: sending anonymous usage counts (no paths, names or text). Disable with CATALY_TELEMETRY=0.";
 
-const isOff = (v: string | undefined) =>
-  v !== undefined && ["0", "false", "no", "off"].includes(v.trim().toLowerCase());
 export const telemetryEnabled = (env: NodeJS.ProcessEnv): boolean =>
-  !isOff(env["CATALY_TELEMETRY"]) && !isOn(env["DO_NOT_TRACK"]);
+  isOn(env["CATALY_TELEMETRY"]) && !isOn(env["DO_NOT_TRACK"]);
 
 type State = {
   installId: string;
