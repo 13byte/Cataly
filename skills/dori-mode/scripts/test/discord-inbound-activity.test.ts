@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { discordInboundLive } from "../src/messenger/discord-inbound-live.ts";
 import { discordInboundQueue } from "../src/messenger/discord-inbound-queue.ts";
 import { ownerMessage } from "./discord-inbound-fakes.ts";
+import { memoryQueue } from "./discord-inbound-memory-queue.ts";
 import { settle } from "./discord-inbound-live-fakes.ts";
 import { FakeGateway, gatewayTimers } from "./discord-presence-fakes.ts";
 import { withState } from "./fakes.ts";
@@ -10,7 +11,6 @@ const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
-
 function setup(
   sync: () => Promise<void>,
   options: {
@@ -30,7 +30,7 @@ function setup(
   const health: boolean[] = [];
   let delivered = 0;
   const state = withState();
-  const queue = discordInboundQueue(state.dir);
+  const queue = process.getuid === undefined ? memoryQueue() : discordInboundQueue(state.dir);
   if (options.retained) queue.push("message", ownerMessage("101"), "100");
   const live = discordInboundLive(
     {

@@ -2,13 +2,14 @@ import { expect, test } from "bun:test";
 import { discordInboundLive } from "../src/messenger/discord-inbound-live.ts";
 import { discordInboundQueue } from "../src/messenger/discord-inbound-queue.ts";
 import { ownerMessage } from "./discord-inbound-fakes.ts";
+import { memoryQueue } from "./discord-inbound-memory-queue.ts";
 import { settle } from "./discord-inbound-live-fakes.ts";
 import { FakeGateway, gatewayTimers } from "./discord-presence-fakes.ts";
 import { withState } from "./fakes.ts";
 
 test("scope promotion preserves the activity failure instead of its follow-on cancellation", async () => {
   const state = withState();
-  const queue = discordInboundQueue(state.dir);
+  const queue = process.getuid === undefined ? memoryQueue() : discordInboundQueue(state.dir);
   const timers = gatewayTimers();
   const socket = new FakeGateway("wss://gateway.discord.gg/");
   const backfill = Promise.withResolvers<void>();

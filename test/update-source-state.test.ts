@@ -8,6 +8,7 @@ import type { DeploymentRecord } from "../src/update/deployment-types.ts";
 import { digest, sourceManifest } from "../src/update/source.ts";
 import { applySourceUpdate, restartSourceLead } from "../src/update/source-update-run.ts";
 import {
+  parseSourceState,
   readSourceState,
   saveSourceState,
   sourceRecoveryPending,
@@ -62,10 +63,16 @@ function stateFixture() {
   };
 }
 
-test("absent source status is read-only and saved intent has protected atomic storage", () => {
+const posixJournal = test.skipIf(!platform.posixOwnership);
+
+test("absent source status is read-only", () => {
   const f = stateFixture();
   expect(readSourceState(f.config)).toEqual({ version: 1 });
   expect(existsSync(f.config.deployment.releaseRoot)).toBe(false);
+});
+
+posixJournal("saved intent has protected atomic storage", () => {
+  const f = stateFixture();
   ownReleaseRoot(f.config.deployment);
   saveSourceState(f.config, f.state);
   expect(readSourceState(f.config)).toEqual(f.state);
@@ -98,7 +105,6 @@ for (const [scope, field, value] of [
 ] as const) {
   test(`source state rejects changed ${scope}.${field} before using recovery identity`, () => {
     const f = stateFixture();
-    ownReleaseRoot(f.config.deployment);
     const buckets = {
       state: f.state,
       job: f.job,
@@ -110,8 +116,7 @@ for (const [scope, field, value] of [
       deployment: f.deployment,
     };
     Reflect.set(buckets[scope], field, value);
-    saveSourceState(f.config, f.state);
-    expect(() => readSourceState(f.config)).toThrow(DeploymentHeld);
+    expect(() => parseSourceState(f.config, f.state)).toThrow(DeploymentHeld);
   });
 }
 
@@ -143,7 +148,7 @@ test("source recovery distinguishes completed pre-effect holds from effectful or
   expect(sourceRecoveryPending({ ...f.job, deployment: { ...record, status: "held", step: "health" } })).toBe(true);
 });
 
-test("source recovery consults the identity-bound inner journal before superseding a held outer intent", () => {
+posixJournal("source recovery consults the identity-bound inner journal before superseding a held outer intent", () => {
   const f = stateFixture();
   f.deployment.status = "held";
   f.deployment.step = "stop";
@@ -157,7 +162,7 @@ test("source recovery consults the identity-bound inner journal before supersedi
 });
 
 for (const status of ["healthy", "rolled-back"] as const)
-  test(`terminal ${status} inner journal needs outer reconciliation before a fresh attempt`, () => {
+  posixJournal(`terminal ${status} inner journal needs outer reconciliation before a fresh attempt`, () => {
     const f = stateFixture();
     saveDeploymentJson(join(f.deployment.directory, "deployment.json"), { ...f.deployment, status, step: "done" });
     expect(sourceRecoveryPending(f.job)).toBe(true);
@@ -179,4 +184,12 @@ processTest("source apply and separate restart share a process-owned controller 
   } finally {
     unlock();
   }
+});
+
+test.skipIf(platform.posixOwnership)("source recovery does not trust a journal without protected storage", () => {
+  const f = stateFixture();
+  saveDeploymentJson(f.statePath, f.state);
+  expect(() => readSourceState(f.config)).toThrow("Group/world-writable installation path");
+  saveDeploymentJson(join(f.deployment.directory, "deployment.json"), f.deployment);
+  expect(() => sourceRecoveryPending(f.job)).toThrow("source recovery journal is unavailable");
 });

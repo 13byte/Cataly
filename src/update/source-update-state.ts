@@ -71,7 +71,10 @@ export function readSourceState(config: SourceUpdateConfig): SourceUpdateState {
   if (!stat) return { version: 1 };
   if (!stat.isFile() || stat.isSymbolicLink()) throw new DeploymentHeld("source update state must be a regular file");
   owned(path);
-  const value: unknown = JSON.parse(readFileSync(path, "utf8"));
+  return parseSourceState(config, JSON.parse(readFileSync(path, "utf8")));
+}
+
+export function parseSourceState(config: SourceUpdateConfig, value: unknown): SourceUpdateState {
   if (
     !object(value) ||
     value["version"] !== 1 ||
