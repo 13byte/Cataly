@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Http, HttpRequest, HttpResponse } from "../src/messenger/http.ts";
+import { fileTgInboundStore } from "../src/messenger/telegram-inbound-state.ts";
 import type { TgInbound } from "../src/messenger/telegram-inbound.ts";
 import { Telegram } from "../src/messenger/telegram.ts";
 import { envInt, pollTelegramInbound, telegramInboundLoop } from "../src/messenger/telegram-inbound.ts";
 import { fakeClock, withState } from "./fakes.ts";
-import { telegramTestStore } from "./telegram-win32-fixtures.ts";
+import { telegramTestDirectory, telegramTestStore } from "./telegram-win32-fixtures.ts";
 
 const OWNER = 5250;
 
@@ -112,8 +113,11 @@ test("a photo with a caption carries both the text and the largest photo", async
 });
 
 test("an unparseable bot cursor warns once across several polls and leaves no saved state", async () => {
-  const store = telegramTestStore(state.dir, 900);
-  writeFileSync(join(state.dir, "telegram-inbound", "900.json"), "not-a-number", { mode: 0o600 });
+  const directory = telegramTestDirectory(state.dir);
+  using store = fileTgInboundStore(directory, 900);
+  store.save({ offset: 1, seen: [] });
+  const cursor = join(directory, "telegram-inbound", "900.json");
+  writeFileSync(cursor, "not-a-number");
   const warns: string[] = [];
   const orig = console.log;
   console.log = (s?: unknown) => {
@@ -131,6 +135,7 @@ test("an unparseable bot cursor warns once across several polls and leaves no sa
   expect(warns).toHaveLength(1);
   expect(warns[0]).toContain("WARN");
   expect(warns[0]).toContain("unparseable");
+  expect(readFileSync(cursor, "utf8")).toBe("not-a-number");
 });
 
 test("envInt refuses empty, whitespace, 1e3 and 0x10; accepts plain integers", () => {

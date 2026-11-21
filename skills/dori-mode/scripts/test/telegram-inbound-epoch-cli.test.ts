@@ -93,22 +93,22 @@ test("legacy high offsets cannot confirm away a fresh lower Telegram update", as
   }
 });
 
-test("stale, missing, invalid and future observation times omit offset without losing new lower IDs", async () => {
-  for (const observation of [undefined, "invalid", null, -1, Date.now() - 86_400_000, Date.now() + 86_400_000]) {
-    const state = withState();
-    try {
-      expect((await run(state.dir, [message(1000, 41, "old epoch")])).inbound).toHaveLength(1);
-      const saved = JSON.parse(readFileSync(cursorPath(state.dir), "utf8"));
-      saved.observedAt = observation;
-      writeFileSync(cursorPath(state.dir), JSON.stringify(saved));
-      const result = await run(state.dir, [message(5, 42, "new epoch")]);
-      expect({ code: result.code, err: result.err }).toEqual({ code: 0, err: "" });
-      expect(result.requests.find((request) => request.method === "getUpdates")?.params).not.toHaveProperty("offset");
-      expect(result.inbound).toEqual(['INBOUND dm 5250 - 5 mid=42 5250 "new epoch"']);
-      expect(JSON.parse(readFileSync(cursorPath(state.dir), "utf8")).offset).toBe(6);
-    } finally {
-      state.done();
-    }
+const timeCases = [undefined, "invalid", null, -1, -86_400_000, 86_400_000] as const;
+test.each(timeCases)("an expired, missing, invalid or future observation omits offset: %j", async (observation) => {
+  const state = withState();
+  try {
+    expect((await run(state.dir, [message(1000, 41, "old epoch")])).inbound).toHaveLength(1);
+    const saved = JSON.parse(readFileSync(cursorPath(state.dir), "utf8"));
+    saved.observedAt =
+      observation === -86_400_000 || observation === 86_400_000 ? Date.now() + observation : observation;
+    writeFileSync(cursorPath(state.dir), JSON.stringify(saved));
+    const result = await run(state.dir, [message(5, 42, "new epoch")]);
+    expect({ code: result.code, err: result.err }).toEqual({ code: 0, err: "" });
+    expect(result.requests.find((request) => request.method === "getUpdates")?.params).not.toHaveProperty("offset");
+    expect(result.inbound).toEqual(['INBOUND dm 5250 - 5 mid=42 5250 "new epoch"']);
+    expect(JSON.parse(readFileSync(cursorPath(state.dir), "utf8")).offset).toBe(6);
+  } finally {
+    state.done();
   }
 });
 

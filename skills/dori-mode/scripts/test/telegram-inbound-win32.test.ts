@@ -41,7 +41,7 @@ const inspectAcl = (path: string) =>
   windowsSecurity(
     path,
     [
-      "$r = @($a.GetAccessRules($true, $true, $sidType))",
+      "$r = @($a.GetAccessRules($true, $true, $sidType));",
       "[PSCustomObject]@{ ownerMatches = ($a.GetOwner($sidType).Value -eq $s); protected = $a.AreAccessRulesProtected;",
       "rules = @($r | ForEach-Object { [PSCustomObject]@{ sameUser = ($_.IdentityReference.Value -eq $s);",
       "rights = [int]$_.FileSystemRights; inherited = $_.IsInherited; type = $_.AccessControlType.ToString() } }) }",
