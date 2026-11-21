@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add opt-in cron schedules with durable claims, explicit delivery, and read-only systemd observation. Stale ownership markers hold scheduled work for operator reconciliation.
+
 - Register lane artifacts by content hash, bind checkpoints and operator-reported delivery receipts to versions, and preserve worktrees that contain registered evidence.
 
 - Add opt-in `dori update source check|status|apply`, `idle-check`, and `lead restart` on the existing managed deployment engine. The source supervisor checks CI and stops only at a verified idle and quiet boundary; service and upstream update defaults are unchanged.

@@ -8,6 +8,7 @@ import { laneCommands } from "../src/cli-lanes.ts";
 import { messengerCommands } from "../src/cli-messenger.ts";
 import { opsCommands } from "../src/cli-ops.ts";
 import { prCommands } from "../src/cli-pr.ts";
+import { scheduleCommands } from "../src/cli-schedule.ts";
 import { statusCommands } from "../src/cli-status.ts";
 import { voiceCommand } from "../src/cli-voice.ts";
 import { DORI_COMMANDS, DORI_VALUE_OPTIONS } from "../src/monitor-dori.ts";
@@ -29,6 +30,7 @@ test("the dori command vocabulary is every command the CLI dispatches", () => {
     ["cli-messenger.ts", messengerCommands],
     ["cli-decisions.ts", decisionCommands],
     ["cli-pr.ts", prCommands],
+    ["cli-schedule.ts", scheduleCommands],
     ["cli-status.ts", statusCommands],
     ["cli-voice.ts", { voice: voiceCommand }],
   ] as const;

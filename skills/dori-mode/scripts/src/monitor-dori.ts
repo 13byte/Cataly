@@ -49,6 +49,8 @@ export const DORI_COMMANDS: Record<string, true> = {
   reopen: true,
   report: true,
   resume: true,
+  schedule: true,
+  scheduler: true,
   send: true,
   status: true,
   sync: true,
@@ -122,6 +124,10 @@ export const DORI_VALUE_OPTIONS: Record<string, true> = {
   "ignore-author": true,
   "adopt-legacy-threads": true,
   self: true,
+  cron: true,
+  tz: true,
+  deliver: true,
+  systemd: true,
 };
 const MESSENGER_COMMANDS: Record<string, true> = {
   send: true,
