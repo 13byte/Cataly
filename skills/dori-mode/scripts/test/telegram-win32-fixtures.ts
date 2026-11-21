@@ -44,7 +44,8 @@ export function telegramTestStore(dir: string, bot: number): TgInboundStore {
 export function telegramTestDirectory(dir: string): string {
   if (process.platform !== "win32") return dir;
   mkdirSync(dir, { recursive: true });
-  const canonical = realpathSync(dir);
+  // Bun can preserve the runner’s DOS-short TEMP spelling; the store requires the full path.
+  const canonical = realpathSync.native(dir);
   setFixtureAcl(canonical);
   return canonical;
 }

@@ -21,7 +21,7 @@ const first = { offset: 14, observedAt: 100, seen: ["a".repeat(64)] };
 const next = { offset: 15, observedAt: 101, seen: ["b".repeat(64)] };
 const fixture = () => {
   const root = withState();
-  const state = join(realpathSync(root.dir), "state");
+  const state = join(realpathSync.native(root.dir), "state");
   try {
     mkdirSync(state);
     setFixtureAcl(state);
@@ -84,7 +84,7 @@ windows("NTFS preflight keeps the cursor and replacements reopen with a private 
 windows("an NTFS junction in the configured ancestor chain is rejected without creating an outside cursor", () => {
   const f = fixture();
   try {
-    const alias = join(realpathSync(f.root.dir), "alias");
+    const alias = join(realpathSync.native(f.root.dir), "alias");
     symlinkSync(f.state, alias, "junction");
     expect(() => fileTgInboundStore(alias, bot)).toThrow("Telegram inbound cursor encountered a reparse point");
     expect(existsSync(f.directory)).toBe(false);
