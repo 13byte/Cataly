@@ -182,6 +182,34 @@ export function registeredNativeTarget(d: Deps, ref: SessionRef) {
   return undefined;
 }
 
+/** An exact unpublished reservation is useful only for inspecting or settling the broker's current dialog. */
+export async function nativeDialogTarget(d: Deps, ref: SessionRef) {
+  const state = nativeInventory(d);
+  const registered = d.store.roles();
+  for (const role of ["lead", "duty"] as const) {
+    const binding = state?.roles[role];
+    if (!state || !binding || registered[role] || !sameSession(binding.ref, ref)) continue;
+    if (Object.values(registered).some((candidate) => candidate && sameSession(candidate, ref)))
+      throw new Refusal(`${role} recovery has a conflicting registration`);
+    if (laneEntry(state.stateDir, ref)?.reservation.role !== role)
+      throw new Refusal(`${role} native reservation identity is unconfirmed`);
+    const runtime = runtimeAt(d, state);
+    const seen = await runtime.observe(ref);
+    if (
+      seen.harnessRole !== role ||
+      seen.role !== "cataly" ||
+      !sameSession(seen.ref, ref) ||
+      !seen.sessionId ||
+      !seen.sessionFile ||
+      (binding.sessionId !== undefined && binding.sessionId !== seen.sessionId) ||
+      Object.entries(state.roles).some(([name, other]) => name !== role && other?.sessionId === seen.sessionId)
+    )
+      throw new Refusal(`${role} recovery session identity is unconfirmed or changed`);
+    return { role, sessionId: seen.sessionId, runtime };
+  }
+  return registeredNativeTarget(d, ref);
+}
+
 export async function nativeHarnessStatus(d: Deps): Promise<string[]> {
   const state = nativeInventory(d);
   if (!state) return [];

@@ -66,6 +66,8 @@ export async function stopNativeHarness(d: Deps): Promise<void> {
     const rt = runtimeAt(d, state);
     const root = d.store.root;
     const unlock: (() => void)[] = [];
+    const stopped = new Set<Role>();
+    const retained: string[] = [];
     let checking: Role | undefined;
     try {
       const registered = d.store.roles();
@@ -87,17 +89,27 @@ export async function stopNativeHarness(d: Deps): Promise<void> {
         if (!queue) throw new Refusal("inbox flush is in progress; retry after it settles");
         unlock.push(queue);
         if (hasInboxForward(root, binding.ref)) throw new Refusal("inbox routing is unresolved");
-        if (
-          d.store.queued(binding.ref).length ||
-          d.store.mergePending(binding.ref) ||
-          nonEmpty(`${d.store.inboxPath(binding.ref)}.merging`)
-        )
+        const entry = laneEntry(rt.stateDir, binding.ref);
+        const receipt = entry?.reservation.role === role && readPrivate<StopReceipt>(join(entry.dir, "stopped.json"));
+        if (receipt) {
+          if (
+            binding.sessionId &&
+            receipt.closedSessionId !== undefined &&
+            receipt.closedSessionId !== binding.sessionId
+          )
+            throw new Refusal("native stop receipt belongs to a different OMP session");
+          // Natural exit has no close-request session ID; the broker writes to its single-use reservation.
+          stopped.add(role);
+        }
+        const pending = d.store.queued(binding.ref).length > 0 || d.store.mergePending(binding.ref);
+        if (nonEmpty(`${d.store.inboxPath(binding.ref)}.merging`) || (pending && !stopped.has(role)))
           throw new Refusal(
             `pending inbox entries; let duty flush or inspect cataly harness inbox list ${refText(binding.ref)}`,
           );
+        if (pending) retained.push(refText(binding.ref));
       }
       checking = "lead";
-      holdForOwedLead(d);
+      if (!stopped.has("lead")) holdForOwedLead(d);
       const seen = new Map<Role, HeadlessObservation>();
       for (const role of RESERVED_KEYS) {
         checking = role;
@@ -118,7 +130,7 @@ export async function stopNativeHarness(d: Deps): Promise<void> {
         const binding = state.roles[role];
         if (!binding) continue;
         checking = role;
-        if (role === "lead") holdForOwedLead(d);
+        if (role === "lead" && !stopped.has(role)) holdForOwedLead(d);
         checkRegistration(d, role, binding.ref);
         sealNativeInbox(root, binding.ref);
         await rt.stopHarnessRole(binding.ref, role, binding.sessionId ?? seen.get(role)?.sessionId);
@@ -128,6 +140,7 @@ export async function stopNativeHarness(d: Deps): Promise<void> {
       }
       rmSync(inventoryPath(d));
       console.log("STOPPED native harness");
+      for (const ref of retained) console.log(`RETAINED inbox ${ref}; inspect cataly harness inbox list ${ref}`);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       throw new Refusal(`HARNESS STOP HELD\n${checking ? `${checking}: ` : ""}${detail}`);

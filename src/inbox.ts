@@ -100,6 +100,7 @@ export async function flushInbox(d: Deps, from: SessionRef): Promise<"delivered"
   const release = d.store.lockInbox(ref, d.now());
   if (!release) return "queued";
   try {
+    if (inboxSealed(d.store.root, ref)) return "held";
     d.store.mergeForwarded(ref);
     return await flushLocked(d, ref);
   } finally {

@@ -5,7 +5,7 @@ import { HEADLESS_ADDRESS } from "../runtime/types.ts";
 import { object } from "../update/config.ts";
 import { processIdentity, sameProcess } from "../update/deployment-process.ts";
 import { processExists } from "../update/proc.ts";
-import { type ConsumerPaths, readJson, realDirectory, regularFile } from "./files.ts";
+import { type ConsumerPaths, readJson, readOptionalJson, realDirectory, regularFile } from "./files.ts";
 import { registeredNativeStates } from "./launch-leases.ts";
 
 function live(value: unknown): number | undefined {
@@ -87,6 +87,19 @@ function assertNoNativeHarnessRoles(paths: ConsumerPaths): void {
     throw new Error("Native harness roles hold release activation; stop Cataly with its harness, then retry");
 }
 
+function assertNoControllerLocks(paths: ConsumerPaths): void {
+  for (const name of ["duty/lock", "loop/lock", "loop/runner.lock"]) {
+    const record = readOptionalJson(join(paths.cataly, name));
+    if (record === undefined) continue;
+    if (!object(record)) throw new Error(`Uncertain Cataly controller lock ${name} holds release activation`);
+    const { pid, nonce } = record;
+    if (typeof pid !== "number" || !Number.isSafeInteger(pid) || pid <= 0 || typeof nonce !== "string" || !nonce)
+      throw new Error(`Uncertain Cataly controller lock ${name} holds release activation`);
+    if (processExists(pid))
+      throw new Error(`Live Cataly PID ${pid} holds ${name}; stop the controller before retrying`);
+  }
+}
+
 /** Read only lifecycle receipts and process identity. Native session contents are never opened. */
 export function assertNoLiveCataly(paths: ConsumerPaths): void {
   assertStoppedRuntime(paths);
@@ -96,6 +109,7 @@ export function assertNoLiveCataly(paths: ConsumerPaths): void {
 /** The legacy cleanup command can check that the home is stopped without treating its own input as a live role. */
 export function assertStoppedRuntime(paths: ConsumerPaths): void {
   assertNoNativeHarnessRoles(paths);
+  assertNoControllerLocks(paths);
   const states = new Set<string>([join(paths.cataly, "state"), ...registeredNativeStates(paths)]);
   if (regularFile(paths.config)) {
     const config = readJson(paths.config);

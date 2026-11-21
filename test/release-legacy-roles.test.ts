@@ -197,6 +197,17 @@ posix("public primary retirement proves default and migrated roles together and 
     expect((await retire(f.paths.cataly, env, ...flags)).error).toContain(`Live Cataly PID ${process.pid}`);
     expect(calls).toBe(0);
     rmSync(join(state, "active.json"));
+    for (const kind of ["duty", "loop"]) {
+      const lock = join(f.paths.cataly, kind, "lock");
+      mkdirSync(dirname(lock), { recursive: true });
+      writeFileSync(lock, JSON.stringify({ pid: process.pid, nonce: "legacy-holder" }));
+      const held = await retire(f.paths.cataly, env, ...flags);
+      expect(held.code).toBe(2);
+      expect(held.error).toContain(`Live Cataly PID ${process.pid} holds ${kind}/lock`);
+      expect(calls).toBe(0);
+      expect(readFileSync(f.roles, "utf8")).toBe(f.original);
+      rmSync(lock);
+    }
     const foreign = '{"lead":"w1:p1","duty":"hc:remote/t2"}\n';
     writeFileSync(f.roles, foreign);
     expect((await retire(f.paths.cataly, env, ...flags)).error).toContain("foreign role registration");

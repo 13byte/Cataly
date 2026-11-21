@@ -9,7 +9,7 @@ import { mergeGate, review } from "./gate.ts";
 import { need, one, parse, textOf, USAGE } from "./cli-args.ts";
 import { defaultDeps, ROLES, type Deps } from "./harness.ts";
 import { stopNativeHarness } from "./harness-native-stop.ts";
-import { nativeInventory, registeredNativeTarget, withHarnessLock } from "./harness-native.ts";
+import { nativeDialogTarget, nativeInventory, withHarnessLock } from "./harness-native.ts";
 import { ConfigError, hooksSettled } from "./hooks.ts";
 import { send, type SendResult } from "./inbox.ts";
 import { inboxList, releaseHeld, sendToShell } from "./inbox-held.ts";
@@ -79,7 +79,7 @@ export async function main(argv: readonly string[], d: Deps = defaultDeps()): Pr
     case "answer": {
       const ref = resolveTarget(d, need(x, "native role, lane or ref"));
       if (ref.runtime !== "headless") throw new Refusal(`${cmd} requires a native headless session`);
-      const binding = registeredNativeTarget(d, ref);
+      const binding = await nativeDialogTarget(d, ref);
       const native = binding?.runtime ?? d.runtimes.for(ref);
       if (!(native instanceof HeadlessRuntime)) throw new Refusal("native runtime is unavailable");
       if (cmd === "observe") {

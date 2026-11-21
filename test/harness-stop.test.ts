@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { main } from "../src/cli.ts";
 import { up } from "../src/cli-up.ts";
 import { owedFile } from "../src/inbox-files.ts";
+import { flushInbox } from "../src/inbox.ts";
 import { lockInboxFiles, lockRoute, spoolMessage } from "../src/inbox-spool.ts";
 import { HeadlessRuntime, headlessArgv } from "../src/runtime/headless.ts";
 import { writePrivate } from "../src/runtime/headless-record.ts";
@@ -76,8 +77,15 @@ test.skipIf(process.platform === "win32")(
 
       // A broker that exits normally writes an owner-only stop receipt; stop never signals a PID from disk.
       writePrivate(join(dir, "stopped.json"), {});
+      const queued = { at: d.now(), from: "operator", text: "recover this queued message" };
+      d.store.setRole("lead", ref);
+      writePrivate(inventory, { version: 1, stateDir, roles: { lead: { ref, sessionId: "owned-session" } } });
+      d.store.saveInbox(ref, [queued]);
       expect((await captureIo(() => main(["stop"], d))).out).toInclude("STOPPED native harness");
       expect(existsSync(inventory)).toBe(false);
+      expect(d.store.queued(ref)).toEqual([queued]);
+      expect(await flushInbox(d, ref)).toBe("held");
+      expect((await captureIo(() => main(["inbox", "list", `headless:${ref.id}`], d))).out).toInclude(queued.text);
     } finally {
       rmSync(d.store.root, { recursive: true, force: true });
     }

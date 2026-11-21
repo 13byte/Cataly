@@ -60,7 +60,18 @@ test.skipIf(process.platform === "win32")(
       expect(observed).toMatchObject({ harnessRole: "lead", sessionId: session, status: "blocked" });
       const request = observed.dialogs[0];
       if (!request) throw new Error("approval missing from observe");
-      await command("answer", "lead", "--session", session, "--request", request.id, "--text", '{"value":"Deny"}');
+      const raw = `headless:${lead.id}`;
+      // A controller can exit after the broker binds, while its inventory is still reservation-only.
+      store.clearRoles([["lead", lead]]);
+      writePrivate(join(f.home, "harness-native.json"), { version: 1, stateDir, roles: { lead: { ref: lead } } });
+      await expect(command("send", raw, "--text", "must not be delivered")).rejects.toThrow(
+        "no matching verified native role registration",
+      );
+      expect(JSON.parse(await command("observe", raw))).toMatchObject({ sessionId: session, status: "blocked" });
+      await expect(
+        command("answer", raw, "--session", "other-session", "--request", request.id, "--text", '{"value":"Deny"}'),
+      ).rejects.toThrow("answer session does not match");
+      await command("answer", raw, "--session", session, "--request", request.id, "--text", '{"value":"Deny"}');
       await waitFor(
         () => rt.observe(lead),
         (value) => value.status === "idle",
