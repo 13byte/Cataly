@@ -26,6 +26,8 @@ posix("isolated wrappers quote the loaded release and clear foreign selection in
   for (const path of ["src", "skills/cataly-mode/scripts/src", "package.json", "release-headless.json"])
     cpSync(resolve(import.meta.dir, "..", path), join(bound.source, path), { recursive: true });
   const probe = `import { agentCommand, defaultDeps } from "./harness.ts";
+import { bindCliEnvironment } from "./cli-environment.ts";
+bindCliEnvironment();
 const deps = defaultDeps();
 const roles = Object.fromEntries(["cataly", "lane"].map(role => {
   const command = agentCommand(deps, role);
@@ -96,6 +98,30 @@ console.log(JSON.stringify({
   for (const role of ["cataly", "lane"]) {
     expect(observed.roles[role]).toEqual({ code: 0, argv: [...expected, "--cataly-role", role] });
   }
+  // A historical wrapper publishes only DORI_* during rollback, before the retained CLI link changes.
+  const historical = Bun.spawnSync([process.execPath, join(release, "src/cli.ts")], {
+    cwd,
+    env: {
+      HOME: paths.home,
+      PATH: process.env["PATH"],
+      DORI_HOME: paths.dori,
+      DORI_CONFIG: paths.config,
+      DORI_AGENT_CMD: join(paths.dori, "bin/omp"),
+      CATALY_HOME: f.paths.dori,
+      CATALY_CONFIG: f.paths.config,
+      CATALY_STATE_DIR: "foreign-state",
+      CATALY_AGENT_ARGV: '["/foreign/omp"]',
+      CATALY_TELEMETRY: "0",
+    },
+  });
+  expect(historical.exitCode, historical.stderr.toString()).toBe(0);
+  expect(JSON.parse(historical.stdout.toString())).toMatchObject({
+    home: paths.dori,
+    config: paths.config,
+    state: null,
+    argv: null,
+    command: expected.map(shq).join(" "),
+  });
   expect(existsSync(join(cwd, "injected"))).toBe(false);
   expect(existsSync(join(cwd, "inherited-command-ran"))).toBe(false);
 });

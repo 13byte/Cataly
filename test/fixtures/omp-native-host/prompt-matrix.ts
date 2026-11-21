@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ROLE_INVARIANTS } from "../../../extension/role-invariants.ts";
+import { isCatalyEntry } from "../../../skills/cataly-mode/scripts/src/session-compat.ts";
 
 const [root, cwd] = process.argv.slice(2);
 assert(
@@ -24,6 +25,10 @@ assert.equal(typeof renderPreset, "function", "selected ULW source has no render
 const cataly = join(root, "extension/index.ts");
 const ulw = join(ulwRoot, "index.ts");
 type Options = Parameters<typeof nativeComposition>[2];
+const roleRows = (entries: readonly { type: string; customType?: string; data?: unknown }[]) =>
+  entries.flatMap((entry) =>
+    entry.type === "custom" && isCatalyEntry(entry.customType, "omp-cataly:role") ? [[entry.customType, entry.data]] : [],
+  );
 const scenarios: Array<{
   name: string;
   role?: Options["role"];
@@ -70,7 +75,6 @@ for (const [mode, entries] of [
   for (const scenario of scenarios) {
     const parent = { kind: "main", id: `NativeParent${checked}`, name: "Main", depth: 0 } as const;
     const child = { kind: "sub", id: `NativeChild${checked}`, name: "Child", depth: 1, parentId: parent.id } as const;
-    let parentRole: unknown;
     const label = `${mode}: ${scenario.name}`;
     const embedded = mode === "embedded";
     writeFileSync(
@@ -101,9 +105,7 @@ for (const [mode, entries] of [
         agent: parent,
         prompt: "ulw inspect the fixture",
       });
-      parentRole = owner.entries
-        .flatMap((entry) => (entry.type === "custom" && entry.customType === "omp-cataly:role" ? [entry.data] : []))
-        .at(-1);
+      assert.equal(roleRows(owner.entries).at(-1)?.[1], "lane", `${label} did not inherit a lane parent`);
       inheritedPolicy = owner.first?.find((block) => block.startsWith("<omp-ulw-policy>"));
       assert(inheritedPolicy, `${label} parent did not produce a policy to inherit`);
     }
@@ -126,12 +128,9 @@ for (const [mode, entries] of [
         monitor: "F67_MONITOR_CAPABILITY",
       },
     });
-    if (scenario.child) assert.equal(parentRole, "lane", `${label} did not inherit a lane parent`);
     assert.deepEqual(
-      result.entries.flatMap((entry) =>
-        entry.type === "custom" && entry.customType === "omp-cataly:role" ? [entry.data] : [],
-      ),
-      scenario.child || scenario.role === undefined ? [] : [scenario.role],
+      roleRows(result.entries),
+      scenario.child || scenario.role === undefined ? [] : [["omp-dori:role", scenario.role === "cataly" ? "dori" : "lane"]],
       `${label} changed the recorded role`,
     );
     const first = result.first ?? result.base;

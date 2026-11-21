@@ -66,10 +66,11 @@ export function createConsumerSmokeContext(
     XDG_CONFIG_HOME: join(out, "c"),
     XDG_CACHE_HOME: join(home, ".cache"),
     XDG_DATA_HOME: join(home, ".local/share"),
+    // Running OMP writes its session and model databases. Keep those separate from the primary discovery sentinels.
+    PI_CODING_AGENT_DIR: join(out, "agent"),
+    PI_CONFIG_DIR: ".omp-smoke",
     HC_SESSION: namespace,
     CATALY_HERDR_SESSION: namespace,
-    CATALY_HOME: side,
-    CATALY_CONFIG: join(side, "config.json"),
     CATALY_INSTALL_MODE: "side",
     CATALY_TELEMETRY: "0",
     GIT_MASTER: "1",

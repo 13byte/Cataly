@@ -2,9 +2,9 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { prepareLaunch } from "../src/launch.ts";
-import { footer, originalBrief } from "../src/launch-footer.ts";
+import { footer, laneFooterFor, originalBrief } from "../src/launch-footer.ts";
 import type { Lane } from "../src/registry.ts";
-import { depsFor, fakeClock, newWorld, type TestState, withState } from "./fakes.ts";
+import { agentIn, depsFor, fakeClock, laneState, newWorld, type TestState, withState } from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00.000Z");
 let state: TestState;
@@ -12,6 +12,38 @@ beforeEach(() => {
   state = withState();
 });
 afterEach(() => state.done());
+
+test("retrying a v0.1.3 generated brief drops its old instructions but not an owner's literal delimiter", () => {
+  const body = "Keep the quoted <!-- dori launch: footer start --> as data.";
+  const old = `generated lessons\n<!-- dori launch: the brief starts below -->\n${body}\n\n<!-- dori launch: footer start -->\nold instructions\n<!-- dori launch: footer end -->\n`;
+  expect(originalBrief(old)).toBe(body);
+  const quoted = `${body}\n<!-- dori launch: footer start -->\nexample only\n<!-- dori launch: footer end -->`;
+  expect(originalBrief(quoted)).toBe(quoted);
+});
+
+test("new native lanes report to the attested terminal lead, but not to a reused pane", async () => {
+  const world = newWorld();
+  const id = "w1:p1";
+  world.panes = [{ pane_id: id, workspace_id: "w1", agent: "omp", agent_status: "idle", foreground: "omp" }];
+  agentIn(world, id);
+  laneState(state.dir, id, { role: "cataly" });
+  writeFileSync(join(state.dir, "roles.json"), JSON.stringify({ lead: id }));
+  const deps = {
+    ...depsFor(world, fakeClock(T0), state.dir, { sessionRuntime: "headless", leadPane: "" }),
+    env: { CATALY_HOME: state.dir },
+  };
+  const lane: Lane = {
+    key: "new-lane",
+    title: "title",
+    thread: "none",
+    brief: "/brief",
+    done: "file /result",
+    openedAt: new Date(T0).toISOString(),
+  };
+  expect(await laneFooterFor(deps, lane)).toContain(`herdr pane run ${id} "$line"`);
+  laneState(state.dir, id, { role: "lane" });
+  expect(await laneFooterFor(deps, lane)).not.toContain("herdr pane run");
+});
 
 test.each(["alpha", "beta"] as const)("%s context survives a reload under another repository default", async (name) => {
   const cwd = join(state.dir, name);

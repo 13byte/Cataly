@@ -48,6 +48,10 @@ describe("OMP harness launches", () => {
     expect(agentCommand({ ...d, agentCmd: "omp --cataly-role=lane --model other" }, "cataly")).toBe(
       "omp --cataly-role=lane --model other",
     );
+    for (const option of ["--dori-role=lane", "--dori-role lane"]) {
+      const command = `omp ${option} --model other`;
+      expect(agentCommand({ ...d, agentCmd: command }, "cataly")).toBe(command);
+    }
     expect(agentCommand({ ...d, agentCmd: "/opt/bin/omp --model other" }, "cataly")).toBe(
       "/opt/bin/omp --model other --cataly-role cataly",
     );
@@ -70,7 +74,13 @@ describe("OMP harness launches", () => {
     w.gh = () => ({ code: 0, stdout: JSON.stringify({ headRefOid: "a".repeat(40) }) });
     await review(d, "o/r#7", "selected/model");
     const call = w.calls.find((c) => c.cmd === "env")!;
-    const context = Object.entries(harnessLaunchEnv(d)).map(([key, value]) => `${key}=${value}`);
+    const context = [
+      ...Object.entries(harnessLaunchEnv(d)).map(([key, value]) => `${key}=${value}`),
+      "CATALY_DISCORD_TOKEN=",
+      "CATALY_TELEGRAM_TOKEN=",
+      "DORI_DISCORD_TOKEN=",
+      "DORI_TELEGRAM_TOKEN=",
+    ];
     expect(call.argv.slice(0, context.length)).toEqual(context);
     expect(call.argv.slice(context.length, context.length + 8)).toEqual([
       "sh",

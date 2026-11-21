@@ -40,17 +40,24 @@ export type NativeReceipt = {
   readonly addonHash: string;
 };
 const LAUNCHER = "packages/coding-agent/scripts/omp";
+const nativeCacheDirectory = (home: string, identity: string, legacy = false): string =>
+  join(nativeCacheRoot(home, legacy), `${platform.nativeCacheLabel()}-${identity}`);
+const legacyNativeSource = (source: string): boolean =>
+  !regularFile(join(source, "release-headless.json")) &&
+  regularFile(join(source, "install.sh")) &&
+  regularFile(join(source, "skills/dori-mode/SKILL.md"));
+
+function selectNativeDirectory(source: string, home: string, identity: string): string {
+  const current = nativeCacheDirectory(home, identity);
+  const legacy = nativeCacheDirectory(home, identity, true);
+  // Old source scripts know only the legacy root. A tagged old updater also provisions there for new sources.
+  if (legacyNativeSource(source)) return legacy;
+  if (!lstatSync(current, { throwIfNoEntry: false }) && lstatSync(legacy, { throwIfNoEntry: false })) return legacy;
+  return current;
+}
+
 export function nativeDirectory(source: string, home: string): string {
-  const name = `${platform.nativeCacheLabel()}-${readSourceBundle(source, true).identity}`;
-  const legacy = join(nativeCacheRoot(home, true), name);
-  // Immutable older sources still validate their historical cache rather than changing or migrating its receipt.
-  if (
-    !regularFile(join(source, "release-headless.json")) &&
-    (lstatSync(legacy, { throwIfNoEntry: false }) ||
-      (regularFile(join(source, "install.sh")) && regularFile(join(source, "skills/dori-mode/SKILL.md"))))
-  )
-    return legacy;
-  return join(nativeCacheRoot(home), name);
+  return selectNativeDirectory(source, home, readSourceBundle(source, true).identity);
 }
 
 /** The cache launcher always validates source then execs the protected upstream launcher through the recorded Bun. */
@@ -61,16 +68,20 @@ export function nativeLauncher(source: string, home: string, directory: string, 
 /**
  * Recompute source identity and every tracked postimage independently of the native release stamp. `holder` leases the
  * identity first (see `leaseNativeIdentity`): the process that goes on to use it, or the shell that will exec it.
+ * A caller that will execute a particular cache copy must pin its directory so it cannot verify a different copy.
  */
 export function assertNativeSource(
   source: string,
   home: string,
   bun = process.execPath,
-  holder = process.pid,
+  options: { readonly holder?: number; readonly directory?: string } = {},
 ): NativeReceipt {
   const bundle = readSourceBundle(source, true);
-  const directory = nativeDirectory(source, home);
-  leaseNativeIdentity(home, bundle.identity, holder, undefined, dirname(directory) === nativeCacheRoot(home, true));
+  const directory = options.directory ?? selectNativeDirectory(source, home, bundle.identity);
+  const legacy = directory === nativeCacheDirectory(home, bundle.identity, true);
+  if (!legacy && directory !== nativeCacheDirectory(home, bundle.identity))
+    throw new Error(`Native source identity does not bind ${directory}`);
+  leaseNativeIdentity(home, bundle.identity, options.holder, undefined, legacy);
   const receipt = readJson(join(directory, "receipt.json")) as NativeReceipt;
   const checkout = join(directory, "source");
   if (
@@ -84,7 +95,8 @@ export function assertNativeSource(
     (lstatSync(receipt.omp).mode & 0o111) === 0 ||
     JSON.stringify(readJson(join(directory, "native-config.json"))) !== JSON.stringify({ update: { auto: false } }) ||
     typeof receipt.source !== "string" ||
-    nativeDirectory(receipt.source, home) !== directory ||
+    readSourceBundle(receipt.source, true).identity !== bundle.identity ||
+    (!legacy && legacyNativeSource(receipt.source)) ||
     receipt.ompHash !== digest(nativeLauncher(receipt.source, home, directory, receipt.bun)) ||
     receipt.entry !== join(checkout, "packages/coding-agent/src/cli.ts") ||
     receipt.bun !== realpathSync(bun) ||
@@ -127,10 +139,11 @@ export async function provisionNativeSource(
   const bundle = readSourceBundle(source, true);
   if (bundle.lock.launcher !== LAUNCHER)
     throw new Error("Native bundle must use the protected upstream omp source launcher");
-  // Leased before the existence check, so a prune either keeps this identity or has finished before it is looked at.
-  const directory = nativeDirectory(source, home);
+  // Look again after leasing: a prune may have acted on the chosen root before the lease.
+  const directory = selectNativeDirectory(source, home, bundle.identity);
   leaseNativeIdentity(home, bundle.identity, holder, undefined, dirname(directory) === nativeCacheRoot(home, true));
-  if (lstatSync(directory, { throwIfNoEntry: false })) return assertNativeSource(source, home, bun, holder);
+  if (lstatSync(directory, { throwIfNoEntry: false }))
+    return assertNativeSource(source, home, bun, { directory, holder });
   const cache = dirname(directory);
   realDirectory(cache, true);
   owned(cache);
@@ -224,7 +237,7 @@ export async function provisionNativeSource(
     saveJson(join(stage, "native-config.json"), { update: { auto: false } });
     saveJson(join(stage, "receipt.json"), receipt);
     renameSync(stage, directory);
-    return assertNativeSource(source, home, bun, holder);
+    return assertNativeSource(source, home, bun, { directory, holder });
   } finally {
     if (lstatSync(stage, { throwIfNoEntry: false })) rmSync(stage, { recursive: true, force: true });
   }

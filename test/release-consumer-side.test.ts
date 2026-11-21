@@ -31,7 +31,7 @@ posix(
       [
         "bash",
         "-c",
-        wrapper.replace(join(f.paths.live, "skills/dori-mode/scripts/src/cli.ts"), cli),
+        wrapper.replaceAll(join(f.paths.live, "skills/dori-mode/scripts/src/cli.ts"), cli),
         "--",
         "update",
         "status",

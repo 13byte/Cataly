@@ -24,6 +24,8 @@ for (const runtime of ["herdr", "hc"] as const) {
             await up(f.deps, f.cwd);
             return 0;
           });
+          // Only the harness selection is in effect here: the daemon may still default children to headless.
+          for (const session of f.daemon.sessions.values()) expect(session.env["CATALY_RUNTIME"]).toBe(runtime);
           await startLane(f.deps, "transport-lane", f.brief, { cwd: f.cwd, group: "w1" });
           expect(f.daemon.captures).toHaveLength(5);
           const agents = f.daemon.captures.filter((capture) => capture.stdout.includes("\nENV\n"));

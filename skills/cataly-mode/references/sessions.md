@@ -27,14 +27,14 @@ On a follow-up or resume, read the brief, registry and existing checkpoint histo
 
 **Why the `Done =` line has to be checkable:** the watcher closes lanes on its own, so it can only trust what it can read back itself. `launch` and `adopt` refuse any signal outside this list. Signals are joined with `;`, and every one has to pass.
 
-| Signal | Passes when |
-|---|---|
-| `merged <owner/repo>#N` | the PR is merged and has a merge commit |
-| `closed <owner/repo>#N` | the issue is closed |
-| `published <pkg>@<version>` | npm has that exact version |
-| `command ["argv","as","json"] [stdout~"regex"]` | the command exits 0 when the watcher runs it, and stdout matches if a regex is given |
-| `file <path> [sha256=<hex>] [json:.a.b=<json value>]` | the file exists, its sha256 matches, and the JSON field equals the value |
-| `url <http(s) url> [status=200] [body~"regex"]` | a GET returns that status, and the body matches if a regex is given |
+| Signal                                                | Passes when                                                                          |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `merged <owner/repo>#N`                               | the PR is merged and has a merge commit                                              |
+| `closed <owner/repo>#N`                               | the issue is closed                                                                  |
+| `published <pkg>@<version>`                           | npm has that exact version                                                           |
+| `command ["argv","as","json"] [stdout~"regex"]`       | the command exits 0 when the watcher runs it, and stdout matches if a regex is given |
+| `file <path> [sha256=<hex>] [json:.a.b=<json value>]` | the file exists, its sha256 matches, and the JSON field equals the value             |
+| `url <http(s) url> [status=200] [body~"regex"]`       | a GET returns that status, and the body matches if a regex is given                  |
 
 The last three are for work that never lands as a PR: a local setup, a QA pass, a running service. Write the check so that it can fail. `command ["bun","test"] stdout~" 0 fail"` is a real check, while `command ["true"]` checks nothing. The watcher runs commands itself, in the lane's directory, as a plain argv with no shell. They have a 2-minute limit. It never trusts the lane's own report that something passed. Relative file paths resolve from the lane's directory, and `~` is your home. JSON values compare as JSON, so `json:.n=3` and `json:.n="3"` are different checks.
 
@@ -95,6 +95,11 @@ A blocked call records the rule IDs and the command's SHA-256, not the command t
 cataly policy allow-once demo-lane 'denyBash[0]' --reason "Owner approved the blocked attempt"
 ```
 
+For a lane started by the root harness, pass `--root headless:<UUID>` using the
+exact reference from that lane's status. If a skill-registry lane and a root
+lane share a key, use `--skill` to select the skill-registry lane instead.
+The key alone cannot authorize a different lane with the same name.
+
 Every matching deny rule needs its own grant. An unused grant is idempotent; a grant is consumed for one attempt, even if OMP's independent approval gate subsequently declines it. This command sends or executes nothing. The lane must explicitly retry.
 
 This policy is a local guardrail, not a sandbox or another authorization service. It sees the native Bash tool's command string, not script contents or all possible execution routes. Keep the native approval and OS account boundaries in place.
@@ -103,13 +108,13 @@ This policy is a local guardrail, not a sandbox or another authorization service
 
 One JSON file per lane under `<stateDir>/lanes/`, written atomically (temp file + rename), so two writers never leave a half-written file. Each lane records:
 
-| Field | Meaning |
-|---|---|
-| `thread` | where its updates go, as `platform:thread` (or `none`) |
-| `sessionRef` | its session: the runtime (`herdr` or `hc`) and the id; `pane` and `tab` mirror the id and the herdr tab (none on hc). A record from before runtimes existed is read as herdr |
-| `session` | the agent's own session id, so a closed job can be reopened later |
-| `status` | `working`, `done-claimed`, `verified-done`, `not-done`, `closed` |
-| `claim`, `objection`, `history` | what was claimed, what was objected, every status change |
+| Field                           | Meaning                                                                                                                                                                      |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `thread`                        | where its updates go, as `platform:thread` (or `none`)                                                                                                                       |
+| `sessionRef`                    | its session: the runtime (`herdr` or `hc`) and the id; `pane` and `tab` mirror the id and the herdr tab (none on hc). A record from before runtimes existed is read as herdr |
+| `session`                       | the agent's own session id, so a closed job can be reopened later                                                                                                            |
+| `status`                        | `working`, `done-claimed`, `verified-done`, `not-done`, `closed`                                                                                                             |
+| `claim`, `objection`, `history` | what was claimed, what was objected, every status change                                                                                                                     |
 
 `cataly sync` compares the registry with live panes and prints drift (a pane that is gone, a session id that changed, an empty `Done =` line). It never deletes anything. With `--write` it stores the session ids it found.
 

@@ -4,24 +4,7 @@ import { dutyTick } from "./duty.ts";
 import type { Deps } from "./harness.ts";
 import { Refusal } from "./refusal.ts";
 import { HOUR, loopTick, msUntilNext, summary } from "./loop.ts";
-import { acquire, release } from "./loop-lock.ts";
-
-export type LoopLifecycle = { readonly signal: AbortSignal; readonly ready: () => void };
-
-function waitForTurn(ms: number, lifecycle?: LoopLifecycle): Promise<void> {
-  if (!lifecycle) return Bun.sleep(ms);
-  const { signal } = lifecycle;
-  if (signal.aborted) return Promise.resolve();
-  return new Promise((resolve) => {
-    const done = () => {
-      clearTimeout(wait);
-      signal.removeEventListener("abort", done);
-      resolve();
-    };
-    const wait = setTimeout(done, ms);
-    signal.addEventListener("abort", done, { once: true });
-  });
-}
+import { controllerLease, type LoopLifecycle } from "./loop-controller.ts";
 
 export async function runDuty(d: Deps, a: Args, x: string | undefined, lifecycle?: LoopLifecycle): Promise<number> {
   if (x === "stop") {
@@ -44,22 +27,19 @@ export async function runDuty(d: Deps, a: Args, x: string | undefined, lifecycle
   // Bun.sleep(NaN) and any Bun.sleep under 1 ms return at once, so a bad value would run duty passes back to back.
   if (!(Number.isFinite(interval) && interval >= 1))
     throw new Refusal("--interval must be a number of seconds, 0.001 or more");
-  // One duty loop per home: two would deliver the same inbox twice and nudge every lane twice.
-  const lock = d.store.lockPath("duty");
-  const held = acquire(d, lock);
-  if ("holder" in held) throw new Refusal(`another duty loop runs in this home (${held.holder})`);
+  const once = one(a, "once") === "true";
+  const lease = controllerLease(d, { role: "duty-loop", once, token: one(a, "controller-handoff"), lifecycle });
   try {
-    lifecycle?.ready();
-    while (!lifecycle?.signal.aborted) {
+    while (await lease.beforePass()) {
       const events = await dutyTick(d);
       if (lifecycle) console.log(`DUTY pass events=${events.length}`);
       for (const e of events)
         console.log(`DUTY ${[e.lane ?? e.pane, e.action].filter(Boolean).join(" ")}${e.detail ? `: ${e.detail}` : ""}`);
-      if (one(a, "once")) break;
-      await waitForTurn(interval, lifecycle);
+      if (once) break;
+      await lease.waitForPass(interval);
     }
   } finally {
-    release(d, held.nonce, lock);
+    lease.close();
   }
   return 0;
 }
@@ -109,12 +89,10 @@ export async function runLoop(d: Deps, a: Args, x: string | undefined, lifecycle
       "--interval and --max-load must be finite positive numbers; --max-lanes and --max-starts whole numbers >= 0",
     );
   }
-  const lock = d.store.loopPath("runner.lock");
-  const held = one(a, "once") ? undefined : acquire(d, lock);
-  if (held && "holder" in held) throw new Refusal(`another hourly loop runs in this home (${held.holder})`);
+  const once = one(a, "once") === "true";
+  const lease = controllerLease(d, { role: "hourly-loop", once, token: one(a, "controller-handoff"), lifecycle });
   try {
-    lifecycle?.ready();
-    while (!lifecycle?.signal.aborted) {
+    while (await lease.beforePass()) {
       try {
         const run = await loopTick(d, opts);
         console.log(
@@ -124,14 +102,14 @@ export async function runLoop(d: Deps, a: Args, x: string | undefined, lifecycle
         );
       } catch (e) {
         console.error(`LOOP ERROR ${e instanceof Error ? e.message : String(e)}`);
-        if (one(a, "once")) return 1;
+        if (once) return 1;
       }
-      if (one(a, "once")) break;
+      if (once) break;
       opts.force = false;
-      await waitForTurn(msUntilNext(d, interval), lifecycle);
+      await lease.waitForPass(msUntilNext(d, interval));
     }
   } finally {
-    if (held) release(d, held.nonce, lock);
+    lease.close();
   }
   return 0;
 }

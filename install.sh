@@ -19,11 +19,19 @@ let temporary;
 try {
   const args = parseArgs({ args: process.argv.slice(2), strict: true,
     options: { version: { type: "string" }, from: { type: "string" }, home: { type: "string" },
-      runtime: { type: "string" }, help: { type: "boolean", short: "h" } } });
+      runtime: { type: "string" }, "retire-legacy-roles": { type: "boolean" },
+      "legacy-session": { type: "string" }, "legacy-migrated-session": { type: "string" },
+      help: { type: "boolean", short: "h" } } });
   if (args.values.help) {
-    console.log("install.sh [--version vX.Y.Z] [--from DIST] [--home PATH] [--runtime headless|hc|herdr]\nCATALY_RELEASE selects an explicit tag. Current releases default to headless. No services are started.");
+    console.log("install.sh [--version vX.Y.Z] [--from DIST] [--home PATH] [--runtime headless|hc|herdr]\ninstall.sh --retire-legacy-roles --home PATH [--legacy-session NAME] [--legacy-migrated-session NAME] [--version vX.Y.Z] [--from DIST]\nRetirement verifies the new release and the already-stopped v0.1.3 home, without installing or stopping terminals.\nCATALY_RELEASE selects an explicit tag. Current releases default to headless. No services are started.");
     process.exit(0);
   }
+  const retire = args.values["retire-legacy-roles"] === true;
+  if (retire && (!args.values.home || args.values.runtime !== undefined))
+    fail("--retire-legacy-roles requires --home and does not take --runtime");
+  const sessionFlags = ["legacy-session", "legacy-migrated-session"];
+  if (!retire && sessionFlags.some((key) => args.values[key] !== undefined))
+    fail("Legacy session flags apply only to --retire-legacy-roles");
   const version = args.values.version ?? process.env.CATALY_RELEASE ?? process.env.DORI_RELEASE;
   if (version !== undefined && !/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) fail("Select an exact --version vX.Y.Z");
   if (args.values.from !== undefined && !args.values.from.trim()) fail("--from requires a directory");
@@ -36,7 +44,7 @@ try {
   const linux = process.platform === "linux" && process.arch === "x64";
   const darwin = process.platform === "darwin" && process.arch === "arm64";
   const legacyRuntime = darwin ? "hc" : "herdr";
-  const requested = args.values.runtime ?? ((process.env.CATALY_RUNTIME ?? process.env.DORI_RUNTIME) || undefined);
+  const requested = retire ? "headless" : args.values.runtime ?? ((process.env.CATALY_RUNTIME ?? process.env.DORI_RUNTIME) || undefined);
   if ((!linux && !darwin) || (requested !== undefined && requested !== "headless" && requested !== legacyRuntime))
     fail(`Unsupported host/runtime: ${process.platform}/${process.arch}/${requested ?? "headless"}`);
   const installMode = process.env.CATALY_INSTALL_MODE ?? process.env.DORI_INSTALL_MODE;
@@ -103,7 +111,7 @@ try {
   };
   if (explicitHome !== undefined) selectHome(false);
   if (!atLeast(Bun.version, [1, 4, 4])) fail("Bun 1.4.4+ is required");
-  if (!Bun.which("git")) fail("git is required; install it before Cataly");
+  if (!retire && !Bun.which("git")) fail("git is required; install it before Cataly");
   const fetchBytes = async (url, limit) => {
     const response = await fetch(url, { headers: { Accept: url.startsWith(api) ? "application/vnd.github+json" : "application/octet-stream" },
       signal: AbortSignal.timeout(120000) });
@@ -241,6 +249,7 @@ try {
   const native = nativeFile ? readProfiles(nativeFile, ["linux/x64/headless", "darwin/arm64/headless"]) : undefined;
   if (native && (!terminalFile || manifest.requirements?.omp !== "18.20.0"))
     fail("Headless capability requires a bound native OMP payload and historical release profiles");
+  if (retire && !native) fail("--retire-legacy-roles requires the new verified release, not the v0.1.3 archive");
   if (home === undefined) selectHome(!native);
   if (config.sessionRuntime !== undefined && !["headless", "hc", "herdr"].includes(config.sessionRuntime))
     fail("Preserved config sessionRuntime must be headless, hc or herdr");
@@ -256,6 +265,17 @@ try {
       fail('Preserved config must explicitly select runtime: set "runtime" to "herdr" or "hc" before retrying');
     if (config.runtime !== runtime || (config.sessionRuntime !== undefined && config.sessionRuntime !== runtime))
       fail(`Selected runtime ${runtime} conflicts with preserved config runtime ${config.runtime}`);
+  }
+  if (!native) {
+    const path = join(home, "roles.json");
+    const entry = stat(path);
+    if (entry) {
+      if (!entry.isFile() || entry.uid !== process.getuid() || (entry.mode & 0o022) || entry.size > 4 * 1024 * 1024)
+        fail("Unsafe historical roles.json");
+      const roles = JSON.parse(readFileSync(path, "utf8"));
+      if (!object(roles) || Object.keys(roles).length)
+        fail("Historical roles hold activation. Use the verified new install.sh --retire-legacy-roles --home PATH first; do not edit roles.json.");
+    }
   }
   // Bootstrapping an old tag runs that tag's updater, which cannot enforce newer protocol retention itself.
   for (const name of ["consumer-installed.json", "consumer-journal.json"]) {
@@ -286,12 +306,19 @@ try {
   const env = { ...process.env };
   for (const prefix of ["CATALY", "DORI"])
     for (const key of ["HOME", "CONFIG", "STATE_DIR", "RUNTIME", "CMD", "AGENT_CMD", "AGENT_ARGV", "OMP_ULW_PATH", "MANAGED_STARTUP"])
-      delete env[`${prefix}_${key}`];
+      if (!retire || key !== "STATE_DIR") delete env[`${prefix}_${key}`];
   const prefix = native ? "CATALY" : "DORI";
   env[`${prefix}_HOME`] = home;
   env[`${prefix}_CONFIG`] = configPath;
-  const childArgs = [process.execPath, join(extracted, "src/release/cli.ts"), "install", "--from", dist, "--version", manifest.tag];
-  if (terminalFile) childArgs.push("--home", home, "--runtime", runtime);
+  const childArgs = [process.execPath, join(extracted, "src/release/cli.ts")];
+  if (retire) {
+    childArgs.push("retire-legacy-roles", "--home", home);
+    for (const key of sessionFlags)
+      if (args.values[key] !== undefined) childArgs.push(`--${key}`, args.values[key]);
+  } else {
+    childArgs.push("install", "--from", dist, "--version", manifest.tag);
+    if (terminalFile) childArgs.push("--home", home, "--runtime", runtime);
+  }
   const child = Bun.spawn(childArgs,
     { stdin: "inherit", stdout: "inherit", stderr: "inherit", env });
   process.exitCode = await child.exited;

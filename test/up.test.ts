@@ -12,7 +12,8 @@ describe("cataly up", () => {
     const w = new World();
     const d = w.deps();
     const root = d.store.root;
-    const env = Object.entries(harnessLaunchEnv(d)).map(([key, value]) => `${key}=${value}`);
+    const launchEnv = { ...harnessLaunchEnv(d), CATALY_RUNTIME: "herdr" };
+    const env = Object.entries(launchEnv).map(([key, value]) => `${key}=${value}`);
     const { out } = await captureIo(async () => {
       await up(d, "/w");
       return 0;
@@ -72,7 +73,10 @@ describe("cataly up", () => {
     });
     const runs = w.calls.filter((c) => c.cmd === "hc" && c.argv[1] === "run").map((c) => c.argv);
     expect(runs).toHaveLength(4);
-    for (const argv of runs) expect(argv).toContain(`cataly.group=${groupId(d.store.root)}`);
+    for (const argv of runs) {
+      expect(argv).toContain(`cataly.group=${groupId(d.store.root)}`);
+      expect(argv).toContain("CATALY_RUNTIME=hc");
+    }
     expect(runs.map((a) => a.find((x) => x.startsWith("cataly.role=")))).toEqual([
       "cataly.role=lead",
       "cataly.role=duty",

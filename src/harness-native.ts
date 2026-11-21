@@ -1,26 +1,28 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
-import { retireLegacyRoles } from "./harness-legacy.ts";
 import { harnessLaunchEnv, nativeHarnessCommand, rolePrompt, type Deps } from "./harness.ts";
 import { acquire, release } from "./loop-lock.ts";
 import { Refusal } from "./refusal.ts";
 import { refText, sameSession } from "./refs.ts";
+import { laneMessengerOverrides } from "./release/runtime.ts";
 import { groupId } from "./runtime/group.ts";
 import { type HeadlessObservation, HeadlessRuntime } from "./runtime/headless.ts";
-import { readPrivate, writePrivate } from "./runtime/headless-record.ts";
+import { laneEntry, readPrivate, writePrivate } from "./runtime/headless-record.ts";
 import { HEADLESS_ADDRESS, type SessionRef } from "./runtime/types.ts";
 import { RESERVED_KEYS, type Role } from "./store-types.ts";
 
-type Binding = { readonly ref: SessionRef; readonly sessionId?: string };
+export type Binding = { readonly ref: SessionRef; readonly sessionId?: string };
 type Inventory = { readonly version: 1; readonly stateDir: string; readonly roles: Partial<Record<Role, Binding>> };
 
-const inventoryPath = (d: Deps) => join(d.store.root, "harness-native.json");
+export const inventoryPath = (d: Deps) => join(d.store.root, "harness-native.json");
 const agent = (role: Role): role is "lead" | "duty" => role === "lead" || role === "duty";
 const reason = (error: unknown) => (error instanceof Error ? error.message : String(error));
-const exclusivePath = (d: Deps) => join(d.store.root, "harness.lock");
 
-export async function withHarnessLock<T>(d: Deps, run: () => Promise<T> | T): Promise<T> {
-  const path = exclusivePath(d);
+export async function withHarnessLock<T>(
+  d: Parameters<typeof acquire>[0] & { readonly store: Pick<Deps["store"], "root"> },
+  run: () => Promise<T> | T,
+): Promise<T> {
+  const path = join(d.store.root, "harness.lock");
   const held = acquire(d, path);
   if ("holder" in held) throw new Refusal(`another harness operation owns this home (${held.holder})`);
   try {
@@ -109,7 +111,7 @@ export async function startNativeHarness(d: Deps, rt: HeadlessRuntime, cwd: stri
       });
       state.roles[role] = { ref };
       save();
-      const scoped = role === "lead" ? env : { ...env, CATALY_DISCORD_TOKEN: "", CATALY_TELEGRAM_TOKEN: "" };
+      const scoped = role === "lead" ? env : { ...env, ...laneMessengerOverrides };
       const seen = agent(role) ? await rt.startNative(ref, commands[role], scoped) : await rt.startLoop(ref, scoped);
       if (agent(role)) {
         if (
@@ -137,59 +139,47 @@ export async function startNativeHarness(d: Deps, rt: HeadlessRuntime, cwd: stri
   );
 }
 
-const runtimeAt = (d: Deps, state: Inventory): HeadlessRuntime =>
+export const runtimeAt = (d: Deps, state: Inventory): HeadlessRuntime =>
   new HeadlessRuntime(state.stateDir, { ...process.env, CATALY_HOME: resolve(d.store.root) });
 
-function checkRegistration(d: Deps, role: Role, expected: SessionRef): void {
+export function checkRegistration(d: Deps, role: Role, expected: SessionRef): void {
   const current = d.store.roles()[role];
   if (current && !sameSession(current, expected))
     throw new Refusal(`${role} registration does not match the owned ref`);
 }
 
-export async function stopNativeHarness(d: Deps): Promise<void> {
-  await withHarnessLock(d, async () => {
-    const state = nativeInventory(d);
-    if (!state) {
-      const retired = await retireLegacyRoles(d);
-      console.log(
-        retired
-          ? `STOPPED retired ${retired} already-gone legacy role registration(s)`
-          : "STOPPED no owned native harness",
-      );
-      return;
-    }
-    const rt = runtimeAt(d, state);
-    const stop = async (roles: readonly Role[]) => {
-      const problems: string[] = [];
-      for (const role of roles) {
-        const binding = state.roles[role];
-        if (!binding) continue;
-        try {
-          checkRegistration(d, role, binding.ref);
-          await rt.stopHarnessRole(binding.ref, role, binding.sessionId);
-          d.store.clearRoles([[role, binding.ref]]);
-          delete state.roles[role];
-          writePrivate(inventoryPath(d), state);
-        } catch (error) {
-          problems.push(`${role}: ${reason(error)}`);
-        }
-      }
-      if (problems.length) throw new Refusal(`HARNESS STOP HELD\n${problems.join("\n")}`);
-    };
-    // Drain existing loop passes before inspecting settled agents. Never stop lanes or a terminal registered by hand.
-    await stop(["hourly-loop", "duty-loop"]);
-    if (state.roles.lead && state.roles.duty) {
-      const [lead, duty] = await Promise.all([rt.observe(state.roles.lead.ref), rt.observe(state.roles.duty.ref)]);
-      if (
-        (lead.sessionId && lead.sessionId === duty.sessionId) ||
-        (lead.sessionFile && lead.sessionFile === duty.sessionFile)
-      )
-        throw new Refusal("HARNESS STOP HELD: lead and duty have ambiguous native identity");
-    }
-    await stop(["lead", "duty"]);
-    rmSync(inventoryPath(d));
-    console.log("STOPPED native harness");
+/** Native role refs belong to their inventory's runtime, not the invoking shell's state directory. */
+export function registeredNativeTarget(d: Deps, ref: SessionRef) {
+  const roles = d.store.roles();
+  const registered = RESERVED_KEYS.filter((role) => {
+    const candidate = roles[role];
+    return candidate && sameSession(candidate, ref);
   });
+  if (ref.runtime !== "headless") {
+    if (registered.length && nativeInventory(d))
+      throw new Refusal(`${registered.join(", ")} has no owned native role binding; inspect cataly harness status`);
+    return undefined;
+  }
+  const state = nativeInventory(d);
+  for (const role of RESERVED_KEYS) {
+    const binding = state?.roles[role];
+    if (!state || !binding || !sameSession(binding.ref, ref)) continue;
+    if (registered.length !== 1 || registered[0] !== role || (agent(role) && !binding.sessionId))
+      throw new Refusal(`${role} has no matching verified native role registration; inspect cataly harness status`);
+    if (laneEntry(state.stateDir, ref)?.reservation.role !== role)
+      throw new Refusal(`${role} native reservation identity is unconfirmed; inspect cataly harness status`);
+    return { role, sessionId: binding.sessionId, runtime: runtimeAt(d, state) };
+  }
+  if (registered.length)
+    throw new Refusal(`${registered.join(", ")} has no owned native role binding; inspect cataly harness status`);
+  // An unpublished reservation is not an alternative route to a harness role, even by its raw UUID.
+  const fallback = d.runtimes.for(ref);
+  if (fallback instanceof HeadlessRuntime) {
+    const role = laneEntry(fallback.stateDir, ref)?.reservation.role;
+    if (role && role !== "lane")
+      throw new Refusal(`${role} has no owned native role binding; inspect cataly harness status`);
+  }
+  return undefined;
 }
 
 export async function nativeHarnessStatus(d: Deps): Promise<string[]> {

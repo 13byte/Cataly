@@ -17,7 +17,9 @@ posix.each(["nudge.md", "nudge-waiting.md"])(
       }
       const compat = join("skills", "cataly-mode", "scripts", "src");
       mkdirSync(join(root, compat), { recursive: true });
-      cpSync(join(import.meta.dir, "..", compat, "session-compat.ts"), join(root, compat, "session-compat.ts"));
+      for (const file of ["checkpoint-lock.ts", "session-compat.ts"]) {
+        cpSync(join(import.meta.dir, "..", compat, file), join(root, compat, file));
+      }
       cpSync(join(import.meta.dir, "..", "package.json"), join(root, "package.json"));
       mkdirSync(join(root, "test"));
       for (const file of ["fake.ts", "fake-hc.ts", "harness-setup.ts"]) {

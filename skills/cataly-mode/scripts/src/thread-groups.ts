@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { fill } from "./config.ts";
+import { configuredHookEnv, fill } from "./config.ts";
 import { type Held, withDeliveryLock } from "./delivery-lock.ts";
 import type { FlowDeps } from "./done-flow.ts";
 import { type Lane, LANE_KEY, statusOf, withStatus } from "./registry.ts";
@@ -112,6 +112,10 @@ export const finishThread = async (
     ];
   const hook = deps.config.hooks.threadDone;
   if (!hook) return [];
-  const result = await deps.run(fill(hook, { thread: lane.thread, text: note, key: lane.key }));
+  const env = configuredHookEnv(deps.config.hooks, hook, deps.env);
+  const result = await deps.run(
+    fill(hook, { thread: lane.thread, text: note, key: lane.key }),
+    env ? { env } : undefined,
+  );
   return [result.code === 0 ? "thread marked done" : `thread hook failed: ${result.err.slice(0, 160)}`];
 };

@@ -25,10 +25,15 @@ const FOOTER_END = "<!-- cataly launch: footer end -->";
 // what a first launch would. Only a file that ends with launch's footer is cut: the owner's text may quote the heading.
 export const originalBrief = (text: string): string => {
   const brief = text.replace(/\s*$/, "");
-  const foot = brief.endsWith(FOOTER_END) ? brief.lastIndexOf(`\n${FOOTER_START}\n`) : -1;
+  const legacy = brief.endsWith("<!-- dori launch: footer end -->");
+  if (!legacy && !brief.endsWith(FOOTER_END)) return brief;
+  const footer = legacy ? "<!-- dori launch: footer start -->" : FOOTER_START;
+  const begin = legacy ? "<!-- dori launch: the brief starts below -->" : BRIEF_START;
+  const foot = brief.lastIndexOf(`\n${footer}\n`);
   if (foot === -1) return brief;
-  const start = brief.indexOf(`${BRIEF_START}\n`);
-  return brief.slice(start === -1 || start > foot ? 0 : start + BRIEF_START.length + 1, foot).replace(/\s*$/, "");
+  const start = brief.indexOf(`${begin}\n`);
+  if (legacy && (start === -1 || start > foot)) return brief;
+  return brief.slice(start === -1 || start > foot ? 0 : start + begin.length + 1, foot).trimEnd();
 };
 
 // Name only the selected runtime; an unresolved preview still records reports without inventing a send command.
@@ -44,17 +49,20 @@ const sendReport = (leadPane: string, runtime: RuntimeKind | undefined): string 
 export const laneFooterFor = async (deps: FlowDeps, lane: Lane): Promise<string> => {
   const { repoIdentities, freshness } = deps.config;
   const rts = runtimesOf(deps);
-  const runtime = rts.choice?.kind;
-  let lead = deps.config.leadPane;
-  if (runtime === "headless") {
-    lead = "";
-    const target = leadAddress(deps.config, deps.env ?? process.env);
-    if ("ref" in target && target.ref.runtime === "headless") {
-      const state = await trustedPaneState(deps.run, deps.config.stateDir, target.ref, rts);
-      if (state?.role === "cataly") lead = formatRef(target.ref);
+  const target = leadAddress(deps.config, deps.env ?? process.env);
+  if ("ref" in target) {
+    const ref = target.ref;
+    if (ref.runtime === "headless" || ref.runtime !== rts.choice?.kind) {
+      const state = await trustedPaneState(deps.run, deps.config.stateDir, ref, rts).catch(() => null);
+      if (state?.role !== "cataly") return footer(lane, "", repoIdentities, undefined, freshness);
     }
+    return footer(lane, ref.runtime === "headless" ? formatRef(ref) : ref.id, repoIdentities, ref.runtime, freshness);
   }
-  return footer(lane, lead, repoIdentities, runtime, freshness);
+  // A legacy terminal alias is meaningful only on an explicitly selected terminal and without a conflicting binding.
+  const runtime = rts.choice?.kind;
+  const alias =
+    target.reason === "invalid" && target.unboundAlias && runtime !== "headless" ? deps.config.leadPane : "";
+  return footer(lane, alias, repoIdentities, runtime, freshness);
 };
 
 export const footer = (

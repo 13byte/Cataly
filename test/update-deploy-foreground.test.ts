@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { captureRuntime } from "../src/update/deployment-native.ts";
+import { attestMonitorForeground } from "../src/update/deployment-monitor-receipts.ts";
 import { DeploymentBusy, DeploymentHeld, processIdentity, sameProcess } from "../src/update/deployment-process.ts";
 import { procStat, processExists } from "../src/update/proc.ts";
 import type { DeploymentRecord, MonitorSet, RuntimeIdentity } from "../src/update/deployment-types.ts";
@@ -41,7 +42,11 @@ posix("closing control during silent monitor startup reaps the actor and monitor
 
 posix("capture admits Bash scripts beside Bun wrapper execs while the generic probe holds", async () => {
   const f = await foregroundFixture();
-  expect((await f.cli.probe(f.config.pane, "held", f.config.stateDir)).shellInFront).toBe(true);
+  const probe = await f.cli.probe(f.config.pane, "held", f.config.stateDir);
+  expect(probe.shellInFront).toBe(true);
+  const retained = JSON.parse(JSON.stringify({ ...f.runtime, role: "dori" }));
+  expect(() => attestMonitorForeground(f.config, retained, probe)).not.toThrow();
+  expect(() => attestMonitorForeground(f.config, { ...retained, role: "lane" }, probe)).toThrow("incarnation receipts");
   expect(await captureRuntime(f.config, f.cli)).toMatchObject({ ...f.runtime, busy: false, approvalPending: false });
   untouched(f);
 });

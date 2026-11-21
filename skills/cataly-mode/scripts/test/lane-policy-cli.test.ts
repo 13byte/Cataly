@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
+import { randomUUID } from "node:crypto";
 import { unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { allowPolicyOnce, checkPolicyCommand } from "../src/lane-policy-actions.ts";
@@ -39,6 +40,7 @@ const cli = async (...args: string[]) => {
     env: {
       PATH: process.env["PATH"] ?? "",
       HOME: state.dir,
+      CATALY_HOME: join(state.dir, "harness"),
       CATALY_CONFIG: config,
       CATALY_LANE_POLICY: callerBinding ?? "",
       PI_SESSION_FILE: callerSession ?? "",
@@ -53,6 +55,16 @@ const cli = async (...args: string[]) => {
   ]);
   return { code, out, err };
 };
+
+test("a skill grant refuses an older snapshot even with the same key and rule", async () => {
+  const registry = new Registry(state.dir);
+  await registry.update("demo", (lane) => (lane ? { ...lane, lifecycleEpoch: randomUUID() } : null));
+  expect(checkPolicyCommand(binding, "sudo true", NOW)).toContain("BLOCKED");
+  const denied = await cli("policy", "allow-once", "demo", "denyBash[0]", "--reason", "approved");
+  expect(denied.code).toBe(1);
+  expect(denied.err).toContain("does not match the registered lane generation");
+  expect(checkPolicyCommand(binding, "sudo true", NOW)).toContain("BLOCKED");
+});
 
 test("real CLI grants only the last blocked command and refuses malformed operator requests", async () => {
   checkPolicyCommand(binding, "sudo true", NOW);

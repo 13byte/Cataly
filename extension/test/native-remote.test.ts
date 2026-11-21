@@ -2,15 +2,24 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { readPaneState } from "../../skills/cataly-mode/scripts/src/lane-state.ts";
 import { remoteSocketDir, remoteSocketPath } from "../../src/remote/socket-path.ts";
 import ompCataly from "../index.ts";
+import { DUTY_INVARIANTS, ROLE_INVARIANTS } from "../role-invariants.ts";
 import { fakePi, type FakePi, useConfig } from "./fake-pi.ts";
 
 type Reply = { ok: true; data: Record<string, unknown> } | { ok: false; error: string };
 const roots: string[] = [];
 const active: FakePi[] = [];
-const names = ["HC_TERMINAL_ID", "HERDR_PANE_ID", "CATALY_HEADLESS_ID", "CATALY_CONFIG", "CATALY_STATE_DIR"] as const;
+const names = [
+  "HC_TERMINAL_ID",
+  "HERDR_PANE_ID",
+  "CATALY_HEADLESS_ID",
+  "CATALY_HARNESS_ROLE",
+  "CATALY_CONFIG",
+  "CATALY_STATE_DIR",
+] as const;
 const env = new Map<string, string | undefined>();
 const unixSocketTest = test.skipIf(typeof process.getuid !== "function");
 
@@ -117,13 +126,85 @@ test("native role and monitor work without Unix user ownership", async () => {
   try {
     await ompCataly(fake.api);
     await fake.emit("session_start");
-    expect(fake.session.entries).toContainEqual({ type: "custom", customType: "omp-cataly:role", data: "cataly" });
+    expect(fake.session.entries).toContainEqual({ type: "custom", customType: "omp-dori:role", data: "dori" });
     expect(fake.active).toContain("monitor");
     expect(fake.notes.join("\n")).not.toContain("Native remote");
   } finally {
     if (original) Object.defineProperty(process, "getuid", original);
     else Reflect.deleteProperty(process, "getuid");
   }
+});
+
+test("a native duty transcript cannot appear as a v0.1.3 lead after rollback", async () => {
+  const root = useConfig("");
+  roots.push(root);
+  process.env.CATALY_HARNESS_ROLE = "duty";
+  const fake = fakePi({
+    session: { id: randomUUID(), entries: [] },
+    flags: { "cataly-role": "cataly" },
+    mode: "rpc",
+    hasUI: true,
+  });
+  active.push(fake);
+  await ompCataly(fake.api);
+  await fake.emit("session_start");
+  expect(fake.active).not.toContain("monitor");
+  expect(fake.session.entries).toEqual([{ type: "custom", customType: "omp-cataly:role", data: "cataly" }]);
+});
+
+test.each([
+  { role: "duty", refId: randomUUID() },
+  { role: "lead", refId: "not-a-native-ref" },
+])("flagless archived duty or malformed newest proof cannot acquire lead capabilities %#", async (proof) => {
+  const root = useConfig("");
+  roots.push(root);
+  const pane = "w1:p17";
+  process.env.HERDR_PANE_ID = pane;
+  const fake = fakePi({
+    mode: "tui",
+    session: {
+      id: randomUUID(),
+      entries: [
+        { type: "custom", customType: "omp-cataly:role", data: "cataly" },
+        {
+          type: "custom",
+          customType: "omp-cataly:harness-role",
+          data: { role: "lead", refId: randomUUID() },
+        },
+        { type: "custom", customType: "omp-cataly:harness-role", data: proof },
+        {
+          type: "custom",
+          customType: "omp-dori:monitor",
+          data: { op: "start", name: "lead-intake", argv: [join(root, "missing-monitor")], filter: ".", cwd: root },
+        },
+      ],
+    },
+  });
+  active.push(fake);
+  await ompCataly(fake.api);
+  await fake.emit("session_start");
+  expect(fake.active).not.toContain("monitor");
+  expect(fake.messages).toEqual([]);
+  expect(readPaneState(root, pane)).toBeNull();
+  expect(await fake.emit("before_agent_start", { systemPrompt: ["base"] })).toContainEqual({
+    systemPrompt: ["base", DUTY_INVARIANTS],
+  });
+
+  fake.session = { id: randomUUID(), entries: [] };
+  await fake.emit("session_switch", { reason: "new" });
+  expect(fake.session.entries).toEqual([]);
+  expect(fake.active).not.toContain("monitor");
+
+  // Explicitly resuming a different lead still uses the lead scope; the duty record is branch-local.
+  fake.session = {
+    id: randomUUID(),
+    entries: [{ type: "custom", customType: "omp-dori:role", data: "dori" }],
+  };
+  await fake.emit("session_switch", { reason: "resume" });
+  expect(fake.active).toContain("monitor");
+  expect(await fake.emit("before_agent_start", { systemPrompt: ["base"] })).toContainEqual({
+    systemPrompt: ["base", ROLE_INVARIANTS.cataly],
+  });
 });
 
 unixSocketTest("private socket is exact, bounded, and only publishes native Cataly roots", async () => {

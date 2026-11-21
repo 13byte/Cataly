@@ -27,7 +27,7 @@ import {
   discordLaneTarget,
   uniqueDiscordLane,
 } from "../skills/cataly-mode/scripts/src/messenger/discord-lane-routing.ts";
-import { Discord } from "../skills/cataly-mode/scripts/src/messenger/discord.ts";
+import { Discord, discordApiBase } from "../skills/cataly-mode/scripts/src/messenger/discord.ts";
 import { fetchHttp } from "../skills/cataly-mode/scripts/src/messenger/http.ts";
 import {
   type Lane,
@@ -37,7 +37,7 @@ import {
   statusOf,
 } from "../skills/cataly-mode/scripts/src/registry.ts";
 import { realClock } from "../skills/cataly-mode/scripts/src/run.ts";
-import { isMonitorMessage, MONITOR_MESSAGE } from "../skills/cataly-mode/scripts/src/session-compat.ts";
+import { isMonitorMessage, SESSION_WIRE } from "../skills/cataly-mode/scripts/src/session-compat.ts";
 import { selfSession } from "../src/runtime/registry.ts";
 import type { SessionRef } from "../src/runtime/types.ts";
 import { discordAskToken, routeFor } from "./discord-ask.ts";
@@ -72,7 +72,10 @@ export class DiscordLane {
   beforeAgentStart?: (event: unknown, ctx: CatalyContext) => Promise<void>;
   beforeProviderRequest?: (ctx: CatalyContext) => void;
 
-  constructor(private readonly readyForHeadless = headlessDiscordLaneAvailable) {}
+  constructor(
+    private readonly readyForHeadless = headlessDiscordLaneAvailable,
+    private readonly apiOverride = process.env["CATALY_DISCORD_API_BASE"] ?? "",
+  ) {}
 
   stop(): void {
     this.stopLoop?.();
@@ -92,6 +95,7 @@ export class DiscordLane {
     dedicated: boolean,
     admission: LaneAdmission,
     headless?: SessionRef,
+    env = process.env,
   ): void {
     this.stop();
     if (!headless && ctx.mode !== "tui") return;
@@ -101,8 +105,8 @@ export class DiscordLane {
     if (!ref) return;
     const session = ctx.sessionManager.getSessionId();
     const file = ctx.sessionManager.getSessionFile();
-    const wakeSession = process.env.CATALY_DISCORD_WAKE_SESSION || undefined;
-    const wakeModel = process.env.CATALY_DISCORD_WAKE_MODEL || undefined;
+    const wakeSession = env.CATALY_DISCORD_WAKE_SESSION || undefined;
+    const wakeModel = env.CATALY_DISCORD_WAKE_MODEL || undefined;
     let cwd = ctx.cwd;
     // A broker-owned lane may drain the shared local inbox; it does not take over a Discord connection.
     if (headless) {
@@ -277,7 +281,7 @@ export class DiscordLane {
           modelWarned = false;
           if (!optedIn && !headless) {
             pi.sendMessage(
-              { customType: MONITOR_MESSAGE, content: text, display: true },
+              { customType: SESSION_WIRE.monitorMessage, content: text, display: true },
               { triggerTurn: true, deliverAs: "aside" },
             );
             confirm = () => {
@@ -392,7 +396,7 @@ export class DiscordLane {
           if (!lane || (lane.session !== undefined && lane.session !== session) || !ownsPane()) return;
           const token = discordAskToken(explicit);
           if (
-            discordAskReceivers(root, token).some(
+            discordAskReceivers(root, token, this.apiOverride).some(
               (item) => item.owner === explicit.owner && item.watched.includes(explicit.channel),
             )
           )
@@ -412,6 +416,7 @@ export class DiscordLane {
                 }),
               realClock,
               token,
+              discordApiBase(this.apiOverride),
             );
             const scopedIntake = await discordInbound(discord, queue.storeFor, {
               ownerId: explicit.owner,
@@ -426,7 +431,7 @@ export class DiscordLane {
               explicit.owner,
               [explicit.channel],
               scopedIntake.channels,
-              15_000,
+              { progressWindowMs: 15_000, apiOverride: this.apiOverride },
             );
           }
           if (!ownsPane()) return;

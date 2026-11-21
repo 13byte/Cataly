@@ -170,9 +170,7 @@ export function assertFrozen(job: UpdateJob): void {
     assertSourceAdmission(manifest, name === "local" ? "local" : "upstream");
     const observed = sourceManifest(join(job.directory, "inputs", name));
     assertSourceAdmission(observed, "upstream");
-    if (!sameManifest(observed, manifest)) {
-      throw new UpdateError(`frozen ${name} input changed`);
-    }
+    if (!sameManifest(observed, manifest)) throw new UpdateError(`frozen ${name} input changed`);
   }
 }
 
@@ -216,9 +214,8 @@ export function carryCatalyPin(local: string, candidate: string, expected: Sourc
 
 /** Source-bundle payloads and the ULW library are frozen local pins, carried byte for byte by a Cataly-only port. */
 export function assertCatalyScope(inputs: UpdateInputs, candidate: SourceManifest): void {
-  if (!sameCatalyPin(inputs.local, candidate)) {
+  if (!sameCatalyPin(inputs.local, candidate))
     throw new UpdateError("Cataly-only update changed the frozen ULW lock/library");
-  }
 }
 
 /** Git metadata that must not move during a port: HEAD, config, refs and the staged index (no staging, no commits). */

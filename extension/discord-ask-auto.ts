@@ -5,7 +5,7 @@ import { readPrivateAskFile } from "../skills/cataly-mode/scripts/src/messenger/
 import { discordAskReceivers } from "../skills/cataly-mode/scripts/src/messenger/discord-ask-receiver.ts";
 import { isDiscordSnowflake } from "../skills/cataly-mode/scripts/src/messenger/discord-inbound-state.ts";
 import { LANE_KEY, Registry, RESERVED_LANE_KEY, statusOf } from "../skills/cataly-mode/scripts/src/registry.ts";
-import { isCatalyEntry } from "../skills/cataly-mode/scripts/src/session-compat.ts";
+import { isCatalyEntry, SESSION_WIRE } from "../skills/cataly-mode/scripts/src/session-compat.ts";
 import { parseRef } from "../src/runtime/types.ts";
 import type { DiscordAskRoute } from "./discord-ask.ts";
 
@@ -21,7 +21,7 @@ export function bindAskLane(
 ): AskLane | undefined {
   if (launched && LANE_KEY.test(launched)) {
     const binding = { key: launched, sessionId };
-    record(LANE_ENTRY, binding);
+    record(SESSION_WIRE.askLane, binding);
     return binding;
   }
   const value = branch.findLast(
@@ -65,19 +65,20 @@ export async function automaticDiscordAskRoute(
   role: CatalyRole,
   sessionId: string,
   binding?: AskLane,
+  env = process.env,
 ): Promise<DiscordAskRoute | undefined> {
-  const home = process.env["CATALY_HOME"] ?? dirname(configPath());
+  const home = env["CATALY_HOME"] ?? dirname(env["CATALY_CONFIG"] ?? configPath());
   // Never let a relative override resolve against a lane's project directory.
   if (!isAbsolute(home)) return undefined;
   const tokenFile = join(home, "discord-token");
   // Older lead processes may already have the bot credential without the standard token file.
   // Lanes never use inherited messenger credentials, and discovery still requires a matching live receiver.
   const fileToken = readPrivateAskFile(tokenFile, 16_384);
-  const token = (fileToken ?? (role === "cataly" ? process.env["CATALY_DISCORD_TOKEN"] : undefined))?.trim();
+  const token = (fileToken ?? (role === "cataly" ? env["CATALY_DISCORD_TOKEN"] : undefined))?.trim();
   if (!token || !/^[\w.-]+$/.test(token)) return undefined;
   const target = role === "lane" ? await laneChannel(stateDir, sessionId, binding) : undefined;
   if (role === "lane" && !target) return undefined;
-  const receivers = discordAskReceivers(stateDir, token);
+  const receivers = discordAskReceivers(stateDir, token, env["CATALY_DISCORD_API_BASE"] ?? "");
   // A registered lane names its own destination; never fall back to the lead's channel.
   // For a lead, discovered channels are not defaults and multiple explicit destinations are ambiguous.
   const routes = new Map<string, DiscordAskRoute>();

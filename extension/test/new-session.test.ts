@@ -10,9 +10,10 @@ import { type FakePi, type FakeSession, load, until, useConfig } from "./fake-pi
 
 const PANE = "w1:p61";
 const ROLE = "omp-cataly:role";
-const MONITOR = "omp-cataly:monitor";
+const MONITOR = "omp-dori:monitor";
 const agentStart = { type: "before_agent_start", prompt: "ulw keep working", systemPrompt: ["base prompt"] };
 const roleEntry = (role: string) => ({ type: "custom", customType: ROLE, data: role });
+const wireRole = (role: "dori" | "lane") => ({ type: "custom", customType: "omp-dori:role", data: role });
 const session = (id: string, entries: FakeSession["entries"] = []): FakeSession => ({
   id,
   file: `/sessions/${id}.jsonl`,
@@ -96,7 +97,7 @@ test("a new lane carries only its role and resets goal, approvals and working st
   const fresh = session("lane-new");
   pi.session = fresh;
   await pi.emit("session_switch", { type: "session_switch", reason: "new" });
-  expect(fresh.entries).toEqual([roleEntry("lane")]);
+  expect(fresh.entries).toEqual([wireRole("lane")]);
   expect(pi.active).toEqual(["read", "bash", "cataly_report", "goal"]);
   expect(readPaneState(stateDir, PANE)).toMatchObject({
     role: "lane",
@@ -187,8 +188,8 @@ posix("a new Cataly session does not reapply its original session-bound bootstra
   });
   sessions.push(pi);
   await pi.emit("session_start");
-  expect(started.entries.at(-1)).toEqual(roleEntry("cataly"));
-  expect(started.entries.filter((entry) => entry.customType === "omp-cataly:monitor-bootstrap")).toHaveLength(1);
+  expect(started.entries.at(-1)).toEqual(wireRole("dori"));
+  expect(started.entries.filter((entry) => entry.customType === "omp-dori:monitor-bootstrap")).toHaveLength(1);
   const oldPid = await runningPid(pi);
 
   const fresh = session("bootstrap-new");
@@ -198,9 +199,9 @@ posix("a new Cataly session does not reapply its original session-bound bootstra
   // Intake routing belongs to the monitors, not to the old session's private bootstrap token.
   expect(readMonitorSet(saved, fresh.id, true)).toMatchObject({ sessionId: fresh.id, monitors: [spec], intake });
   expect(fresh.entries).toEqual([
-    roleEntry("cataly"),
+    wireRole("dori"),
     { type: "custom", customType: MONITOR, data: { op: "start", ...spec, id: expect.any(String) } },
-    { type: "custom", customType: "omp-cataly:intake", data: intake },
+    { type: "custom", customType: "omp-dori:intake", data: intake },
   ]);
   await until(() => !alive(oldPid));
   const exitedPid = await runningPid(pi);

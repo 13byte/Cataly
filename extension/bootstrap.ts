@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import { isCatalyEntry } from "../skills/cataly-mode/scripts/src/session-compat.ts";
+import { isCatalyEntry, SESSION_WIRE } from "../skills/cataly-mode/scripts/src/session-compat.ts";
 import { readMonitorSet } from "../src/update/deployment-monitors.ts";
 import type { IntakeSpec, MonitorSpec } from "../src/update/deployment-types.ts";
 import type { CatalyApi } from "./index.ts";
@@ -37,10 +37,10 @@ export function bootstrapMonitors(
     )
   )
     return false;
-  for (const name of previous.keys()) pi.appendEntry("omp-cataly:monitor", { op: "stop", name });
-  for (const spec of bootstrap.monitors) pi.appendEntry("omp-cataly:monitor", { op: "start", ...spec });
-  pi.appendEntry(INTAKE_ENTRY, bootstrap.intake);
-  pi.appendEntry(BOOTSTRAP_ENTRY, { version: 1, sessionId, hash });
+  for (const name of previous.keys()) pi.appendEntry(SESSION_WIRE.monitor, { op: "stop", name });
+  for (const spec of bootstrap.monitors) pi.appendEntry(SESSION_WIRE.monitor, { op: "start", ...spec });
+  pi.appendEntry(SESSION_WIRE.intake, bootstrap.intake);
+  pi.appendEntry(SESSION_WIRE.monitorBootstrap, { version: 1, sessionId, hash });
   return true;
 }
 

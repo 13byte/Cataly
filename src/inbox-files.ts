@@ -131,6 +131,12 @@ export function spooled(path: string, moving = false): string[] {
 // lead whose route stays held (inbox-spool.ts) waits in that queue's spool, one file per message.
 export const owedFile = (root: string): string => join(root, "duty", "lead.jsonl");
 
+/** Includes notices in a move interrupted before the duty pass could finish. */
+export function pendingLead(root: string): boolean {
+  const path = owedFile(root);
+  return pendingQueue(path).length > 0 || nonEmpty(`${path}.merging`) || spooled(path, true).length > 0;
+}
+
 export function oweLead(root: string, msg: QueuedMessage & { id: string }): void {
   if (!readQueue(owedFile(root)).some((m) => m.id === msg.id)) appendQueue(owedFile(root), msg);
 }

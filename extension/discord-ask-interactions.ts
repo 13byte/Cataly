@@ -1,4 +1,3 @@
-import { discordApiBase } from "../skills/cataly-mode/scripts/src/messenger/discord.ts";
 import { discordGateway, type GatewaySocket } from "../skills/cataly-mode/scripts/src/messenger/discord-gateway.ts";
 import { isDiscordSnowflake } from "../skills/cataly-mode/scripts/src/messenger/discord-inbound-state.ts";
 import { fetchHttp } from "../skills/cataly-mode/scripts/src/messenger/http.ts";
@@ -16,6 +15,11 @@ type InteractionConnection = {
   readonly answer: Promise<{ data: AskData }>;
   isSubmitting(): boolean;
   close(): void;
+};
+type ButtonEndpoint = {
+  readonly base: string;
+  readonly apiOverride: string;
+  readonly open: AskButtonSocket | undefined;
 };
 const clock = {
   now: Date.now,
@@ -47,12 +51,10 @@ export async function openAskButtons(
   token: string,
   binding: ButtonBinding,
   signal: AbortSignal,
-  open?: AskButtonSocket,
+  { base, apiOverride, open }: ButtonEndpoint,
 ): Promise<InteractionConnection | undefined> {
-  const apiOverride = process.env["CATALY_DISCORD_API_BASE"];
   if (!open && apiOverride) return undefined; // Never send a fixture credential to Discord's real Gateway.
   if (signal.aborted) return undefined;
-  const base = discordApiBase(apiOverride);
   const answer = Promise.withResolvers<{ data: AskData }>();
   const ready = Promise.withResolvers<boolean>();
   let accepting = false;

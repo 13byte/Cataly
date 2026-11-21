@@ -1,6 +1,6 @@
 import { accessSync, existsSync, lstatSync, readFileSync } from "node:fs";
 import { cpus, loadavg } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import type { LanePolicy } from "../skills/cataly-mode/scripts/src/lane-policy.ts";
 import { shq } from "./delivery.ts";
 import { platform } from "./platform/index.ts";
@@ -44,8 +44,10 @@ export type Deps = {
   readonly usage: Usage;
 };
 
-const harnessConfigPath = (catalyHome: string): string =>
-  resolve(process.env["CATALY_CONFIG"] ?? join(catalyHome, "config.json"));
+const harnessConfigPath = (catalyHome: string): string => {
+  const path = process.env["CATALY_CONFIG"] ?? `${catalyHome}${sep}config.json`;
+  return isAbsolute(path) ? path : `${process.cwd()}${sep}${path}`;
+};
 
 /** The runtime is chosen on first use, so commands that open or reach no session work without one installed. */
 export const defaultDeps = (): Deps => {
@@ -106,7 +108,7 @@ export function isOmpAgentCommand(command: string): boolean {
 
 /** Give OMP the extension role while preserving configured arguments and explicit role/command overrides. */
 export const agentCommand = (d: Deps, role: "cataly" | "lane"): string =>
-  isOmpAgentCommand(d.agentCmd) && !/(?:^|\s)--cataly-role(?:[=\s]|$)/.test(d.agentCmd)
+  isOmpAgentCommand(d.agentCmd) && !/(?:^|\s)--(?:cataly|dori)-role(?:[=\s]|$)/.test(d.agentCmd)
     ? `${d.agentCmd} --cataly-role ${role}`
     : d.agentCmd;
 
@@ -170,14 +172,17 @@ export function promptFile(name: string): string {
 
 /** `template` with each `{{name}}` in `vars` replaced; an unknown one is left as written. */
 export const fill = (template: string, vars: Record<string, string>): string =>
-  template.replace(/\{\{(\w+)\}\}/g, (_, k: string) => vars[k] ?? `{{${k}}}`);
+  template.replace(
+    /\{\{(\w+)\}\}/g,
+    (literal, k: string) => vars[k] ?? (k === "dori" ? vars["cataly"] : undefined) ?? literal,
+  );
 
 export const prompt = (name: string, vars: Record<string, string>): string =>
   fill(readFileSync(promptFile(name), "utf8"), vars);
 
 /** The trusted role prompt references private profile data without embedding it. */
 export function rolePrompt(d: Deps, name: "lead.md" | "duty.md"): string {
-  const text = readFileSync(promptFile(name), "utf8").replaceAll("{{cataly}}", d.catalyCmd);
+  const text = prompt(name, { cataly: d.catalyCmd });
   if (name !== "lead.md" || !lstatSync(ownerPaths(d.store.root).profile, { throwIfNoEntry: false })?.isFile())
     return text;
   return [

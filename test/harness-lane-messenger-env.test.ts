@@ -6,8 +6,14 @@ import { setup } from "./harness-setup.ts";
 import { migrateWorld } from "./migrate-setup.ts";
 
 // Inspect only the messenger assignments sent to the terminal server, never caller credentials.
-const messengerArgs = (command: string[]) => command.filter((arg) => /^CATALY_(DISCORD|TELEGRAM)_TOKEN=/.test(arg));
-const emptyOverrides = ["CATALY_DISCORD_TOKEN=", "CATALY_TELEGRAM_TOKEN="];
+const messengerArgs = (command: string[]) =>
+  command.filter((arg) => /^(CATALY|DORI)_(DISCORD|TELEGRAM)_TOKEN=/.test(arg));
+const emptyOverrides = [
+  "CATALY_DISCORD_TOKEN=",
+  "CATALY_TELEGRAM_TOKEN=",
+  "DORI_DISCORD_TOKEN=",
+  "DORI_TELEGRAM_TOKEN=",
+];
 
 async function withFixtureConfig(root: string, run: () => Promise<number>): Promise<number> {
   const previous = process.env["CATALY_CONFIG"];

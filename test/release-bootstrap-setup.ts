@@ -36,7 +36,13 @@ export function fixture(profile: typeof linux | typeof darwin) {
   executable("hc", "#!/bin/sh\nexit 0\n");
   const cli = `import { writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
-const args = parseArgs({ args: process.argv.slice(3), options: { from: { type: "string" }, version: { type: "string" }, home: { type: "string" }, runtime: { type: "string" } } });
+const args = parseArgs({ args: process.argv.slice(3), options: { from: { type: "string" }, version: { type: "string" }, home: { type: "string" }, runtime: { type: "string" }, "legacy-session": { type: "string" }, "legacy-migrated-session": { type: "string" } } });
+if (process.argv[2] === "retire-legacy-roles") {
+  writeFileSync(process.env.BOOTSTRAP_RESULT, JSON.stringify({
+    command: process.argv[2], ...args.values, historicalState: process.env.DORI_STATE_DIR,
+  }));
+  process.exit(0);
+}
 writeFileSync(process.env.BOOTSTRAP_RESULT, JSON.stringify({ home: args.values.home, runtime: args.values.runtime,
   env: { home: process.env.CATALY_HOME ?? process.env.DORI_HOME, config: process.env.CATALY_CONFIG ?? process.env.DORI_CONFIG, state: process.env.DORI_STATE_DIR ?? null,
     runtime: process.env.DORI_RUNTIME ?? null, cmd: process.env.DORI_CMD ?? null, agent: process.env.DORI_AGENT_CMD ?? null,

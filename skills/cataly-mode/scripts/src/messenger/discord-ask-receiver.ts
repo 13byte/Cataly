@@ -79,6 +79,7 @@ function receipt(value: unknown, pid: number): Receipt | undefined {
 export function discordAskReceivers(
   stateDir: string,
   token: string,
+  apiOverride = process.env["CATALY_DISCORD_API_BASE"] ?? "",
 ): Array<{
   owner: string;
   explicit: readonly string[];
@@ -89,7 +90,7 @@ export function discordAskReceivers(
   const routes: Route[] = [];
   const tokenDigest = digest(token);
   try {
-    const apiBase = discordApiBase(process.env["CATALY_DISCORD_API_BASE"]);
+    const apiBase = discordApiBase(apiOverride);
     privateDirectory(root);
     for (const name of readdirSync(root)) {
       const match = RECEIPT_NAME.exec(name);
@@ -126,7 +127,10 @@ export function openDiscordAskReceiver(
   owner: string,
   explicit: readonly string[],
   watched: () => readonly string[],
-  progressWindowMs = Infinity,
+  {
+    progressWindowMs = Infinity,
+    apiOverride = process.env["CATALY_DISCORD_API_BASE"] ?? "",
+  }: { readonly progressWindowMs?: number; readonly apiOverride?: string } = {},
 ): DiscordAskReceiverPublication {
   const root = join(stateDir, "discord-ask-receivers");
   const name = `${process.pid}-${randomUUID()}.json`;
@@ -135,7 +139,7 @@ export function openDiscordAskReceiver(
   const tokenDigest = digest(token);
   let apiBase: string | undefined;
   try {
-    apiBase = discordApiBase(process.env["CATALY_DISCORD_API_BASE"]);
+    apiBase = discordApiBase(apiOverride);
   } catch {
     /* Fail closed below. */
   }

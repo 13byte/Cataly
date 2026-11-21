@@ -6,7 +6,7 @@ import { die, every, exitOnDisconnect } from "./cli-context.ts";
 import { discordClock, openDiscordSocket, untilStopped } from "./cli-discord-gateway.ts";
 import { discordLaneMonitor } from "./discord-lane-monitor.ts";
 import type { FlowDeps } from "./done-flow.ts";
-import { Discord } from "./messenger/discord.ts";
+import { Discord, discordApiBase } from "./messenger/discord.ts";
 import { DiscordChannels } from "./messenger/discord-channels.ts";
 import { routeDiscordAskReply, routeUnreferencedDiscordAskText } from "./messenger/discord-ask-mailbox.ts";
 import { type DiscordAskReceiverPublication, openDiscordAskReceiver } from "./messenger/discord-ask-receiver.ts";
@@ -94,7 +94,8 @@ export const discordInboundCommand = async (
     if (!gateway && queue.first())
       die("Discord inbound has pending Gateway work; restart with --gateway before REST mode");
     activity = inboundActivity(options.activityFile, "discord");
-    const discord = new Discord(fetchHttp, realClock, token);
+    const apiOverride = env["CATALY_DISCORD_API_BASE"] ?? "";
+    const discord = new Discord(fetchHttp, realClock, token, discordApiBase(apiOverride));
     const intake = await discordInbound(discord, queue.storeFor, {
       ownerId,
       channelIds: [...new Set(channelIds)],
@@ -105,14 +106,10 @@ export const discordInboundCommand = async (
     const serviceLanes = wake ? discordLaneMonitor(deps, discord, identity) : undefined;
     if (wake) laneInbox = openDiscordLaneInbox(stateDir);
     if (gateway || pollMinutes > 0)
-      receiver = openDiscordAskReceiver(
-        stateDir,
-        token,
-        ownerId,
-        channelIds,
-        intake.channels,
-        gateway ? Infinity : pollMinutes * 60_000 + 15_000,
-      );
+      receiver = openDiscordAskReceiver(stateDir, token, ownerId, channelIds, intake.channels, {
+        progressWindowMs: gateway ? Infinity : pollMinutes * 60_000 + 15_000,
+        apiOverride,
+      });
     const watching = all ? "all" : intake.channels().join(",");
     const where = context ? inboundContext(discord, new DiscordChannels(stateDir), realClock.now) : undefined;
     const recall = deps.config.recall?.enabled

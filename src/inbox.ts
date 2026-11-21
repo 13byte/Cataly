@@ -1,7 +1,9 @@
 import { DeliveryUncertain, failureDetail } from "./delivery.ts";
 import type { Deps } from "./harness.ts";
+import { registeredNativeTarget } from "./harness-native.ts";
 import { Refusal } from "./refusal.ts";
 import { nonEmpty } from "./inbox-files.ts";
+import { inboxSealed } from "./inbox-spool.ts";
 import { resolveTarget } from "./target.ts";
 import { refText } from "./refs.ts";
 import type { AgentStatus, SessionRef, SubmitResult } from "./runtime/types.ts";
@@ -43,17 +45,20 @@ export async function sendOrThrow(
   return (await flushInbox(d, queued.at)) === "delivered" ? "DELIVERED" : "QUEUED";
 }
 
-/**
- * `target` resolved again (for queueMessage's recheck under the route): a lane or role that switched sessions since
- * `ref` was resolved names its new session; a name that no longer resolves stays at `ref`.
- */
+/** Re-resolve under the route: follow a new binding, but a disappeared name keeps its original ref. */
 export function resolveAgain(d: Deps, target: string, ref: SessionRef): () => SessionRef {
   return () => {
+    let current = ref;
     try {
-      return resolveTarget(d, target);
-    } catch {
-      return ref;
+      current = resolveTarget(d, target);
+    } catch (error) {
+      if (!(error instanceof Refusal)) throw error;
     }
+    if (!inboxSealed(d.store.root, current)) {
+      const binding = registeredNativeTarget(d, current);
+      if (binding && !binding.sessionId) throw new Refusal(`${binding.role} has no native agent inbox`);
+    }
+    return current;
   };
 }
 
@@ -107,7 +112,8 @@ async function flushLocked(d: Deps, ref: SessionRef): Promise<"delivered" | "que
   const all = d.store.queued(ref);
   if (all.length === 0) return "delivered";
   const queued = all.filter((m) => m.attempt?.state !== "ambiguous");
-  const rt = d.runtimes.for(ref);
+  const binding = registeredNativeTarget(d, ref);
+  const rt = binding?.runtime ?? d.runtimes.for(ref);
   // The probe carries the #62 screen check on herdr: an omo with live monitors between turns reads idle.
   const { status } = await rt.probe(ref);
   // Before the held check, so a gone session with only held messages says so instead of delivery-ambiguous forever (#108).
@@ -156,7 +162,7 @@ async function flushLocked(d: Deps, ref: SessionRef): Promise<"delivered" | "que
       ? (queued[0]?.text ?? "")
       : `${queued.length} messages arrived while you were busy:\n\n` +
         queued.map((m, i) => `(${i + 1}) from ${m.from}:\n${m.text}`).join("\n\n");
-  const out = await rt.deliver(ref, body);
+  const out = await rt.deliver(ref, body, binding?.sessionId ? { expectedSessionId: binding.sessionId } : undefined);
   switch (out.kind) {
     case "delivered":
       settleInbox(d, ref, queued);

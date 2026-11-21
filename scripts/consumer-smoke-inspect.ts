@@ -32,6 +32,9 @@ if (import.meta.main) {
   assert.equal(context.home, home, "Inspector requires the driver's private namespace receipt");
   assert.equal(context.side, side);
   assert.equal(dirname(side), home, "Consumer must be inside the private HOME");
+  // This program imports modules directly; installed CLI and OMP launchers are exercised without these bindings.
+  process.env["CATALY_HOME"] = side;
+  process.env["CATALY_CONFIG"] = join(side, "config.json");
   const expected = validateReleaseManifest(JSON.parse(readFileSync(expectedFile, "utf8")));
   const previous =
     previousFile === "-" ? undefined : validateReleaseManifest(JSON.parse(readFileSync(previousFile, "utf8")));

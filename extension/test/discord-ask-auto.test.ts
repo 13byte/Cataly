@@ -23,8 +23,17 @@ test("only the launched lane's exact native session can reuse its recorded bindi
   const entries: Array<{ type: string; customType: string; data: unknown }> = [];
   const record = (customType: string, data: unknown) => void entries.push({ type: "custom", customType, data });
   expect(bindAskLane(entries, "session-a", "worker", record)).toEqual({ key: "worker", sessionId: "session-a" });
+  expect(entries).toEqual([
+    { type: "custom", customType: "omp-dori:discord-ask-lane", data: { key: "worker", sessionId: "session-a" } },
+  ]);
   expect(bindAskLane(entries, "session-a", undefined, record)).toEqual({ key: "worker", sessionId: "session-a" });
   expect(bindAskLane(entries, "session-b", undefined, record)).toBeUndefined();
+  entries.push({
+    type: "custom",
+    customType: "omp-cataly:discord-ask-lane",
+    data: { key: "other", sessionId: "session-b" },
+  });
+  expect(bindAskLane(entries, "session-a", undefined, record)).toBeUndefined();
 });
 
 // The live receiver writes a POSIX-private cursor and receiver lease.

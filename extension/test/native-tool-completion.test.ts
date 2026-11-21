@@ -223,9 +223,7 @@ const nativeLane = async (cwd = import.meta.dir) => {
       return out.content.map((block) => (block.type === "text" ? block.text : "")).join("\n");
     },
     receipts: () =>
-      session
-        .getBranch()
-        .filter((entry) => entry.type === "custom" && entry.customType === "omp-cataly:tool-completion"),
+      session.getBranch().filter((entry) => entry.type === "custom" && entry.customType === "omp-dori:tool-completion"),
     shutdown: async (): Promise<void> => {
       try {
         await emitSessionShutdownEvent(runner);

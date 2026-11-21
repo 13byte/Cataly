@@ -9,6 +9,7 @@ import { review } from "../src/gate.ts";
 import { prompt, type Deps } from "../src/harness.ts";
 import { ConfigError, hooksSettled, loadHooks, runHook, substitute } from "../src/hooks.ts";
 import { ready, report, startLane } from "../src/lanes.ts";
+import { spawnExec } from "../src/runtime/exec.ts";
 import { World } from "./fake.ts";
 import { setup } from "./harness-setup.ts";
 
@@ -60,6 +61,24 @@ describe("hook config and placeholders", () => {
 });
 
 describe("lifecycle hooks", () => {
+  test.skipIf(process.platform === "win32")("saved lifecycle hooks receive the home of the loaded store", async () => {
+    const { d } = setup();
+    const output = join(d.store.root, "hook-output");
+    const previous = process.env["DORI_HOME"];
+    process.env["DORI_HOME"] = join(d.store.root, "foreign");
+    config(d, {
+      hooks: { onReport: ["bash", "-c", 'printf "%s" "${DORI_HOME:?}" > "$1"', "_", output] },
+    });
+    try {
+      await runHook({ ...d, exec: spawnExec }, "onReport", {});
+      expect(readFileSync(output, "utf8")).toBe(d.store.root);
+      expect(process.env["DORI_HOME"]).toBe(join(d.store.root, "foreign"));
+    } finally {
+      if (previous === undefined) delete process.env["DORI_HOME"];
+      else process.env["DORI_HOME"] = previous;
+    }
+  });
+
   test("onReport runs after the record is saved, with the exact argv", async () => {
     const { w, d, brief } = setup();
     await startLane(d, "lane-k", brief, { group: "w1" });

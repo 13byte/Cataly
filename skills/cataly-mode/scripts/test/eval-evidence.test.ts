@@ -44,7 +44,7 @@ describe("native eval evidence", () => {
     const branch = [
       call("eval"),
       result("eval", [], { async: { state: "running", jobId: job } }),
-      { type: "custom", customType: COMPLETION_ENTRY, data: { ...base, fingerprint: "a".repeat(64) } },
+      { type: "custom", customType: "omp-cataly:tool-completion", data: { ...base, fingerprint: "a".repeat(64) } },
       { type: "custom", customType: "omp-dori:tool-completion", data: { ...base, refused: "partial result" } },
     ];
     expect(() => toolEvidence(branch, "eval", CWD)).toThrow("partial result");

@@ -1,5 +1,4 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   appendQueue,
@@ -13,14 +12,13 @@ import {
 } from "./inbox-files.ts";
 import { mergeForwarded, mergePending } from "./inbox-forward.ts";
 import { destinationOf, lockQueue, mergeOwnSpool, type Queued, queueMessage } from "./inbox-spool.ts";
-import { sameSession } from "./refs.ts";
 import type { SessionRef } from "./runtime/types.ts";
+import { RootLaneStore, rootStoreHome } from "./store-lanes.ts";
 import { readRoles, registerRole, removeRoles } from "./store-roles.ts";
 import {
   KEEP_RUNS,
   KEY_RE,
   type Item,
-  type Lane,
   type LoopRun,
   type QueuedMessage,
   type ReviewReceipt,
@@ -29,22 +27,14 @@ import {
 
 export type { HostLoad } from "./store-types.ts";
 
-/** A lane file as any binary wrote it: one from before runtimes existed has no `sessionRef`. */
-type StoredLane = Omit<Lane, "sessionRef"> & { sessionRef?: SessionRef };
-
-/** Reads a record without `sessionRef` as the herdr pane it names; the same input always gives the same lane. */
-const upgrade = (raw: StoredLane): Lane =>
-  raw.sessionRef !== undefined
-    ? (raw as Lane)
-    : { ...raw, sessionRef: { runtime: "herdr", id: raw.paneId, ...(raw.tabId ? { container: raw.tabId } : {}) } };
-
 const checkedId = (id: string): string => {
   if (!KEY_RE.test(id)) throw new Error(`invalid id ${JSON.stringify(id)}: must match ${KEY_RE}`);
   return id;
 };
 
-export class Store {
-  constructor(readonly root: string = process.env["CATALY_HOME"] ?? join(homedir(), ".cataly")) {
+export class Store extends RootLaneStore {
+  constructor(root: string = rootStoreHome()) {
+    super(root);
     for (const d of ["lanes", "inbox", "briefs", "receipts", "backlog", "loop/runs", "duty"])
       mkdirSync(join(root, d), { recursive: true });
   }
@@ -57,30 +47,6 @@ export class Store {
     const tmp = `${path}.${process.pid}.tmp`;
     writeFileSync(tmp, JSON.stringify(value, null, 2) + "\n");
     renameSync(tmp, path);
-  }
-
-  lane(key: string): Lane | undefined {
-    const raw = this.readJson<StoredLane>(join(this.root, "lanes", `${key}.json`));
-    return raw && upgrade(raw);
-  }
-
-  /** Writes `paneId`/`tabId` from `sessionRef` beside it, so an older binary still reads the record. */
-  saveLane(lane: Lane): void {
-    const { id, container } = lane.sessionRef;
-    this.writeJson(join(this.root, "lanes", `${lane.key}.json`), { ...lane, paneId: id, tabId: container ?? "" });
-  }
-
-  lanes(): Lane[] {
-    return readdirSync(join(this.root, "lanes"))
-      .filter((f) => f.endsWith(".json"))
-      .map((f) => this.readJson<StoredLane>(join(this.root, "lanes", f)))
-      .filter((l): l is StoredLane => l !== undefined)
-      .map(upgrade)
-      .sort((a, b) => a.createdAt - b.createdAt || a.key.localeCompare(b.key));
-  }
-
-  laneBySession(ref: SessionRef): Lane | undefined {
-    return this.lanes().find((l) => sameSession(l.sessionRef, ref) && l.status !== "done");
   }
 
   roles(): Partial<Record<Role, SessionRef>> {

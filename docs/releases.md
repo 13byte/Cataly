@@ -26,13 +26,13 @@ The historical `v0.1.2` GitHub **prerelease** supports **Linux x64, herdr and Di
 
 The immutable `v0.1.0` and `v0.1.1` tags are superseded unpublished release attempts with zero release assets, not stable published releases. See the [release history](../CHANGELOG.md#superseded-unpublished-tags) for the draft-identity and first-upload failures.
 
-| Component | Minimum requirement | Tested preview baseline |
-|---|---|---|
-| OS / architecture | Linux x64 | Ubuntu 24.04 x64, clean non-root consumer home |
-| Bun | 1.4.4 | 1.4.4 |
-| Native OMP | 18.18.8 | 18.18.8 |
-| Session runtime | herdr, with its OMP integration | herdr 0.9.5 |
-| Messenger | Discord, using your own bot | Discord |
+| Component         | Minimum requirement             | Tested preview baseline                        |
+| ----------------- | ------------------------------- | ---------------------------------------------- |
+| OS / architecture | Linux x64                       | Ubuntu 24.04 x64, clean non-root consumer home |
+| Bun               | 1.4.4                           | 1.4.4                                          |
+| Native OMP        | 18.18.8                         | 18.18.8                                        |
+| Session runtime   | herdr, with its OMP integration | herdr 0.9.5                                    |
+| Messenger         | Discord, using your own bot     | Discord                                        |
 
 Newer Bun or OMP versions meeting the minimum are not automatically tested combinations. The consumer release implementation also supports an isolated macOS arm64/hc profile when a release manifest explicitly declares it; this does not claim that such a release has been published or that a macOS rollout has been exercised. A manifest without capabilities is legacy Linux x64/herdr only. Unsupported host/runtime combinations and releases without the selected capability hold rather than activate. Slack and Telegram remain source features. The maintainer source-container recipe is separate from the public release installer; it is not a published consumer image.
 
@@ -50,12 +50,12 @@ Use the canonical repository **https://github.com/vntrevx/Cataly**. Confirm the 
 
 Each release has four matching assets. The historical archive and manifest product names are still part of the release wire format so the `v0.1.3` updater can authenticate a newer release. They do not name the current command, skill or installation home.
 
-| Asset | Purpose |
-|---|---|
-| `omp-dori-v0.1.2.tar.gz` | Public source archive, rooted at `omp-dori-0.1.2/` |
-| `release-manifest.json` | Product/version/tag, commit/tree, archive digest/size, public source manifest, requirements and exact public omp-ulw dependency |
-| `SHA256SUMS` | SHA-256 checksums for the release payload files |
-| `install.sh` | Release bootstrap, separate from the source-checkout installer |
+| Asset                    | Purpose                                                                                                                         |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| `omp-dori-v0.1.2.tar.gz` | Public source archive, rooted at `omp-dori-0.1.2/`                                                                              |
+| `release-manifest.json`  | Product/version/tag, commit/tree, archive digest/size, public source manifest, requirements and exact public omp-ulw dependency |
+| `SHA256SUMS`             | SHA-256 checksums for the release payload files                                                                                 |
+| `install.sh`             | Release bootstrap, separate from the source-checkout installer                                                                  |
 
 Checksums establish consistency with the files downloaded from that trusted release. They are not an independent signature or a substitute for verifying the publishing repository. The installer also validates the manifest bindings, archive digest and extracted source manifest. Tar entries are checked before extraction; links, special files and unsafe paths are not admitted. The public source manifest excludes `ref/omp-ulw`; the separately fetched dependency must match `omp-ulw.lock` exactly.
 
@@ -127,21 +127,44 @@ sessions and their local scheduling loops. Installation itself starts nothing.
    the home, edit its config bytes, change authentication or start anything.
    It publishes `bin/cataly` and `bin/cataly-harness` in that owned home. A fresh
    installation uses the new defaults rather than taking over a legacy home.
+
 3. With no explicit `sessionRuntime` or `CATALY_RUNTIME`, new sessions default
    to headless. A saved `"runtime": "herdr"` or `"hc"` stays in the file but
    does not select terminal execution. Keep registered terminal sessions with
    their owning backend; changing the default does not migrate or close them.
 
-If old harness roles are still registered, `cataly harness up` holds rather than
-replacing them. Close those sessions in the original server context and run
-`cataly harness stop` with that backend available to verify they are gone and
-retire the registrations. This cleanup is separate from release activation.
+If v0.1.3 still has entries in `roles.json`, close the old agents, loops and
+role terminals yourself. Leave their **original server** running. Before step 2,
+use the verified **new** bootstrap to check that server and retire only
+registrations it proves are gone:
+
+```sh
+# Legacy primary: use the original name ("default" only if you used the unnamed server).
+bash "$download_dir/install.sh" --from "$download_dir" --version v0.1.4 \
+  --home "$HOME/.dori" --retire-legacy-roles --legacy-session default
+# Legacy side: its installation home identifies the original namespace.
+bash "$download_dir/install.sh" --from "$download_dir" --version v0.1.4 \
+  --home "$HOME/.omp-dori" --retire-legacy-roles
+```
+
+Run only the command for your installation, with the original XDG environment.
+If a primary home used both backends after migrating a role, also pass
+`--legacy-migrated-session NAME` for the original server on the other backend.
+Retirement neither installs a release nor stops processes. If the original
+server is missing or ownership is uncertain, leave the home intact; do not
+delete `roles.json` to bypass the hold. You can use a separate fresh home
+without adopting those sessions.
 
 The verified new bootstrap can upgrade a stopped legacy home **without** the
 old terminal tool. The old `v0.1.3` command, for example
 `"$HOME/.dori/bin/dori" update install --from "$download_dir"`, is a compatibility
-route only when the old client’s required herdr or hc is still installed. Use
-the new bootstrap for a terminal-free upgrade. The legacy command and discovery
+route only when the old client’s required herdr or hc is still installed.
+On a **primary** home that immutable updater only publishes the v0.1.3 link
+names. If you already updated that way, run the verified new bootstrap in
+step 2 against the same release and the same home to install `bin/cataly` and
+`bin/cataly-harness`. This does not require another version change. Starting
+with the new bootstrap instead completes the upgrade in one step.
+The legacy command and discovery
 names in an upgraded home are retained for owned update/rollback references;
 use `cataly` for current operation.
 
@@ -151,7 +174,8 @@ run `"$HOME/.dori/bin/cataly" update rollback --version v0.1.3`
 (or the same command from the actual installation home). Rollback needs the
 verified retained release and compatible preserved runtime settings. It restores
 the original release and its launchers but does not rewrite config, resume
-sessions or undo external work. Older independent-native releases also require
+sessions or undo external work. Do not resume a retired native duty transcript
+as a lead on v0.1.3: that version has no native duty role. Older independent-native releases also require
 an appropriate independently installed OMP.
 
 ## Isolated macOS arm64/hc consumer
@@ -263,7 +287,11 @@ Additional configured channel IDs are opt-in: `CATALY_DISCORD_CHANNEL_IDS=ID,ID,
 With the protected token file prepared above and the non-secret IDs inherited from the owning OMP session, explicitly start one native `monitor` using these `argv` values and filter `^INBOUND`:
 
 ```json
-["bash", "-c", "set -eu; base=\"${CATALY_HOME:?Select this installation home}\"; CATALY_DISCORD_TOKEN=\"$(cat \"$base/discord-token\")\"; export CATALY_DISCORD_TOKEN; exec \"$base/bin/cataly\" inbound discord"]
+[
+  "bash",
+  "-c",
+  "set -eu; base=\"${CATALY_HOME:?Select this installation home}\"; CATALY_DISCORD_TOKEN=\"$(cat \"$base/discord-token\")\"; export CATALY_DISCORD_TOKEN; exec \"$base/bin/cataly\" inbound discord"
+]
 ```
 
 The token value never appears in this argv or its monitor receipt: only the child shell reads and exports it. No private helper, external watch script, Node or agent-messenger is needed. A different token-file path is an explicit local choice; keep it owned, regular and mode `0600`.
@@ -409,7 +437,11 @@ Discord REST inbound polling and message sending alone do not keep a bot online.
 For an explicitly enabled presence monitor, use these native monitor `argv` values and filter `^PRESENCE_`. The protected token file is read inside the child shell; the monitor specification contains only its path, never the token:
 
 ```json
-["bash", "-c", "set -eu; base=\"${CATALY_HOME:?Select this installation home}\"; CATALY_DISCORD_TOKEN=\"$(cat \"$base/discord-token\")\"; export CATALY_DISCORD_TOKEN; exec \"$base/bin/cataly\" presence discord"]
+[
+  "bash",
+  "-c",
+  "set -eu; base=\"${CATALY_HOME:?Select this installation home}\"; CATALY_DISCORD_TOKEN=\"$(cat \"$base/discord-token\")\"; export CATALY_DISCORD_TOKEN; exec \"$base/bin/cataly\" presence discord"
+]
 ```
 
 Presence logs distinguish actual Gateway state:
@@ -441,17 +473,17 @@ For example, after obtaining a compatible asset set in `download_dir`:
 
 The commands below remain explicit operations. New builds also include the launch-time automatic path described next; historical releases do not acquire it merely because `main` changes. Neither installation nor update enables watchers, services, messenger intake or presence. A stopped activation remains stopped. Each retained release uses its own exact manifest-bound omp-ulw pin and cache across update and rollback.
 
-| Command | Behavior and options |
-|---|---|
-| `cataly update check --version TAG` | Inspect an exact release without activating it; `check` also accepts `--from DIST` |
-| `cataly update install --version TAG` | Verify and install the selected release; `install` also accepts `--from DIST` |
-| `cataly update install --preview --from DIST` | New builds: verify and preview configuration changes without preparing dependencies or changing the installation |
-| `cataly update status` | Inspect installed state and reconcile an interrupted activation journal |
-| `cataly update rollback` | Verify and restore the retained previous release |
-| `cataly update rollback --version TAG` | Assert that the retained rollback target is exactly `TAG` |
-| `cataly update cache [--reference DIR]...` | Report native cache identities, observed references or unknown uses and exclusive logical bytes; changes nothing |
-| `cataly update cache --prune [--reference DIR]... [--trust-process PID@START]... [--trust-root-cwd]` | Quarantine unused identities and restore copies used again; only dead, unused preparation stages may be removed |
-| `cataly update cache --prune --delete-quarantined [--grace MINUTES] ...` | Also remove quarantined copies unused through the grace period, after one more check; you accept that a writer without a lease may publish between that check and the removal |
+| Command                                                                                              | Behavior and options                                                                                                                                                          |
+| ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cataly update check --version TAG`                                                                  | Inspect an exact release without activating it; `check` also accepts `--from DIST`                                                                                            |
+| `cataly update install --version TAG`                                                                | Verify and install the selected release; `install` also accepts `--from DIST`                                                                                                 |
+| `cataly update install --preview --from DIST`                                                        | New builds: verify and preview configuration changes without preparing dependencies or changing the installation                                                              |
+| `cataly update status`                                                                               | Inspect installed state and reconcile an interrupted activation journal                                                                                                       |
+| `cataly update rollback`                                                                             | Verify and restore the retained previous release                                                                                                                              |
+| `cataly update rollback --version TAG`                                                               | Assert that the retained rollback target is exactly `TAG`                                                                                                                     |
+| `cataly update cache [--reference DIR]...`                                                           | Report native cache identities, observed references or unknown uses and exclusive logical bytes; changes nothing                                                              |
+| `cataly update cache --prune [--reference DIR]... [--trust-process PID@START]... [--trust-root-cwd]` | Quarantine unused identities and restore copies used again; only dead, unused preparation stages may be removed                                                               |
+| `cataly update cache --prune --delete-quarantined [--grace MINUTES] ...`                             | Also remove quarantined copies unused through the grace period, after one more check; you accept that a writer without a lease may publish between that check and the removal |
 
 `cache` is read-only by default: it prints `"removes": "nothing"` and takes no writer lock. It scans native identities for the current platform/architecture under the user home cache, the running release, sources and files under both default homes (`~/.cataly`, `~/.omp-cataly`), selected/loaded installation homes, configured `CATALY_HOME`/`OMP_CATALY_HOME` homes and every explicit `--reference` root. Files of every size are read whole. `bytes` counts logical inode bytes, including directories and internal hardlinks once, but excluding files with hardlinks outside the entry; it does not count allocated filesystem blocks.
 

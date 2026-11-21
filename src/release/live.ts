@@ -59,14 +59,19 @@ function assertNoNativeReservations(state: string): void {
   }
 }
 
-function assertNoHarnessRoles(paths: ConsumerPaths): void {
+export function assertNoLegacyRoleRegistrations(paths: ConsumerPaths): void {
   const path = join(paths.cataly, "roles.json");
   if (regularFile(path)) {
     const roles = readJson(path);
     if (!object(roles)) throw new Error("Uncertain harness roles hold release activation");
     if (Object.keys(roles).length)
-      throw new Error("Harness roles hold release activation; stop Cataly with its harness, then retry");
+      throw new Error(
+        "Harness roles hold release activation. For current releases, use cataly harness stop. For v0.1.3, close your terminals in the original servers, then use the verified new install.sh --retire-legacy-roles --home PATH. For a primary home name the original server(s) with --legacy-session NAME and, if used, --legacy-migrated-session NAME. Do not edit roles.json.",
+      );
   }
+}
+
+function assertNoNativeHarnessRoles(paths: ConsumerPaths): void {
   const native = readPrivate<unknown>(join(paths.cataly, "harness-native.json"));
   if (native === undefined) return;
   if (
@@ -84,7 +89,13 @@ function assertNoHarnessRoles(paths: ConsumerPaths): void {
 
 /** Read only lifecycle receipts and process identity. Native session contents are never opened. */
 export function assertNoLiveCataly(paths: ConsumerPaths): void {
-  assertNoHarnessRoles(paths);
+  assertStoppedRuntime(paths);
+  assertNoLegacyRoleRegistrations(paths);
+}
+
+/** The legacy cleanup command can check that the home is stopped without treating its own input as a live role. */
+export function assertStoppedRuntime(paths: ConsumerPaths): void {
+  assertNoNativeHarnessRoles(paths);
   const states = new Set<string>([join(paths.cataly, "state"), ...registeredNativeStates(paths)]);
   if (regularFile(paths.config)) {
     const config = readJson(paths.config);
@@ -96,8 +107,10 @@ export function assertNoLiveCataly(paths: ConsumerPaths): void {
       states.add(resolve(expanded));
     }
   }
-  const configured = process.env["CATALY_STATE_DIR"];
-  if (configured) states.add(configured.startsWith("~/") ? join(paths.home, configured.slice(2)) : resolve(configured));
+  for (const configured of [process.env["CATALY_STATE_DIR"], process.env["DORI_STATE_DIR"]]) {
+    if (configured)
+      states.add(configured.startsWith("~/") ? join(paths.home, configured.slice(2)) : resolve(configured));
+  }
   const inspect = (path: string): void => {
     if (!regularFile(path)) return;
     const record = readJson(path);

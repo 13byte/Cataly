@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { cpSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { parseArgs } from "node:util";
 import { validateReleaseManifest } from "../src/release/manifest.ts";
 import type { ReleaseManifest } from "../src/release/types.ts";
+import { platform } from "../src/platform/index.ts";
+import { readSourceBundle } from "../src/release/source-bundle.ts";
 import { digest } from "../src/update/source.ts";
 import { createConsumerSmokeContext } from "./consumer-smoke-context.ts";
 import { snapshot } from "./consumer-smoke-inspect.ts";
@@ -131,17 +133,6 @@ const checked = await run("historical-check", [
 ]);
 assert.equal(JSON.parse(checked.stdout).available, b.tag);
 
-const fresh = join(home, ".omp-cataly");
-await bootstrap(distB, fresh, b);
-const freshConfig = JSON.parse(readFileSync(join(fresh, "config.json"), "utf8"));
-assert.equal(freshConfig.runtime, undefined);
-assert.equal(freshConfig.sessionRuntime, undefined);
-assert.match((await run("headless-native-version", [join(fresh, "bin/omp"), "--version"])).stdout, /\b18\.20\.0\b/);
-assert.equal(
-  JSON.parse((await run("headless-status", [join(fresh, "bin/cataly"), "update", "status"])).stdout).installed.tag,
-  b.tag,
-);
-
 if (runtimeBin) {
   await run("historical-runtime-version", [runtimeBin, "--version"]);
   await bootstrap(distA, side, a, true);
@@ -185,6 +176,29 @@ if (runtimeBin) {
     legacy: true,
   });
   assert(readFileSync(join(side, "config.json")).equals(config));
+  // Nothing else has installed this identity. Prove the first operator launch before any reinstall can repair it.
+  const source = realpathSync(join(side, "src"));
+  const identity = `${platform.nativeCacheLabel()}-${readSourceBundle(source, true).identity}`;
+  const oldCache = join(home, ".cache/omp-dori", identity);
+  const newCache = join(home, ".cache/omp-cataly", identity);
+  const receipt = readFileSync(join(oldCache, "receipt.json"));
+  const launcher = readFileSync(join(oldCache, "bin/omp"));
+  assert(!existsSync(newCache));
+  assert.equal(
+    (await run("first-upgraded-native-version", [join(side, "bin/omp"), "--version"])).stdout.trim(),
+    b.requirements.omp,
+  );
+  try {
+    await run("first-upgraded-harness-up", [cli, "harness", "up"]);
+    const { stdout } = await run("first-upgraded-harness-status", [cli, "harness", "status"]);
+    assert.match(stdout, /NATIVE lead headless:\S+ idle pid=\d+ session=\S+/);
+    assert.match(stdout, /NATIVE duty headless:\S+ idle pid=\d+ session=\S+/);
+  } finally {
+    await run("first-upgraded-harness-stop", [cli, "harness", "stop"]);
+  }
+  assert(readFileSync(join(oldCache, "receipt.json")).equals(receipt));
+  assert(readFileSync(join(oldCache, "bin/omp")).equals(launcher));
+  assert(!existsSync(newCache), "First launch must not duplicate the authenticated native cache");
   await run("check-without-terminal", [cli, "update", "check", "--from", distB]);
   await run("reinstall-without-terminal", [cli, "update", "install", "--from", distB]);
   await run("installed-native-bindings", [
@@ -225,6 +239,30 @@ if (runtimeBin) {
   assert(readFileSync(join(side, "releases/consumer-owner.json")).equals(owner));
 }
 
+// A fresh install and an upgrade must never supply each other's missing native dependencies.
+const isolated = createConsumerSmokeContext(join(out, "fresh"), tar);
+const fresh = join(isolated.home, ".omp-cataly");
+await isolated.run("fresh-bootstrap", [
+  join(isolated.tools, "bash"),
+  join(distB, "install.sh"),
+  "--from",
+  distB,
+  "--home",
+  fresh,
+]);
+const freshConfig = JSON.parse(readFileSync(join(fresh, "config.json"), "utf8"));
+assert.equal(freshConfig.runtime, undefined);
+assert.equal(freshConfig.sessionRuntime, undefined);
+assert.match(
+  (await isolated.run("headless-native-version", [join(fresh, "bin/omp"), "--version"])).stdout,
+  /\b18\.20\.0\b/,
+);
+assert.equal(
+  JSON.parse((await isolated.run("headless-status", [join(fresh, "bin/cataly"), "update", "status"])).stdout).installed
+    .tag,
+  b.tag,
+);
+isolated.unchangedPrimary();
 unchangedPrimary();
 writeFileSync(
   join(out, "result.json"),

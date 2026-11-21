@@ -12,7 +12,7 @@ if (!process.argv.includes("rpc-ui") || !process.argv.includes("always-ask") || 
 const saved = process.env["CATALY_TEST_SESSION"]!;
 const trace = process.env["CATALY_TEST_TRACE"]!;
 const resume = process.argv.find((arg) => arg.startsWith("--resume="));
-const id = resume ? (JSON.parse(readFileSync(saved, "utf8").trim()) as { id: string }).id : randomUUID();
+const id = resume ? (JSON.parse(readFileSync(saved, "utf8").split("\n", 1)[0]!) as { id: string }).id : randomUUID();
 if (!resume) writeFileSync(saved, `${JSON.stringify({ type: "session", id, cwd: process.cwd() })}\n`);
 const role = process.argv.includes("lane") ? "lane" : "cataly";
 const send = (data: object) => process.stdout.write(`${JSON.stringify(data)}\n`);
@@ -58,7 +58,17 @@ for await (const line of createInterface({ input: process.stdin })) {
     ack({ sessionId: id, sessionFile: saved, isSettled: !working && !background, isStreaming: working,
       goal: goal ? { goal } : null, model });
   } else if (type === "get_entries") {
-    ack({ entries: [{ type: "custom", customType: "omp-cataly:role", data: role }, ...(launchEntry ? [launchEntry] : [])] });
+    const harnessRole = process.env["CATALY_HARNESS_ROLE"];
+    const entries: object[] = [{ type: "custom", customType: "omp-cataly:role", data: role }];
+    if (harnessRole) {
+      entries.push({
+        type: "custom",
+        customType: "omp-cataly:harness-role",
+        data: { role: harnessRole, refId: process.env["CATALY_HEADLESS_ID"] },
+      });
+    }
+    if (launchEntry) entries.push(launchEntry);
+    ack({ entries });
     if (scenario === "changed") model = { provider: initial.provider, id: "Initial" };
   } else if (type === "goal") {
     if (frame["op"] === "create") goal = { status: "active", objective: String(frame["objective"]) };

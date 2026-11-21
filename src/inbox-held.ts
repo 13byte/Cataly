@@ -1,4 +1,5 @@
 import type { Deps } from "./harness.ts";
+import { registeredNativeTarget } from "./harness-native.ts";
 import { resolveAgain, send, type SendResult } from "./inbox.ts";
 import { refText } from "./refs.ts";
 import { Refusal } from "./refusal.ts";
@@ -12,7 +13,7 @@ import { resolveTarget } from "./target.ts";
  */
 export async function sendToShell(d: Deps, target: string, text: string, from: string): Promise<SendResult> {
   const ref = resolveTarget(d, target);
-  const rt = d.runtimes.for(ref);
+  const rt = registeredNativeTarget(d, ref)?.runtime ?? d.runtimes.for(ref);
   if ((await rt.probe(ref)).status !== "shell") return send(d, target, text, from);
   if (rt.kind !== "headless" && (await rt.typeIntoShell(ref, text))) return "DELIVERED";
   await d.store.enqueue(ref, { at: d.now(), from, text }, target === "lead", resolveAgain(d, target, ref));

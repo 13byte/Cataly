@@ -16,7 +16,7 @@ export function wakeCommand(template: readonly string[]) {
   const scriptAt = bin === "bun" && template[1] === "run" ? 2 : 1;
   let end = 0;
   if (OMP_EXECUTABLE.test(executable)) end = 1;
-  else if (bin === "omp-cataly" && template[1] === "omp") end = 2;
+  else if ((bin === "omp-cataly" || bin === "omp-dori") && template[1] === "omp") end = 2;
   else if (sourceOmpArgv(template)) end = template[3] === "--preload" ? 6 : 4;
   else if ((bin === "bun" || bin === "node") && OMP_EXECUTABLE.test(template[scriptAt] ?? "")) end = scriptAt + 1;
   if (!end || end >= template.length || executable.startsWith("-") || executable.includes("=")) return;
@@ -32,7 +32,7 @@ export function wakeCommand(template: readonly string[]) {
     const flag = inline?.[1] ?? arg;
     const value = inline?.[2] ?? (i + 1 < template.length - 1 ? template[++i] : undefined);
     if (flag === "--model" && value === "{model}") continue;
-    if (flag === "--cataly-role" && value === "lane") continue;
+    if ((flag === "--cataly-role" || flag === "--dori-role") && value === "lane") continue;
     if (!value || value.startsWith("-") || /\{\w+\}/.test(value)) return;
     if (flag !== "--profile" && flag !== "--config" && flag !== "--extension" && flag !== "-e") return;
     launch.push(flag, value);

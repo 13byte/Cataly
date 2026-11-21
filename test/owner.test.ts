@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { main } from "../src/cli.ts";
 import { up } from "../src/cli-up.ts";
-import { fill, promptFile, rolePrompt } from "../src/harness.ts";
+import { fill, prompt, promptFile, rolePrompt } from "../src/harness.ts";
 import { OWNER_PROFILE_MAX_BYTES, ownerPaths, ownerPromptSection, snapshotPath, TEMPLATE } from "../src/owner.ts";
 import { checkOwner } from "../src/owner-check.ts";
 import { World } from "./fake.ts";
@@ -33,6 +33,28 @@ function home() {
 }
 
 describe("owner profile in the lead's prompt", () => {
+  test("retained operator prompts resolve both command placeholders without changing their files", () => {
+    const { d } = home();
+    const old = process.env["CATALY_PROMPTS_DIR"];
+    const dir = d.store.root;
+    const text = "{{dori}} / {{cataly}} / {{unknown}}";
+    expect(fill("{{dori}} owner snapshot / {{unknown}}", { cataly: d.catalyCmd })).toBe(
+      `${d.catalyCmd} owner snapshot / {{unknown}}`,
+    );
+    try {
+      process.env["CATALY_PROMPTS_DIR"] = dir;
+      for (const name of ["lead.md", "duty.md", "lane-footer.md"] as const) {
+        writeFileSync(join(dir, name), text);
+        const value = name === "lane-footer.md" ? prompt(name, { cataly: d.catalyCmd }) : rolePrompt(d, name);
+        expect(value).toBe(`${d.catalyCmd} / ${d.catalyCmd} / {{unknown}}`);
+        expect(readFileSync(join(dir, name), "utf8")).toBe(text);
+      }
+    } finally {
+      if (old === undefined) delete process.env["CATALY_PROMPTS_DIR"];
+      else process.env["CATALY_PROMPTS_DIR"] = old;
+    }
+  });
+
   test("off by default: no file leaves the lead and duty prompts exactly as the templates", () => {
     const { d } = home();
     expect(ownerPromptSection(d.store.root)).toBeUndefined();

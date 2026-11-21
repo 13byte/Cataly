@@ -61,6 +61,17 @@ export function migrateWorld(status: AgentStatus = "idle") {
 
 export const NEW: SessionRef = { runtime: "hc", id: "t1" };
 
+export function rolesWorld() {
+  const m = migrateWorld();
+  m.w.addPane("w1:p2", "idle");
+  m.w.addPane("w1:p4", "shell");
+  m.w.addPane("w1:p5", "shell");
+  m.d.store.setRole("duty", href("w1:p2"));
+  m.d.store.setRole("duty-loop", href("w1:p4"));
+  m.d.store.setRole("hourly-loop", href("w1:p5"));
+  return m;
+}
+
 /** Every file under the home with its size and mtime: equal snapshots mean nothing was written. */
 export function snapshot(root: string): string[] {
   const out: string[] = [];

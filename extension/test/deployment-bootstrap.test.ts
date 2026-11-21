@@ -90,7 +90,7 @@ posix(
     const after = JSON.parse(readFileSync(f.healthPath, "utf8")) as RuntimeHealth;
     expect(after.monitors[0]?.pid).not.toBe(oldPid);
     expect(after.monitors[0]?.argv).toEqual(f.monitor.argv);
-    expect(session.entries.filter((entry) => entry.customType === "omp-cataly:monitor-bootstrap")).toHaveLength(1);
+    expect(session.entries.filter((entry) => entry.customType === "omp-dori:monitor-bootstrap")).toHaveLength(1);
   },
 );
 
@@ -133,7 +133,7 @@ posix("ordinary bootstrap replaces legacy monitors and restores real children wi
   expect(newPid).not.toBe(oldPid);
   expect(restored).toContain(f.monitor.argv.join(" "));
   expect(JSON.parse(readFileSync(metadata, "utf8"))).toMatchObject({ monitors: [f.monitor], intake: f.intake });
-  expect(session.entries.filter((entry) => entry.customType === "omp-cataly:monitor-bootstrap")).toHaveLength(1);
+  expect(session.entries.filter((entry) => entry.customType === "omp-dori:monitor-bootstrap")).toHaveLength(1);
 });
 
 // POSIX-only: the product only accepts monitor metadata that is not group/world writable and is owned by the uid.
@@ -182,7 +182,7 @@ posix("a rejected bootstrap leaves no half-initialized role session publishing p
   await cataly.emit("session_branch");
   await cataly.emit("agent_start");
   expect(readPaneState(f.stateDir, "w1:p7")).toBeNull();
-  expect(cataly.session.entries.filter((e) => e.type === "custom" && e.customType === "omp-cataly:role")).toEqual([]);
+  expect(cataly.session.entries).toEqual([]);
   expect(cataly.handlers.get("session_shutdown")?.length ?? 0).toBeGreaterThan(0);
   await cataly.emit("session_shutdown");
   expect(readPaneState(f.stateDir, "w1:p7")).toBeNull();

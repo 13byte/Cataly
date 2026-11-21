@@ -12,18 +12,22 @@ import { installBundle, preflightInstallation, rollbackRelease } from "./install
 import { runCacheCommand } from "./native-cache-cli.ts";
 import { prerequisites } from "./provision.ts";
 import { assertUpdateProtocol, releaseTargetRuntime, requestedReleaseRuntime } from "./profile.ts";
+import { runRetireLegacyCommand } from "./retire-legacy.ts";
 import { previewConsumerSetup } from "./setup.ts";
 import { consumerReleaseHome } from "./runtime.ts";
 import { hasConsumerState, loadInstalled, recoverInstalled, verifyRelease } from "./state.ts";
 import type { ReleaseManifest } from "./types.ts";
 
-const USAGE = `cataly update <check|install|status|rollback|cache> [--version vX.Y.Z] [--from DIST] [--home PATH] [--runtime headless|hc|herdr]
+const USAGE = `cataly update <check|install|status|rollback|cache|retire-legacy-roles> [--version vX.Y.Z] [--from DIST] [--home PATH] [--runtime headless|hc|herdr]
   auto <status|enable|disable>  manage daily stable-release checks at consumer OMP launch
   check       verify an available public release without activating it
   install     verify and install a fixed release; no messenger, watcher, model or service is started
               --preview verifies a configuration plan in disposable storage, without installation or dependency changes
   status      print verified installed and retained previous release identities
   rollback    verify and restore the retained previous release (--version may assert its tag)
+  retire-legacy-roles --home PATH [--legacy-session NAME] [--legacy-migrated-session NAME]
+              retire proven-gone v0.1.3 role registrations; never stop terminals or activate a release
+              For primary homes, name each used backend's original session; side homes derive both namespaces
   cache       report native identities, users and sizes (read-only); --reference DIR adds scan roots (repeatable)
               --prune quarantines unused identities and restores used ones; --delete-quarantined deletes after --grace MINUTES (default 10)
               Deletion rechecks usage but can race unleased writers or later publication.
@@ -41,10 +45,11 @@ const identity = (manifest: ReleaseManifest) => ({
 });
 
 export async function runConsumerUpdate(argv: string[]): Promise<number> {
-  importLegacyEnvironment();
+  if (argv[0] !== "retire-legacy-roles") importLegacyEnvironment();
   if (argv[0] === "auto") return runAutomaticCommand(argv.slice(1));
   let releaseLock: (() => void) | undefined;
   try {
+    if (argv[0] === "retire-legacy-roles") return await runRetireLegacyCommand(argv.slice(1));
     const args = parseArgs({
       args: argv,
       allowPositionals: true,

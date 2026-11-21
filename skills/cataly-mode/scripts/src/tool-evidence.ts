@@ -35,9 +35,9 @@ type Frame = { readonly content?: unknown; readonly details?: Details | null; re
 /**
  * The custom entry recording that the background job a tool call started completed successfully: the call, its job,
  * the tool, the session cwd the call started in, and the completed result's fingerprint, or why that result is not
- * evidence.
+ * evidence. Keep the exact tag read by the retained v0.1.3 runtime.
  */
-export const COMPLETION_ENTRY = "omp-cataly:tool-completion";
+export const COMPLETION_ENTRY = "omp-dori:tool-completion";
 export type Completion = {
   readonly call: string;
   readonly job: string;
@@ -141,7 +141,7 @@ const evalRefusal = (details: Details | null | undefined): string | undefined =>
 const findCompletion = (branch: Branch, id: string, job: string, name: string): Completion | undefined => {
   for (let i = branch.length - 1; i >= 0; i--) {
     const entry = branch[i];
-    if (entry?.type !== "custom" || !isCatalyEntry(entry.customType, COMPLETION_ENTRY)) continue;
+    if (entry?.type !== "custom" || !isCatalyEntry(entry.customType, "omp-cataly:tool-completion")) continue;
     const data = entry.data as Partial<Completion> | null | undefined;
     if (data?.call !== id || data.job !== job || data.tool !== name || typeof data.cwd !== "string") continue;
     const receipt = { call: id, job, tool: name, cwd: data.cwd };

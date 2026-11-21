@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { agentCommand, harnessLaunchEnv, prompt, type Deps } from "./harness.ts";
 import { Refusal } from "./refusal.ts";
 import { loadHooks, substitute } from "./hooks.ts";
+import { laneMessengerOverrides } from "./release/runtime.ts";
+import { legacyRecipeEnv } from "./runtime/recipe-env.ts";
 import type { MergeOutcome } from "./telemetry.ts";
 
 export type PrRef = { repo: string; number: number; id: string };
@@ -41,7 +43,9 @@ export async function review(
     ? substitute(hook, { ...vars, text })
     : [
         "env",
-        ...Object.entries(harnessLaunchEnv(d)).map(([key, value]) => `${key}=${value}`),
+        ...Object.entries({ ...harnessLaunchEnv(d), ...laneMessengerOverrides }).map(
+          ([key, value]) => `${key}=${value}`,
+        ),
         "sh",
         "-c",
         `unset HERDR_PANE_ID HERDR_WORKSPACE_ID HC_TERMINAL_ID CATALY_HEADLESS_ID CATALY_HARNESS_ROLE CATALY_MANAGED_STARTUP CATALY_LANE; ${agentCommand(d, "lane")} "$@"`,
@@ -51,7 +55,8 @@ export async function review(
         ...(model ? ["--model", model] : []),
         text,
       ];
-  const res = await d.exec(cmd ?? d.agentCmd, argv);
+  const env = hook && legacyRecipeEnv(hook, { configFile: join(d.store.root, "config.json"), env: process.env });
+  const res = await d.exec(cmd ?? d.agentCmd, argv, env ? { env } : undefined);
   const verdicts = [...res.stdout.matchAll(/^VERDICT:\s*(CLEAR|BLOCK)\b/gm)];
   const last = verdicts.at(-1);
   if (!last) {

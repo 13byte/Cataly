@@ -79,3 +79,51 @@ posix.each([
   expect(explicit.exitCode).not.toBe(0);
   expect(explicit.stderr.toString()).toContain(`${profile.runtime} is required`);
 });
+
+posix("bootstrap retirement dispatches the verified new CLI without installation or terminal prerequisites", () => {
+  const f = fixture(linux);
+  const home = join(f.home, ".dori");
+  const args = [
+    "--retire-legacy-roles",
+    "--home",
+    home,
+    "--legacy-session",
+    "original",
+    "--legacy-migrated-session",
+    "migration",
+  ];
+  const old = f.run(args);
+  expect(old.exitCode).not.toBe(0);
+  expect(old.stderr.toString()).toContain("requires the new verified release");
+  expect(existsSync(f.result)).toBe(false);
+  f.assets({ version: 1, profiles: [linux] }, { version: 1, profiles: [{ ...linux, runtime: "headless" }] });
+  const bin = join(f.root, "bin");
+  for (const tool of ["hc", "herdr"]) renameSync(join(bin, tool), join(f.root, tool));
+  const historicalState = join(home, "historical-state");
+  const retirement = f.run(args, { PATH: `${bin}:/usr/bin:/bin`, DORI_STATE_DIR: historicalState });
+  expect(retirement.exitCode, retirement.stderr.toString()).toBe(0);
+  expect(f.selected()).toEqual({
+    command: "retire-legacy-roles",
+    home,
+    "legacy-session": "original",
+    "legacy-migrated-session": "migration",
+    historicalState,
+  });
+  expect(existsSync(home)).toBe(false);
+});
+
+posix("ordinary bootstrap does not hand a home with historical roles to an old updater", () => {
+  const f = fixture(linux);
+  f.assets();
+  const home = join(f.home, ".dori");
+  mkdirSync(home);
+  writeFileSync(join(home, "config.json"), '{"runtime":"herdr"}\n');
+  const roles = join(home, "roles.json");
+  const original = '{"lead":"w1:p1"}\n';
+  writeFileSync(roles, original);
+  const result = f.run(["--home", home, "--runtime", "herdr"]);
+  expect(result.exitCode).not.toBe(0);
+  expect(result.stderr.toString()).toContain("--retire-legacy-roles");
+  expect(readFileSync(roles, "utf8")).toBe(original);
+  expect(existsSync(join(home, "legacy-installed"))).toBe(false);
+});

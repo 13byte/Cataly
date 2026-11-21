@@ -13,8 +13,9 @@ if (
   process.env["DORI_MONITOR_ADMISSION"] === "1"
 )
   process.env["CATALY_MONITOR_ADMISSION_PROTOCOL"] = LEGACY_HEAD_ADMISSION_PROTOCOL;
-bindCliEnvironment();
 const [command = "", ...rest] = process.argv.slice(2);
+// Retirement requires an explicit home and must inspect both generations' state directories.
+if (command !== "update" || rest[0] !== "retire-legacy-roles") bindCliEnvironment();
 const renderTablesUsage = "--render-tables requires cataly send discord (with or without --edit)";
 if (
   rest.includes("--render-tables") &&

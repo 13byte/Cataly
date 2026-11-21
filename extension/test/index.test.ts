@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 
 import { paneStatePath, readPaneState, writePaneState } from "../../skills/cataly-mode/scripts/src/lane-state";
+import { extensionInstallation } from "../installation.ts";
 import { ROLE_INVARIANTS } from "../role-invariants.ts";
 import { calls, type FakePi, type FakeSession, load, until, useConfig } from "./fake-pi";
 
@@ -19,6 +20,7 @@ const session = (id: string, entries: FakeSession["entries"] = []): FakeSession 
   entries,
 });
 const roleEntry = (role: string) => ({ type: "custom", customType: ROLE, data: role });
+const wireRole = (role: "dori" | "lane") => ({ type: "custom", customType: "omp-dori:role", data: role });
 const agentStart = { type: "before_agent_start", prompt: "ulw fix the bug", systemPrompt: ["base prompt"] };
 
 let stateDir: string;
@@ -59,15 +61,118 @@ describe("role", () => {
     }
   });
 
-  test("an explicit v0.1.3 role flag starts a lead but records only the new role", async () => {
+  test("an explicit v0.1.3 role flag records a lead the retained reader can resume", async () => {
     const s = session("legacy-flag");
     const pi = await load({ session: s, flags: { "dori-role": "dori" } });
     try {
       await pi.emit("session_start");
-      expect(s.entries).toEqual([roleEntry("cataly")]);
+      expect(s.entries).toEqual([wireRole("dori")]);
       expect(pi.active).toContain("monitor");
     } finally {
       await pi.emit("session_shutdown");
+    }
+  });
+
+  test("a flagless historical role uses its selected config without giving a plain TUI its pane", async () => {
+    const names = ["CATALY_CONFIG", "CATALY_HOME", "DORI_CONFIG", "DORI_HOME"] as const;
+    const previous = names.map((name) => [name, process.env[name]] as const);
+    const legacyHome = join(dirname(stateDir), ".dori");
+    const legacyState = join(legacyHome, "historic-state");
+    const legacyConfig = join(legacyHome, "operator-config.json");
+    mkdirSync(legacyHome);
+    writeFileSync(legacyConfig, JSON.stringify({ stateDir: legacyState, ompUlwPath: FAKE_ULW }));
+    const retired = {
+      paneId: PANE,
+      role: "lane",
+      sessionId: "flagless-legacy",
+      cwd: tmpdir(),
+      pid: 0,
+      startedAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      goal: { status: "none" },
+      approvalPending: false,
+    } as const;
+    writePaneState(legacyState, retired);
+    delete process.env.CATALY_CONFIG;
+    delete process.env.CATALY_HOME;
+    process.env.DORI_CONFIG = legacyConfig;
+    process.env.DORI_HOME = legacyHome;
+    let pi: FakePi | undefined;
+    try {
+      const physicalSource = join(legacyHome, "releases", "releases", `${"a".repeat(40)}-${"b".repeat(16)}`);
+      mkdirSync(physicalSource, { recursive: true });
+      delete process.env.DORI_HOME;
+      delete process.env.DORI_CONFIG;
+      const physicalHome = realpathSync(legacyHome);
+      expect(extensionInstallation(physicalSource)).toMatchObject({
+        configFile: join(physicalHome, "config.json"),
+        env: { CATALY_HOME: physicalHome },
+        ordinaryPaneRoot: false,
+      });
+      process.env.DORI_CONFIG = legacyConfig;
+      process.env.DORI_HOME = legacyHome;
+      pi = await load({ session: session("unrelated"), mode: "tui" });
+      await pi.emit("session_start");
+      expect(readPaneState(legacyState, PANE)).toEqual(retired);
+      expect(pi.handlers.has("tool_approval_requested")).toBe(false);
+      expect(await pi.emit("before_agent_start", agentStart)).toEqual([undefined]);
+
+      pi.session = session(retired.sessionId, [wireRole("lane")]);
+      await pi.emit("session_switch", { type: "session_switch", reason: "resume" });
+      await pi.emit("tool_approval_requested", { toolCallId: "legacy-approval" });
+      expect(readPaneState(legacyState, PANE)).toMatchObject({
+        sessionId: retired.sessionId,
+        pid: process.pid,
+        approvalPending: true,
+      });
+      expect(await pi.emit("before_agent_start", agentStart)).toContainEqual({
+        systemPrompt: ["base prompt", ROLE_INVARIANTS.lane, "<fake-ulw-policy>"],
+      });
+      expect(readPaneState(stateDir, PANE)).toBeNull();
+      expect(process.env.CATALY_HOME).toBeUndefined();
+      expect(process.env.CATALY_CONFIG).toBeUndefined();
+      expect(process.env.DORI_HOME).toBe(legacyHome);
+      expect(process.env.DORI_CONFIG).toBe(legacyConfig);
+    } finally {
+      await pi?.emit("session_shutdown");
+      for (const [name, value] of previous) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
+
+  posix.each([".omp-dori", ".omp-cataly"])("binds only a marked primary in-home source checkout (%s)", (marker) => {
+    const names = ["CATALY_CONFIG", "CATALY_HOME", "DORI_CONFIG", "DORI_HOME"] as const;
+    const previous = names.map((name) => [name, process.env[name]] as const);
+    const home = realpathSync(dirname(stateDir));
+    const install = join(home, ".dori");
+    const source = join(install, "src");
+    const markerFile = join(install, marker);
+    mkdirSync(source, { recursive: true, mode: 0o700 });
+    writeFileSync(join(source, "omp-ulw.lock"), `${"a".repeat(40)}\n`);
+    for (const name of names) delete process.env[name];
+    try {
+      writeFileSync(markerFile, "primary\n", { mode: 0o600 });
+      expect(extensionInstallation(source, home).env.CATALY_HOME).toBeUndefined();
+      mkdirSync(join(source, ".git"), { mode: 0o700 });
+      expect(extensionInstallation(source, home)).toMatchObject({
+        configFile: join(install, "config.json"),
+        env: { CATALY_HOME: install },
+        ordinaryPaneRoot: false,
+      });
+      expect(extensionInstallation(source, install).env.CATALY_HOME).toBeUndefined();
+      chmodSync(markerFile, 0o622);
+      expect(extensionInstallation(source, home).env.CATALY_HOME).toBeUndefined();
+      chmodSync(markerFile, 0o600);
+      writeFileSync(markerFile, "side\n");
+      expect(extensionInstallation(source, home).env.CATALY_HOME).toBeUndefined();
+      expect(process.env.CATALY_HOME).toBeUndefined();
+    } finally {
+      for (const [name, value] of previous) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
     }
   });
 
@@ -75,13 +180,13 @@ describe("role", () => {
     const s = session("s1");
     const first = await load({ session: s, flags: { "cataly-role": "lane" } });
     await first.emit("session_start");
-    expect(s.entries).toEqual([roleEntry("lane")]);
+    expect(s.entries).toEqual([wireRole("lane")]);
 
     // a later process resumes the same session file (herdr restore, `omp --resume`) without the flag
     calls.length = 0;
     const resumed = await load({ session: s });
     await resumed.emit("session_start");
-    expect(s.entries).toEqual([roleEntry("lane")]);
+    expect(s.entries).toEqual([wireRole("lane")]);
     expect(readPaneState(stateDir, PANE)?.role).toBe("lane");
     expect(await resumed.emit("before_agent_start", agentStart)).toContainEqual({
       systemPrompt: ["base prompt", ROLE_INVARIANTS.lane, "<fake-ulw-policy>"],
@@ -96,7 +201,7 @@ describe("role", () => {
     };
     await expect(lane.emit("session_start")).rejects.toThrow("tool list unavailable");
     // The process keeps the role it was started with, so a later resume without the flag must restore it too.
-    expect(s.entries).toEqual([roleEntry("lane")]);
+    expect(s.entries).toEqual([wireRole("lane")]);
   });
 
   test("a session without a role runs no omp-ulw handler and never sends a user message", async () => {
@@ -293,7 +398,7 @@ describe("monitor restore", () => {
     });
     await until(() => resumed.messages.some((m) => m.content === "[tick] up"));
     expect(await monitorCall(resumed, { op: "list" })).toContain("tick (pid");
-    expect(s.entries.find((entry) => entry.customType === "omp-cataly:monitor")?.data).toMatchObject({
+    expect(s.entries.find((entry) => entry.customType === "omp-dori:monitor")?.data).toMatchObject({
       op: "start",
       name: "tick",
       restart: "on-failure",
@@ -332,8 +437,8 @@ describe("monitor restore", () => {
       await pi.emit("session_switch", { type: "session_switch", reason: "new" });
       expect(snapshot).toEqual([]);
       expect(fresh.entries).toEqual([
-        roleEntry("cataly"),
-        { type: "custom", customType: "omp-cataly:monitor", data: { ...tick, cwd: tmpdir(), id: expect.any(String) } },
+        wireRole("dori"),
+        { type: "custom", customType: "omp-dori:monitor", data: { ...tick, cwd: tmpdir(), id: expect.any(String) } },
       ]);
       expect(pi.active).toContain("monitor");
       expect(await pi.emit("before_agent_start", agentStart)).toContainEqual({
@@ -664,8 +769,10 @@ describe.skipIf(!existsSync(REAL_ULW))("with the real omp-ulw", () => {
     });
     expect(JSON.stringify(lane.first)).toContain("<omp-ulw-policy>");
     expect(
-      lane.entries.flatMap((entry) => (entry.type === "custom" && entry.customType === ROLE ? [entry.data] : [])),
-    ).toEqual(["lane"]);
+      lane.entries.filter(
+        (entry) => entry.type === "custom" && (entry.customType === ROLE || entry.customType === "omp-dori:role"),
+      ),
+    ).toEqual([expect.objectContaining(wireRole("lane"))]);
     expect(lane.userMessages).toEqual(["ulw fix it"]);
   });
 

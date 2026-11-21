@@ -43,7 +43,7 @@ export const consumerPaths = (home = homedir(), selectedHome = join(home, ".cata
   home = resolve(home);
   const cataly = resolve(selectedHome);
   const primary = isPrimaryConsumer({ home, cataly });
-  const layout = consumerLayout(home, cataly);
+  const layout = consumerLayout(home, cataly, readOptionalJson);
   const skill = layout === "legacy" ? "dori-mode" : "cataly-mode";
   const command = layout === "legacy" ? "dori" : "cataly";
   const extension = layout === "legacy" ? "omp-dori" : "omp-cataly";
@@ -107,6 +107,10 @@ export function readJson(path: string): unknown {
   if (!regularFile(path)) throw new Error(`Missing file: ${path}`);
   if (lstatSync(path).size > 4 * 1024 * 1024) throw new Error(`Metadata is too large: ${path}`);
   return JSON.parse(readFileSync(path, "utf8"));
+}
+
+export function readOptionalJson(path: string): unknown {
+  return regularFile(path) ? readJson(path) : undefined;
 }
 
 export function saveJson(path: string, value: unknown): void {

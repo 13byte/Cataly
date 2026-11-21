@@ -147,7 +147,7 @@ export function attestMonitorForeground(
       if (
         !owner ||
         owner.pane !== runtime.pane ||
-        owner.role !== runtime.role ||
+        owner.role !== parseCatalyRole(runtime.role) ||
         owner.sessionId !== runtime.sessionId ||
         owner.startedAt !== runtime.startedAt ||
         !sameProcess(owner, runtime) ||

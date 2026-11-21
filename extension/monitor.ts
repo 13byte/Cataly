@@ -8,6 +8,7 @@ import {
   HEAD_ADMISSION_PROTOCOL,
   isHeadAdmissionProtocol,
 } from "../skills/cataly-mode/scripts/src/messenger/head-admission-protocol.ts";
+import { legacyRecipeEnv, recipePaths, type RecipeContext } from "../src/runtime/recipe-env.ts";
 import type { MonitorSpec } from "../src/update/deployment-types.ts";
 import type { HeadAdmissions } from "./head-admission.ts";
 import { MonitorOutputFile, readMonitorOutput } from "./monitor-output";
@@ -84,18 +85,24 @@ export class Monitors {
   readonly #currentSession: () => string | undefined;
   readonly #batchMs: number;
   readonly #restartMs: number;
+  readonly #recipeContext: RecipeContext | undefined;
 
   constructor(
     deliver: Deliver,
     currentSession: () => string | undefined,
     batchMs = BATCH_MS,
     restart: number | HeadAdmissions = 5_000,
+    recipeContext?: RecipeContext,
   ) {
     this.#deliver = deliver;
     this.#currentSession = currentSession;
     this.#batchMs = batchMs;
     this.#restartMs = typeof restart === "number" ? restart : 5_000;
     this.#admissions = typeof restart === "number" ? undefined : restart;
+    this.#recipeContext = recipeContext && {
+      ...recipePaths(recipeContext.configFile, recipeContext.installationHome),
+      env: recipeContext.env,
+    };
   }
 
   start(
@@ -126,6 +133,9 @@ export class Monitors {
     const { restart, mode, recordId } = options;
     if (argv.length === 0) throw new Error("argv must name the command to run");
     const pattern = new RegExp(filter);
+    const env = this.#recipeContext
+      ? (legacyRecipeEnv(argv, this.#recipeContext) ?? this.#recipeContext.env)
+      : process.env;
     let entry: Running;
     const proc = Bun.spawn([...argv], {
       cwd,
@@ -135,7 +145,7 @@ export class Monitors {
       ...(this.#admissions
         ? {
             env: {
-              ...process.env,
+              ...env,
               CATALY_MONITOR_ADMISSION: "1",
               CATALY_MONITOR_ADMISSION_PROTOCOL: HEAD_ADMISSION_PROTOCOL,
               DORI_MONITOR_ADMISSION: "1",
@@ -143,7 +153,7 @@ export class Monitors {
             serialization: "json" as const,
             ipc: (message: unknown) => this.#ipc(entry, message),
           }
-        : {}),
+        : { env }),
     });
     entry = {
       name,

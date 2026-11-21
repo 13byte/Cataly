@@ -11,6 +11,7 @@ import {
   rolePrompt,
   type Deps,
 } from "./harness.ts";
+import type { ControllerRole } from "./loop-controller.ts";
 import { Refusal } from "./refusal.ts";
 import { askCheckpoint, capture, type MigrateOpts, type Subject } from "./migrate-capture.ts";
 import { swapAgent, swapLoop } from "./migrate-swap.ts";
@@ -29,15 +30,29 @@ import type { Lane, Role } from "./store-types.ts";
 
 export type Target = { readonly lane?: string; readonly role?: Role; readonly all?: boolean };
 
-const AGENT_ROLES: readonly Role[] = ["lead", "duty"];
-const LOOP_ROLES: readonly Role[] = ["duty-loop", "hourly-loop"];
+const LOOP_ROLES: readonly ControllerRole[] = ["duty-loop", "hourly-loop"];
+const ROLE_NAMES: readonly Role[] = ["lead", "duty", ...LOOP_ROLES];
 const isOpen = (l: Lane): boolean => l.status !== "done" && l.status !== "lost";
 
-function laneSubject(d: Deps, key: string): Subject {
+function migratableLane(d: Deps, key: string): Lane {
   const lane = d.store.lane(key);
   if (!lane || !isOpen(lane)) throw new Refusal(`no open lane ${key}`);
+  // The terminal replacement does not inherit or authenticate the source's native policy binding.
+  if (lane.sessionRef.runtime === "headless" || readJournal(d.store.root, key)?.from.runtime === "headless")
+    throw new Refusal(`MIGRATION HELD ${key}: the terminal handoff cannot authenticate this native lane's policy`);
+  return lane;
+}
+
+function laneSubject(d: Deps, key: string): Subject {
+  const lane = migratableLane(d, key);
   const kickoff = (brief: string) => `Read your brief at ${brief} and execute it. Your lane key is ${key}.`;
-  const save = (change: (l: Lane) => Lane): void => d.store.saveLane(change(d.store.lane(key) as Lane));
+  const save = (change: (l: Lane) => Lane): void => {
+    d.store.updateLane(key, (current) => {
+      if (!current || current.createdAt !== lane.createdAt || (lane.noticeId && current.noticeId !== lane.noticeId))
+        throw new Refusal(`lane ${key} registration changed during migration`);
+      return change(current);
+    });
+  };
   return {
     name: key,
     kind: "lane",
@@ -123,14 +138,19 @@ async function agentSession(d: Deps, s: Subject, j: MigrateJournal | undefined, 
 }
 
 async function migrateName(d: Deps, name: string, from: SessionRef, opts: MigrateOpts, sub: () => Subject) {
-  const j = readJournal(d.store.root, name);
-  if (j !== undefined && j.to !== opts.to)
-    throw new Refusal(`a migration of ${name} is in progress toward ${j.to}; finish it with --to ${j.to}`);
-  if (j === undefined && from.runtime === opts.to) {
+  const journal = () => {
+    const j = readJournal(d.store.root, name);
+    if (j !== undefined && j.to !== opts.to)
+      throw new Refusal(`a migration of ${name} is in progress toward ${j.to}; finish it with --to ${j.to}`);
+    return j;
+  };
+  const skip = () => {
     opts.log(`SKIP ${name} already on ${opts.to}`);
     return 0;
-  }
+  };
   if (opts.dryRun) {
+    const j = journal();
+    if (!j && from.runtime === opts.to) return skip();
     const what = j === undefined ? `inbox entries: ${d.store.queued(from).length}` : `resume at ${j.phase}`;
     opts.log(`PLAN ${name} ${refText(from)} -> ${opts.to} (${what})`);
     return 0;
@@ -138,9 +158,17 @@ async function migrateName(d: Deps, name: string, from: SessionRef, opts: Migrat
   const release = lockMigration(d.store.root, name, d.now());
   if (!release) throw new Refusal(`another cataly harness migrate of ${name} is running`);
   try {
-    if (LOOP_ROLES.includes(name as Role))
-      return await swapLoop(d, name as Role, j ?? fresh(d, name, from, opts), process.cwd(), opts);
-    return await agentSession(d, sub(), j, opts);
+    const j = journal();
+    const role = LOOP_ROLES.find((role) => role === name);
+    if (role) {
+      const current = d.store.roles()[role];
+      if (!current) throw new Refusal(`no ${role} session registered`);
+      if (!j && current.runtime === opts.to) return skip();
+      return await swapLoop(d, role, j ?? fresh(d, name, current, opts), process.cwd(), opts);
+    }
+    const subject = sub();
+    if (!j && subject.from.runtime === opts.to) return skip();
+    return await agentSession(d, subject, j, opts);
   } finally {
     release();
   }
@@ -165,8 +193,10 @@ export async function migrate(d: Deps, t: Target, opts: MigrateOpts): Promise<nu
     : t.lane
       ? [t.lane]
       : [];
-  const roles = t.all ? [...AGENT_ROLES, ...LOOP_ROLES] : t.role ? [t.role] : [];
+  const roles = t.all ? ROLE_NAMES : t.role ? [t.role] : [];
   if (lanes.length + roles.length === 0) throw new Refusal(`give --lane K, --role R or --all\n\n${USAGE}`);
+  // Preflight every requested lane before an --all handoff changes any of them.
+  for (const key of lanes) migratableLane(d, key);
   const registeredRoles = d.store.roles();
   for (const role of roles) {
     if (registeredRoles[role]?.runtime === "headless")
@@ -174,8 +204,7 @@ export async function migrate(d: Deps, t: Target, opts: MigrateOpts): Promise<nu
   }
   let code = 0;
   for (const key of lanes) {
-    const lane = d.store.lane(key);
-    if (!lane || !isOpen(lane)) throw new Refusal(`no open lane ${key}`);
+    const lane = migratableLane(d, key);
     code = Math.max(code, await migrateName(d, key, lane.sessionRef, opts, () => laneSubject(d, key)));
   }
   for (const role of roles) {
@@ -188,8 +217,6 @@ export async function migrate(d: Deps, t: Target, opts: MigrateOpts): Promise<nu
   }
   return code;
 }
-
-const ROLE_NAMES: readonly Role[] = [...AGENT_ROLES, ...LOOP_ROLES];
 
 export async function runMigrate(d: Deps, a: Args): Promise<number> {
   const to =

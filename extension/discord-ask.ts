@@ -65,7 +65,10 @@ export class DiscordAsk {
   #armed?: { wrap: FormDialog; requests: Map<string, PendingAsk>; restore(): void };
   #signal = new AbortController();
 
-  constructor(private readonly openSocket?: AskButtonSocket) {}
+  constructor(
+    private readonly openSocket?: AskButtonSocket,
+    private readonly apiOverride = process.env["CATALY_DISCORD_API_BASE"] ?? "",
+  ) {}
 
   clear(): void {
     this.#armed?.restore();
@@ -160,6 +163,7 @@ export class DiscordAsk {
             signal,
             warn,
             openSocket: this.openSocket,
+            apiOverride: this.apiOverride,
           }),
         )
         .catch(() => {

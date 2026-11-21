@@ -16,7 +16,18 @@ const MIN = 60_000;
  * the next write to an inbox, whichever store method makes it.
  */
 function dieOnce(d: Deps, method: "saveLane" | "queue"): void {
-  const names = method === "queue" ? (["enqueue", "enqueueOnce"] as const) : ([method] as const);
+  if (method === "saveLane") {
+    const withCurrent = d.store.withCurrentLane.bind(d.store);
+    d.store.withCurrentLane = (key, fn) =>
+      withCurrent(key, (current) =>
+        fn(current, () => {
+          d.store.withCurrentLane = withCurrent;
+          throw new Error("killed at lane write");
+        }),
+      );
+    return;
+  }
+  const names = ["enqueue", "enqueueOnce"] as const;
   let armed = true;
   for (const name of names) {
     const real = (d.store as unknown as Record<string, ((...a: never[]) => unknown) | undefined>)[name]?.bind(d.store);

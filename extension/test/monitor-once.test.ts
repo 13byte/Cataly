@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { readMonitorSet } from "../../src/update/deployment-monitors.ts";
 import { dirname, join } from "node:path";
+import { recordedMonitorStates } from "../monitor-state.ts";
 import { type FakePi, type FakeSession, load, until, useConfig } from "./fake-pi";
 
 const run = (pi: FakePi, params: Record<string, unknown>) =>
@@ -25,12 +27,29 @@ test("a completed once job remains listed but never starts again on resume or ne
       argv: [process.execPath, "-e", `require("node:fs").appendFileSync(${JSON.stringify(marker)}, "run")`],
       filter: "^CI_",
     });
-    await exited(first);
+    await until(() => recordedMonitorStates(session.entries).get("ci")?.completed === true);
+    const started = session.entries.find((entry) => entry.customType === "omp-dori:monitor");
+    if (
+      !started?.data ||
+      typeof started.data !== "object" ||
+      !("id" in started.data) ||
+      typeof started.data.id !== "string"
+    )
+      throw new Error("the monitor start did not persist its incarnation");
+    const incarnation = started.data.id;
+    // Match snapshots, not the live rows shared with the resumed session.
+    expect(structuredClone(started)).toMatchObject({ data: { op: "start", mode: "once", id: incarnation } });
+    expect(structuredClone(session.entries.at(-1))).toMatchObject({
+      type: "custom",
+      customType: "omp-dori:monitor",
+      data: { op: "stop", name: "ci", id: incarnation, exit: { code: 0, signal: null } },
+    });
     expect(readFileSync(marker, "utf8")).toBe("run");
     await first.emit("session_shutdown");
+    expect(recordedMonitorStates(session.entries).get("ci")).toMatchObject({ completed: true, id: incarnation });
     resumed = await load({ session });
     await resumed.emit("session_start");
-    expect(resumed.messages.some((message) => message.content.includes("restored"))).toBe(false);
+    expect(resumed.messages).toEqual([]);
     expect(await text(resumed)).toContain("ci [mode=once status=exited code=0");
     expect(await text(resumed)).not.toContain("pid ");
     expect(JSON.parse(readFileSync(join(stateDir, "monitors", "once-owner.json"), "utf8")).monitors).toEqual([]);
@@ -43,6 +62,50 @@ test("a completed once job remains listed but never starts again on resume or ne
     await first.emit("session_shutdown");
   }
 });
+
+const retainedSource = process.env["CATALY_TEST_V013_SOURCE"];
+test.skipIf(!retainedSource)(
+  "the tagged v0.1.3 monitor reader keeps Cataly exits, stops, and once completions",
+  async () => {
+    const old: typeof import("../monitor-state.ts") = await import(join(retainedSource!, "extension/monitor-state.ts"));
+    useConfig("");
+    const start = (name: string, code: number, mode?: "once") => ({
+      type: "custom",
+      customType: "omp-dori:monitor",
+      data: {
+        op: "start",
+        id: `old-${name}`,
+        name,
+        argv: [process.execPath, "-e", `process.exit(${code})`],
+        filter: "^UNMATCHED$",
+        cwd: tmpdir(),
+        ...(mode ? { mode } : {}),
+      },
+    });
+    const session: FakeSession = {
+      id: "rollback-monitor",
+      entries: [
+        { type: "custom", customType: "omp-dori:role", data: "dori" },
+        start("historic-once", 0, "once"),
+        start("historic-exit", 7),
+      ],
+    };
+    const pi = await load({ session });
+    try {
+      await pi.emit("session_start");
+      await until(() => {
+        const states = old.recordedMonitorStates(session.entries);
+        return states.get("historic-once")?.completed === true && states.get("historic-exit")?.exit?.code === 7;
+      });
+      expect([...old.recordedMonitors(session.entries).keys()]).toEqual(["historic-exit"]);
+      await run(pi, { op: "stop", name: "historic-exit" });
+      expect([...old.recordedMonitors(session.entries).keys()]).toEqual([]);
+      expect(old.recordedMonitorStates(session.entries).get("historic-once")?.exit?.code).toBe(0);
+    } finally {
+      await pi.emit("session_shutdown");
+    }
+  },
+);
 
 test.each([
   ["persistent", 0],
@@ -68,6 +131,11 @@ test.each([
       filter: "^CI_",
     });
     await exited(first);
+    expect(session.entries.at(-1)).toMatchObject({
+      type: "custom",
+      customType: "omp-dori:monitor",
+      data: { op: "exit", name: "ci", exit: { code, signal: null } },
+    });
     expect(await text(first)).toContain(`ci [mode=${mode} status=exited code=${code}`);
     expect(await text(first)).toMatch(/signal=none at=[0-9]{4}-/);
     expect(JSON.parse(readFileSync(join(stateDir, "monitors", `${session.id}.json`), "utf8"))).toMatchObject({

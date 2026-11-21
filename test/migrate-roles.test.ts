@@ -6,48 +6,13 @@ import { migrate } from "../src/migrate.ts";
 import { refText } from "../src/refs.ts";
 import { Refusal } from "../src/refusal.ts";
 import { readJournal, writeJournal } from "../src/store-journal.ts";
+import { controllerTerminals } from "./controller-migration-setup.ts";
 import { href } from "./fake.ts";
-import { migrateWorld, OLD } from "./migrate-setup.ts";
-
-/** migrateWorld plus duty (w1:p2), the duty loop (w1:p4) and the hourly loop (w1:p5), all on herdr. */
-function rolesWorld() {
-  const m = migrateWorld();
-  m.w.addPane("w1:p2", "idle");
-  m.w.addPane("w1:p4", "shell");
-  m.w.addPane("w1:p5", "shell");
-  m.d.store.setRole("duty", href("w1:p2"));
-  m.d.store.setRole("duty-loop", href("w1:p4"));
-  m.d.store.setRole("hourly-loop", href("w1:p5"));
-  const order = () =>
-    m.w.calls.flatMap((c) =>
-      c.cmd === "hc" && c.argv[1] === "run"
-        ? [`open ${c.argv.find((a) => a.startsWith("cataly.role="))}`]
-        : c.cmd === "herdr" && c.argv[1] === "close"
-          ? [`close ${c.argv[2]}`]
-          : [],
-    );
-  return { ...m, order };
-}
+import { migrateWorld, OLD, rolesWorld } from "./migrate-setup.ts";
 
 describe("cataly migrate: roles and loops", () => {
-  test("duty-loop: the old loop is closed before the new one opens", async () => {
-    const { d, lines, opts, order } = rolesWorld();
-    expect(await migrate(d, { role: "duty-loop" }, opts())).toBe(0);
-    expect(order()).toEqual(["close w1:p4", "open cataly.role=duty-loop"]);
-    expect(lines).toEqual(["MIGRATED duty-loop w1:p4 -> hc:t1"]);
-    expect(refText(d.store.roles()["duty-loop"]!)).toBe("hc:t1");
-    expect(readJournal(d.store.root, "duty-loop")).toBeUndefined();
-  });
-
-  test("hourly-loop: the new loop opens before the old one is closed", async () => {
-    const { w, d, opts, order } = rolesWorld();
-    expect(await migrate(d, { role: "hourly-loop" }, opts())).toBe(0);
-    expect(order()).toEqual(["open cataly.role=hourly-loop", "close w1:p5"]);
-    expect(w.hc.sent[0]!.text).toBe("cataly loop");
-  });
-
   test("bulk migration holds before opening a replacement when a headless role is registered", async () => {
-    const { d, opts, order } = rolesWorld();
+    const { w, d, opts } = rolesWorld();
     const native = { runtime: "headless", id: "9fb0af3f-aad9-4384-b052-e5953b40d960" } as const;
     d.store.setRole("hourly-loop", native);
     expect(d.store.roles()["hourly-loop"]).toEqual(native);
@@ -56,7 +21,8 @@ describe("cataly migrate: roles and loops", () => {
 
     expect(d.store.roles()["hourly-loop"]).toEqual(native);
     expect(d.store.lane("k")?.sessionRef).toEqual(OLD);
-    expect(order()).toEqual([]);
+    expect(w.calls).toEqual([]);
+    expect(w.hc.terminals.size).toBe(0);
     expect(readJournal(d.store.root, "hourly-loop")).toBeUndefined();
   });
 
@@ -95,15 +61,33 @@ describe("cataly migrate: roles and loops", () => {
   });
 
   test("--all: lanes first, then lead and duty, the loops last", async () => {
-    const { d, lines, opts } = rolesWorld();
-    expect(await migrate(d, { all: true }, opts())).toBe(0);
-    expect(lines.map((l) => l.split(" ").slice(0, 2).join(" "))).toEqual([
-      "MIGRATED k",
-      "MIGRATED lead",
-      "MIGRATED duty",
-      "MIGRATED duty-loop",
-      "MIGRATED hourly-loop",
-    ]);
+    const { w, d, lines, opts } = rolesWorld();
+    const f = controllerTerminals(w, d);
+    try {
+      await Promise.all([f.source("duty-loop", href("w1:p4")), f.source("hourly-loop", href("w1:p5"))]);
+      const sleep = opts().sleep;
+      expect(
+        await migrate(
+          d,
+          { all: true },
+          opts({
+            sleep: async (ms) => {
+              await f.sleep(ms);
+              await sleep(ms);
+            },
+          }),
+        ),
+      ).toBe(0);
+      expect(lines.map((l) => l.split(" ").slice(0, 2).join(" "))).toEqual([
+        "MIGRATED k",
+        "MIGRATED lead",
+        "MIGRATED duty",
+        "MIGRATED duty-loop",
+        "MIGRATED hourly-loop",
+      ]);
+    } finally {
+      await f.closeActors();
+    }
   });
 });
 

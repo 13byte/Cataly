@@ -23,7 +23,9 @@ export function assertRuntimeToolchain(config: DeploymentConfig, receipt: Toolch
   if (JSON.stringify(overlay) !== JSON.stringify({ update: { auto: false } }))
     throw new DeploymentHeld("managed native update fence differs");
   if (receipt.nativeSource) {
-    const observed = assertNativeSource(receipt.nativeSource.source, config.home, receipt.bun);
+    const observed = assertNativeSource(receipt.nativeSource.source, config.home, receipt.bun, {
+      directory: receipt.nativeSource.directory,
+    });
     if (
       observed.identity !== receipt.nativeSource.identity ||
       observed.omp !== receipt.omp ||

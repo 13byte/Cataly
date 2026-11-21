@@ -9,6 +9,7 @@ import {
 import { freshnessError, type FreshnessPolicy } from "./freshness-policy.ts";
 import { isSessionRuntime } from "../../../../src/runtime/select.ts";
 import { currentAgentCommand } from "../../../../src/runtime/legacy-agent-command.ts";
+import { legacyRecipeEnv, recipePaths } from "../../../../src/runtime/recipe-env.ts";
 import type { RuntimeKind, TerminalRuntimeKind } from "../../../../src/runtime/types.ts";
 import { type ArtifactRoot, parseArtifactRoots } from "./artifact-config.ts";
 import { repoIdentities } from "./config-identities.ts";
@@ -124,6 +125,17 @@ export const expandHome = (path: string, home = homedir()): string =>
 const queueCwds = new WeakMap<CatalyConfig, string>();
 export const queueDefaultCwd = (config: CatalyConfig): string => queueCwds.get(config) ?? config.defaultCwd;
 
+// Bind the loaded file and installation, not a process environment variable reread at invocation.
+const hookPaths = new WeakMap<Hooks, ReturnType<typeof recipePaths>>();
+export function configuredHookEnv(
+  hooks: Hooks,
+  argv: ArgvTemplate,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): ReturnType<typeof legacyRecipeEnv> {
+  const paths = hookPaths.get(hooks);
+  return paths === undefined ? undefined : legacyRecipeEnv(argv, { ...paths, env });
+}
+
 export class ConfigError extends Error {}
 
 const RUNTIMES: Readonly<Record<TerminalRuntimeKind, true>> = { herdr: true, hc: true };
@@ -138,6 +150,7 @@ const checkRuntime = (value: unknown): void => {
 
 export const loadConfig = async (path = configPath(), home = homedir(), env = process.env): Promise<CatalyConfig> => {
   const selectedHome = env["CATALY_HOME"];
+  const selectedPaths = recipePaths(path, selectedHome);
   const base = {
     ...defaultConfig(home),
     ...(selectedHome && path === join(selectedHome, "config.json")
@@ -222,6 +235,7 @@ export const loadConfig = async (path = configPath(), home = homedir(), env = pr
     leadPane: env["CATALY_LEAD_PANE"] ?? merged.leadPane,
   };
   if (merged.defaultCwd.startsWith("~/")) queueCwds.set(config, `${home}${sep}${merged.defaultCwd.slice(2)}`);
+  hookPaths.set(config.hooks, selectedPaths);
   return config;
 };
 export const fill = (template: ArgvTemplate, values: Readonly<Record<string, string>>): string[] =>

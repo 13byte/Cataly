@@ -26,6 +26,8 @@ export const parseSkillFlags = (rest: string[]) =>
       receipt: { type: "string" },
       public: { type: "boolean" },
       reason: { type: "string", multiple: true },
+      root: { type: "string", multiple: true },
+      skill: { type: "boolean" },
       note: { type: "string" },
       abandon: { type: "boolean" },
       "resume-when": { type: "string" },

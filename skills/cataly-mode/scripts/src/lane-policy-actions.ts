@@ -77,7 +77,7 @@ const withState = <T>(
       writeFileSync(tmp, after, { flag: "wx", mode: 0o600 });
       renameSync(tmp, file);
     }
-    const reports = new Reports(current.stateDir);
+    const reports = new Reports(current.rootRef === undefined ? current.stateDir : dirname(current.file));
     const { key, generation, provenance } = current.snapshot;
     const scope = { generation, ...provenance };
     if (result.blocker) {
@@ -131,7 +131,7 @@ export const checkPolicyCommand = (binding: string, command: string, now: number
     }
     state.blocked = { hash, rules };
     return {
-      value: `${notice}. Report this blocker to the owner or lead for approval; this lane cannot grant its own exception. No command ran.`,
+      value: `${notice}. Report this blocker to the owner or lead for approval; this lane cannot grant its own exception.${policy.rootRef === undefined ? "" : ` Owner approval must select --root headless:${policy.rootRef}.`} No command ran.`,
       blocker: notice,
     };
   });

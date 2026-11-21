@@ -3,7 +3,7 @@ import type { CatalyApi, CatalyContext } from "./index.ts";
 import type { CatalyRole } from "../skills/cataly-mode/scripts/src/lane-state.ts";
 import { checkPolicyCommand } from "../skills/cataly-mode/scripts/src/lane-policy-actions.ts";
 import { PolicyError } from "../skills/cataly-mode/scripts/src/lane-policy.ts";
-import { isCatalyEntry } from "../skills/cataly-mode/scripts/src/session-compat.ts";
+import { isCatalyEntry, SESSION_WIRE } from "../skills/cataly-mode/scripts/src/session-compat.ts";
 
 const ENTRY = "omp-cataly:lane-policy";
 type Binding = string | { readonly error: string };
@@ -22,6 +22,7 @@ const recordedBinding = (branch: Branch): Binding | undefined => {
 export const lanePolicyHook = (
   pi: CatalyApi & { pi?: Pick<ExtensionAPI["pi"], "loadSessionFile" | "SessionEntryIndex"> },
   recordedRole: (branch: Branch) => CatalyRole | undefined,
+  launchedBinding: string | undefined,
 ) => {
   let binding: Binding | undefined;
   pi.on("tool_call", (event) => {
@@ -101,11 +102,10 @@ export const lanePolicyHook = (
           event.reason === "new";
         if (recorded !== undefined) binding = recorded;
         else if (!carried)
-          binding =
-            eventName === "session_start" && flaggedRole ? process.env["CATALY_LANE_POLICY"] || undefined : undefined;
+          binding = eventName === "session_start" && flaggedRole ? launchedBinding || undefined : undefined;
       }
       if (recorded === undefined && binding !== undefined)
-        pi.appendEntry(ENTRY, typeof binding === "string" ? binding : null);
+        pi.appendEntry(SESSION_WIRE.lanePolicy, typeof binding === "string" ? binding : null);
       agentPolicies.set(ctx.agent.id, { role, binding });
     },
   };

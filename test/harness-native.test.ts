@@ -191,13 +191,22 @@ test.skipIf(!enabled)(
       const held = await run(env, "stop");
       expect(held.code).toBe(2);
       expect(held.err).toInclude("lead: native role is busy or awaiting an answer");
-      expect(store.roles().lead).toEqual(refs.lead);
-      for (const role of ["duty-loop", "hourly-loop"] as const) {
-        expect(store.roles()[role]).toBeUndefined();
-        expect((await rt.observe(refs[role]!)).status).toBe("gone");
-      }
+      expect(store.roles()).toEqual(refs);
+      const queuedText = "CATALY_HARNESS_PENDING_INBOX_PROBE";
+      expect(await command("send", "lead", "--text", queuedText)).toBe("QUEUED lead");
+      const pending = await run(env, "stop");
+      expect(pending.code).toBe(2);
+      expect(pending.err).toInclude("lead: pending inbox entries");
+      expect(store.roles()).toEqual(refs);
+      expect((await rt.observe(refs["duty-loop"]!)).status).toBe("working");
       release.resolve();
       await settledReply("lead");
+      const queued = await command("inbox", "list", "lead");
+      if (!queued.startsWith("EMPTY"))
+        expect(await command("send", "lead", "--text", "flush alongside the queued message")).toBe("DELIVERED lead");
+      await waitFor(async () => (requests.some((body) => body.includes(queuedText)) ? true : undefined));
+      await settledReply("lead");
+      expect(await command("inbox", "list", "lead")).toStartWith("EMPTY");
       expect(await command("stop")).toBe("STOPPED native harness");
       expect(store.roles()).toEqual({});
       expect(existsSync(join(home, "harness-native.json"))).toBe(false);

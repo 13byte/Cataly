@@ -1,7 +1,7 @@
 import type { Runtimes } from "../../../../src/runtime/registry.ts";
 import type { HeadlessObservation } from "../../../../src/runtime/headless.ts";
 import type { SessionRef } from "../../../../src/runtime/types.ts";
-import { fill } from "./config.ts";
+import { configuredHookEnv, fill } from "./config.ts";
 import type { FlowDeps } from "./done-flow.ts";
 import { anchoredReportLine, scrubForThread } from "./freshness-report.ts";
 import type { SweepAct } from "./freshness.ts";
@@ -200,7 +200,8 @@ export const notifyFreshness = async (
     const text = `Progress (from the lane's last report): ${scrubForThread(ownerLine ?? report ?? "", home)}`;
     const latest = await deps.registry.read(lane.key);
     if (!latest || !sameLaneGeneration(lane, latest) || !sameReceipt(current, latest)) return;
-    const sent = await deps.run(fill(hook, { thread: lane.thread, text, key: lane.key }));
+    const env = configuredHookEnv(deps.config.hooks, hook, deps.env);
+    const sent = await deps.run(fill(hook, { thread: lane.thread, text, key: lane.key }), env ? { env } : undefined);
     // Only a delivered report counts as posted: a failed hook leaves it unposted, so the next tick sends it again. Like
     // a held-back report, the same failure is printed once, not on every retry.
     if (sent.code !== 0) {

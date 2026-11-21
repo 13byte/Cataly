@@ -1,18 +1,16 @@
 import { isAbsolute } from "node:path";
 import { isHeadAdmissionProtocol } from "../skills/cataly-mode/scripts/src/messenger/head-admission-protocol.ts";
 import type { HeadReply, HeadRequest, HeadResult } from "../skills/cataly-mode/scripts/src/messenger/head-admission.ts";
-import { MONITOR_MESSAGE } from "../skills/cataly-mode/scripts/src/session-compat.ts";
+import { MONITOR_MESSAGE, SESSION_WIRE } from "../skills/cataly-mode/scripts/src/session-compat.ts";
 import { hasHeadReceipt, headReceipt } from "./head-receipt.ts";
 
 type Head = { id: string; file: string; entries(): readonly unknown[]; ensureOnDisk(): Promise<void> };
+type AdmissionDetails = { ompDoriAdmission: { identity: string; fingerprint: string } };
 type Binding = {
   source: number;
   session: string;
   accepts(content: string): boolean;
-  deliver(
-    content: string,
-    details: { ompCatalyAdmission: { identity: string; fingerprint: string } },
-  ): void | Promise<void>;
+  deliver(content: string, details: AdmissionDetails): void | Promise<void>;
 };
 type Pending = {
   source: number;
@@ -28,7 +26,7 @@ export class HeadAdmissions {
   readonly #serial = new Map<string, Promise<HeadResult>>();
   constructor(
     private readonly current: () => Head | undefined,
-    private readonly reject: (details: { ompCatalyAdmission: { identity: string; fingerprint: string } }) => void,
+    private readonly reject: (details: AdmissionDetails) => void,
     private readonly changed: (pending: number, unresolved?: string) => void,
   ) {}
 
@@ -88,7 +86,7 @@ export class HeadAdmissions {
     if (request.op === "prepare") return { outcome: "ready", headFile: head.file, headPid: process.pid };
     if (request.headFile !== head.file) return { outcome: "unresolved" };
     if (!accepts) {
-      this.reject({ ompCatalyAdmission: { identity: request.identity, fingerprint: request.fingerprint } });
+      this.reject({ ompDoriAdmission: { identity: request.identity, fingerprint: request.fingerprint } });
       await head.ensureOnDisk();
       const rejected = await headReceipt(head.file, request.identity, request.fingerprint);
       return rejected ? { ...rejected, headFile: head.file, headPid: process.pid } : { outcome: "unresolved" };
@@ -104,7 +102,7 @@ export class HeadAdmissions {
       this.changed(this.#pending.size);
       const delivered = Promise.resolve(
         binding.deliver(request.content, {
-          ompCatalyAdmission: { identity: request.identity, fingerprint: request.fingerprint },
+          ompDoriAdmission: { identity: request.identity, fingerprint: request.fingerprint },
         }),
       ).then(() => pending.promise);
       // Stop releases the receipt wait even during async delivery; its later rejection remains observed.
@@ -123,12 +121,18 @@ export class HeadAdmissions {
           customType?: string;
           details?: {
             ompCatalyAdmission?: { identity?: string; fingerprint?: string };
+            ompDoriAdmission?: { identity?: string; fingerprint?: string };
           };
         };
       } | null
     )?.message;
-    const admission = message?.details?.ompCatalyAdmission;
-    if (message?.customType !== MONITOR_MESSAGE || typeof admission?.identity !== "string") return;
+    const admission =
+      message?.customType === SESSION_WIRE.monitorMessage
+        ? message.details?.ompDoriAdmission
+        : message?.customType === MONITOR_MESSAGE
+          ? message.details?.ompCatalyAdmission
+          : undefined;
+    if (typeof admission?.identity !== "string") return;
     const pending = this.#pending.get(admission.identity);
     if (!pending || pending.fingerprint !== admission.fingerprint) return;
     try {

@@ -71,6 +71,7 @@ export function managedTerminal(runtime: TerminalRuntimeKind, conflicting = true
     ...(conflicting ? Object.fromEntries(Object.keys(expected).map((key) => [key, `/server/default/${key}`])) : {}),
     HOME: join(f.root, "server-home"),
     PATH: "/usr/bin:/bin",
+    ...(conflicting ? { CATALY_RUNTIME: "headless" } : {}),
     CATALY_MANAGED_STARTUP: "1",
     SERVER_ONLY: "daemon-created-child",
   });

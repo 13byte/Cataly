@@ -193,7 +193,12 @@ export function resolveProcessOmpUlwPath(
 }
 
 /** Empty assignments override tokens retained by the terminal server; lanes do not host messenger bots. */
-export const laneMessengerOverrides = { CATALY_DISCORD_TOKEN: "", CATALY_TELEGRAM_TOKEN: "" } as const;
+export const laneMessengerOverrides = {
+  CATALY_DISCORD_TOKEN: "",
+  CATALY_TELEGRAM_TOKEN: "",
+  DORI_DISCORD_TOKEN: "",
+  DORI_TELEGRAM_TOKEN: "",
+} as const;
 
 /** Only launch context crosses a terminal server boundary; paths retain the caller's OS resolution. */
 export function catalyLaunchEnv(

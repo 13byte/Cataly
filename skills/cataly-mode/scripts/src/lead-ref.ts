@@ -5,7 +5,9 @@ import type { CatalyConfig } from "./config.ts";
 import { type Lane, sessionOf, statusOf } from "./registry.ts";
 
 type LeadAddress =
-  { readonly ref: SessionRef } | { readonly reason: "unconfigured" | "invalid" | "ambiguous" | "unreadable" };
+  | { readonly ref: SessionRef }
+  | { readonly reason: "invalid"; readonly unboundAlias?: boolean }
+  | { readonly reason: "unconfigured" | "ambiguous" | "unreadable" };
 
 /** A default for new sessions is never evidence about the address of an existing lead. */
 export function leadAddress(
@@ -39,7 +41,7 @@ export function leadAddress(
     (config.runtime === "hc" || (recorded?.runtime === "hc" && recorded.id === pane)
       ? parseRef(`hc:${pane}`)
       : undefined);
-  if (!explicit) return { reason: "invalid" };
+  if (!explicit) return recorded ? { reason: "ambiguous" } : { reason: "invalid", unboundAlias: true };
   if (recorded && (recorded.runtime !== explicit.runtime || recorded.id !== explicit.id))
     return { reason: "ambiguous" };
   return { ref: explicit };

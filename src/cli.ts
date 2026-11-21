@@ -8,7 +8,8 @@ import { done, ready, report, startLane } from "./lanes.ts";
 import { mergeGate, review } from "./gate.ts";
 import { need, one, parse, textOf, USAGE } from "./cli-args.ts";
 import { defaultDeps, ROLES, type Deps } from "./harness.ts";
-import { nativeInventory, stopNativeHarness, withHarnessLock } from "./harness-native.ts";
+import { stopNativeHarness } from "./harness-native-stop.ts";
+import { nativeInventory, registeredNativeTarget, withHarnessLock } from "./harness-native.ts";
 import { ConfigError, hooksSettled } from "./hooks.ts";
 import { send, type SendResult } from "./inbox.ts";
 import { inboxList, releaseHeld, sendToShell } from "./inbox-held.ts";
@@ -78,12 +79,22 @@ export async function main(argv: readonly string[], d: Deps = defaultDeps()): Pr
     case "answer": {
       const ref = resolveTarget(d, need(x, "native role, lane or ref"));
       if (ref.runtime !== "headless") throw new Refusal(`${cmd} requires a native headless session`);
-      const native = d.runtimes.for(ref);
+      const binding = registeredNativeTarget(d, ref);
+      const native = binding?.runtime ?? d.runtimes.for(ref);
       if (!(native instanceof HeadlessRuntime)) throw new Refusal("native runtime is unavailable");
       if (cmd === "observe") {
-        console.log(JSON.stringify(await native.observe(ref)));
+        const seen = await native.observe(ref);
+        if (
+          binding &&
+          ((seen.harnessRole !== undefined && seen.harnessRole !== binding.role) ||
+            (seen.sessionId !== undefined && seen.sessionId !== binding.sessionId))
+        )
+          throw new Refusal(`${binding.role} native session identity has changed`);
+        console.log(JSON.stringify(seen));
       } else {
         const session = need(one(a, "session"), "--session from observe");
+        if (binding && binding.sessionId !== session)
+          throw new Refusal(`${binding.role} answer session does not match the owned native session`);
         const request = need(one(a, "request"), "--request from observe");
         let answer;
         try {

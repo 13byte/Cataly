@@ -45,7 +45,7 @@ export async function up(d: Deps, cwd: string): Promise<void> {
 }
 
 async function upTerminal(d: Deps, cwd: string, rt: import("./runtime/types.ts").TerminalRuntime): Promise<void> {
-  const env = harnessLaunchEnv(d);
+  const env = { ...harnessLaunchEnv(d), CATALY_RUNTIME: rt.kind };
   const agent = (name: "lead.md" | "duty.md") =>
     `${agentCommand(d, "cataly")} --append-system-prompt ${shq(renderPrompt(d, name))}`;
   // herdr ignores the group of a workspace-root session and reports the new workspace as the lead ref's group.

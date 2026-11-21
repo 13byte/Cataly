@@ -116,7 +116,7 @@ posix("a stalled REST receiver expires even though its process is still alive", 
   const state = withState();
   let now = Date.now();
   const clock = spyOn(Date, "now").mockImplementation(() => now);
-  const receiver = openDiscordAskReceiver(state.dir, TOKEN, "10", ["20"], () => ["20"], 18_000.8);
+  const receiver = openDiscordAskReceiver(state.dir, TOKEN, "10", ["20"], () => ["20"], { progressWindowMs: 18_000.8 });
   try {
     receiver.refresh();
     const path = receiptPath(join(state.dir, "discord-ask-receivers"));

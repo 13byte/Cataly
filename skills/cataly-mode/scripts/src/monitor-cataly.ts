@@ -82,6 +82,7 @@ export const CATALY_VALUE_OPTIONS: Record<string, true> = {
   pane: true,
   evidence: true,
   reason: true,
+  root: true,
   resolve: true,
   note: true,
   repo: true,
