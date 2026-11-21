@@ -90,6 +90,10 @@ export const USAGE = `dori <command> [options]
   guard [--loop MIN]                   host load, memory, disk and pane-count alerts
   heavy <label> -- <command ...>       run a heavy command when a slot is free and load is low
   can-launch                           exit 0 if the host has room for a new lane, else print why and exit 4
+  schedule add NAME --cron EXPR --tz IANA [--deliver MODE] [--cwd DIR] -- argv...
+  schedule list | pause NAME | resume NAME [--ack-interrupted] | remove NAME
+  schedule adopt [NAME] --systemd UNIT [--system]   observe an external timer/service read-only
+  scheduler [--loop MIN]               opt-in runner; --loop 0 claims one tick and waits
   send <slack|telegram|discord> --to TARGET (--text TEXT | --text-file PATH|-) [--thread ID] [--edit ID] [--reply ID]
                                        Discord accepts channel names with DORI_DISCORD_GUILD_ID; --thread needs no --to and also targets edits
                                        Discord splits text past 2000 characters (SENT lists every id); --reply and opt-in --render-tables (bounded pipe tables) are Discord only
