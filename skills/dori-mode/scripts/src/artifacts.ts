@@ -8,13 +8,14 @@ import {
   lstatSync,
   openSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { platform } from "../../../../src/platform/index.ts";
-import { ArtifactError, inspectArtifact, type ArtifactFile } from "./artifact-files.ts";
+import { ArtifactError, artifactWithin, inspectArtifact, type ArtifactFile } from "./artifact-files.ts";
 import {
   type Artifact,
   type ArtifactVersion,
@@ -23,8 +24,10 @@ import {
   parseArtifactManifest,
 } from "./artifact-records.ts";
 import { takeLock } from "./checkpoint-lock.ts";
+import { discoverWorktrees } from "./close-worktrees.ts";
 import type { DoriConfig } from "./config.ts";
 import { LANE_KEY, type Registry, statusOf } from "./registry.ts";
+import { run } from "./run.ts";
 
 export type ArtifactView = Artifact & {
   readonly current: ArtifactFile | null;
@@ -34,7 +37,7 @@ export type ArtifactView = Artifact & {
 
 export class Artifacts {
   constructor(
-    readonly config: Pick<DoriConfig, "stateDir" | "artifactRoots">,
+    readonly config: Pick<DoriConfig, "stateDir" | "artifactRoots" | "defaultCwd">,
     readonly registry: Registry,
   ) {}
 
@@ -110,7 +113,25 @@ export class Artifacts {
       if (!lane || statusOf(lane) === "closed")
         throw new ArtifactError("artifact registration requires an open registered lane");
       const entries = this.read(key);
+      const foreign: { key: string; path: string; realPath: string }[] = [];
+      // Retain observed foreign ownership even if another lane closes while the file is hashed.
+      for (const other of await this.registry.list()) {
+        if (other.key === key) continue;
+        for (const tree of await discoverWorktrees(other, run, [this.config.defaultCwd])) {
+          if (lstatSync(tree, { throwIfNoEntry: false }))
+            foreign.push({ key: other.key, path: resolve(tree), realPath: realpathSync(tree) });
+        }
+      }
       const file = await inspectArtifact(this.config.artifactRoots ?? [], path, visibility);
+      const owner = foreign.find((tree) =>
+        [file.path, file.realPath].some(
+          (target) => artifactWithin(tree.path, target) || artifactWithin(tree.realPath, target),
+        ),
+      );
+      if (owner)
+        throw new ArtifactError(
+          `artifact is inside worktree owned by lane "${owner.key}"; move it outside that worktree before registering to this lane`,
+        );
       const at = new Date(now).toISOString();
       const version: ArtifactVersion = {
         sha256: file.sha256,
