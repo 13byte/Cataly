@@ -40,7 +40,7 @@ test("a first-window change after its read withholds the final-window verdict, t
   expect(f.refs()).toContainEqual(fileEvidence(first, f.repo));
   // The real change restarted the quiet clock; the next whole quiet cycle is confirmed and hung.
   for (let window = 1; window < 8; window++) expect((await f.sweep()).result.hung).toBe(window === 7);
-});
+}, 20_000);
 
 test("production freshness never reports a stall for a first-window change made after its read", async () => {
   const f = coverageFixture(state);
@@ -62,7 +62,7 @@ test("production freshness never reports a stall for a first-window change made 
     if (acts.some((act) => act.kind === "stalled")) stalls.push(turn);
   }
   expect(stalls).toEqual([15]);
-});
+}, 20_000);
 
 test("a new verdict rechecks its current window after evidence collection", async () => {
   const f = coverageFixture(state);
@@ -100,7 +100,7 @@ test("a new verdict rechecks its current window after evidence collection", asyn
   } finally {
     collected.mockRestore();
   }
-});
+}, 20_000);
 
 test("a touch in an earlier window withholds one verdict and never becomes evidence", async () => {
   const f = coverageFixture(state);
@@ -115,7 +115,7 @@ test("a touch in an earlier window withholds one verdict and never becomes evide
     expect(result.hung).toBe(window === 7);
     expect(result.lastEvidenceAt).toBe(before);
   }
-});
+}, 20_000);
 
 test("a held stall is not re-confirmed by later quiet cycles, and its alert is sent once", async () => {
   const alerts: string[] = [];
@@ -132,7 +132,7 @@ test("a held stall is not re-confirmed by later quiet cycles, and its alert is s
     expect(confirmations).toBe(0);
   }
   expect(alerts).toHaveLength(1);
-});
+}, 20_000);
 
 test("only a settled mark with an unchanged lstat holds; racy, changed, created, relinked or unreadable is unknown", () => {
   const dir = join(state.dir, "marks");

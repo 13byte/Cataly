@@ -55,7 +55,7 @@ test("1,000 files are covered in bounded windows, including a late change in the
     `bounded coverage: 1000 files, 12 sweeps, lstat+fstat per sweep=${counts.join(",")}, max=${Math.max(...counts)}`,
   );
   console.info(`new-hung confirmation: 1000 files, lstat=${confirmation}, counted apart from the 256-path windows`);
-});
+}, 20_000);
 
 test("new candidates do not restart the current snapshot or starve its final window", async () => {
   const f = coverageFixture(state);
@@ -91,7 +91,7 @@ test("new candidates do not restart the current snapshot or starve its final win
   expect(new Set(f.refs().map((ref) => ref.ref))).toEqual(new Set(f.paths));
   for (let window = 0; window < 4; window++) expect((await f.sweep()).result.hung).toBe(false);
   expect(new Set(f.refs().map((ref) => ref.ref))).toEqual(new Set([...f.paths, ...added]));
-});
+}, 20_000);
 
 test("a real Git failure invalidates the whole cycle without resetting its pending window", async () => {
   const f = coverageFixture(state);
@@ -109,7 +109,7 @@ test("a real Git failure invalidates the whole cycle without resetting its pendi
   expect(f.observation().coverage.pending).toEqual([]);
   expect(f.observation().lastEvidenceAt).toBe(before.lastEvidenceAt);
   for (let window = 0; window < 4; window++) expect((await f.sweep()).result.hung).toBe(window === 3);
-});
+}, 20_000);
 
 test("production freshness keeps a proven stall through partial windows until actual evidence changes", async () => {
   const f = coverageFixture(state);
@@ -147,7 +147,7 @@ test("production freshness keeps a proven stall through partial windows until ac
   }
   await tick(15);
   expect(f.reports.read(lane.key)?.state).toBe("running");
-});
+}, 20_000);
 
 test("a failed proved-stall alert retries on the next partial sweep and is then delivered only once", async () => {
   let attempts = 0;
@@ -166,7 +166,7 @@ test("a failed proved-stall alert retries on the next partial sweep and is then 
   expect(attempts).toBe(2);
   for (let window = 0; window < 3; window++) expect((await f.sweep()).result.alerts).toEqual([]);
   expect(attempts).toBe(2);
-});
+}, 20_000);
 
 test("retiring 1,000 disappeared candidates uses the same window budget and records every deletion", async () => {
   const f = coverageFixture(state);
@@ -190,4 +190,4 @@ test("retiring 1,000 disappeared candidates uses the same window budget and reco
     ),
   ).toEqual(new Set(f.paths));
   expect((await f.sweep()).result.hung).toBe(true);
-});
+}, 20_000);

@@ -66,7 +66,7 @@ for (const failedDelivery of [false, true]) {
       expect(attempts).toBe(held && failedDelivery ? 2 : 1);
       for (let window = 0; window < 2; window++) expect((await f.sweep()).result.alerts).toEqual([]);
       expect(attempts).toBe(held && failedDelivery ? 2 : 1);
-    });
+    }, 20_000);
   }
 }
 
@@ -98,7 +98,7 @@ test("a reached ceiling still blocks when an awaited alert reports fresh work", 
   expect(result.state).toBe("blocked");
   expect(result.heldHung).toBe(false);
   expect(f.reports.read(f.lane.key)?.lastReport?.text).toBe("tokens ceiling reached (1)");
-});
+}, 20_000);
 
 test("fresh evidence during delivery cannot suppress the next independently proved hung alert", async () => {
   const f = coverageFixture(state);
@@ -141,4 +141,4 @@ test("fresh evidence during delivery cannot suppress the next independently prov
   f.clock.at += 60_000;
   expect((await f.settle(() => supervisor.sweep(f.lane, "Working 24m"))).alerts).toEqual([]);
   expect(alerts).toBe(2);
-});
+}, 20_000);

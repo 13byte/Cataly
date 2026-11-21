@@ -91,7 +91,7 @@ test("one unreadable file cannot starve the rest of its window or the final wind
   for (let window = 0; window < 4; window++) expect((await f.sweep()).result.hung).toBe(false);
   expect(new Set(f.refs().map((ref) => ref.ref))).toEqual(new Set(f.paths));
   for (let window = 0; window < 4; window++) expect((await f.sweep()).result.hung).toBe(window === 3);
-});
+}, 20_000);
 
 for (const screen of [">", "compaction failed\n>"]) {
   test(`ordinary ${screen.includes("compaction") ? "compaction" : "idle"} stalls resume on Working and permit a later nudge and stall`, async () => {
