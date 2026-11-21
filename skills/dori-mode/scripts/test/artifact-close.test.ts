@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { artifactClose, artifactNote } from "../src/artifact-report.ts";
 import { Artifacts } from "../src/artifacts.ts";
@@ -109,10 +109,12 @@ test.each([
   await f.registry.write(other);
   const listing = await run(["git", "-C", w.repo, "worktree", "list", "--porcelain"]);
   const discovered = await discoverWorktrees(other, run, [w.repo]);
-  expect(
-    discovered.map((path) => resolve(path)),
-    JSON.stringify(listing),
-  ).toContain(resolve(otherTree));
+  const identity = (path: string) => {
+    const { dev, ino } = statSync(path, { bigint: true });
+    return `${dev}:${ino}`;
+  };
+  expect(statSync(otherTree, { bigint: true }).ino).not.toBe(0n);
+  expect(discovered.map(identity), JSON.stringify(listing)).toContain(identity(otherTree));
   const config = { ...w.deps.config, artifactRoots: [{ path: f.state.dir }] };
   const artifacts = new Artifacts(config, f.registry);
   const own = (await artifacts.add(w.lane.key, join(w.tree, "report.txt"), "Own", "private", now)).artifact;
