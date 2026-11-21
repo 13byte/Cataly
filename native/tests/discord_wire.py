@@ -25,6 +25,8 @@ class World:
         self.rate_limit = False
         self.bound = 0
         self.seq = 10
+        self.force_plain_reply = False
+        self.reject_text = None
 
     def dispatch(self, name, data):
         self.seq += 1
@@ -86,6 +88,11 @@ class Discord(BaseHTTPRequestHandler):
                 before = int(query.get("before", [str(2 ** 64)])[0])
                 records = sorted(self.world.history, key=lambda msg: int(msg["id"]), reverse=True)
                 self.json([msg for msg in records if int(msg["id"]) < before][:limit])
+            elif path.path in ("/api/v10/channels/20", "/api/v10/channels/21"):
+                channel = path.path.rsplit("/", 1)[1]
+                self.json({"id": channel, "type": 0 if channel == "20" else 15})
+            elif path.path == "/api/v10/guilds/40/channels":
+                self.json([{"id": "20", "type": 0, "name": "work"}])
             else:
                 self.json({}, 404)
 
@@ -98,7 +105,10 @@ class Discord(BaseHTTPRequestHandler):
             self.json(status=204)
         elif self.authorized() and self.path == "/api/v10/channels/20/messages":
             card = "components" in data
-            if not card:
+            if self.world.reject_text is not None and self.world.reject_text == data.get("content"):
+                self.json({}, 403)
+                return
+            if not card and "nonce" in data:
                 self.world.nonces.append(data["nonce"])
                 if self.world.rate_limit:
                     self.world.rate_limit = False
@@ -106,7 +116,9 @@ class Discord(BaseHTTPRequestHandler):
                     return
             self.world.replies.put(data)
             self.world.bound += 1
-            self.json({"id": "300" if card else str(301 + self.world.bound), "channel_id": "20", "message_reference": data["message_reference"]})
+            reference = None if self.world.force_plain_reply else data.get("message_reference")
+            self.json({"id": "300" if card else str(301 + self.world.bound), "channel_id": "20",
+                       "type": 19 if reference else 0, "message_reference": reference})
         else:
             self.json({}, 404)
 
@@ -114,7 +126,7 @@ class Discord(BaseHTTPRequestHandler):
         data = json.loads(self.rfile.read(int(self.headers["content-length"])))
         if self.authorized() and self.path == "/api/v10/channels/20/messages/300":
             self.world.cleared.put(data)
-            self.json({"id": "300"})
+            self.json({"id": "300", "channel_id": "20"})
         else:
             self.json({}, 404)
 

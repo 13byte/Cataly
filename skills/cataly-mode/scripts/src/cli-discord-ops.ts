@@ -51,6 +51,19 @@ export const sendDiscord: Command = async (cli) => {
   // An edit replaces one message, so it is never split: over the limit it is refused before the channel lookup.
   if (edit !== undefined && text.length > DISCORD_LIMIT)
     die(`--edit text exceeds ${DISCORD_LIMIT} UTF-16 code units; shorten the text or send without --edit`);
+  const native = process.env["CATALY_DISCORD_NATIVE_BIN"];
+  if (
+    native &&
+    (edit !== undefined || text.length <= DISCORD_LIMIT || !text.includes("```")) &&
+    Buffer.byteLength(text) <= 256 * 1024
+  ) {
+    const destination = thread === undefined ? { to: to! } : { thread: discordInboundEnv("--thread", thread) };
+    const { channel, ids, replyConfirmed } = await (
+      await import("./cli-discord-native-send.ts")
+    ).nativeDiscordSend(native, destination, { text, edit, reply });
+    if (edit === undefined) await confirmDiscordSend(config, { reply, target: channel, ids, replyConfirmed, rawText });
+    return;
+  }
   const dc = discordClient();
   let target: string;
   if (thread !== undefined) target = discordInboundEnv("--thread", thread);
@@ -63,20 +76,37 @@ export const sendDiscord: Command = async (cli) => {
   if (edit !== undefined) await dc.edit(target, edit, text);
   else {
     const { ids, replyConfirmed } = await dc.sendDelivery(target, text, reply === undefined ? {} : { replyTo: reply });
-    if (reply !== undefined) {
-      const known = ids.filter(isDiscordSnowflake);
-      if (known.length !== ids.length) {
-        const posted = known.length ? ` (already posted: ${known.join(" ")})` : "";
-        die(`discord send: incomplete delivery receipt; outcome uncertain${posted}`);
-      }
-      // An accepted plain fallback sends the answer, but it does not settle the exact owner request.
-      if (replyConfirmed) await recordSent(config.stateDir, target, reply, ids, Date.now());
-    }
-    console.log(`SENT ${ids.join(" ")}`);
-    if (reply !== undefined && replyConfirmed && config.recall?.enabled)
-      await (await import("./messenger/recall-discord.ts")).discordLeadRecall(config, dc, target, ids, rawText);
+    await confirmDiscordSend(config, { reply, target, ids, replyConfirmed, rawText }, dc);
   }
 };
+
+async function confirmDiscordSend(
+  config: Parameters<Command>[0]["config"],
+  delivery: {
+    readonly reply: string | undefined;
+    readonly target: string;
+    readonly ids: string[];
+    readonly replyConfirmed: boolean;
+    readonly rawText: string;
+  },
+  dc?: Discord,
+): Promise<void> {
+  const { reply, target, ids, replyConfirmed, rawText } = delivery;
+  if (reply !== undefined) {
+    const known = ids.filter(isDiscordSnowflake);
+    if (known.length !== ids.length) {
+      const posted = known.length ? ` (already posted: ${known.join(" ")})` : "";
+      die(`discord send: incomplete delivery receipt; outcome uncertain${posted}`);
+    }
+    // An accepted plain fallback sends the answer, but it does not settle the exact owner request.
+    if (replyConfirmed) await recordSent(config.stateDir, target, reply, ids, Date.now());
+  }
+  console.log(`SENT ${ids.join(" ")}`);
+  if (reply !== undefined && replyConfirmed && config.recall?.enabled)
+    await (
+      await import("./messenger/recall-discord.ts")
+    ).discordLeadRecall(config, dc ?? discordClient(), target, ids, rawText);
+}
 
 export const threadDiscord: Command = async ({ positionals, need, opt, strings, values, deps }) => {
   const action = positionals[1];

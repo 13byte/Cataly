@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Result, ensure};
 use tokio::{
     signal::unix::{SignalKind, signal},
     sync::{mpsc, watch},
@@ -9,7 +9,7 @@ use tokio::{
 use super::{
     Options, Snowflake, Transport,
     api::DiscordApi,
-    endpoint,
+    configured_api, endpoint,
     gateway::Link,
     intake::{Intake, Poll},
     wake::Wake,
@@ -19,28 +19,13 @@ use crate::omp::Executable;
 pub async fn run(omp: &Executable<'_>, cwd: &Path, options: Options) -> Result<()> {
     let owner = Snowflake::try_from(options.owner).map_err(anyhow::Error::msg)?;
     let channels = allowed_channels(options.channel)?;
-    let mut base = endpoint(
-        "CATALY_DISCORD_API_BASE",
-        "https://discord.com/api/v10/",
-        "http",
-    )?;
-    if !base.path().ends_with('/') {
-        let path = format!("{}/", base.path());
-        base.set_path(&path);
-    }
     let mut gateway = endpoint(
         "CATALY_DISCORD_GATEWAY_URL",
         "wss://gateway.discord.gg/",
         "ws",
     )?;
     gateway.set_query(Some("v=10&encoding=json"));
-    let token = std::env::var("CATALY_DISCORD_TOKEN")
-        .context("set CATALY_DISCORD_TOKEN for native Discord")?;
-    ensure!(
-        !token.is_empty(),
-        "set CATALY_DISCORD_TOKEN for native Discord"
-    );
-    let api = DiscordApi::new(base, &token)?;
+    let (api, token) = configured_api()?;
     let bot = bot_profile(&api, owner, options.default_avatar.as_deref()).await?;
     let worker = Worker::new(
         omp,

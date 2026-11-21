@@ -11,8 +11,10 @@ mod api;
 mod gateway;
 mod intake;
 mod monitor;
+mod send;
 mod wake;
 pub use api::{Destination, ReplyExtras};
+pub use send::{SendOptions, send};
 
 #[derive(Args, Debug)]
 pub struct Options {
@@ -163,6 +165,25 @@ fn endpoint(var: &str, default: &str, scheme: &str) -> Result<Url> {
         "{var} must be a loopback {scheme} endpoint without credentials, query or fragment"
     );
     Ok(url)
+}
+
+fn configured_api() -> Result<(api::DiscordApi, String)> {
+    let mut base = endpoint(
+        "CATALY_DISCORD_API_BASE",
+        "https://discord.com/api/v10/",
+        "http",
+    )?;
+    if !base.path().ends_with('/') {
+        let path = format!("{}/", base.path());
+        base.set_path(&path);
+    }
+    let token = std::env::var("CATALY_DISCORD_TOKEN")
+        .context("set CATALY_DISCORD_TOKEN for native Discord")?;
+    ensure!(
+        !token.is_empty(),
+        "set CATALY_DISCORD_TOKEN for native Discord"
+    );
+    Ok((api::DiscordApi::new(base, &token)?, token))
 }
 
 pub struct Transport {

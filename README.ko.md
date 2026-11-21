@@ -246,6 +246,14 @@ Rust가 Gateway 하트비트와 재연결, REST 조회·전송, 버튼, OMP 레�
 `--context`, `--wake-lanes`, `--activity-file`은 `CATALY_DISCORD_NATIVE_BIN`을
 설정하지 않는 기존 경로에서 유지합니다.
 
+같은 `CATALY_DISCORD_NATIVE_BIN` 설정으로 `cataly send discord`의
+텍스트·답장·편집도 Rust에서 처리합니다. Bun과 OMP 없이
+`target/release/cataly discord-send --thread "$THREAD_ID" < reply.txt`로
+직접 호출할 수도 있습니다. 답장은 `--reply MESSAGE_ID`, 기존 메시지 편집은
+`--edit MESSAGE_ID`를 사용합니다. `--to`에는 채널 ID 또는
+`CATALY_DISCORD_GUILD_ID` 안의 고유한 채널 이름을 지정합니다. 직접 호출은
+JSON 전송 영수증을 반환하며, 여러 조각으로 나뉘는 코드 블록은 기존 경로를 사용합니다.
+
 소유자의 일반 텍스트는 도구 없이 실행하고, 첨부 파일은 다운로드하지 않습니다.
 같은 채널·스레드에서 저장된 세션을 재사용하되, 실행이 끝나면 OMP 프로세스는
 닫습니다. OMP가 호스트 도구를 지원할 때, Gateway에서 `!cataly <요청>`으로

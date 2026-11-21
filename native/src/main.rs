@@ -53,6 +53,9 @@ enum Command {
     /// Run the native Discord intake, approvals and reply transport in the foreground.
     #[cfg(all(unix, feature = "discord"))]
     Discord(discord::Options),
+    /// Send or edit Discord text from standard input without launching OMP.
+    #[cfg(all(unix, feature = "discord"))]
+    DiscordSend(discord::SendOptions),
 }
 
 #[derive(Serialize)]
@@ -127,6 +130,8 @@ async fn main() -> Result<()> {
         }
         #[cfg(all(unix, feature = "discord"))]
         Command::Discord(options) => Box::pin(discord::run(&omp, &cli.cwd, options)).await?,
+        #[cfg(all(unix, feature = "discord"))]
+        Command::DiscordSend(options) => Box::pin(discord::send(options)).await?,
     }
     Ok(())
 }

@@ -1,13 +1,15 @@
 use std::path::Path;
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use base64::Engine as _;
-use reqwest::{Client, Method, StatusCode, Url, header};
+use reqwest::{Client, Method, Url, header};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 
 use super::{BotProfile, Message, Snowflake};
+
+mod http;
 
 pub(super) struct DiscordApi {
     client: Client,
@@ -16,16 +18,34 @@ pub(super) struct DiscordApi {
 }
 
 #[derive(Deserialize)]
-struct Receipt {
-    id: Snowflake,
+pub(super) struct Receipt {
+    pub(super) id: Snowflake,
     channel_id: Snowflake,
     message_reference: Option<Reference>,
+    #[serde(rename = "type")]
+    kind: Option<u8>,
 }
 
 #[derive(Deserialize)]
 struct Reference {
     message_id: Snowflake,
-    channel_id: Snowflake,
+    channel_id: Option<Snowflake>,
+}
+
+impl Receipt {
+    pub(super) fn references(&self, channel: Snowflake, message: Snowflake) -> bool {
+        self.message_reference.as_ref().is_some_and(|reference| {
+            reference.message_id == message && reference.channel_id == Some(channel)
+        })
+    }
+
+    pub(super) fn confirms_reply(&self, channel: Snowflake, message: Snowflake) -> bool {
+        self.kind == Some(19)
+            && self.message_reference.as_ref().is_some_and(|reference| {
+                reference.message_id == message
+                    && reference.channel_id.is_none_or(|id| id == channel)
+            })
+    }
 }
 
 impl DiscordApi {
@@ -102,7 +122,7 @@ impl DiscordApi {
         Ok(page)
     }
 
-    async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
+    pub(super) async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
         serde_json::from_slice(&self.call(Method::GET, path, None, true).await?)
             .context("invalid Discord REST response")
     }
@@ -113,11 +133,7 @@ impl DiscordApi {
         content: &str,
         extras: ReplyExtras<'_>,
     ) -> Result<Snowflake> {
-        let mut body = json!({
-            "content": content,
-            "allowed_mentions": { "parse": [], "replied_user": false },
-            "message_reference": { "message_id": origin.message, "channel_id": origin.channel, "fail_if_not_exists": true }
-        });
+        let mut body = text_body(origin.channel, Some(origin.message), content);
         match extras {
             ReplyExtras::Part { nonce } => {
                 body["nonce"] = json!(nonce);
@@ -133,19 +149,59 @@ impl DiscordApi {
                 }]);
             }
         }
-        let path = format!("channels/{}/messages", origin.channel);
-        let receipt: Receipt =
-            serde_json::from_slice(&self.call(Method::POST, &path, Some(&body), true).await?)
-                .context("Discord did not confirm the reply message")?;
+        let receipt = self.post(origin.channel, &body).await?;
         ensure!(
-            receipt.channel_id == origin.channel
-                && receipt
-                    .message_reference
-                    .is_some_and(|reference| reference.message_id == origin.message
-                        && reference.channel_id == origin.channel),
+            receipt.references(origin.channel, origin.message),
             "Discord reply destination did not match its source"
         );
         Ok(receipt.id)
+    }
+
+    pub(super) async fn post_text(
+        &self,
+        channel: Snowflake,
+        reference: Option<Snowflake>,
+        content: &str,
+    ) -> Result<Receipt> {
+        self.post(channel, &text_body(channel, reference, content))
+            .await
+    }
+
+    async fn post(&self, channel: Snowflake, body: &Value) -> Result<Receipt> {
+        let path = format!("channels/{channel}/messages");
+        let receipt: Receipt =
+            serde_json::from_slice(&self.call(Method::POST, &path, Some(body), true).await?)
+                .context("Discord did not confirm the posted message")?;
+        ensure!(
+            receipt.channel_id == channel,
+            "Discord returned a message in another channel"
+        );
+        Ok(receipt)
+    }
+
+    pub(super) async fn edit_text(
+        &self,
+        channel: Snowflake,
+        message: Snowflake,
+        content: &str,
+    ) -> Result<()> {
+        let path = format!("channels/{channel}/messages/{message}");
+        let receipt: Receipt = serde_json::from_slice(
+            &self
+                .call(
+                    Method::PATCH,
+                    &path,
+                    Some(&text_body(channel, None, content)),
+                    true,
+                )
+                .await?,
+        )
+        .context("Discord did not confirm the edited message")?;
+        ensure!(
+            receipt.channel_id == channel && receipt.id == message,
+            "Discord returned another edited message"
+        );
+        Ok(())
     }
 
     pub(super) async fn clear(&self, channel: Snowflake, message: Snowflake) -> Result<()> {
@@ -174,60 +230,16 @@ impl DiscordApi {
         .await??;
         Ok(())
     }
+}
 
-    async fn call(
-        &self,
-        method: Method,
-        path: &str,
-        body: Option<&Value>,
-        auth: bool,
-    ) -> Result<Vec<u8>> {
-        let url = self.base.join(path)?;
-        for trial in 0..2 {
-            let mut request = self.client.request(method.clone(), url.clone());
-            if auth {
-                request = request.header(header::AUTHORIZATION, self.authorization.clone());
-            }
-            if let Some(body) = body {
-                request = request.json(body);
-            }
-            let mut response = request
-                .send()
-                .await
-                .map_err(reqwest::Error::without_url)
-                .context("Discord REST I/O failed")?;
-            let status = response.status();
-            let mut bytes = Vec::new();
-            while let Some(chunk) = response
-                .chunk()
-                .await
-                .map_err(reqwest::Error::without_url)?
-            {
-                ensure!(
-                    bytes.len() + chunk.len() <= 2 * 1024 * 1024,
-                    "Discord REST response exceeded its limit"
-                );
-                bytes.extend_from_slice(&chunk);
-            }
-            if status.is_success() {
-                return Ok(bytes);
-            }
-            if status == StatusCode::TOO_MANY_REQUESTS && trial == 0 && auth {
-                #[derive(Deserialize)]
-                struct RateLimit {
-                    retry_after: f64,
-                }
-                if let Ok(rate) = serde_json::from_slice::<RateLimit>(&bytes)
-                    && (0.0..=5.0).contains(&rate.retry_after)
-                {
-                    tokio::time::sleep(Duration::from_secs_f64(rate.retry_after)).await;
-                    continue;
-                }
-            }
-            bail!("Discord REST returned HTTP {}", status.as_u16());
-        }
-        bail!("Discord REST request did not complete")
+fn text_body(channel: Snowflake, reference: Option<Snowflake>, content: &str) -> Value {
+    let mut body =
+        json!({ "content": content, "allowed_mentions": { "parse": [], "replied_user": false } });
+    if let Some(message) = reference {
+        body["message_reference"] =
+            json!({ "message_id": message, "channel_id": channel, "fail_if_not_exists": true });
     }
+    body
 }
 
 #[derive(Clone, Copy, Serialize)]

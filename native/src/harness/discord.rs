@@ -141,7 +141,7 @@ impl Harness<'_, '_> {
 }
 
 /// Discord counts UTF-16 code units. Prefer a word boundary without dropping text.
-fn split(mut remainder: &str) -> Vec<&str> {
+pub fn split(mut remainder: &str) -> Vec<&str> {
     const LIMIT: usize = 2_000;
     let mut parts = Vec::new();
     while !remainder.is_empty() {

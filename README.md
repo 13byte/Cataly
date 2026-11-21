@@ -263,6 +263,14 @@ imports the existing channel cursor on first use. Legacy head/ASK routing and
 the `--context`, `--wake-lanes`, and `--activity-file` flags stay with the legacy
 command configuration, without `CATALY_DISCORD_NATIVE_BIN`.
 
+With the same `CATALY_DISCORD_NATIVE_BIN`, `cataly send discord` uses Rust
+for text, replies and edits. You can also run it without Bun or OMP:
+`target/release/cataly discord-send --thread "$THREAD_ID" < reply.txt`.
+Use `--reply MESSAGE_ID` to reply or `--edit MESSAGE_ID` to update a single
+message. For a channel, use `--to CHANNEL_ID` or a unique `--to '#name'`
+in `CATALY_DISCORD_GUILD_ID`. The direct command emits a JSON delivery receipt.
+Multi-part fenced Markdown stays on the compatibility send path.
+
 Ordinary owner text runs with OMP's tools disabled; attachments are not
 downloaded. Follow-ups reuse the saved session, and the OMP process exits
 between turns. On Gateway, `!cataly <request>` enables the approval-gated

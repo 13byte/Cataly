@@ -8,6 +8,7 @@ import subprocess
 from threading import Thread
 
 from discord_wire import Discord, World, message
+from stock_discord_send import exercise_send
 
 
 README = "Cataly transport fixture — 네이티브 Discord"
@@ -30,6 +31,7 @@ def exercise_monitor(command, env, root, calls, results):
         rest(prefix, wire_env, root, world, calls, command[2])
         gateway(prefix, wire_env, root, world, calls, results)
         memory_checkpoint(prefix, wire_env, root, world)
+        exercise_send(command[0], wire_env, world)
     finally:
         server.shutdown()
         server.server_close()
