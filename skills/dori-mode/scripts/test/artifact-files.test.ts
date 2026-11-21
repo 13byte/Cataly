@@ -104,11 +104,16 @@ posix("rejects FIFOs without opening a blocking stream", async () => {
   expect(Bun.spawnSync(["mkfifo", fifo]).exitCode).toBe(0);
   await expect(inspectArtifact(roots(), fifo, "private")).rejects.toThrow("regular file");
 });
-test("rejects real byte changes and atomic replacement during the stream", async () => {
+test("rejects real byte changes during the stream", async () => {
   const path = file("report.txt", "original");
   const changing = inspectArtifact(roots(), path, "public");
   writeFileSync(path, "changed");
   await expect(changing).rejects.toThrow("changed");
+});
+
+// Win32 can deny replacement while the real reader holds the file open.
+posix("rejects atomic replacement during the stream", async () => {
+  const path = file("report.txt", "original");
   const replacing = inspectArtifact(roots(), path, "public");
   renameSync(file("replacement.txt", "replacement"), path);
   await expect(replacing).rejects.toThrow("changed");

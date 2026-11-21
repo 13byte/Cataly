@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFile
 import { join } from "node:path";
 import { artifactClose, artifactNote } from "../src/artifact-report.ts";
 import { Artifacts } from "../src/artifacts.ts";
+import { discoverWorktrees } from "../src/close-worktrees.ts";
 import { closeLane } from "../src/done-flow.ts";
 import { Registry, statusOf } from "../src/registry.ts";
 import { run } from "../src/run.ts";
@@ -53,6 +54,29 @@ const worktree = async () => {
   return { repo, tree, notification, lane, artifacts, deps };
 };
 const posix = test.skipIf(process.platform === "win32");
+
+test("worktree discovery handles CRLF porcelain and normalizes Git path spelling", async () => {
+  const repo = join(f.state.dir, "repo");
+  const owned = join(f.state.dir, "tree with spaces");
+  const print = (path: string) => (process.platform === "win32" ? path.replaceAll("\\", "/") : path);
+  const result = [
+    `worktree ${print(repo)}`,
+    "HEAD abc",
+    "branch refs/heads/artifact-lane",
+    "",
+    `worktree ${print(owned)}`,
+    "HEAD abc",
+    "branch refs/heads/artifact-lane-two",
+    "",
+    "",
+  ].join("\r\n");
+  const trees = await discoverWorktrees({ ...f.lane, cwd: repo, worktrees: [] }, async () => ({
+    code: 0,
+    out: result,
+    err: "",
+  }));
+  expect(trees).toEqual([owned]);
+});
 
 test("real git cleanup preserves a clean committed artifact and final hook receives the current URL/hash", async () => {
   const w = await worktree();

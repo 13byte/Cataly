@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { basename, resolve } from "node:path";
 import type { FlowDeps } from "./done-flow.ts";
 import type { Lane } from "./registry.ts";
 import { repoGit, type Runner } from "./run.ts";
@@ -20,12 +21,13 @@ const findWorktrees = async (
       continue;
     }
     let path = "";
-    for (const line of r.out.split("\n")) {
-      if (line.startsWith("worktree ")) path = line.slice(9);
+    for (const line of r.out.split(/\r?\n/)) {
+      if (line.startsWith("worktree ")) path = resolve(line.slice(9));
       else if (
         line.startsWith("branch ") &&
-        path !== root &&
-        (ours(line.split("/").pop() ?? "") || ours(path.split("/").pop() ?? ""))
+        path &&
+        path !== resolve(root) &&
+        (ours(line.split("/").pop() ?? "") || ours(basename(path)))
       )
         found.add(path);
     }
