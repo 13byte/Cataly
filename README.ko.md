@@ -127,10 +127,10 @@ npm install cataly
 bun add cataly
 ```
 
-설치 후 실행 명령은 기존과 동일하게 `dori-harness`입니다.
+이 버전에서 설치되는 하네스 명령은 `cataly-harness`입니다.
 
 ```bash
-./node_modules/.bin/dori-harness --help
+./node_modules/.bin/cataly-harness --help
 ```
 
 이 방법은 하네스 CLI만 설치합니다. OMP와 메신저까지 설정하려면 아래 방법 중
