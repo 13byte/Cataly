@@ -6,6 +6,8 @@ use serde::Serialize;
 
 #[cfg(all(unix, feature = "discord"))]
 mod discord;
+#[cfg(unix)]
+mod discord_split;
 mod frames;
 #[cfg(unix)]
 mod harness;
@@ -56,6 +58,9 @@ enum Command {
     /// Send or edit Discord text from standard input without launching OMP.
     #[cfg(all(unix, feature = "discord"))]
     DiscordSend(discord::SendOptions),
+    /// Keep a Discord bot online without starting the inbox or OMP.
+    #[cfg(all(unix, feature = "discord"))]
+    DiscordPresence,
 }
 
 #[derive(Serialize)]
@@ -132,6 +137,8 @@ async fn main() -> Result<()> {
         Command::Discord(options) => Box::pin(discord::run(&omp, &cli.cwd, options)).await?,
         #[cfg(all(unix, feature = "discord"))]
         Command::DiscordSend(options) => Box::pin(discord::send(options)).await?,
+        #[cfg(all(unix, feature = "discord"))]
+        Command::DiscordPresence => Box::pin(discord::presence()).await?,
     }
     Ok(())
 }

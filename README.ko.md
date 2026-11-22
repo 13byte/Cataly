@@ -235,24 +235,29 @@ OMP 프로세스를 닫습니다. 결과가 불명확하면 롤백된 것으로 
 
 | 설정 | 값 |
 | --- | --- |
-| `CATALY_DISCORD_NATIVE_BIN` | Rust 바이너리(`target/release/cataly`)의 절대 경로 |
-| `CATALY_DISCORD_NATIVE_WORKSPACE` | `README.md`를 읽을 작업 디렉터리의 절대 경로 |
+| `CATALY_DISCORD_NATIVE_BIN` | 선택 사항. Rust 바이너리의 절대 경로. `off`는 기존 Discord 경로를 선택합니다. |
+| `CATALY_DISCORD_NATIVE_WORKSPACE` | 선택 사항. 네이티브 작업 디렉터리의 절대 경로. 생략하면 `laneWorkspace`를 사용합니다. |
 | `CATALY_DISCORD_NATIVE_CHANNEL_ID` | 선택 사항. 인입 목록의 채널 또는 스레드 하나를 지정합니다. 생략하면 명시적으로 등록한 인입 채널만 사용합니다. |
 | `CATALY_OMP` / `CATALY_DISCORD_NATIVE_MODEL` | 필요할 때만 지정하는 OMP 실행 파일과 모델 |
 
 Rust가 Gateway 하트비트와 재연결, REST 조회·전송, 버튼, OMP 레인을 맡습니다.
 명시적으로 등록한 채널·스레드만 처리합니다. 전환 전에 기존 모니터를 중지하세요.
 호환 실행기는 첫 실행 때 기존 채널 커서를 가져옵니다. 기존 head/ASK 라우팅과
-`--context`, `--wake-lanes`, `--activity-file`은 `CATALY_DISCORD_NATIVE_BIN`을
-설정하지 않는 기존 경로에서 유지합니다.
+자동 스레드 탐색과 `--context`, `--wake-lanes`, `--activity-file`은 기존
+모니터에서 유지합니다. 독립 Rust 수신을 쓰려면 채널을 명시하고
+`CATALY_DISCORD_THREADS=off`로 설정하세요.
 
-같은 `CATALY_DISCORD_NATIVE_BIN` 설정으로 `cataly send discord`의
-텍스트·답장·편집도 Rust에서 처리합니다. Bun과 OMP 없이
+Rust 바이너리가 설치되거나 배포본에 포함되어 있으면 `cataly send discord`와
+`cataly presence discord`가 자동으로 Rust를 선택합니다. Bun과 OMP 없이
 `target/release/cataly discord-send --thread "$THREAD_ID" < reply.txt`로
 직접 호출할 수도 있습니다. 답장은 `--reply MESSAGE_ID`, 기존 메시지 편집은
 `--edit MESSAGE_ID`를 사용합니다. `--to`에는 채널 ID 또는
 `CATALY_DISCORD_GUILD_ID` 안의 고유한 채널 이름을 지정합니다. 직접 호출은
-JSON 전송 영수증을 반환하며, 여러 조각으로 나뉘는 코드 블록은 기존 경로를 사용합니다.
+JSON 전송 영수증을 반환합니다. 긴 코드 블록은 UTF-16 경계를 지키며 조각마다
+닫고 다시 엽니다. 온라인 상태만 유지하려면 `target/release/cataly discord-presence`를 사용하세요.
+Linux x64 배포본에는 체크섬으로 검증하는 Rust 바이너리가 포함됩니다.
+지원되는 Unix의 소스 설치는 Cargo가 있으면 직접 빌드합니다.
+바이너리가 없는 기존 설치는 기존 CLI를 그대로 사용합니다.
 
 소유자의 일반 텍스트는 도구 없이 실행하고, 첨부 파일은 다운로드하지 않습니다.
 같은 채널·스레드에서 저장된 세션을 재사용하되, 실행이 끝나면 OMP 프로세스는

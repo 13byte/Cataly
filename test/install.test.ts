@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { git, setup } from "./install-setup.ts";
 
@@ -42,7 +43,53 @@ posix("CATALY_NO_PULL=1 installs a changed checkout as it is, without pulling", 
   expect(git(src, "rev-parse", "HEAD")).toBe(before);
   expect(readFileSync(join(src, cli), "utf8")).toBe("patched\n");
   expect(existsSync(join(home, ".cataly/config.json"))).toBe(true);
+  expect(existsSync(join(home, ".cataly/bin/cataly-native"))).toBe(false);
 });
+
+posix("source install publishes the matching packaged native controller as an owner-only executable", () => {
+  const { src, home, install } = setup();
+  const hostPackage = join(src, "native-bin", `${process.platform}-${process.arch}`);
+  mkdirSync(hostPackage, { recursive: true });
+  const contents = "#!/bin/sh\nprintf 'packaged controller\\n'\n";
+  writeFileSync(join(hostPackage, "cataly"), contents, { mode: 0o755 });
+
+  const r = install({ CATALY_NO_PULL: "1", CATALY_INSTALL_MODE: "side" });
+
+  expect(r.code).toBe(0);
+  const installed = join(home, ".omp-cataly/bin/cataly-native");
+  const stat = lstatSync(installed);
+  expect(stat.isFile()).toBe(true);
+  expect(stat.mode & 0o777).toBe(0o700);
+  expect(readFileSync(installed, "utf8")).toBe(contents);
+});
+
+test.skipIf(process.platform === "win32" || !Bun.which("cargo") || !Bun.which("rustc"))(
+  "source install builds a host-native controller with Cargo when the package is absent",
+  () => {
+    const { root, src, home, install } = setup();
+    mkdirSync(join(src, "native/src"), { recursive: true });
+    writeFileSync(
+      join(src, "Cargo.toml"),
+      '[package]\nname = "cataly"\nversion = "0.1.0"\nedition = "2021"\n\n[[bin]]\nname = "cataly"\npath = "native/src/main.rs"\n',
+    );
+    writeFileSync(join(src, "Cargo.lock"), 'version = 4\n\n[[package]]\nname = "cataly"\nversion = "0.1.0"\n');
+    writeFileSync(join(src, "native/src/main.rs"), 'fn main() { println!("built controller"); }\n');
+
+    const r = install({
+      CATALY_NO_PULL: "1",
+      CARGO_HOME: join(root, "cargo-home"),
+      RUSTUP_HOME: process.env["RUSTUP_HOME"] ?? join(homedir(), ".rustup"),
+      CARGO_BUILD_TARGET: "wasm32-unknown-unknown",
+      CARGO_NET_OFFLINE: "true",
+    });
+
+    expect(r.code).toBe(0);
+    const installed = Bun.spawnSync([join(home, ".cataly/bin/cataly-native")], { stdin: "ignore" });
+    expect(installed.exitCode).toBe(0);
+    expect(installed.stdout.toString()).toBe("built controller\n");
+  },
+  30_000,
+);
 
 posix("a pull blocked by a local commit lists that commit and how to go on", () => {
   // Given a checkout with its own commit on a file upstream has since changed.

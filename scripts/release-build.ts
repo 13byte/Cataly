@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   closeSync,
   constants,
   cpSync,
@@ -12,7 +13,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
   headlessReleaseProfiles,
@@ -30,6 +31,58 @@ import { committedSource } from "./release-source.ts";
 
 export type Distribution = { manifest: ReleaseManifest; assets: Record<string, Buffer> };
 
+export const nativeReleasePath = "native-bin/linux-x64/cataly";
+
+async function buildNativeRelease(source: string, temporary: string): Promise<Buffer | undefined> {
+  // The public producer is Linux x64. Other hosts can still build source-only
+  // distributions (notably the historical Darwin consumer transition smoke).
+  if (process.platform !== "linux" || process.arch !== "x64") return;
+  const cargo = Bun.which("cargo");
+  if (!cargo) throw new Error("Cargo is required to package the Linux x64 Cataly release");
+  const target = "x86_64-unknown-linux-gnu";
+  const targetDir = join(temporary, "cargo-target");
+  const child = Bun.spawn(
+    [
+      cargo,
+      "build",
+      "--manifest-path",
+      join(source, "Cargo.toml"),
+      "--locked",
+      "--release",
+      "--bin",
+      "cataly",
+      "--target",
+      target,
+      "--target-dir",
+      targetDir,
+    ],
+    {
+      // Cargo discovers .cargo/config relative to its invocation directory, not --manifest-path.
+      cwd: "/",
+      // Do not load user Cargo config, RUSTFLAGS, compiler wrappers or linker settings.
+      env: {
+        PATH: process.env["PATH"],
+        RUSTUP_HOME: process.env["RUSTUP_HOME"] ?? join(homedir(), ".rustup"),
+        RUSTUP_TOOLCHAIN: process.env["RUSTUP_TOOLCHAIN"],
+        CARGO_HOME: join(temporary, "cargo-home"),
+        CARGO_ENCODED_RUSTFLAGS: `--remap-path-prefix=${temporary}=/cataly`,
+        CARGO_INCREMENTAL: "0",
+        SOURCE_DATE_EPOCH: "0",
+        LC_ALL: "C",
+        TZ: "UTC",
+      },
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "pipe",
+      timeout: 600_000,
+      killSignal: "SIGKILL",
+    },
+  );
+  const [stderr, code] = await Promise.all([new Response(child.stderr).text(), child.exited]);
+  if (code !== 0) throw new Error(`Cargo release build failed (${code}): ${stderr.trim()}`);
+  return readAsset(join(targetDir, target, "release"), "cataly");
+}
+
 function readAsset(directory: string, name: string): Buffer {
   if (!lstatSync(directory).isDirectory()) throw new Error("Distribution must be a real directory");
   const fd = openSync(join(directory, name), constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -41,7 +94,7 @@ function readAsset(directory: string, name: string): Buffer {
   }
 }
 
-/** Only committed blobs selected by the public SourceManifest policy ever enter the archive. */
+/** Package committed blobs plus the generated legacy shims and host release binary. */
 export function buildRelease(root: string, output: string, prerelease: boolean): Promise<ReleaseManifest> {
   return buildReleaseAssets(root, output, prerelease);
 }
@@ -64,7 +117,19 @@ export async function packageReleaseTree(
   try {
     const archiveRoot = `omp-dori-${releaseVersion}`;
     const source = join(temporary, archiveRoot);
-    await committedSource(root, tree, source);
+    const committed = await committedSource(root, tree, source);
+    if (lstatSync(join(source, "native-bin"), { throwIfNoEntry: false }))
+      throw new Error("Committed source uses the reserved native-bin release path");
+    const binary = await buildNativeRelease(source, temporary);
+    if (binary) {
+      const afterBuild = sourceManifest(source);
+      if (!sameManifest(committed, afterBuild) || afterBuild.excluded.length !== 0)
+        throw new Error("Committed source changed during the Cargo release build");
+      const artifact = join(source, nativeReleasePath);
+      mkdirSync(dirname(artifact), { recursive: true, mode: 0o700 });
+      writeFileSync(artifact, binary, { flag: "wx" });
+      chmodSync(artifact, 0o755);
+    }
     // The archived v1 updater needs these paths, not a duplicate copy of the old skill or runtime.
     const legacySkill = join(source, "skills/dori-mode");
     const currentSkill = join(source, "skills/cataly-mode");

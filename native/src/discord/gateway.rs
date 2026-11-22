@@ -15,7 +15,9 @@ use tokio_tungstenite::{
     tungstenite::{Message, protocol::WebSocketConfig},
 };
 
-use super::{Interaction, Snowflake, wake::Wake};
+use super::{Interaction, Snowflake, presence::online, wake::Wake};
+
+mod dispatch;
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -33,12 +35,6 @@ struct Hello {
     heartbeat_interval: u64,
 }
 
-#[derive(Deserialize)]
-struct Ready {
-    session_id: String,
-    resume_gateway_url: String,
-}
-
 struct Resume {
     url: Url,
     id: String,
@@ -48,12 +44,17 @@ struct Resume {
 enum Outcome {
     Reconnect,
     Restart,
+    RateLimited,
     Fatal(u16),
 }
 
 pub(super) struct Link<'a> {
     pub(super) url: &'a Url,
     pub(super) token: &'a str,
+    pub(super) intake: Option<IntakeLink<'a>>,
+}
+
+pub(super) struct IntakeLink<'a> {
     pub(super) channels: &'a [Snowflake],
     pub(super) owner: Snowflake,
     pub(super) wake: &'a Wake,
@@ -63,22 +64,31 @@ pub(super) struct Link<'a> {
 impl Link<'_> {
     pub(super) async fn run(self) -> Result<()> {
         let mut resume = None;
-        let mut delay = 1;
+        let presence = self.intake.is_none();
+        let base_delay = if presence { 5 } else { 1 };
+        let max_delay = if presence { 300 } else { 30 };
+        let mut delay = base_delay;
         loop {
             let started = Instant::now();
+            let mut minimum = 0;
             match self.connect(&mut resume).await {
                 Ok(Outcome::Fatal(code)) => {
                     bail!("Discord Gateway closed with non-retryable code {code}")
                 }
                 Ok(Outcome::Restart) => resume = None,
                 Ok(Outcome::Reconnect) | Err(_) => {}
+                Ok(Outcome::RateLimited) => minimum = 60,
             }
             if started.elapsed() >= Duration::from_secs(30) {
-                delay = 1;
+                delay = base_delay;
             }
-            let minimum = if resume.is_some() { 1 } else { 6 };
-            sleep(Duration::from_secs(delay.max(minimum))).await;
-            delay = (delay * 2).min(30);
+            let minimum = minimum.max(if resume.is_some() || presence { 1 } else { 6 });
+            let wait = delay.max(minimum);
+            if presence {
+                println!("PRESENCE_RECONNECT discord delay_ms={}", wait * 1000);
+            }
+            sleep(Duration::from_secs(wait)).await;
+            delay = (delay * 2).min(max_delay);
         }
     }
 
@@ -112,18 +122,16 @@ impl Link<'_> {
         let mut awaiting_ack = false;
         let handshake = Instant::now() + Duration::from_secs(20);
         let mut ready = false;
-        let authenticate = resume.as_ref().map_or_else(
-            || json!({"op": 2, "d": {"token": self.token, "intents": (1 << 9) | (1 << 12) | (1 << 15),
-                "properties": {"os": std::env::consts::OS, "browser": "cataly", "device": "cataly"}}}),
-            |state| json!({"op": 6, "d": {"token": self.token, "session_id": state.id, "seq": state.sequence}}),
-        );
-        send(&mut ws, &authenticate).await?;
+        let mut acknowledged = false;
+        let mut heartbeat_seq = None;
+        send(&mut ws, &self.authenticate(resume.as_ref())).await?;
         loop {
             tokio::select! {
                 () = sleep_until(handshake), if !ready => return Ok(Outcome::Reconnect),
                 () = sleep_until(heartbeat) => {
                     if awaiting_ack { return Ok(Outcome::Reconnect); }
                     beat(&mut ws, resume.as_ref()).await?;
+                    heartbeat_seq = resume.as_ref().map(|state| state.sequence);
                     awaiting_ack = true;
                     heartbeat = Instant::now() + interval;
                 }
@@ -136,18 +144,38 @@ impl Link<'_> {
                                 state.sequence = state.sequence.max(sequence);
                             }
                             match frame.op {
-                                0 => self.dispatch(frame, resume, &mut ready)?,
-                                1 => { beat(&mut ws, resume.as_ref()).await?; awaiting_ack = true; }
+                                0 => {
+                                    let event = self.dispatch(frame, resume, &mut ready)?;
+                                    if self.intake.is_none() && let Some(event) = event {
+                                        if event == "RESUMED" {
+                                            send(&mut ws, &json!({"op": 3, "d": online()})).await?;
+                                        }
+                                        println!("PRESENCE_READY discord event={event}");
+                                    }
+                                }
+                                1 => {
+                                    beat(&mut ws, resume.as_ref()).await?;
+                                    heartbeat_seq = resume.as_ref().map(|state| state.sequence);
+                                    awaiting_ack = true;
+                                }
                                 7 => return Ok(Outcome::Reconnect),
                                 9 if frame.d == Value::Bool(true) => return Ok(Outcome::Reconnect),
                                 9 => return Ok(Outcome::Restart),
-                                11 => awaiting_ack = false,
+                                11 if awaiting_ack => {
+                                    awaiting_ack = false;
+                                    if self.intake.is_none() && !acknowledged {
+                                        acknowledged = true;
+                                        let seq = heartbeat_seq.map_or_else(|| "-".to_owned(), |seq| seq.to_string());
+                                        println!("PRESENCE_ACK discord seq={seq}");
+                                    }
+                                }
                                 _ => {}
                             }
                         }
                         Message::Ping(_) => timeout(Duration::from_secs(3), ws.flush()).await??,
                         Message::Close(Some(close)) => return Ok(match u16::from(close.code) {
                             code @ (4004 | 4010..=4014) => Outcome::Fatal(code),
+                            4008 => Outcome::RateLimited,
                             1000 | 1001 | 4003 | 4005 | 4007 | 4009 => Outcome::Restart,
                             _ => Outcome::Reconnect,
                         }),
@@ -159,70 +187,20 @@ impl Link<'_> {
         }
     }
 
-    fn dispatch(&self, frame: Frame, resume: &mut Option<Resume>, ready: &mut bool) -> Result<()> {
-        match frame.t.as_deref() {
-            Some("READY") => {
-                let event: Ready = serde_json::from_value(frame.d)?;
-                let url = if self.url.scheme() == "ws" {
-                    self.url.clone()
+    fn authenticate(&self, resume: Option<&Resume>) -> Value {
+        resume.map_or_else(
+            || {
+                let mut identify = json!({"op": 2, "d": {"token": self.token, "intents": 1 << 9,
+                    "properties": {"os": std::env::consts::OS, "browser": "cataly", "device": "cataly"}}});
+                if self.intake.is_some() {
+                    identify["d"]["intents"] = json!((1 << 9) | (1 << 12) | (1 << 15));
                 } else {
-                    let mut url = Url::parse(&event.resume_gateway_url)
-                        .context("invalid Discord resume URL")?;
-                    ensure!(
-                        url.scheme() == "wss"
-                            && url
-                                .host_str()
-                                .is_some_and(|host| host.ends_with(".discord.gg")
-                                    || host == "gateway.discord.gg")
-                            && url.username().is_empty()
-                            && url.password().is_none(),
-                        "invalid Discord resume host"
-                    );
-                    url.set_query(Some("v=10&encoding=json"));
-                    url
-                };
-                let sequence = frame.s.context("missing Discord sequence")?;
-                *resume = Some(Resume {
-                    url,
-                    id: event.session_id,
-                    sequence,
-                });
-                *ready = true;
-                self.wake.send(Wake::ALL);
-            }
-            Some("RESUMED") if resume.is_some() => {
-                *ready = true;
-                self.wake.send(Wake::ALL);
-            }
-            Some("MESSAGE_CREATE") if *ready || resume.is_some() => {
-                #[derive(Deserialize)]
-                struct Notice {
-                    channel_id: Snowflake,
-                    author: super::User,
+                    identify["d"]["presence"] = online();
                 }
-                if let Ok(event) = serde_json::from_value::<Notice>(frame.d)
-                    && event.author.id == self.owner
-                    && !event.author.bot
-                    && !event.author.system
-                    && let Ok(index) = self.channels.binary_search(&event.channel_id)
-                {
-                    self.wake.send(1 << index);
-                }
-            }
-            Some("INTERACTION_CREATE") if *ready || resume.is_some() => {
-                if let Ok(event) = serde_json::from_value::<Interaction>(frame.d)
-                    && event.valid()
-                    && self.channels.contains(&event.channel_id)
-                {
-                    // Never block heartbeats on user work or a slow callback.
-                    if self.interactions.try_send(event).is_err() {
-                        eprintln!("DISCORD_INTERACTION_QUEUE_FULL");
-                    }
-                }
-            }
-            _ => {}
-        }
-        Ok(())
+                identify
+            },
+            |state| json!({"op": 6, "d": {"token": self.token, "session_id": state.id, "seq": state.sequence}}),
+        )
     }
 }
 

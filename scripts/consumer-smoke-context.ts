@@ -33,6 +33,7 @@ export function createConsumerSmokeContext(
   const home = join(out, "consumer-home");
   const side = join(home, ".omp-dori");
   const tools = join(out, "tools");
+  const compilerTools = join(out, "compiler-tools");
   const terminalTools = join(out, "legacy-tools");
   const cwd = join(out, "workspace");
   const namespace = `omp-dori-${digest(side).slice(0, 12)}`;
@@ -50,6 +51,22 @@ export function createConsumerSmokeContext(
   for (const [name, path] of Object.entries(binaries)) {
     assert(path, `Missing prerequisite: ${name}`);
     symlinkSync(realpathSync(path), join(tools, name));
+  }
+  const compilerEnv =
+    process.platform === "linux" && process.arch === "x64"
+      ? {
+          PATH: `${compilerTools}:${tools}:/usr/bin:/bin`,
+          RUSTUP_HOME: process.env["RUSTUP_HOME"] ?? join(homedir(), ".rustup"),
+          RUSTUP_TOOLCHAIN: process.env["RUSTUP_TOOLCHAIN"],
+        }
+      : undefined;
+  if (compilerEnv) {
+    mkdirSync(compilerTools, { mode: 0o700 });
+    for (const name of ["cargo", "rustc"]) {
+      const path = Bun.which(name);
+      assert(path, `Missing release producer prerequisite: ${name}`);
+      symlinkSync(realpathSync(path), join(compilerTools, name));
+    }
   }
   if (legacy) symlinkSync(legacy.binary, join(terminalTools, legacy.runtime));
   // An allowlist, not a spread: no inherited DORI/HC/HERDR/OMP selection, credentials or provider settings cross.
@@ -83,11 +100,13 @@ export function createConsumerSmokeContext(
   async function run(
     label: string,
     argv: string[],
-    options: { readonly allowFailure?: boolean; readonly legacy?: boolean } = {},
+    options: { readonly allowFailure?: boolean; readonly legacy?: boolean; readonly producer?: boolean } = {},
   ) {
     const child = Bun.spawn(argv, {
       cwd,
-      env: options.legacy ? { ...env, PATH: `${terminalTools}:${env.PATH}`, DORI_INSTALL_MODE: "side" } : env,
+      env: options.legacy
+        ? { ...env, PATH: `${terminalTools}:${env.PATH}`, DORI_INSTALL_MODE: "side" }
+        : { ...env, ...(options.producer ? compilerEnv : undefined) },
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",

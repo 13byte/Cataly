@@ -9,8 +9,9 @@ use tokio::{
 use super::{
     Options, Snowflake, Transport,
     api::DiscordApi,
-    configured_api, endpoint,
-    gateway::Link,
+    configured_api,
+    gateway::{IntakeLink, Link},
+    gateway_url,
     intake::{Intake, Poll},
     wake::Wake,
 };
@@ -19,12 +20,7 @@ use crate::omp::Executable;
 pub async fn run(omp: &Executable<'_>, cwd: &Path, options: Options) -> Result<()> {
     let owner = Snowflake::try_from(options.owner).map_err(anyhow::Error::msg)?;
     let channels = allowed_channels(options.channel)?;
-    let mut gateway = endpoint(
-        "CATALY_DISCORD_GATEWAY_URL",
-        "wss://gateway.discord.gg/",
-        "ws",
-    )?;
-    gateway.set_query(Some("v=10&encoding=json"));
+    let gateway = gateway_url()?;
     let (api, token) = configured_api()?;
     let bot = bot_profile(&api, owner, options.default_avatar.as_deref()).await?;
     let worker = Worker::new(
@@ -55,10 +51,12 @@ pub async fn run(omp: &Executable<'_>, cwd: &Path, options: Options) -> Result<(
             Link {
                 url: &gateway,
                 token: &token,
-                channels: &channels,
-                owner,
-                wake: &wake,
-                interactions,
+                intake: Some(IntakeLink {
+                    channels: &channels,
+                    owner,
+                    wake: &wake,
+                    interactions,
+                }),
             }
             .run()
             .await
@@ -129,9 +127,14 @@ fn allowed_channels(values: Vec<String>) -> Result<Vec<Snowflake>> {
 }
 
 async fn shutdown_signal(stop: &watch::Sender<bool>) -> Result<()> {
+    termination().await?;
+    stop.send_replace(true);
+    Ok(())
+}
+
+pub(super) async fn termination() -> Result<()> {
     let mut interrupt = signal(SignalKind::interrupt())?;
     let mut terminate = signal(SignalKind::terminate())?;
     tokio::select! { _ = interrupt.recv() => {}, _ = terminate.recv() => {} }
-    stop.send_replace(true);
     Ok(())
 }
