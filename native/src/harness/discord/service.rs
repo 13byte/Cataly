@@ -10,7 +10,11 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 use super::{DeliveryReply, Origin, Snowflake, memory::Memory, reply_parts};
 use crate::discord::{Destination, ReplyExtras, Transport};
-use crate::harness::{Harness, Options, store::Store, work::RunOptions};
+use crate::harness::{
+    Harness, Options, SessionKey,
+    store::{HeadSource, Store},
+    work::RunOptions,
+};
 use crate::omp::Executable;
 use crate::rpc::tools::Approval;
 
@@ -18,6 +22,7 @@ pub struct Worker<'a, 'b> {
     harness: Harness<'a, 'b>,
     readme: bool,
     memory: Option<Memory>,
+    head_channel: Option<Snowflake>,
 }
 
 pub struct ApprovalCard {
@@ -37,8 +42,26 @@ impl<'a, 'b> Worker<'a, 'b> {
         Ok(Self {
             harness,
             readme: gateway,
+            head_channel: None,
             memory,
         })
+    }
+
+    pub(crate) fn bind_head(
+        &mut self,
+        bot: Snowflake,
+        owner: Snowflake,
+        channel: Option<Snowflake>,
+    ) -> Result<()> {
+        self.harness
+            .store
+            .bind_discord_head(channel.map(|channel| HeadSource {
+                bot,
+                owner,
+                channel,
+            }))?;
+        self.head_channel = channel;
+        Ok(())
     }
 
     pub(crate) async fn close_memory(&mut self) -> Result<()> {
@@ -49,7 +72,12 @@ impl<'a, 'b> Worker<'a, 'b> {
     }
 
     fn session_bytes(&self, origin: Origin) -> Result<u64> {
-        match self.harness.store.read(&origin.key().0)? {
+        let key = if self.head_channel == Some(origin.channel) {
+            SessionKey("head".to_owned())
+        } else {
+            origin.key()
+        };
+        match self.harness.store.read(&key.0)? {
             crate::harness::store::Record::Bound(binding) => {
                 Ok(fs::metadata(binding.session.file)?.len())
             }
@@ -119,8 +147,15 @@ impl<'a, 'b> Worker<'a, 'b> {
             .filter(|text| !text.is_empty());
         let readme = self.readme && explicit.is_some();
         // Retain the same mode on replay even if the installed OMP now advertises different features.
-        let readme = self.harness.discord_readme_mode(origin)?.unwrap_or(readme);
-        let prompt = explicit.unwrap_or(text).to_owned();
+        let discord_head = self.head_channel == Some(origin.channel);
+        let mut run = origin.run(explicit.unwrap_or(text).to_owned());
+        if discord_head {
+            run.key = SessionKey("head".to_owned());
+        }
+        let readme = self
+            .harness
+            .discord_readme_mode(origin, &run.key)?
+            .unwrap_or(readme);
         let id = origin.id();
         let (send, mut approvals) = mpsc::channel(1);
         let (cancel, cancel_signal) = oneshot::channel();
@@ -129,10 +164,11 @@ impl<'a, 'b> Worker<'a, 'b> {
             approvals: readme.then_some(send),
             memory_context: self.memory_context(origin),
             fenced_replies: true,
+            discord_head,
         };
         let mut card = None;
         let result = {
-            let run = self.harness.execute(origin.run(prompt), options);
+            let run = self.harness.execute(run, options);
             let mut run = pin!(run);
             let mut cancel = Some(cancel);
             loop {

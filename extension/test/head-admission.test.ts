@@ -8,12 +8,16 @@ import {
   discordInboundQueue,
   type DiscordInboundQueue,
 } from "../../skills/cataly-mode/scripts/src/messenger/discord-inbound-queue.ts";
+import { openDiscordAskMailbox } from "../../skills/cataly-mode/scripts/src/messenger/discord-ask-mailbox.ts";
 import { headReceipt } from "../head-receipt.ts";
 import { takeLock } from "../../skills/cataly-mode/scripts/src/checkpoint-lock.ts";
 import { openOwes } from "../../skills/cataly-mode/scripts/src/owes.ts";
 import { until } from "./fake-pi.ts";
 
 const posix = test.skipIf(typeof process.getuid !== "function");
+// The public CLI hands Discord intake to the Rust monitor; these cases need its binary.
+const nativeBinary = process.env["CATALY_DISCORD_NATIVE_BIN"] && process.env["CATALY_DISCORD_NATIVE_BIN"] !== "off";
+const nativeCli = test.skipIf(typeof process.getuid !== "function" || !nativeBinary);
 const retainedSource = process.env["CATALY_TEST_V013_SOURCE"];
 const retainedReceipt = async (): Promise<typeof headReceipt> =>
   retainedSource ? (await import(join(retainedSource, "extension/head-receipt.ts"))).headReceipt : headReceipt;
@@ -62,12 +66,19 @@ const root = () => {
   roots.push(dir);
   return dir;
 };
-const start = (dir: string, mode: string): Head => {
+const start = (dir: string, mode: string, routingBinary = process.env["CATALY_DISCORD_NATIVE_BIN"]): Head => {
   const events: Event[] = [];
   const observers = new Set<(event: Event) => void>();
   const exitFile = join(dir, `source-exit-${heads.length}`);
   const proc = Bun.spawn([process.execPath, fixture, dir, mode, exitFile], {
-    env: { ...process.env, HOME: dir, PI_CODING_AGENT_DIR: join(dir, "agent") },
+    env: {
+      ...process.env,
+      HOME: dir,
+      PI_CODING_AGENT_DIR: join(dir, "agent"),
+      CATALY_DISCORD_NATIVE_BIN: routingBinary,
+      // The monitored CLI always gets the real monitor, even when the supervisor's router is made unavailable.
+      CATALY_TEST_MONITOR_NATIVE_BIN: process.env["CATALY_DISCORD_NATIVE_BIN"],
+    },
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
@@ -136,7 +147,7 @@ afterEach(async () => {
   for (const dir of roots.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-posix(
+nativeCli(
   "public CLI one-shot exits after native receipt and keeps context in the admitted group",
   async () => {
     const dir = root();
@@ -164,7 +175,59 @@ posix(
   15000,
 );
 
-posix(
+test.skipIf(process.platform !== "linux" || !nativeBinary)(
+  "supervised Discord routes ASK and head through one Rust child",
+  async () => {
+    const dir = root();
+    const mailbox = openDiscordAskMailbox(join(dir, "queue"), "20", "95", "10");
+    const head = start(dir, "cli-shared");
+    const { sourcePid } = await event(head, "ready");
+    expect(typeof sourcePid).toBe("number");
+    const handoff = await event(head, "handoff");
+    expect(handoff.content).toContain("regular head request");
+    expect(sources(head).map((source) => source.identity)).toEqual(["99:10:20:102"]);
+    expect(mailbox.replies(new Set())).toEqual([{ id: "101", text: "answer to the pending ASK" }]);
+
+    const processes = Bun.spawnSync(["ps", "-axo", "ppid=,args="]);
+    expect(processes.exitCode).toBe(0);
+    const routers = processes.stdout
+      .toString()
+      .trim()
+      .split("\n")
+      .flatMap((line) => {
+        const row = line.trim().match(/^(\d+)\s+.*\/cataly routing$/);
+        const parent = Number(row?.[1]);
+        return parent === head.proc.pid || parent === sourcePid ? [parent] : [];
+      });
+    expect(routers).toEqual([head.proc.pid]);
+    await stop(head);
+  },
+  15000,
+);
+
+nativeCli(
+  "an unavailable shared router holds the original ASK and a fresh supervisor can finish it",
+  async () => {
+    const dir = root();
+    const mailbox = openDiscordAskMailbox(join(dir, "queue"), "20", "95", "10");
+    const failed = start(dir, "cli-shared", join(dir, "missing-cataly"));
+    const exited = await event(failed, "source-exited");
+    expect(exited.content).toContain("[source] monitor exited (code 1):");
+    expect(sources(failed)).toEqual([]);
+    expect(mailbox.replies(new Set())).toEqual([]);
+    pending(dir, null, "100");
+    await stop(failed);
+
+    const recovered = start(dir, "cli-shared");
+    expect((await event(recovered, "handoff")).content).toContain("regular head request");
+    expect(mailbox.replies(new Set())).toEqual([{ id: "101", text: "answer to the pending ASK" }]);
+    expect(sources(recovered).map(({ identity }) => identity)).toEqual(["99:10:20:102"]);
+    await stop(recovered);
+  },
+  15000,
+);
+
+nativeCli(
   "default public REST exits nonzero when the native event has no durable receipt",
   async () => {
     const dir = root();

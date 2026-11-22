@@ -4,6 +4,13 @@
  * expects; omp has no built-in equivalent.
  */
 import type { Subprocess } from "bun";
+import { resolve } from "node:path";
+import { discordNativeBinary } from "../skills/cataly-mode/scripts/src/cli-discord-binary.ts";
+import {
+  ASK_RELAY_PROTOCOL,
+  ASK_RELAY_STATE,
+  routeAskRelay,
+} from "../skills/cataly-mode/scripts/src/messenger/discord-ask-relay.ts";
 import {
   HEAD_ADMISSION_PROTOCOL,
   isHeadAdmissionProtocol,
@@ -41,6 +48,7 @@ type Running = {
   readonly signal: AbortSignal;
   readonly restart?: MonitorSpec["restart"];
   readonly options: MonitorOptions;
+  readonly askState: string | undefined;
   stopped: boolean;
   admitting: boolean;
   prepared?: {
@@ -93,6 +101,7 @@ export class Monitors {
     batchMs = BATCH_MS,
     restart: number | HeadAdmissions = 5_000,
     recipeContext?: RecipeContext,
+    private readonly routingState?: () => string | undefined,
   ) {
     this.#deliver = deliver;
     this.#currentSession = currentSession;
@@ -136,6 +145,8 @@ export class Monitors {
     const env = this.#recipeContext
       ? (legacyRecipeEnv(argv, this.#recipeContext) ?? this.#recipeContext.env)
       : process.env;
+    const state = this.routingState?.();
+    const askState = this.#admissions && state && discordNativeBinary() ? resolve(state) : undefined;
     let entry: Running;
     const proc = Bun.spawn([...argv], {
       cwd,
@@ -149,6 +160,7 @@ export class Monitors {
               CATALY_MONITOR_ADMISSION: "1",
               CATALY_MONITOR_ADMISSION_PROTOCOL: HEAD_ADMISSION_PROTOCOL,
               DORI_MONITOR_ADMISSION: "1",
+              [ASK_RELAY_STATE]: askState ?? "",
             },
             serialization: "json" as const,
             ipc: (message: unknown) => this.#ipc(entry, message),
@@ -167,6 +179,7 @@ export class Monitors {
       admitting: false,
       restart,
       options,
+      askState,
     };
     this.#running.set(name, entry);
     const finish = proc.exited.then((code) => {
@@ -337,15 +350,23 @@ export class Monitors {
       entry.proc.signalCode === null &&
       this.#running.get(entry.name) === entry;
     const isCurrent = () => epoch === this.#admissionEpoch && sourceIsRunning() && this.#current(entry);
-    if (
-      !admissions ||
-      !sourceIsRunning() ||
-      raw === null ||
-      typeof raw !== "object" ||
-      !("protocol" in raw) ||
-      !isHeadAdmissionProtocol(raw.protocol)
-    )
+    if (!admissions || !sourceIsRunning() || raw === null || typeof raw !== "object" || !("protocol" in raw)) return;
+    if (raw.protocol === ASK_RELAY_PROTOCOL) {
+      const ownsAskState = () => {
+        const current = this.routingState?.();
+        return current !== undefined && resolve(current) === entry.askState && isCurrent();
+      };
+      routeAskRelay(raw, entry.askState, ownsAskState, (reply) => {
+        if (!sourceIsRunning()) return;
+        try {
+          entry.proc.send(reply);
+        } catch (error) {
+          if (sourceIsRunning()) console.error("ASK supervision reply failed", error);
+        }
+      });
       return;
+    }
+    if (!isHeadAdmissionProtocol(raw.protocol)) return;
     const fail = () => {
       entry.admitting = false;
       if (!sourceIsRunning()) return;
@@ -404,6 +425,7 @@ export class Monitors {
       .receive(raw, {
         source: entry.proc.pid,
         session: entry.session,
+        isCurrent,
         accepts(content) {
           if (!isCurrent()) throw new Error("inactive head source");
           return content.split("\n").some((line) => entry.filter.test(line));

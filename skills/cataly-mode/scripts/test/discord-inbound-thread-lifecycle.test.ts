@@ -4,7 +4,6 @@ import type { Request } from "../src/messenger/discord-inbound-api.ts";
 import type { DiscordInboundStore } from "../src/messenger/discord-inbound-state.ts";
 import { discordThreads } from "../src/messenger/discord-inbound-threads.ts";
 import { discordRestWorld, memoryDiscordCursor, ownerMessage } from "./discord-inbound-fakes.ts";
-import { memoryLiveWorld } from "./discord-inbound-live-fakes.ts";
 
 const cursors = () => {
   const stores = new Map<string, DiscordInboundStore>();
@@ -92,35 +91,6 @@ test("historical metadata cache holds at most 256 LRU results without evicting c
   expect(await following.parentOf("30")).toBe("20");
   expect(calls.get("30")).toBe(1);
 });
-
-for (const type of [10, 11, 12, 0]) {
-  test(`live channel type ${type} ${type === 0 ? "does not confuse a category with" : "establishes"} thread scope`, async () => {
-    const world = await memoryLiveWorld([ownerMessage("100")], { ownerId: "10", channelIds: ["20"] });
-    const socket = world.sockets[0]!;
-    await world.connect(socket);
-    world.rest.state.responses.set("/channels/50", JSON.stringify({ type, parent_id: "20" }));
-    await world.dispatch(socket, ownerMessage("201", { channel_id: "50" }));
-    expect(world.received).toEqual(type === 0 ? [] : ["50:201"]);
-    expect(world.intake.channels()).toEqual(type === 0 ? ["20"] : ["20", "50"]);
-  });
-}
-
-for (const all of [false, true]) {
-  test(`${all ? "scope all" : "threads off"} does not perform unknown parent discovery`, async () => {
-    const world = await memoryLiveWorld([ownerMessage("100")], {
-      ownerId: "10",
-      channelIds: ["20"],
-      all,
-      threads: false,
-    });
-    const socket = world.sockets[0]!;
-    await world.connect(socket);
-    world.rest.state.failure.set("/channels/50", 401);
-    await world.dispatch(socket, ownerMessage("201", { channel_id: "50" }));
-    expect(world.received).toEqual(all ? ["50:201"] : []);
-    expect(world.rest.requests.some((request) => new URL(request.url).pathname.endsWith("/channels/50"))).toBe(false);
-  });
-}
 
 for (const status of [403, 404]) {
   test(`an explicit thread keeps fatal HTTP ${status} rather than becoming optional discovery`, async () => {

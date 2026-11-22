@@ -9,7 +9,9 @@ use serde_json::{Value, json};
 
 use super::{BotProfile, Message, Snowflake};
 
+mod extra;
 mod http;
+pub(in crate::discord) use extra::{PartPost, RestStatus};
 
 pub(super) struct DiscordApi {
     client: Client,
@@ -118,6 +120,32 @@ impl DiscordApi {
             page.len() <= usize::from(limit)
                 && page.iter().all(|message| message.channel_id == channel),
             "Discord history response did not match its channel or page limit"
+        );
+        Ok(page)
+    }
+
+    /// One raw history page for TS-parity intake (`messagePage`, discord-inbound-api.ts:109-128).
+    pub(super) async fn history_raw(
+        &self,
+        channel: Snowflake,
+        before: Option<Snowflake>,
+        limit: u8,
+    ) -> Result<Vec<Value>> {
+        let mut path = format!("channels/{channel}/messages?limit={limit}");
+        if let Some(before) = before {
+            use std::fmt::Write as _;
+            write!(path, "&before={before}")?;
+        }
+        let Value::Array(page) = self.get::<Value>(&path).await? else {
+            anyhow::bail!("Discord inbound message response is invalid");
+        };
+        ensure!(
+            page.len() <= usize::from(limit)
+                && page.iter().all(|message| message
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| Snowflake::try_from(id.to_owned()).is_ok())),
+            "Discord inbound message response is invalid"
         );
         Ok(page)
     }

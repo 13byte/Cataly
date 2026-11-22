@@ -9,6 +9,7 @@ from threading import Thread
 
 from discord_wire import Discord, World, message
 from stock_discord_send import exercise_send
+from stock_discord_queue import exercise_queue
 
 
 README = "Cataly transport fixture — 네이티브 Discord"
@@ -31,6 +32,7 @@ def exercise_monitor(command, env, root, calls, results):
         rest(prefix, wire_env, root, world, calls, command[2])
         gateway(prefix, wire_env, root, world, calls, results)
         memory_checkpoint(prefix, wire_env, root, world)
+        exercise_queue(prefix, wire_env, root, world, calls)
         exercise_send(command[0], wire_env, world)
         presence(command[0], wire_env, world)
     finally:
@@ -150,7 +152,7 @@ def gateway(prefix, env, root, world, calls, results):
             world.events.put({"op": 7})
             resume = world.auth.get(timeout=5)
             assert resume["op"] == 6 and resume["d"]["session_id"] == "local-session", resume
-            world.add(message("103", "cataly-test: native ordinary Gateway"))
+            world.dispatch("MESSAGE_CREATE", message("103", "cataly-test: native ordinary Gateway"))
             plain = world.replies.get(timeout=15)
             assert plain["content"] == "확인: native ordinary Gateway" and "components" not in plain, plain
             assert calls.count("native ordinary Gateway") == 1

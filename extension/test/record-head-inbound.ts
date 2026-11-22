@@ -4,7 +4,7 @@ import {
   formatDiscordInbound,
 } from "../../skills/cataly-mode/scripts/src/messenger/discord-inbound.ts";
 import { discordInboundQueue } from "../../skills/cataly-mode/scripts/src/messenger/discord-inbound-queue.ts";
-import { headEmitter, reconcileHead } from "../../skills/cataly-mode/scripts/src/messenger/head-admission.ts";
+import { headEmitter, reconcileHead } from "./head-admission-client.ts";
 import { discordRestWorld, ownerMessage } from "../../skills/cataly-mode/scripts/test/discord-inbound-fakes.ts";
 
 const [stateDir, exitFile, mode] = process.argv.slice(2);

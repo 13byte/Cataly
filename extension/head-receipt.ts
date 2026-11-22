@@ -1,5 +1,6 @@
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
+import { routeNativeHead } from "../skills/cataly-mode/scripts/src/messenger/native-routing.ts";
 import { isCatalyEntry, isMonitorMessage, MONITOR_MESSAGE } from "../skills/cataly-mode/scripts/src/session-compat.ts";
 
 type Metadata = { readonly identity?: unknown; readonly fingerprint?: unknown };
@@ -36,6 +37,19 @@ export async function headReceipt(
   identity: string,
   fingerprint: string,
 ): Promise<{ outcome: "accepted" | "rejected"; receipt: string } | undefined> {
+  const native = routeNativeHead({
+    op: "reconcile",
+    file,
+    identity,
+    fingerprint,
+    check_disk: true,
+    binding: "original",
+    accepts: false,
+  });
+  if (native) {
+    const decision = await native;
+    return "receipt" in decision ? { outcome: decision.action, receipt: decision.receipt } : undefined;
+  }
   const fileHandle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const stat = await fileHandle.stat();

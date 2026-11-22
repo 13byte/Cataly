@@ -85,6 +85,17 @@ posix(
   },
 );
 
+test.skipIf(
+  typeof process.getuid !== "function" ||
+    !process.env["CATALY_DISCORD_NATIVE_BIN"] ||
+    process.env["CATALY_DISCORD_NATIVE_BIN"] === "off",
+)("an oversized Rust receipt fails only its own routing request", async () => {
+  const oversized = transcript(`${JSON.stringify(receipt("accepted", { id: "x".repeat(128 * 1024) }))}\n`);
+  const next = transcript(`${JSON.stringify(receipt("rejected"))}\n`);
+  await expect(headReceipt(oversized, identity, fingerprint)).rejects.toThrow("response exceeded the frame limit");
+  expect(await headReceipt(next, identity, fingerprint)).toEqual({ outcome: "rejected", receipt: "native-entry-1" });
+});
+
 posix("symlinks and multiply-linked files cannot substitute a native receipt target", async () => {
   const file = transcript(`${JSON.stringify(receipt("accepted"))}\n`);
   const alias = `${file}.alias`;

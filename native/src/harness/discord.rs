@@ -44,6 +44,15 @@ impl std::fmt::Display for Snowflake {
 impl Snowflake {
     #[cfg(feature = "discord")]
     pub(crate) const FLOOR: Self = Self(NonZeroU64::MIN);
+
+    #[cfg(feature = "discord")]
+    pub(crate) fn preceding(self) -> Option<Self> {
+        NonZeroU64::new(self.0.get() - 1).map(Self)
+    }
+
+    pub(crate) const fn timestamp_ms(self) -> u64 {
+        (self.0.get() >> 22) + 1_420_070_400_000
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

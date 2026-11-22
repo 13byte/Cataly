@@ -12,6 +12,8 @@ mod frames;
 #[cfg(unix)]
 mod harness;
 mod omp;
+#[cfg(unix)]
+mod routing;
 mod rpc;
 
 #[derive(Debug, Parser)]
@@ -54,13 +56,17 @@ enum Command {
     },
     /// Run the native Discord intake, approvals and reply transport in the foreground.
     #[cfg(all(unix, feature = "discord"))]
-    Discord(discord::Options),
+    Discord(Box<discord::Options>),
     /// Send or edit Discord text from standard input without launching OMP.
     #[cfg(all(unix, feature = "discord"))]
     DiscordSend(discord::SendOptions),
     /// Keep a Discord bot online without starting the inbox or OMP.
     #[cfg(all(unix, feature = "discord"))]
     DiscordPresence,
+    /// Route local Cataly head/ASK records over private stdio; does not launch OMP.
+    #[cfg(unix)]
+    #[command(hide = true)]
+    Routing,
 }
 
 #[derive(Serialize)]
@@ -134,11 +140,13 @@ async fn main() -> Result<()> {
             .await?;
         }
         #[cfg(all(unix, feature = "discord"))]
-        Command::Discord(options) => Box::pin(discord::run(&omp, &cli.cwd, options)).await?,
+        Command::Discord(options) => Box::pin(discord::run(&omp, &cli.cwd, *options)).await?,
         #[cfg(all(unix, feature = "discord"))]
         Command::DiscordSend(options) => Box::pin(discord::send(options)).await?,
         #[cfg(all(unix, feature = "discord"))]
         Command::DiscordPresence => Box::pin(discord::presence()).await?,
+        #[cfg(unix)]
+        Command::Routing => routing::run()?,
     }
     Ok(())
 }

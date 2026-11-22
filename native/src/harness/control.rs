@@ -118,6 +118,7 @@ impl<R: AsyncBufRead + Unpin, W: AsyncWrite + Unpin> ControlIo<R, W> {
             approvals: tools.then_some(publish),
             memory_context: None,
             fenced_replies: false,
+            discord_head: false,
         };
         let mut execution = pin!(harness.execute(run, options));
         loop {

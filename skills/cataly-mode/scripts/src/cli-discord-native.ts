@@ -1,5 +1,5 @@
 import { mkdir } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { discordInboundEnv } from "./messenger/discord-inbound-state.ts";
 import { messengerProfileDefaultsEnabled } from "./messenger/profile-defaults.ts";
@@ -10,19 +10,15 @@ type Config = {
   readonly workspace?: string;
   readonly pollMinutes: number;
   readonly gateway: boolean;
-  readonly context: boolean;
-  readonly wake: boolean;
-  readonly activityFile?: string;
+  readonly threads: boolean;
+  readonly head?: string | undefined;
 };
 
-/** Compatibility entry point only: Rust owns sockets, cursors, approval and replies. */
+/** A Rust-owned OMP receiver (standalone lanes or the head): Rust owns sockets, cursors, approval and replies. */
 export async function runNativeDiscord(executable: string, config: Config): Promise<void> {
   const workspace = process.env["CATALY_DISCORD_NATIVE_WORKSPACE"] || config.workspace;
   if (!isAbsolute(executable) || !workspace || !isAbsolute(workspace)) {
     throw new Error("Set absolute CATALY_DISCORD_NATIVE_BIN and CATALY_DISCORD_NATIVE_WORKSPACE paths");
-  }
-  if (config.context || config.wake || config.activityFile !== undefined) {
-    throw new Error("--context, --wake-lanes and --activity-file are legacy Discord monitor options");
   }
   const selected = process.env["CATALY_DISCORD_NATIVE_CHANNEL_ID"];
   const channels = selected
@@ -35,14 +31,31 @@ export async function runNativeDiscord(executable: string, config: Config): Prom
   const argv = [executable, "--cwd", workspace];
   const model = process.env["CATALY_DISCORD_NATIVE_MODEL"]?.trim();
   if (model) argv.push("--model", model);
-  argv.push(
-    "discord",
-    "--state-dir",
-    join(config.stateDir, "discord-native"),
-    "--legacy-cursors",
-    join(config.stateDir, "discord-inbound"),
-  );
+  const inbox = join(config.stateDir, "discord-inbound");
+  if (config.head) {
+    const head = discordInboundEnv("CATALY_DISCORD_HEAD_CHANNEL_ID", config.head);
+    if (!channels.includes(head)) throw new Error("Rust-owned Discord head must be explicitly configured");
+    argv.push(
+      "discord",
+      "--state-dir",
+      join(config.stateDir, "discord-head"),
+      "--head-channel",
+      head,
+      "--ask-state",
+      resolve(config.stateDir),
+    );
+  } else {
+    argv.push(
+      "discord",
+      "--state-dir",
+      join(config.stateDir, "discord-native"),
+      "--ask-state",
+      resolve(config.stateDir),
+    );
+  }
+  argv.push("--inbox", inbox, "--legacy-cursors", inbox);
   for (const channel of channels) argv.push("--channel", channel);
+  if (config.threads) argv.push("--follow-threads");
   if (config.gateway) argv.push("--gateway");
   else argv.push("--poll-seconds", String(Math.ceil(config.pollMinutes * 60)));
   if (messengerProfileDefaultsEnabled()) {

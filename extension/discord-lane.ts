@@ -7,10 +7,7 @@ import {
 } from "../skills/cataly-mode/scripts/src/discord-lane-headless-state.ts";
 import { isDiscordWakePending } from "../skills/cataly-mode/scripts/src/discord-lane-wake-pending.ts";
 import { type GoalStatus, readPaneState } from "../skills/cataly-mode/scripts/src/lane-state.ts";
-import {
-  routeDiscordAskReply,
-  routeUnreferencedDiscordAskText,
-} from "../skills/cataly-mode/scripts/src/messenger/discord-ask-mailbox.ts";
+import { routeDiscordAsk } from "../skills/cataly-mode/scripts/src/messenger/discord-ask-routing.ts";
 import {
   type DiscordAskReceiverPublication,
   discordAskReceivers,
@@ -440,10 +437,7 @@ export class DiscordLane {
           const { receiver: scopedIntake, discord } = intake;
           await scopedIntake.poll(async (message) => {
             signal.throwIfAborted();
-            if (
-              routeDiscordAskReply(stateDir, message, explicit.owner) ||
-              (message.unreferencedText && routeUnreferencedDiscordAskText(stateDir, message, explicit.owner))
-            ) {
+            if (await routeDiscordAsk(stateDir, message, explicit.owner)) {
               await markDiscordInboundSeen(discord, message);
               return;
             }

@@ -36,8 +36,9 @@ test("only the launched lane's exact native session can reuse its recorded bindi
   expect(bindAskLane(entries, "session-a", undefined, record)).toBeUndefined();
 });
 
-// The live receiver writes a POSIX-private cursor and receiver lease.
-const posix = test.skipIf(process.platform === "win32");
+// The live receiver is the native monitor; it writes a POSIX-private cursor and receiver lease.
+const nativeBinary = process.env["CATALY_DISCORD_NATIVE_BIN"];
+const posix = test.skipIf(process.platform === "win32" || !nativeBinary || nativeBinary === "off");
 posix.each(["private file", "lead environment"] as const)(
   "live Discord accepts an owner ASK reply using %s credentials",
   verifyAutomaticAsk,
@@ -140,6 +141,8 @@ async function verifyAutomaticAsk(credential: "private file" | "lead environment
         CATALY_DISCORD_OWNER_ID: owner,
         CATALY_DISCORD_CHANNEL_IDS: channels,
         CATALY_DISCORD_THREADS: "off",
+        CATALY_DISCORD_NATIVE_BIN: nativeBinary,
+        CATALY_MESSENGER_PROFILE_DEFAULTS: "off",
         DO_NOT_TRACK: "1",
       },
     });

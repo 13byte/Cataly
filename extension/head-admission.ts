@@ -1,4 +1,5 @@
 import { isAbsolute } from "node:path";
+import { routeNativeHead } from "../skills/cataly-mode/scripts/src/messenger/native-routing.ts";
 import { isHeadAdmissionProtocol } from "../skills/cataly-mode/scripts/src/messenger/head-admission-protocol.ts";
 import type { HeadReply, HeadRequest, HeadResult } from "../skills/cataly-mode/scripts/src/messenger/head-admission.ts";
 import { MONITOR_MESSAGE, SESSION_WIRE } from "../skills/cataly-mode/scripts/src/session-compat.ts";
@@ -9,6 +10,7 @@ type AdmissionDetails = { ompDoriAdmission: { identity: string; fingerprint: str
 type Binding = {
   source: number;
   session: string;
+  isCurrent(): boolean;
   accepts(content: string): boolean;
   deliver(content: string, details: AdmissionDetails): void | Promise<void>;
 };
@@ -72,25 +74,47 @@ export class HeadAdmissions {
     if (!head || head.id !== binding.session) return { outcome: "unresolved" };
     await head.ensureOnDisk();
     const headFile = request.headFile ?? head.file;
-    const receipt =
-      headFile !== head.file || hasHeadReceipt(head.entries(), request.identity)
-        ? await headReceipt(headFile, request.identity, request.fingerprint)
-        : undefined;
-    if (receipt) return { ...receipt, headFile, headPid: process.pid };
-    if (this.current()?.id !== head.id || this.current()?.file !== head.file) return { outcome: "unresolved" };
-    // An earlier attempted delivery without its original receipt is quarantined, not replayed into a new head.
-    if (request.op === "reconcile" || (request.op === "prepare" && request.headFile !== undefined))
+    const checkDisk = headFile !== head.file || hasHeadReceipt(head.entries(), request.identity);
+    const accepts =
+      request.op === "dispatch" && headFile === head.file && binding.isCurrent() && binding.accepts(request.content);
+    const native = routeNativeHead({
+      op: request.op,
+      file: headFile,
+      identity: request.identity,
+      fingerprint: request.fingerprint,
+      check_disk: checkDisk,
+      binding: request.headFile === undefined ? "new" : headFile === head.file ? "original" : "other",
+      accepts,
+    });
+    const decision = native ? await native : undefined;
+    if (decision && "receipt" in decision)
+      return { outcome: decision.action, receipt: decision.receipt, headFile, headPid: process.pid };
+    if (!decision && checkDisk) {
+      const receipt = await headReceipt(headFile, request.identity, request.fingerprint);
+      if (receipt) return { ...receipt, headFile, headPid: process.pid };
+    }
+    if (!binding.isCurrent() || this.current()?.id !== head.id || this.current()?.file !== head.file)
       return { outcome: "unresolved" };
-    const accepts = binding.accepts(request.content);
+    // An earlier attempted delivery without its original receipt is quarantined, not replayed into a new head.
+    if (
+      decision?.action === "unresolved" ||
+      request.op === "reconcile" ||
+      (request.op === "prepare" && request.headFile !== undefined)
+    )
+      return { outcome: "unresolved" };
     // Even a deliberate rejection follows the receiver's durable attempt record.
-    if (request.op === "prepare") return { outcome: "ready", headFile: head.file, headPid: process.pid };
+    if (request.op === "prepare")
+      return !decision || decision.action === "ready"
+        ? { outcome: "ready", headFile: head.file, headPid: process.pid }
+        : { outcome: "unresolved" };
     if (request.headFile !== head.file) return { outcome: "unresolved" };
-    if (!accepts) {
+    if (decision?.action === "reject" || (!decision && !accepts)) {
       this.reject({ ompDoriAdmission: { identity: request.identity, fingerprint: request.fingerprint } });
       await head.ensureOnDisk();
       const rejected = await headReceipt(head.file, request.identity, request.fingerprint);
       return rejected ? { ...rejected, headFile: head.file, headPid: process.pid } : { outcome: "unresolved" };
     }
+    if (decision && decision.action !== "deliver") return { outcome: "unresolved" };
     const pending = {
       ...Promise.withResolvers<HeadResult>(),
       source: binding.source,

@@ -2,10 +2,22 @@ name: Cataly Native
 
 on:
   pull_request:
-    paths: ["Cargo.toml", "Cargo.lock", "native/**", ".github/workflows/cataly-native.yml"]
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - native/**
+      - extension/**
+      - skills/cataly-mode/scripts/src/messenger/**
+      - .github/workflows/cataly-native.yml
   push:
     branches: [main]
-    paths: ["Cargo.toml", "Cargo.lock", "native/**", ".github/workflows/cataly-native.yml"]
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - native/**
+      - extension/**
+      - skills/cataly-mode/scripts/src/messenger/**
+      - .github/workflows/cataly-native.yml
   schedule:
     - cron: "37 4 * * *"
   workflow_dispatch:
@@ -24,6 +36,15 @@ jobs:
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo clippy --locked --all-targets --no-default-features -- -D warnings
       - run: cargo test --locked
+      - uses: ./.github/actions/setup
+        with:
+          fixtures: host
+      - run: cargo build --locked
+      - name: Exercise head and ASK with the native routing binary
+        working-directory: extension
+        run: |
+          CATALY_DISCORD_NATIVE_BIN="$GITHUB_WORKSPACE/target/debug/cataly" \
+            bun test ./test/head-admission.test.ts ./test/head-receipt.test.ts ./test/discord-ask-mailbox.test.ts
 
   stock-omp:
     runs-on: ubuntu-24.04

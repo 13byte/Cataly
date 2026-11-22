@@ -1,16 +1,16 @@
 use std::fs::File;
-use std::io::Read as _;
+use std::io::{Read as _, Write as _};
 use std::os::unix::fs::MetadataExt as _;
 use std::path::Path;
 
 use anyhow::{Context, Result, ensure};
-use rustix::fs::{Mode, OFlags, open, openat};
+use rustix::fs::{AtFlags, Mode, OFlags, open, openat, renameat, unlinkat};
 use rustix::io::Errno;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::Snowflake;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SavedPosition {
     version: u8,
@@ -19,7 +19,10 @@ struct SavedPosition {
     position: String,
 }
 
-pub(super) fn read(dir: Option<&Path>, channel: Snowflake) -> Result<Option<Snowflake>> {
+pub(in crate::discord) fn read(
+    dir: Option<&Path>,
+    channel: Snowflake,
+) -> Result<Option<Snowflake>> {
     let Some(dir) = dir else {
         return Ok(None);
     };
@@ -70,4 +73,59 @@ pub(super) fn read(dir: Option<&Path>, channel: Snowflake) -> Result<Option<Snow
     } else {
         Snowflake::try_from(cursor.position).map_err(anyhow::Error::msg)?
     }))
+}
+
+pub(in crate::discord) fn write(
+    dir: Option<&Path>,
+    channel: Snowflake,
+    cursor: Snowflake,
+) -> Result<()> {
+    let Some(dir) = dir else { return Ok(()) };
+    if read(Some(dir), channel)?.is_some_and(|prior| prior >= cursor) {
+        return Ok(());
+    }
+    let handle = match open(
+        dir,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::DIRECTORY,
+        Mode::empty(),
+    ) {
+        Ok(fd) => File::from(fd),
+        Err(Errno::NOENT) => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    let meta = handle.metadata()?;
+    ensure!(
+        meta.uid() == rustix::process::geteuid().as_raw() && meta.mode().trailing_zeros() >= 6,
+        "legacy Discord cursor directory is not private"
+    );
+    let path = format!("{channel}.json");
+    let temporary = format!(".{channel}.cataly-native.tmp");
+    match unlinkat(&handle, temporary.as_str(), AtFlags::empty()) {
+        Ok(()) | Err(Errno::NOENT) => {}
+        Err(error) => return Err(error.into()),
+    }
+    let mut file = File::from(openat(
+        &handle,
+        temporary.as_str(),
+        OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::RUSR | Mode::WUSR,
+    )?);
+    serde_json::to_writer(
+        &mut file,
+        &SavedPosition {
+            version: 1,
+            channel_id: channel,
+            // The TS store writes "0" for a channel without messages; FLOOR reads back from "0".
+            position: if cursor == Snowflake::FLOOR {
+                "0".to_owned()
+            } else {
+                cursor.to_string()
+            },
+        },
+    )?;
+    file.write_all(b"\n")?;
+    file.sync_all()?;
+    renameat(&handle, temporary.as_str(), &handle, path.as_str())?;
+    handle.sync_all()?;
+    Ok(())
 }

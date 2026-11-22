@@ -4,7 +4,6 @@ import { discordInbound, formatDiscordInbound } from "../src/messenger/discord-i
 import { toInbound } from "../src/messenger/discord-inbound-api.ts";
 import type { Http, HttpRequest } from "../src/messenger/http.ts";
 import { discordRestWorld, memoryDiscordCursor, ownerMessage } from "./discord-inbound-fakes.ts";
-import { liveWorld, memoryLiveWorld } from "./discord-inbound-live-fakes.ts";
 import { fakeClock } from "./fakes.ts";
 
 const original = () => ({
@@ -81,30 +80,6 @@ test("a mismatched reply stops before its emit and cursor while preserving earli
   expect(delivered).toEqual(["101"]);
   expect(cursor.saved).toEqual(["101"]);
   expect(cursor.store.load()).toBe("101");
-});
-
-test("a mismatched live Gateway reply remains uncommitted and closes intake", async () => {
-  const createWorld = process.platform === "win32" ? memoryLiveWorld : liveWorld;
-  const world = await createWorld([], { ownerId: "10", channelIds: ["20"] }, { "20": "100" });
-  try {
-    const [socket] = world.sockets;
-    if (!socket) throw new Error("gateway did not open");
-    await world.connect(socket);
-    await world.dispatch(socket, ownerMessage("101"));
-    const bad = {
-      ...original(),
-      id: "102",
-      referenced_message: { ...original().referenced_message, channel_id: "21" },
-    };
-    await world.dispatch(socket, bad);
-    await expect(world.live.done).rejects.toMatchObject({ status: 502, code: "DISCORD_INBOUND_PROTOCOL_ERROR" });
-    expect(world.received).toEqual(["20:101"]);
-    expect(world.cursor("20")).toBe("101");
-    expect(socket.closed).toBe(true);
-    expect(world.pending.size).toBe(0);
-  } finally {
-    world.live.close();
-  }
 });
 
 /** A synthetic Discord endpoint enforcing its atomic reply-existence contract, not a preflight lookup. */

@@ -1,4 +1,3 @@
-import type { Discord } from "./discord.ts";
 import type { Telegram } from "./telegram.ts";
 
 const avatar = new URL("../../../assets/cataly-avatar.jpg", import.meta.url);
@@ -6,21 +5,6 @@ const timeoutMs = 5_000;
 
 export const messengerProfileDefaultsEnabled = (): boolean =>
   process.env["CATALY_MESSENGER_PROFILE_DEFAULTS"]?.trim().toLowerCase() !== "off";
-
-export async function applyDiscordAvatarDefault(discord: Discord): Promise<void> {
-  try {
-    const bytes = await Bun.file(avatar).arrayBuffer();
-    await discord.call(
-      "PATCH",
-      "/users/@me",
-      { avatar: `data:image/jpeg;base64,${Buffer.from(bytes).toString("base64")}` },
-      AbortSignal.timeout(timeoutMs),
-    );
-  } catch (error) {
-    if (!(error instanceof Error)) throw error;
-    console.error("Discord default bot avatar could not be set; inbound will continue.");
-  }
-}
 
 export async function applyTelegramProfileDefaults(tg: Telegram, botId: number, name: string): Promise<void> {
   try {

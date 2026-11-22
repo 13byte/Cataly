@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use crate::omp::Identity;
 
 mod discord;
+#[cfg(feature = "discord")]
+pub(super) use discord::HeadSource;
 mod receipts;
 pub(super) use receipts::Claim;
 

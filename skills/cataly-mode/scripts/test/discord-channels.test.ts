@@ -1,26 +1,8 @@
 import { expect, test } from "bun:test";
 import { readFileSync, statSync, writeFileSync } from "node:fs";
-import { type DcChannel, Discord } from "../src/messenger/discord.ts";
 import { ChannelPurposeError, DiscordChannels } from "../src/messenger/discord-channels.ts";
-import { inboundContext } from "../src/messenger/discord-inbound-context.ts";
-import { MessengerError } from "../src/messenger/http.ts";
 import { ids, withDiscordCli } from "./discord-fakes.ts";
-import { fakeClock, withState } from "./fakes.ts";
-
-/** A Discord whose channel lookups answer from a table, counting each lookup. */
-const fakeDiscord = (table: Record<string, DcChannel | MessengerError | "hang">) => {
-  const looked: string[] = [];
-  const discord = new Discord(async () => ({ status: 500, headers: {}, body: "" }), fakeClock(0), "t");
-  discord.channel = async (id: string) => {
-    looked.push(id);
-    const answer = table[id];
-    if (answer === "hang") return await new Promise<DcChannel>(() => {});
-    if (answer instanceof MessengerError) throw answer;
-    if (answer === undefined) throw new MessengerError("missing", 404);
-    return answer;
-  };
-  return { discord, looked };
-};
+import { withState } from "./fakes.ts";
 
 test("purposes are stored privately, replaced, cleared and validated before anything is written", async () => {
   const state = withState();
@@ -55,84 +37,6 @@ test("purposes are stored privately, replaced, cleared and validated before anyt
       await expect(store.set("30", "fine", undefined, 0)).rejects.toBeInstanceOf(ChannelPurposeError);
       expect(readFileSync(store.path, "utf8")).toBe(damaged);
     }
-  } finally {
-    state.done();
-  }
-});
-
-test("context names a thread under its parent, marks a DM, caches lookups and never throws", async () => {
-  const state = withState();
-  try {
-    const store = new DiscordChannels(state.dir);
-    await store.set("30", "dev", "dev", 0);
-    await store.set("50", "owner DM", undefined, 0);
-    const { discord, looked } = fakeDiscord({
-      "20": { id: "20", type: 11, name: "task", parent_id: "30" },
-      "30": { id: "30", type: 0, name: "dev", topic: "" },
-      "50": { id: "50", type: 1 },
-      "60": "hang",
-      "70": { id: "70", type: 11, name: "orphan", parent_id: "71" },
-    });
-    let now = 0;
-    const where = inboundContext(discord, store, () => now, 20);
-    expect(await where("20")).toEqual({
-      channel: { id: "30", name: "dev", purpose: "dev" },
-      thread: { id: "20", name: "task", purpose: null },
-    });
-    expect(await where("50")).toEqual({ channel: { id: "50", dm: true, purpose: "owner DM" }, thread: null });
-    expect(await where("60")).toEqual({
-      channel: { id: "60", purpose: null },
-      thread: null,
-      error: "channel lookup timed out",
-    });
-    // A thread whose parent cannot be read is still a thread under that parent ID.
-    expect(await where("70")).toEqual({
-      channel: { id: "71", purpose: null },
-      thread: { id: "70", name: "orphan", purpose: null },
-      error: "channel lookup failed (HTTP 404)",
-    });
-    // A failed or hung lookup is remembered for the minute: no second request, and no second wait once past the bound.
-    now = 30;
-    expect((await where("70")).error).toBe("channel lookup failed (HTTP 404)");
-    expect((await where("60")).error).toBe("channel lookup timed out");
-    expect(looked.filter((id) => id === "71" || id === "60")).toEqual(["60", "71"]);
-    now = 0;
-    expect(looked.filter((id) => id === "20" || id === "30")).toEqual(["20", "30"]);
-    await where("20");
-    expect(looked.filter((id) => id === "20")).toHaveLength(1);
-    now = 60_000;
-    await where("20");
-    expect(looked.filter((id) => id === "20")).toHaveLength(2);
-    writeFileSync(store.path, "[]");
-    expect(await where("20")).toEqual({
-      channel: { id: "30", name: "dev", purpose: null },
-      thread: { id: "20", name: "task", purpose: null },
-      error: "channel purposes unreadable",
-    });
-  } finally {
-    state.done();
-  }
-});
-
-test("a long-running context drops expired lookups and never holds more than 500", async () => {
-  const state = withState();
-  try {
-    const table: Record<string, DcChannel> = {};
-    for (let i = 1; i <= 700; i++) table[String(1000 + i)] = { id: String(1000 + i), type: 0, name: `c${i}` };
-    const { discord, looked } = fakeDiscord(table);
-    let now = 0;
-    const where = inboundContext(discord, new DiscordChannels(state.dir), () => now, 20);
-    for (let i = 1; i <= 100; i++) await where(String(1000 + i));
-    expect(where.cached()).toBe(100);
-    // Channels seen once are not kept past their minute, even if never looked up again.
-    now = 60_000;
-    await where("1101");
-    expect(where.cached()).toBe(1);
-    // A burst across more channels than the cap keeps the newest 500 and still answers each one.
-    for (let i = 102; i <= 700; i++) await where(String(1000 + i));
-    expect(where.cached()).toBe(500);
-    expect((await where("1700")).channel.name).toBe("c700");
-    expect(looked.filter((id) => id === "1700")).toHaveLength(1);
   } finally {
     state.done();
   }

@@ -1,6 +1,4 @@
 import { expect, test } from "bun:test";
-import { discordWakeBoundEpoch, isDiscordWakePending } from "../src/discord-lane-wake-pending.ts";
-import { wakeDiscordLane } from "../src/discord-lane-wake.ts";
 import type { FlowDeps } from "../src/done-flow.ts";
 import { recordExecution, runContext } from "../src/lane-run.ts";
 import { parkLane } from "../src/park.ts";
@@ -9,15 +7,12 @@ import { reopenLane } from "../src/reopen.ts";
 import { type Lane, statusOf, withStatus } from "../src/registry.ts";
 import { type Execution, type LaneEvent, Reports } from "../src/reports.ts";
 import { isRequestId, isRunId } from "../src/request-identity.ts";
-import { executable, nativePid, next, wakeFixture } from "./discord-lane-wake-fixture.ts";
 import { lifecycleFixture } from "./lifecycle-fixture.ts";
 
 const requestId = "discord:100000000000000001:200000000000000002";
 const launchRun = "00000000-0000-4000-8000-000000000001";
 const parentRun = "00000000-0000-4000-8000-0000000000ff";
 const isExecution = (event: LaneEvent): event is Execution => event.type === "execution";
-const linux = test.skipIf(process.platform !== "linux");
-
 /** A registered lane of one original request whose launch run already started. */
 const sourced = async (deps: FlowDeps, lane: Lane): Promise<Lane> => {
   const launched: Lane = { ...lane, requestId, runId: launchRun };
@@ -134,95 +129,5 @@ test("a reopen whose lane moves on after start records no native binding for its
     expect(runs).toEqual([expect.objectContaining({ phase: "started" })]);
   } finally {
     f.state.done();
-  }
-});
-
-/** A sourced wake whose startup is attested on a later poll; the fixture's start check sees the bare command. */
-const delayedWake = async () => {
-  const fixture = await wakeFixture();
-  const lane = await sourced(fixture.deps, fixture.lane);
-  fixture.control.delayStartup = true;
-  const seen = { command: "", atStart: [] as LaneEvent[], create: [] as string[] };
-  const deps: FlowDeps = {
-    ...fixture.deps,
-    run: async (full, options) => {
-      if (full[0] === "herdr" && full[4] === "create") seen.create = [...full];
-      if (full[0] === "herdr" && full[3] === "pane" && full[4] === "run") {
-        seen.command = full[6] ?? "";
-        seen.atStart = new Reports(fixture.state.dir).events(lane.key);
-        return fixture.deps.run([...full.slice(0, 6), seen.command.replace(/^CATALY_LANE_RUN=\S+ /, "")], options);
-      }
-      return fixture.deps.run(full, options);
-    },
-  };
-  expect((await wakeDiscordLane(deps, lane)).kind).toBe("unconfirmed");
-  const binding = await fixture.deps.registry.read(lane.key);
-  if (!binding?.runId) throw new Error("missing wake binding");
-  fixture.attachStartedPane();
-  fixture.control.leaseOwner = nativePid;
-  return { fixture, lane, deps, binding, runId: binding.runId, ...seen };
-};
-
-linux("a sourced wake starts a new run in its final generation and binds it only at attestation", async () => {
-  const { fixture, lane, deps, binding, runId, command, atStart, create } = await delayedWake();
-  try {
-    expect(isDiscordWakePending(binding.lifecycleEpoch)).toBe(true);
-    expect(binding.requestId).toBe(requestId);
-    expect([isRunId(runId), runId === launchRun]).toEqual([true, false]);
-    expect(command).toStartWith(`CATALY_LANE_RUN=${runId} ${executable} `);
-    expect(create).toContain("CATALY_LANE_RUN=");
-    expect(create.some((arg) => arg.includes(runId))).toBe(false);
-    const started = atStart.filter(isExecution).filter((event) => event.runId === runId);
-    expect(started).toEqual([expect.objectContaining({ phase: "started", requestId })]);
-    const generation = started[0]?.generation ?? "";
-    // The process may report before attestation, so its run starts in the final generation, not the pending guard.
-    expect(binding.lifecycleEpoch).toBe(discordWakeBoundEpoch(generation));
-    expect(new Reports(fixture.state.dir).events(lane.key).filter(isExecution)).toHaveLength(2);
-
-    expect(await wakeDiscordLane(deps, binding)).toEqual({ kind: "started", ref: next });
-    const current = await fixture.deps.registry.read(lane.key);
-    expect([current?.lifecycleEpoch, current?.runId, current?.requestId]).toEqual([generation, runId, requestId]);
-    const nativeRef = { sessionId: fixture.session, ref: { runtime: "herdr", id: next.id } } as const;
-    const reports = new Reports(fixture.state.dir);
-    expect(
-      reports
-        .events(lane.key)
-        .filter(isExecution)
-        .filter((event) => event.runId === runId),
-    ).toEqual([started[0], expect.objectContaining({ phase: "bound", requestId, generation, nativeRef })]);
-    if (current) expect(runContext(reports, current, runId)?.provenance).toEqual({ requestId, runId, nativeRef });
-  } finally {
-    fixture.state.done();
-  }
-});
-
-linux("a wake whose lane moves on during attestation records no native binding", async () => {
-  const { fixture, lane, deps, binding, runId } = await delayedWake();
-  try {
-    let moved = false;
-    const moving: FlowDeps = {
-      ...deps,
-      run: async (full, options) => {
-        if (!moved && full[0] === "find") {
-          moved = true;
-          await fixture.deps.registry.update(lane.key, (c) =>
-            c ? withStatus(c, statusOf(c), "operator note", c.openedAt) : null,
-          );
-        }
-        return deps.run(full, options);
-      },
-    };
-    expect(await wakeDiscordLane(moving, binding)).toEqual({
-      kind: "unconfirmed",
-      reason: "the lane changed during startup attestation",
-    });
-    expect(moved).toBe(true);
-    const runs = new Reports(fixture.state.dir)
-      .events(lane.key)
-      .filter(isExecution)
-      .filter((event) => event.runId === runId);
-    expect(runs).toEqual([expect.objectContaining({ phase: "started" })]);
-  } finally {
-    fixture.state.done();
   }
 });

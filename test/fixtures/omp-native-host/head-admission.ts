@@ -5,8 +5,10 @@ import { FileSessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-st
 import { HeadAdmissions } from "../../../extension/head-admission.ts";
 import { Monitors } from "../../../extension/monitor.ts";
 import { assertNativeHost } from "./host.ts";
+import { fileDiscordInboundStore } from "../../../skills/cataly-mode/scripts/src/messenger/discord-inbound-state.ts";
 import { recordOwes } from "../../../skills/cataly-mode/scripts/src/owes.ts";
 import { SESSION_WIRE } from "../../../skills/cataly-mode/scripts/src/session-compat.ts";
+import { discordLoopback, LOOPBACK_TOKEN, ownerHistory } from "../../../skills/cataly-mode/scripts/test/discord-loopback.ts";
 
 const [root, mode, exitFile] = process.argv.slice(2);
 if (!root || !isAbsolute(root) || !exitFile || !process.send ||
@@ -29,7 +31,7 @@ if (!file) throw new Error("native head did not materialize its session");
 const identity = session.getSessionId();
 let contextManager = session;
 const held = mode === "held" || mode === "backfill-held";
-const cli = mode === "cli" || mode === "cli-unproven";
+const cli = mode === "cli" || mode === "cli-unproven" || mode === "cli-shared";
 const admissions = new HeadAdmissions(
   () => mode === "absent" ? undefined : { id: identity, file, entries: () => contextManager.getEntries(), ensureOnDisk: () => contextManager.ensureOnDisk() },
   (details) => session.appendCustomEntry(SESSION_WIRE.admissionRejected, details),
@@ -82,19 +84,27 @@ const monitors = new Monitors(async (content, delivery) => {
   const entry = held || mode === "cli-unproven" ? undefined : session.appendCustomMessageEntry(SESSION_WIRE.monitorMessage, content, true, details);
   process.send?.({ event: "handoff", content, details, entry });
   if (mode !== "lost-ack" && !held) void admissions.messageEnded({ message });
-}, () => mode === "absent" ? undefined : identity, 5, admissions);
+}, () => mode === "absent" ? undefined : identity, 5, admissions, undefined, () => join(root, "queue"));
 const repo = resolve(import.meta.dir, "../../..");
-const argv = cli ? [process.execPath, "--preload",
-  join(repo, "skills/cataly-mode/scripts/test/record-discord-inbound.ts"),
-  join(repo, "skills/cataly-mode/scripts/src/cli.ts"), "inbound", "discord",
+const monitorBinary = process.env["CATALY_TEST_MONITOR_NATIVE_BIN"];
+const argv = cli ? ["/usr/bin/env", ...(monitorBinary ? [`CATALY_DISCORD_NATIVE_BIN=${monitorBinary}`] : []),
+  process.execPath, join(repo, "skills/cataly-mode/scripts/src/cli.ts"), "inbound", "discord",
   ...(mode === "cli" ? ["--loop", "0"] : []), "--context"] :
   [process.execPath, join(repo, "extension/test/record-head-inbound.ts"), join(root, "queue"), exitFile, mode ?? "accepted"];
-if (cli) {
+// The public CLI hands intake to the native monitor (CATALY_DISCORD_NATIVE_BIN) against loopback Discord REST.
+const discord = cli
+  ? discordLoopback(ownerHistory(mode === "cli-shared" ? "shared-routing" : "plain"), {
+      "20": { id: "20", type: 11, name: "task thread", parent_id: "30" },
+      "30": { id: "30", type: 0, name: "dev", topic: "editable topic" },
+    })
+  : undefined;
+if (discord) {
   const config = join(root, "config.json");
   writeFileSync(config, JSON.stringify({ stateDir: join(root, "queue"), runtime: "herdr", hooks: {} }));
+  fileDiscordInboundStore(join(root, "queue"), "20").save("100");
   Object.assign(process.env, { CATALY_CONFIG: config, CATALY_STATE_DIR: join(root, "queue"),
-    CATALY_DISCORD_TOKEN: "synthetic-inbound-token", CATALY_DISCORD_OWNER_ID: "10", CATALY_DISCORD_CHANNEL_ID: "20",
-    CATALY_TEST_DISCORD_CASE: "context" });
+    CATALY_DISCORD_TOKEN: LOOPBACK_TOKEN, CATALY_DISCORD_OWNER_ID: "10", CATALY_DISCORD_CHANNEL_ID: "20",
+    CATALY_DISCORD_API_BASE: discord.base, CATALY_MESSENGER_PROFILE_DEFAULTS: "off" });
 }
 if (mode === "owes-serial") {
   monitors.start("prior", [process.execPath, "--eval",
@@ -106,6 +116,7 @@ monitors.start("source", argv, mode === "filtered" ? "NO_SOURCE_RECORD_MATCHES" 
 process.send({ event: "ready", file, sourcePid: monitors.list().find((entry) => entry.name === "source")?.pid });
 const stop = async () => {
   monitors.stopAll();
+  discord?.stop();
   await nativeHead?.close();
   await session.close();
   process.exit(0);
