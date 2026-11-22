@@ -57,7 +57,11 @@ impl DiscordApi {
                     continue;
                 }
             }
-            bail!("Discord REST returned HTTP {}", status.as_u16());
+            return Err(super::RestStatus {
+                status: status.as_u16(),
+                code: None,
+            }
+            .into());
         }
         bail!("Discord REST request did not complete")
     }

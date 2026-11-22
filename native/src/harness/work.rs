@@ -31,6 +31,7 @@ pub(super) struct RunOptions {
     pub(super) approvals: Option<mpsc::Sender<Approval>>,
     pub(super) memory_context: Option<String>,
     pub(super) fenced_replies: bool,
+    pub(super) discord_head: bool,
 }
 
 impl Harness<'_, '_> {
@@ -38,6 +39,7 @@ impl Harness<'_, '_> {
     pub(super) fn discord_readme_mode(
         &self,
         origin: super::discord::Origin,
+        key: &SessionKey,
     ) -> Result<Option<bool>> {
         let claim = match self.store.receipt(&origin.id())? {
             Claim::Missing => return Ok(None),
@@ -45,7 +47,7 @@ impl Harness<'_, '_> {
             Claim::Done(receipt) => receipt.claim,
         };
         ensure!(
-            claim.lane == origin.key().0,
+            claim.lane == key.0,
             "Discord origin does not match the run receipt"
         );
         Ok(Some(claim.tool == Some(RunTool::ReadReadme)))
@@ -70,8 +72,8 @@ impl Harness<'_, '_> {
             bind_workspace,
         } = run;
         ensure!(
-            key.0 != "head",
-            "Cataly run requires a lane key, not the head"
+            (key.0 == "head") == options.discord_head,
+            "only supervised Discord may submit a turn to the Cataly head"
         );
         ensure!(
             !prompt.trim().is_empty() && !prompt.trim_start().starts_with('/'),

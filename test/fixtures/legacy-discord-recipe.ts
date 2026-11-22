@@ -37,7 +37,11 @@ set -eu
 [[ "$CATALY_CONFIG" == ${shq(configFile)} && "$DORI_CONFIG" == ${shq(configFile)} ]]
 [[ "\${DORI_DISCORD_TOKEN:-}" == synthetic-inbound-token && ! "\${CATALY_DISCORD_TOKEN+x}" ]]
 case "$1" in
-  inbound) preload=${shq(join(skill, "test/record-discord-inbound.ts"))} ;;
+  inbound)
+    # Intake runs in the native monitor against the test's loopback Discord REST.
+    export CATALY_DISCORD_NATIVE_BIN="\${CATALY_TEST_INBOUND_NATIVE_BIN:?}"
+    export CATALY_DISCORD_API_BASE="\${CATALY_TEST_INBOUND_API:?}"
+    exec ${shq(process.execPath)} --no-env-file ${shq(join(skill, "src/cli.ts"))} "$@" ;;
   presence) preload=${shq(join(skill, "test/record-gateway.ts"))} ;;
   *) preload=${shq(join(skill, "test/record-discord.ts"))} ;;
 esac

@@ -9,11 +9,13 @@ import { parkLane } from "../src/park.ts";
 import { Registry, sessionOf, withStatus } from "../src/registry.ts";
 import { reopenLane } from "../src/reopen.ts";
 import { ownerMessage } from "./discord-inbound-fakes.ts";
+import { nativeDiscordBinary } from "./discord-loopback.ts";
 import { lifecycleFixture } from "./lifecycle-fixture.ts";
 
-const posix = test.skipIf(process.platform === "win32");
+// Real intake runs in the native binary; without it this public-CLI scenario is skipped, never faked.
+const native = test.skipIf(process.platform === "win32" || !nativeDiscordBinary());
 
-posix(
+native(
   "public REST intake holds the exact shared lane message until native close recovery",
   verifyCloseRecovery,
   20_000,
@@ -64,6 +66,8 @@ async function verifyCloseRecovery() {
           CATALY_DISCORD_OWNER_ID: author.id,
           CATALY_DISCORD_CHANNEL_ID: channel,
           CATALY_DISCORD_THREADS: "off",
+          CATALY_DISCORD_NATIVE_BIN: nativeDiscordBinary()!,
+          CATALY_MESSENGER_PROFILE_DEFAULTS: "off",
         },
         stdout: "pipe",
         stderr: "pipe",

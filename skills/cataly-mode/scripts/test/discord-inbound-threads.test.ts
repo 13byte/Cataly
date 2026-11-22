@@ -2,10 +2,6 @@ import { expect, test } from "bun:test";
 import { discordInbound } from "../src/messenger/discord-inbound.ts";
 import { MessengerError } from "../src/messenger/http.ts";
 import { discordRestWorld, memoryDiscordCursor, ownerMessage } from "./discord-inbound-fakes.ts";
-import { liveWorld, memoryLiveWorld } from "./discord-inbound-live-fakes.ts";
-
-// This case verifies admission through the private POSIX disk queue.
-const diskTest = test.skipIf(process.platform === "win32");
 
 const cursorsFor = (initial: Record<string, string> = {}) => {
   const stores = new Map<string, ReturnType<typeof memoryDiscordCursor>>();
@@ -137,53 +133,6 @@ test("a configured thread exists without its parent being watched", async () => 
   const cursors = cursorsFor();
   const intake = await discordInbound(world.discord, cursors.storeFor, { ownerId: "10", channelIds: ["31"] });
   expect(intake.channels()).toEqual(["31"]);
-});
-
-diskTest("a live message in a new thread under a watched channel is accepted once and persisted", async () => {
-  const world = await liveWorld([ownerMessage("100")], { ownerId: "10", channelIds: ["20"] });
-  world.rest.state.guilds = [{ id: "5", channels: ["20", "21"], threads: [] }];
-  world.rest.state.threadParents.set("50", "20");
-  const [socket] = world.sockets;
-  if (!socket) throw new Error("gateway did not open");
-  await world.connect(socket);
-  await world.dispatch(socket, ownerMessage("201", { channel_id: "50" }));
-  await world.dispatch(socket, ownerMessage("201", { channel_id: "50" }));
-  await world.dispatch(socket, ownerMessage("202", { channel_id: "50", author: { id: "11" } }));
-  expect(world.received).toEqual(["50:201"]);
-  expect(world.cursor("50")).toBe("202");
-  expect(world.intake.channels().sort()).toEqual(["20", "50"]);
-});
-
-test("a live message in a thread of an unwatched channel stays out of intake", async () => {
-  const world = await memoryLiveWorld([ownerMessage("100")], { ownerId: "10", channelIds: ["20"] });
-  world.rest.state.guilds = [{ id: "5", channels: ["20", "21"], threads: [] }];
-  world.rest.state.threadParents.set("51", "21");
-  const [socket] = world.sockets;
-  if (!socket) throw new Error("gateway did not open");
-  await world.connect(socket);
-  await world.dispatch(socket, ownerMessage("301", { channel_id: "51" }));
-  expect(world.received).toEqual([]);
-  expect(world.intake.channels()).toEqual(["20"]);
-  expect(world.rest.requests.some((request) => request.url.includes("/channels/51/messages"))).toBe(false);
-});
-
-test("a thread whose parent lookup is rate limited retries through the backfill without losing the message", async () => {
-  const world = await memoryLiveWorld([ownerMessage("100")], { ownerId: "10", channelIds: ["20"] });
-  world.rest.state.guilds = [{ id: "5", channels: ["20", "21"], threads: [] }];
-  world.rest.state.threadParents.set("50", "20");
-  const [socket] = world.sockets;
-  if (!socket) throw new Error("gateway did not open");
-  await world.connect(socket);
-  world.rest.state.failure.set("/channels/50", 429);
-  await world.dispatch(socket, ownerMessage("201", { channel_id: "50" }));
-  expect(world.received).toEqual([]);
-  expect(world.rest.state.failure.has("/channels/50")).toBe(true);
-  expect(world.logs).toContain("DISCORD_GATEWAY_ACCEPT_RETRY discord retry_in=2s");
-  world.rest.state.failure.clear();
-  world.advance(2_000);
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  expect(world.received).toEqual(["50:201"]);
-  expect(world.cursor("50")).toBe("201");
 });
 
 test("an explicit thread keeps its strict failure and a real channel lookup error propagates", async () => {

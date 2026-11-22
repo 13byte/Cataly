@@ -3,7 +3,6 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../skills/cataly-mode/scripts/src/config.ts";
-import { wakeCommand } from "../skills/cataly-mode/scripts/src/discord-lane-wake-command.ts";
 import { importLegacyEnvironment } from "../src/legacy-environment.ts";
 import { currentAgentCommand } from "../src/runtime/legacy-agent-command.ts";
 import { readRuntimeChoice } from "../src/runtime/select.ts";
@@ -33,16 +32,6 @@ test("role migration does not interpret opaque executables, option values or pro
     expect(currentAgentCommand(argv)).toEqual(argv);
   expect(currentAgentCommand(["omp", "--dori-role=dori"])).toEqual(["omp", "--cataly-role=cataly"]);
   expect(() => currentAgentCommand(["omp", "--dori-role=lane", "--cataly-role=cataly"])).toThrow("Ambiguous");
-});
-
-test("an archived side dispatcher can wake the same OMP lane but never a different subcommand", () => {
-  const binary = join(tmpdir(), "retained side", "bin", "omp-dori");
-  const options = ["--dori-role=lane", "--model", "{model}", "{prompt}"];
-  expect(wakeCommand([binary, "omp", ...options])).toEqual({
-    lease: [binary, "omp"],
-    launch: [binary, "omp", "--cataly-role", "lane"],
-  });
-  expect(wakeCommand([binary, "hc", ...options])).toBeUndefined();
 });
 
 test.skipIf(process.platform === "win32")("the harness selects the config the OS resolves after a symlink", () => {

@@ -1,5 +1,4 @@
 import type { Discord } from "./discord.ts";
-import type { InboundContext } from "./discord-inbound-context.ts";
 import {
   type DiscordInbound,
   discoverChannels,
@@ -50,9 +49,6 @@ export const formatDiscordInbound = (message: DiscordInbound): string => {
     ...message.attachments.map((attachment) => `INBOUND_ATTACHMENT ${id} ${JSON.stringify(attachment)}`),
   ].join("\n");
 };
-
-export const formatInboundContext = (message: DiscordInbound, context: InboundContext): string =>
-  `INBOUND_CONTEXT discord ${message.channel} ${message.message} ${JSON.stringify(context)}`;
 
 /**
  * Known REST and admitted owners merge before each delivery boundary. An older frame admitted during an

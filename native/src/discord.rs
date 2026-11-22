@@ -7,25 +7,65 @@ use serde::Deserialize;
 
 use crate::harness::discord::Snowflake;
 
+mod activity;
+mod admission;
 mod api;
+mod context;
 mod gateway;
+mod inbound;
+mod inbox;
 mod intake;
+mod ipc;
+mod lanes;
 mod monitor;
+mod owes;
 mod presence;
+mod recall;
+mod receiver;
+mod scope;
 mod send;
+mod supervised;
+mod threads;
 mod wake;
 pub use api::{Destination, ReplyExtras};
 pub use presence::presence;
 pub use send::{SendOptions, send};
 
+// Each bool is an independent clap CLI flag; grouping them would change the command line.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Args, Debug)]
 pub struct Options {
     /// Import the previous monitor's per-channel cursor only when the native cursor is absent.
     #[arg(long)]
     legacy_cursors: Option<PathBuf>,
     /// Private directory for Discord cursors, OMP sessions and confirmed replies.
-    #[arg(long)]
-    pub(crate) state_dir: PathBuf,
+    #[arg(
+        long,
+        required_unless_present = "cataly_state",
+        conflicts_with = "cataly_state"
+    )]
+    state_dir: Option<PathBuf>,
+    /// Absolute Cataly state directory: TS-compatible intake that hands head messages to the OMP extension.
+    #[arg(long, conflicts_with_all = ["legacy_cursors", "head_channel", "ask_state", "inbox"])]
+    cataly_state: Option<PathBuf>,
+    /// Admit head messages over the supervising extension's IPC channel on standard input.
+    #[arg(long, requires = "cataly_state")]
+    supervised: bool,
+    /// Watch every guild text channel, active thread and the owner DM instead of only explicit channels.
+    #[arg(long, requires = "cataly_state")]
+    scope_all: bool,
+    /// Append an `INBOUND_CONTEXT` line with channel metadata and purposes to each head message.
+    #[arg(long, requires = "cataly_state")]
+    context: bool,
+    /// Start lane OMP sessions for messages routed to sleeping Discord lanes (continuous REST only).
+    #[arg(long, requires = "cataly_state", conflicts_with = "gateway")]
+    wake_lanes: bool,
+    /// Absolute source-activity record for update scheduling.
+    #[arg(long, requires = "cataly_state")]
+    activity_file: Option<PathBuf>,
+    /// Enable owner recall with this retention in days.
+    #[arg(long, requires = "cataly_state", value_parser = clap::value_parser!(u32).range(1..=3650))]
+    recall_retention_days: Option<u32>,
     /// Bundled JPEG to use only when the bot has no avatar.
     #[arg(long)]
     default_avatar: Option<PathBuf>,
@@ -33,11 +73,23 @@ pub struct Options {
     #[arg(long, env = "CATALY_DISCORD_OWNER_ID")]
     owner: String,
     /// An explicitly allowed channel or thread ID (repeatable).
-    #[arg(long, required = true)]
+    #[arg(long, required_unless_present = "scope_all")]
     channel: Vec<String>,
+    /// Bind this explicitly allowed conversation to the Rust-owned OMP head.
+    #[arg(long)]
+    head_channel: Option<String>,
+    /// Read ASK mailboxes in this absolute Cataly state directory before dispatching to OMP.
+    #[arg(long)]
+    ask_state: Option<PathBuf>,
+    /// Existing Discord FIFO directory; defaults to the native state directory.
+    #[arg(long)]
+    inbox: Option<PathBuf>,
     /// Use the Gateway for immediate wakeups and interactive decisions.
     #[arg(long)]
     gateway: bool,
+    /// Follow active Discord threads under explicitly allowed parent channels.
+    #[arg(long)]
+    follow_threads: bool,
     /// REST polling interval in seconds; zero means one poll in REST mode.
     #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u64).range(0..=3600))]
     poll_seconds: u64,
@@ -68,6 +120,35 @@ struct Message {
     author: User,
     webhook_id: Option<Snowflake>,
     content: Option<String>,
+    #[serde(rename = "message_reference")]
+    reference: Option<MessageReference>,
+    #[serde(
+        rename = "referenced_message",
+        default,
+        deserialize_with = "field_present"
+    )]
+    has_reference_snapshot: bool,
+    #[serde(
+        rename = "message_snapshots",
+        default,
+        deserialize_with = "field_present"
+    )]
+    forwarded: bool,
+    #[serde(default)]
+    attachments: Vec<serde::de::IgnoredAny>,
+}
+
+fn field_present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
+    serde::de::IgnoredAny::deserialize(deserializer)?;
+    Ok(true)
+}
+
+#[derive(Clone, Copy, Deserialize)]
+struct MessageReference {
+    #[serde(rename = "type", default)]
+    kind: u8,
+    message_id: Option<Snowflake>,
+    channel_id: Option<Snowflake>,
 }
 
 #[derive(Deserialize)]

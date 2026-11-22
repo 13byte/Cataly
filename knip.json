@@ -9,7 +9,6 @@
         "scripts/verify-consumer-release.ts",
         "scripts/consumer-smoke-candidate.ts",
         "scripts/consumer-smoke-harness.ts",
-        "scripts/bench-discord-intake.ts",
         "src/update/deployment-launcher.ts",
         "src/release/automatic.ts",
         "src/release/references.ts",
@@ -25,8 +24,6 @@
       "entry": [
         "test/**/*.test.ts",
         "test/record-gateway.ts",
-        "test/record-discord-inbound.ts",
-        "test/record-discord-gateway.ts",
         "test/record-fetch.ts",
         "test/record-inbound-activity-failure.ts",
         "test/record-slack-activity-backlog.ts",

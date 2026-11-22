@@ -1,29 +1,9 @@
 import type { CatalyConfig } from "../config.ts";
 import { type Discord, isThreadType } from "./discord.ts";
-import type { DiscordInbound } from "./discord-inbound-api.ts";
 import { isDiscordSnowflake } from "./discord-inbound-state.ts";
 import { conversationRecall, createRecallScope } from "./recall-ledger.ts";
 
 const warn = (message: string) => console.error(`WARN ${message}`);
-
-export const discordOwnerRecall = (config: CatalyConfig, identity: { bot: string; owner: string }) => {
-  const recall = conversationRecall(
-    { ...config, scope: createRecallScope("discord", identity.bot, identity.owner) },
-    warn,
-  );
-  return (message: DiscordInbound, space: () => string | undefined): string | undefined => {
-    if (!recall || message.text.trim() === "") return undefined;
-    let channel: string | undefined;
-    try {
-      channel = space();
-    } catch {
-      warn("recall: Discord conversation scope was not available");
-      return undefined;
-    }
-    if (channel === undefined) return undefined;
-    return recall.owner({ channel, thread: message.channel, ref: message.message, text: message.text });
-  };
-};
 
 /** A send receipt alone does not establish either the authenticated bot or the target's conversation space. */
 export const discordLeadRecall = async (

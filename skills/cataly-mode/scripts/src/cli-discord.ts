@@ -1,41 +1,16 @@
-/** The Discord Gateway plumbing shared by `cataly presence discord` and `cataly inbound discord --gateway`. */
-import { join } from "node:path";
-import { inboundActivity, InboundActivityError } from "../../../../src/update/source-activity.ts";
-import { takeLock } from "./checkpoint-lock.ts";
-import { die, every, exitOnDisconnect } from "./cli-context.ts";
-import { discordClock, openDiscordSocket, untilStopped } from "./cli-discord-gateway.ts";
-import { discordLaneMonitor } from "./discord-lane-monitor.ts";
-import type { FlowDeps } from "./done-flow.ts";
-import { Discord, discordApiBase } from "./messenger/discord.ts";
-import { DiscordChannels } from "./messenger/discord-channels.ts";
-import { routeDiscordAskReply, routeUnreferencedDiscordAskText } from "./messenger/discord-ask-mailbox.ts";
-import { type DiscordAskReceiverPublication, openDiscordAskReceiver } from "./messenger/discord-ask-receiver.ts";
-import {
-  discordInbound,
-  formatDiscordInbound,
-  formatInboundContext,
-  markDiscordInboundSeen,
-} from "./messenger/discord-inbound.ts";
-import { inboundContext } from "./messenger/discord-inbound-context.ts";
-import { type Emit, isOwnerMessage, transientRetryDelay } from "./messenger/discord-inbound-api.ts";
-import { discordInboundLive } from "./messenger/discord-inbound-live.ts";
-import { discordInboundQueue } from "./messenger/discord-inbound-queue.ts";
-import { discordInboundEnv } from "./messenger/discord-inbound-state.ts";
-import { openDiscordLaneInbox } from "./messenger/discord-lane-inbox.ts";
-import { DiscordLaneIntakeHold, enqueueDiscordLane } from "./messenger/discord-lane-routing.ts";
-import { runNativeDiscord } from "./cli-discord-native.ts";
-import { headEmitter, reconcileHead } from "./messenger/head-admission.ts";
-import { headUnresolved } from "./messenger/head-admission-state.ts";
-import { fetchHttp } from "./messenger/http.ts";
+/** `cataly inbound discord`: validates the shared settings, then hands intake to the Rust monitor. */
+import { die } from "./cli-context.ts";
 import { discordNativeBinary } from "./cli-discord-binary.ts";
-import { applyDiscordAvatarDefault, messengerProfileDefaultsEnabled } from "./messenger/profile-defaults.ts";
-import { recordOwes } from "./owes.ts";
-import { realClock } from "./run.ts";
-const idList = (value: string | undefined): string[] =>
-  (value ?? "")
-    .split(",")
-    .map((id) => id.trim())
-    .filter((id) => id !== "");
+import { execDiscordMonitor } from "./cli-discord-exec.ts";
+import { runNativeDiscord } from "./cli-discord-native.ts";
+import type { FlowDeps } from "./done-flow.ts";
+import { discordInboundOptions } from "./messenger/discord-inbound-env.ts";
+import { headUnresolved } from "./messenger/head-admission-state.ts";
+
+const NATIVE_REQUIRED =
+  "Discord intake requires the native Cataly binary. Build it with `cargo build --locked --release` and set " +
+  "CATALY_DISCORD_NATIVE_BIN to the absolute path of target/release/cataly, or reinstall Cataly on a host with a " +
+  "Rust toolchain so it installs $CATALY_HOME/bin/cataly-native.";
 
 export const discordInboundCommand = async (
   deps: FlowDeps,
@@ -47,198 +22,44 @@ export const discordInboundCommand = async (
     readonly activityFile?: string;
   },
 ) => {
-  const { gateway, pollMinutes, context, wake } = options;
+  const { gateway, pollMinutes, context, wake, activityFile } = options;
   const { stateDir } = deps.config;
   if (wake && (gateway || pollMinutes <= 0)) die("--wake-lanes requires continuous Discord REST intake");
   const env = process.env;
-  const ownerId = discordInboundEnv("CATALY_DISCORD_OWNER_ID", env["CATALY_DISCORD_OWNER_ID"]);
-  const scope = env["CATALY_DISCORD_SCOPE"]?.trim();
-  if (scope !== undefined && scope !== "" && scope !== "all") die("CATALY_DISCORD_SCOPE must be all or unset");
-  const all = scope === "all";
-  const setting = env["CATALY_DISCORD_THREADS"]?.trim().toLowerCase();
-  if (setting !== undefined && setting !== "" && setting !== "off" && setting !== "on")
-    die("CATALY_DISCORD_THREADS must be on, off or unset");
-  const threads = setting !== "off";
-  const channelIds = ["CATALY_DISCORD_CHANNEL_ID", "CATALY_DISCORD_CHANNEL_IDS"].flatMap((name) =>
-    idList(env[name]).map((id) => discordInboundEnv(name, id)),
-  );
-  if (!all && channelIds.length === 0) discordInboundEnv("CATALY_DISCORD_CHANNEL_ID", env["CATALY_DISCORD_CHANNEL_ID"]);
-  const executable = discordNativeBinary();
-  // Never replace the lead's IPC, tracked replies or auto-discovered thread routes.
-  const explicit = Boolean(env["CATALY_DISCORD_NATIVE_BIN"]);
-  const standalone = !process.connected && !all && !threads && !context && !wake && options.activityFile === undefined;
-  if (
-    executable &&
-    (explicit || (standalone && (env["CATALY_DISCORD_NATIVE_WORKSPACE"] || deps.config.laneWorkspace)))
-  ) {
+  const { channelIds, all, threads } = discordInboundOptions(env);
+  const executable = discordNativeBinary() ?? die(NATIVE_REQUIRED);
+  const head = env["CATALY_DISCORD_HEAD_CHANNEL_ID"]?.trim();
+  const admission = env["CATALY_MONITOR_ADMISSION"];
+  const supervised = admission !== undefined;
+  // The monitor contract is one live IPC channel; anything else cannot settle a head admission.
+  if (supervised && (admission !== "1" || !process.connected)) throw headUnresolved();
+  const standalone = !context && !wake && activityFile === undefined;
+  if (head && (supervised || process.connected || all || !standalone))
+    die("Rust-owned Discord head requires an independent receiver with explicit scope");
+  const workspace = env["CATALY_DISCORD_NATIVE_WORKSPACE"] || deps.config.laneWorkspace;
+  if (!supervised && !process.connected && !all && (head || (standalone && workspace))) {
     return await runNativeDiscord(executable, {
       ...options,
       stateDir,
       channels: channelIds,
+      threads,
+      head,
       workspace: deps.config.laneWorkspace,
     });
   }
-  const token = env["CATALY_DISCORD_TOKEN"] || die("CATALY_DISCORD_TOKEN is not set");
-  const mode = env["CATALY_MONITOR_ADMISSION"];
-  const native = mode === "1";
-  if (mode !== undefined && (!native || !process.send || !process.connected)) throw headUnresolved();
-  const queue = discordInboundQueue(stateDir, native);
-  const delivery = { registry: deps.registry, clock: realClock };
-  let receiver: DiscordAskReceiverPublication | undefined;
-  let laneInbox: ReturnType<typeof openDiscordLaneInbox> | undefined;
-  let releaseWake: (() => void) | undefined;
-  let activity: ReturnType<typeof inboundActivity>;
-  const close = () => {
-    try {
-      activity?.close();
-    } finally {
-      releaseWake?.();
-      receiver?.close();
-      laneInbox?.close();
-      queue.close();
-    }
-  };
-  const unregisterDisconnect = native ? exitOnDisconnect(close) : undefined;
   try {
-    if (wake) {
-      const lock = takeLock(join(stateDir, "discord-lane-monitor.lock"), realClock.now(), (text) => new Error(text), {
-        keepLiveOwner: true,
-      });
-      if (typeof lock !== "function")
-        return die("Another Discord lane wake monitor is running for this state directory");
-      releaseWake = lock;
-    }
-    await reconcileHead(queue);
-    if (!gateway && queue.first())
-      die("Discord inbound has pending Gateway work; restart with --gateway before REST mode");
-    activity = inboundActivity(options.activityFile, "discord");
-    const apiOverride = env["CATALY_DISCORD_API_BASE"] ?? "";
-    const discord = new Discord(fetchHttp, realClock, token, discordApiBase(apiOverride));
-    const intake = await discordInbound(discord, queue.storeFor, {
-      ownerId,
-      channelIds: [...new Set(channelIds)],
-      all,
+    execDiscordMonitor(executable, deps, {
+      supervised,
+      channels: channelIds,
       threads,
+      all,
+      gateway,
+      pollMinutes,
+      context,
+      wake,
+      ...(activityFile === undefined ? {} : { activityFile }),
     });
-    if (intake.missingAvatar && messengerProfileDefaultsEnabled()) await applyDiscordAvatarDefault(discord);
-    const identity = { bot: intake.botId, owner: ownerId };
-    const serviceLanes = wake ? discordLaneMonitor(deps, discord, identity) : undefined;
-    if (wake) laneInbox = openDiscordLaneInbox(stateDir);
-    if (gateway || pollMinutes > 0)
-      receiver = openDiscordAskReceiver(stateDir, token, ownerId, channelIds, intake.channels, {
-        progressWindowMs: gateway ? Infinity : pollMinutes * 60_000 + 15_000,
-        apiOverride,
-      });
-    const watching = all ? "all" : intake.channels().join(",");
-    const where = context ? inboundContext(discord, new DiscordChannels(stateDir), realClock.now) : undefined;
-    const recall = deps.config.recall?.enabled
-      ? await import("./messenger/recall-discord.ts").then((module) => module.discordOwnerRecall(deps.config, identity))
-      : undefined;
-    const emitToHead = headEmitter(queue, intake.botId, ownerId, async (message, signal) => {
-      const text = where
-        ? `${formatDiscordInbound(message)}\n${formatInboundContext(message, await where(message.channel))}`
-        : formatDiscordInbound(message);
-      await recordOwes(stateDir, text, Date.now(), signal);
-      signal?.throwIfAborted();
-      const recalled = recall?.(message, () =>
-        intake.recallSpaceFor(message.channel, queue.parentFor(message.channel)),
-      );
-      return recalled ? `${text}\n${recalled}` : text;
-    });
-    const emit: Emit = async (message, signal) => {
-      signal?.throwIfAborted();
-      activity?.received();
-      if (
-        routeDiscordAskReply(stateDir, message, ownerId) ||
-        (message.unreferencedText && routeUnreferencedDiscordAskText(stateDir, message, ownerId))
-      ) {
-        await markDiscordInboundSeen(discord, message);
-        return;
-      }
-      const queued = await enqueueDiscordLane(
-        delivery,
-        stateDir,
-        message.channel,
-        wake,
-        (session) => {
-          laneInbox ??= openDiscordLaneInbox(stateDir);
-          if (wake) laneInbox.add(session, message, { reply: identity });
-          else laneInbox.add(session, message);
-        },
-        signal,
-      );
-      if (queued) {
-        await markDiscordInboundSeen(discord, message);
-        return;
-      }
-      await emitToHead(message, signal);
-    };
-    console.log(
-      `INBOUND_READY discord owner=${ownerId} channel=${watching} bot=${intake.botId}${gateway ? " mode=gateway" : ""}`,
-    );
-    if (!gateway)
-      return await every(
-        pollMinutes,
-        async () => {
-          await intake.poll(emit);
-          receiver?.refresh();
-          if (serviceLanes && laneInbox) await serviceLanes(laneInbox, intake.channels());
-          activity?.healthy();
-        },
-        (error, interval) => {
-          receiver?.suspend();
-          if (error instanceof InboundActivityError) return false;
-          activity?.unavailable();
-          return error instanceof DiscordLaneIntakeHold ? interval : (transientRetryDelay(error, interval) ?? false);
-        },
-      );
-    // Gateway receipts mean successful backfill on the observed connection, not a separate connectivity probe.
-    let connected = false;
-    let generation = 0;
-    const live = {
-      ...intake,
-      async sync(...args: Parameters<typeof intake.sync>) {
-        const current = generation;
-        try {
-          await intake.sync(...args);
-          if (connected && current === generation) receiver?.refresh();
-        } catch (error) {
-          receiver?.suspend();
-          throw error;
-        }
-      },
-    };
-    await untilStopped(
-      discordInboundLive(
-        live,
-        openDiscordSocket,
-        token,
-        discordClock,
-        emit,
-        (line) => console.log(line),
-        queue,
-        {
-          ready() {
-            connected = true;
-            generation++;
-          },
-          disconnect() {
-            connected = false;
-            generation++;
-            receiver?.suspend();
-          },
-        },
-        activity && {
-          healthy: activity.healthy,
-          unavailable: activity.unavailable,
-          received: (message) => {
-            if (isOwnerMessage(message, ownerId, intake.botId)) activity?.received();
-          },
-        },
-      ),
-    );
-  } finally {
-    unregisterDisconnect?.();
-    close();
+  } catch (error) {
+    die(error instanceof Error ? error.message : String(error));
   }
 };

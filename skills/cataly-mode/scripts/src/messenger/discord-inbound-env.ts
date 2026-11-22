@@ -2,10 +2,12 @@ import type { DiscordInboundOptions } from "./discord-inbound.ts";
 import { discordInboundEnv } from "./discord-inbound-state.ts";
 import { MessengerError } from "./http.ts";
 
+type ResolvedOptions = Required<DiscordInboundOptions>;
+
 /** Shared owner, channel and thread settings for inbound-scoped commands. */
 export const discordInboundOptions = (
   env: Readonly<Record<string, string | undefined>> = process.env,
-): DiscordInboundOptions => {
+): ResolvedOptions => {
   const ownerId = discordInboundEnv("CATALY_DISCORD_OWNER_ID", env["CATALY_DISCORD_OWNER_ID"]);
   const scope = env["CATALY_DISCORD_SCOPE"]?.trim();
   if (scope !== undefined && scope !== "" && scope !== "all")

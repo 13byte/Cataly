@@ -11,7 +11,9 @@ import tempfile
 from threading import Event, Thread
 
 from stock_discord import exercise_discord
+from stock_discord_head import exercise_head
 from stock_discord_monitor import exercise_monitor
+from stock_discord_threads import exercise_threads
 from stock_omp_upgrade import exercise_upgrade
 from stock_readme import PROMPT as README_PROMPT
 from stock_readme import WORKSPACE_TOOL, exercise_owner_edges, exercise_tools
@@ -219,6 +221,8 @@ def main() -> None:
             exercise_owner_edges(command, env, root, Model.calls, Model.tool_results, run_harness)
             exercise_discord(command, env, Model.calls, run_harness)
             exercise_monitor(command, env, root, Model.calls, Model.tool_results)
+            exercise_threads(command, env, root, Model.calls)
+            exercise_head(command, env, root, Model, run_harness)
             exercise_upgrade(command, env, root, Model.calls, run_harness)
         finally:
             server.shutdown()

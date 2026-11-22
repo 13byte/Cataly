@@ -253,16 +253,43 @@ The existing `cataly inbound discord` can launch the Rust monitor with:
 | --- | --- |
 | `CATALY_DISCORD_NATIVE_BIN` | Optional absolute Rust binary override; set `off` for legacy Discord commands. |
 | `CATALY_DISCORD_NATIVE_WORKSPACE` | Optional absolute workspace override for the native monitor; otherwise it uses `laneWorkspace`. |
-| `CATALY_DISCORD_NATIVE_CHANNEL_ID` | Optional exact channel or thread ID from the inbound list. If unset, use all explicitly listed inbound channels, not auto-discovered channels. |
+| `CATALY_DISCORD_NATIVE_CHANNEL_ID` | Optional exact channel or thread ID from the inbound list. If unset, use all explicitly listed inbound channels as roots. |
+| `CATALY_DISCORD_THREADS` | Follow active threads under those roots by default. Set `off` to watch only explicit IDs. Direct Rust invocation uses `--follow-threads`. |
 | `CATALY_OMP` / `CATALY_DISCORD_NATIVE_MODEL` | Optional OMP executable and model overrides. |
 
 Rust owns Gateway heartbeat and resume, REST history and sends, button
-callbacks, and the OMP lane. It only watches explicitly listed channels or
-threads. Stop the legacy monitor before switching; the compatibility launcher
-imports the existing channel cursor on first use. Legacy head/ASK routing,
-auto-discovered threads, and the `--context`, `--wake-lanes`, and
-`--activity-file` flags stay with the legacy monitor. For standalone native
-inbound, explicitly list channels and set `CATALY_DISCORD_THREADS=off`.
+callbacks, and the OMP lane. Each discovered thread has its own cursor, lane,
+and reply destination. Stop the legacy monitor before switching; the
+compatibility launcher imports existing cursors on first use. With the native
+binary installed, supervised monitors share one on-demand Rust process per OMP
+supervisor for ASK replies and head admission against persisted OMP receipts.
+The OMP extension still owns the active session, its admission queue, and
+`message_end` delivery. An interrupted routing request is not silently replayed
+or redirected to the head.
+Discord intake is Rust-only. Under the OMP `monitor` tool, `cataly inbound discord`
+(filter `^INBOUND`) replaces itself in place with `cataly discord --supervised`,
+keeping its PID, stdout and IPC channel. `CATALY_DISCORD_SCOPE=all`, `--context`,
+`--activity-file`, recall and `--wake-lanes` all run in Rust. `--wake-lanes` starts a lane's
+OMP directly, without herdr or hc. The OMP extension still owns the live session.
+Without the native binary, `cataly inbound discord` fails and names the build command.
+
+For a head owned entirely by Rust, run a separate receiver with
+`--head-channel "$CHANNEL_ID"` and an explicit `--channel "$CHANNEL_ID"`.
+Only that conversation goes to the head; other configured channels and threads
+keep independent lanes. The receiver loads the exact saved `head` identity in
+`--state-dir`, or creates it on the first turn, and parks OMP again when the
+turn finishes. Do not open the same native state or transcript in another OMP
+process. Pass `--ask-state "$CATALY_STATE_DIR"` (an absolute path) to consume
+answers for existing ASK mailboxes before starting a turn.
+
+For the installed CLI, set `CATALY_DISCORD_HEAD_CHANNEL_ID` to one of the
+explicit inbound channels and run `cataly inbound discord --gateway` outside
+an interactive OMP monitor. Its state is `$CATALY_STATE_DIR/discord-head`.
+Stop the old receiver before switching. Rust takes over its `gateway.sqlite`
+queue and cursors in `$CATALY_STATE_DIR/discord-inbound`: a pending head
+admission is settled only from its original OMP receipt, and the queue is
+kept untouched while that receipt is missing. Rust never takes over a live
+interactive OMP session.
 
 When the native binary is installed or bundled, `cataly send discord` and
 `cataly presence discord` select it automatically. To run without Bun or OMP:
@@ -274,7 +301,7 @@ Long fenced Markdown closes and reopens its code block at each UTF-16-safe cut.
 Use `target/release/cataly discord-presence` to run only the Gateway presence connection.
 Linux x64 release archives contain the checksummed Rust binary. Source installs
 on supported Unix hosts build it with Cargo when a toolchain is available.
-Existing installations without that binary keep working through the legacy CLI.
+Discord intake has no fallback: installations without that binary must build it.
 
 Ordinary owner text runs with OMP's tools disabled; attachments are not
 downloaded. Follow-ups reuse the saved session, and the OMP process exits

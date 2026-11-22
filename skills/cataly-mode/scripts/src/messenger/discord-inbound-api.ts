@@ -63,22 +63,6 @@ export const unavailable = (error: unknown): boolean =>
 export const inboundProtocolError = (message: string): MessengerError =>
   new MessengerError(message, 502, "DISCORD_INBOUND_PROTOCOL_ERROR");
 
-/** Only retry a known rejection or a read failure; keep any server rate-limit floor. */
-export const transientRetryDelay = (error: unknown, delay: number): number | undefined => {
-  if (!(error instanceof MessengerError) || error.outcome === "uncertain") return undefined;
-  if (error instanceof RateLimitError) {
-    return error.retryAfterMs <= error.waitLimitMs ? Math.max(delay, error.retryAfterMs) : undefined;
-  }
-  if (
-    error.code !== "DISCORD_INBOUND_PROTOCOL_ERROR" &&
-    (error.status === 429 ||
-      error.status >= 500 ||
-      (error.status === 0 && error.code === "DISCORD_INBOUND_REQUEST_FAILED"))
-  )
-    return delay;
-  return undefined;
-};
-
 /** Maps Discord failures to actionable errors that never echo a response body. */
 export const inboundRequest =
   (discord: Discord): Request =>

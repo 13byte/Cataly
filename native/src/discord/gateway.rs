@@ -1,3 +1,5 @@
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail, ensure};
@@ -7,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::{
     net::TcpStream,
-    sync::mpsc,
+    sync::{Notify, mpsc},
     time::{Instant, sleep, sleep_until, timeout},
 };
 use tokio_tungstenite::{
@@ -15,7 +17,7 @@ use tokio_tungstenite::{
     tungstenite::{Message, protocol::WebSocketConfig},
 };
 
-use super::{Interaction, Snowflake, presence::online, wake::Wake};
+use super::{Interaction, Snowflake, presence::online, threads::Routes, wake::Wake};
 
 mod dispatch;
 
@@ -58,7 +60,61 @@ pub(super) struct IntakeLink<'a> {
     pub(super) channels: &'a [Snowflake],
     pub(super) owner: Snowflake,
     pub(super) wake: &'a Wake,
-    pub(super) interactions: mpsc::Sender<Interaction>,
+    pub(super) threads: Option<&'a Routes>,
+    pub(super) inbox: &'a super::inbox::Inbox,
+    pub(super) interactions: Option<mpsc::Sender<Interaction>>,
+    pub(super) supervision: Option<Supervision<'a>>,
+}
+
+/// TS-parity FIFO admission (discord-inbound-live.ts): each accepted owner message is persisted with its
+/// channel's admission cursor and thread scope before any delivery.
+pub(super) struct Supervision<'a> {
+    pub(super) cursors: &'a Path,
+    /// `--scope-all`: every valid channel is accepted (discord-inbound.ts:125-127).
+    pub(super) all: bool,
+    pub(super) health: &'a Health,
+}
+
+/// The established connection's state for activity and receiver publication (`onHealth`/`onReady`).
+#[derive(Default)]
+pub(super) struct Health {
+    connected: AtomicBool,
+    generation: AtomicU64,
+    notify: Notify,
+}
+
+impl Health {
+    fn ready(&self) {
+        self.generation.fetch_add(1, Ordering::AcqRel);
+        self.connected.store(true, Ordering::Release);
+        self.notify.notify_one();
+    }
+
+    fn lost(&self) {
+        if self.connected.swap(false, Ordering::AcqRel) {
+            self.generation.fetch_add(1, Ordering::AcqRel);
+        }
+        self.notify.notify_one();
+    }
+
+    fn ack(&self) {
+        if self.connected.load(Ordering::Acquire) {
+            self.notify.notify_one();
+        }
+    }
+
+    /// Whether READY/RESUMED established the current connection, and that connection's generation.
+    pub(super) fn snapshot(&self) -> (bool, u64) {
+        (
+            self.connected.load(Ordering::Acquire),
+            self.generation.load(Ordering::Acquire),
+        )
+    }
+
+    /// Resolves after a connection was established or retired, or a heartbeat was acknowledged.
+    pub(super) async fn changed(&self) {
+        self.notify.notified().await;
+    }
 }
 
 impl Link<'_> {
@@ -71,7 +127,11 @@ impl Link<'_> {
         loop {
             let started = Instant::now();
             let mut minimum = 0;
-            match self.connect(&mut resume).await {
+            let outcome = self.connect(&mut resume).await;
+            if let Some(health) = self.health() {
+                health.lost();
+            }
+            match outcome {
                 Ok(Outcome::Fatal(code)) => {
                     bail!("Discord Gateway closed with non-retryable code {code}")
                 }
@@ -140,12 +200,13 @@ impl Link<'_> {
                     match incoming? {
                         Message::Text(text) => {
                             let frame: Frame = serde_json::from_str(text.as_str())?;
-                            if let (Some(state), Some(sequence)) = (resume.as_mut(), frame.s) {
-                                state.sequence = state.sequence.max(sequence);
-                            }
                             match frame.op {
                                 0 => {
+                                    let sequence = frame.s;
                                     let event = self.dispatch(frame, resume, &mut ready)?;
+                                    if let (Some(state), Some(sequence)) = (resume.as_mut(), sequence) {
+                                        state.sequence = state.sequence.max(sequence);
+                                    }
                                     if self.intake.is_none() && let Some(event) = event {
                                         if event == "RESUMED" {
                                             send(&mut ws, &json!({"op": 3, "d": online()})).await?;
@@ -163,6 +224,9 @@ impl Link<'_> {
                                 9 => return Ok(Outcome::Restart),
                                 11 if awaiting_ack => {
                                     awaiting_ack = false;
+                                    if ready && let Some(health) = self.health() {
+                                        health.ack();
+                                    }
                                     if self.intake.is_none() && !acknowledged {
                                         acknowledged = true;
                                         let seq = heartbeat_seq.map_or_else(|| "-".to_owned(), |seq| seq.to_string());
@@ -187,13 +251,21 @@ impl Link<'_> {
         }
     }
 
+    fn health(&self) -> Option<&Health> {
+        self.intake
+            .as_ref()
+            .and_then(|intake| intake.supervision.as_ref())
+            .map(|supervision| supervision.health)
+    }
+
     fn authenticate(&self, resume: Option<&Resume>) -> Value {
         resume.map_or_else(
             || {
                 let mut identify = json!({"op": 2, "d": {"token": self.token, "intents": 1 << 9,
                     "properties": {"os": std::env::consts::OS, "browser": "cataly", "device": "cataly"}}});
-                if self.intake.is_some() {
-                    identify["d"]["intents"] = json!((1 << 9) | (1 << 12) | (1 << 15));
+                if let Some(intake) = &self.intake {
+                    let guilds = u32::from(intake.threads.is_some());
+                    identify["d"]["intents"] = json!((1 << 9) | (1 << 12) | (1 << 15) | guilds);
                 } else {
                     identify["d"]["presence"] = online();
                 }

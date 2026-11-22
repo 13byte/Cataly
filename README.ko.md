@@ -237,15 +237,37 @@ OMP 프로세스를 닫습니다. 결과가 불명확하면 롤백된 것으로 
 | --- | --- |
 | `CATALY_DISCORD_NATIVE_BIN` | 선택 사항. Rust 바이너리의 절대 경로. `off`는 기존 Discord 경로를 선택합니다. |
 | `CATALY_DISCORD_NATIVE_WORKSPACE` | 선택 사항. 네이티브 작업 디렉터리의 절대 경로. 생략하면 `laneWorkspace`를 사용합니다. |
-| `CATALY_DISCORD_NATIVE_CHANNEL_ID` | 선택 사항. 인입 목록의 채널 또는 스레드 하나를 지정합니다. 생략하면 명시적으로 등록한 인입 채널만 사용합니다. |
+| `CATALY_DISCORD_NATIVE_CHANNEL_ID` | 선택 사항. 인입 목록의 채널 또는 스레드 하나를 지정합니다. 생략하면 명시적으로 등록한 인입 채널 전체를 루트로 사용합니다. |
+| `CATALY_DISCORD_THREADS` | 기본적으로 루트 아래의 활성 스레드를 따라갑니다. `off`면 명시한 ID만 처리합니다. Rust를 직접 실행할 때는 `--follow-threads`를 씁니다. |
 | `CATALY_OMP` / `CATALY_DISCORD_NATIVE_MODEL` | 필요할 때만 지정하는 OMP 실행 파일과 모델 |
 
 Rust가 Gateway 하트비트와 재연결, REST 조회·전송, 버튼, OMP 레인을 맡습니다.
-명시적으로 등록한 채널·스레드만 처리합니다. 전환 전에 기존 모니터를 중지하세요.
-호환 실행기는 첫 실행 때 기존 채널 커서를 가져옵니다. 기존 head/ASK 라우팅과
-자동 스레드 탐색과 `--context`, `--wake-lanes`, `--activity-file`은 기존
-모니터에서 유지합니다. 독립 Rust 수신을 쓰려면 채널을 명시하고
-`CATALY_DISCORD_THREADS=off`로 설정하세요.
+찾은 스레드마다 커서, 레인, 답장 위치가 따로 있습니다. 전환 전에 기존 모니터를
+중지하세요. 호환 실행기는 첫 실행 때 기존 커서를 가져옵니다. 네이티브 바이너리가
+있으면 감독형 모니터는 OMP 감독자마다 필요할 때 Rust 프로세스 하나를 띄워 ASK
+답변과 head 승인을 저장된 OMP 영수증으로 판정합니다. 활성 세션, 승인 대기열,
+`message_end` 전달은 여전히 OMP 확장이 맡습니다. 중단된 라우팅 요청은 몰래 다시
+보내거나 head로 돌리지 않습니다. Discord 수신은 Rust 전용입니다. OMP `monitor` 도구 아래에서 `cataly inbound discord`(필터
+`^INBOUND`)는 같은 PID, stdout, IPC 채널을 유지한 채 `cataly discord --supervised`로 자신을
+대체합니다. `CATALY_DISCORD_SCOPE=all`, `--context`, `--activity-file`, recall, `--wake-lanes`도
+모두 Rust에서 실행되며, `--wake-lanes`는 herdr나 hc 없이 lane OMP를 직접 시작합니다. 라이브
+세션은 계속 OMP 확장이 소유합니다. 네이티브 바이너리가 없으면 `cataly inbound discord`는
+빌드 명령(`cargo build --locked --release`)을 안내하며 실패합니다.
+
+head 전체를 Rust가 맡게 하려면 `--head-channel "$CHANNEL_ID"`와 명시적인
+`--channel "$CHANNEL_ID"`로 별도 수신기를 실행하세요. 그 대화만 head로 가고,
+다른 채널과 스레드는 독립 레인을 유지합니다. 수신기는 `--state-dir`에 저장된
+`head` 세션을 그대로 불러오거나 첫 실행 때 만들고, 실행이 끝나면 OMP를 다시
+내립니다. 같은 네이티브 상태나 기록 파일을 다른 OMP 프로세스에서 열지 마세요.
+기존 ASK 답변을 먼저 처리하려면 `--ask-state "$CATALY_STATE_DIR"`(절대 경로)를
+넘기세요.
+
+설치된 CLI에서는 `CATALY_DISCORD_HEAD_CHANNEL_ID`를 명시한 인입 채널 중 하나로
+정하고, 대화형 OMP 모니터 밖에서 `cataly inbound discord --gateway`를 실행합니다.
+상태는 `$CATALY_STATE_DIR/discord-head`에 저장됩니다. 전환 전에 기존 수신기를
+중지하세요. Rust는 `$CATALY_STATE_DIR/discord-inbound`의 `gateway.sqlite` 큐와
+커서를 이어받습니다. 미확정 head 승인은 원래 OMP 영수증으로만 확정하고, 영수증이
+없으면 큐를 그대로 둡니다. 실행 중인 대화형 OMP 세션은 가져오지 않습니다.
 
 Rust 바이너리가 설치되거나 배포본에 포함되어 있으면 `cataly send discord`와
 `cataly presence discord`가 자동으로 Rust를 선택합니다. Bun과 OMP 없이

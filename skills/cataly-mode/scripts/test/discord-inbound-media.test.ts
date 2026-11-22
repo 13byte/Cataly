@@ -1,17 +1,12 @@
 import { expect, test } from "bun:test";
 import { discordInbound, formatDiscordInbound } from "../src/messenger/discord-inbound.ts";
 import { toInbound } from "../src/messenger/discord-inbound-api.ts";
-import { MessengerError } from "../src/messenger/http.ts";
 import {
   discordRestWorld,
   memoryDiscordCursor,
   ownerMessage,
   type TestDiscordMessage,
 } from "./discord-inbound-fakes.ts";
-import { liveWorld } from "./discord-inbound-live-fakes.ts";
-
-// POSIX-only: the Discord inbound queue requires a private (0700) uid-owned directory.
-const posix = test.skipIf(process.platform === "win32");
 
 const options = { ownerId: "10", channelIds: ["20"] };
 const cdn = (name: string) => `https://cdn.discordapp.com/attachments/20/1/${name}?ex=1&is=2&hm=3`;
@@ -92,22 +87,6 @@ test("attachments, voice messages and replies follow their INBOUND line in one R
   expect(groups.map((group) => group.split("\n").length)).toEqual([2, 3, 2, 2, 2]);
 });
 
-posix("Gateway backfill and live dispatch deliver the same record groups without replaying media", async () => {
-  const world = await liveWorld(media.slice(0, 3), options, { "20": "100" });
-  try {
-    const [socket] = world.sockets;
-    if (!socket) throw new Error("gateway did not open");
-    await world.connect(socket);
-    for (const message of media) await world.dispatch(socket, message);
-    expect(world.lines.join("\n").split("\n")).toEqual(expected);
-    expect(world.lines.map((group) => group.split("\n").length)).toEqual([2, 3, 2, 2, 2]);
-    expect(world.cursor("20")).toBe("106");
-  } finally {
-    world.live.close();
-    await world.live.done;
-  }
-});
-
 test("the documented INBOUND grammar reads media text unchanged and never matches context records", async () => {
   const grammar = /^INBOUND discord (\d+) (\d+) from=owner ref=(\d+|-) (".*")$/;
   const { lines } = await restLines();
@@ -126,48 +105,4 @@ test("the documented INBOUND grammar reads media text unchanged and never matche
   expect(extra).toHaveLength(6);
   expect(extra.some((line) => line.startsWith("INBOUND discord "))).toBe(false);
   for (const line of extra) JSON.parse(line.split(" ").slice(4).join(" "));
-});
-
-posix("malformed attachment lists and required fields stop before the message commits", async () => {
-  const malformed = [
-    { filename: "x.png", size: 1, url: cdn("x.png") },
-    null,
-    [null],
-    [attachment("x.png", { filename: 1 })],
-    [{ filename: "x.png", size: 1 }],
-    [attachment("x.png", { size: Number.MAX_SAFE_INTEGER + 1 })],
-  ];
-  for (const attachments of malformed) {
-    const world = discordRestWorld([
-      ownerMessage("101"),
-      ownerMessage("102", { content: "", attachments }),
-      ownerMessage("103"),
-    ]);
-    const cursor = memoryDiscordCursor("100");
-    const intake = await discordInbound(world.discord, () => cursor.store, options);
-    const received: string[] = [];
-    const failure = intake.poll((message) => received.push(formatDiscordInbound(message)));
-    await expect(failure).rejects.toThrow(MessengerError);
-    await expect(failure).rejects.toMatchObject({ status: 502, code: "DISCORD_INBOUND_PROTOCOL_ERROR" });
-    expect(received).toEqual(['INBOUND discord 20 101 from=owner ref=- "owner 101"']);
-    expect(cursor.saved).toEqual(["101"]);
-    expect(cursor.store.load()).toBe("101");
-  }
-  const world = await liveWorld(
-    [ownerMessage("101"), ownerMessage("102", { attachments: [{ filename: "x.png", size: 1 }] }), ownerMessage("103")],
-    options,
-    { "20": "100" },
-  );
-  try {
-    const [socket] = world.sockets;
-    if (!socket) throw new Error("gateway did not open");
-    await world.connect(socket);
-    await expect(world.live.done).rejects.toMatchObject({ status: 502, code: "DISCORD_INBOUND_PROTOCOL_ERROR" });
-    expect(world.received).toEqual(["20:101"]);
-    expect(world.cursor("20")).toBe("101");
-    expect(socket.closed).toBe(true);
-    expect(world.pending.size).toBe(0);
-  } finally {
-    world.live.close();
-  }
 });

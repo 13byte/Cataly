@@ -488,6 +488,7 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
     BATCH_MS,
     typeof process.getuid === "function" ? admissions : undefined,
     installation,
+    () => stateDir,
   );
   const runtimeHealth = new RuntimeHealthWriter(monitors);
 

@@ -8,9 +8,10 @@ import { expect, test } from "bun:test";
 import { Readable } from "node:stream";
 import type { OwnerStream, ReceiveLink } from "../src/voice/discord-link.ts";
 import { ownerReceiver } from "../src/voice/discord-receive.ts";
-import { settle } from "./discord-inbound-live-fakes.ts";
 import { gatewayTimers } from "./discord-presence-fakes.ts";
 import { fakeCodec, ids } from "./voice-discord-fakes.ts";
+
+const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 /** VoiceReceiver.subscribe and onUdpMessage over real Readables, wrapped per receive() call as discord.ts does. */
 class LibraryLink implements ReceiveLink {

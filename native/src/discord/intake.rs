@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::time::Duration;
 
@@ -7,9 +8,15 @@ use tokio::{
     time::{MissedTickBehavior, interval},
 };
 
-use super::{Snowflake, Transport, wake::Wake};
+use super::{
+    Message, Snowflake, Transport,
+    inbox::Inbox,
+    threads::{Discovery, Routes},
+    wake::Wake,
+};
 use crate::harness::discord::{Origin, Worker};
-mod migration;
+use crate::routing::ask;
+pub(super) mod migration;
 
 const PAGE: u8 = 100;
 const PAGE_LIMIT: usize = 20;
@@ -18,6 +25,7 @@ pub(super) struct Poll<'a> {
     pub(super) seconds: u64,
     pub(super) gateway: bool,
     pub(super) legacy: Option<&'a Path>,
+    pub(super) discovery: Option<(&'a mut Discovery, &'a Routes)>,
 }
 
 pub(super) struct Intake<'a, 'b> {
@@ -26,11 +34,20 @@ pub(super) struct Intake<'a, 'b> {
     pub(super) bot: Snowflake,
     pub(super) owner: Snowflake,
     pub(super) stop: watch::Receiver<bool>,
+    pub(super) ask_state: Option<&'a Path>,
+    pub(super) inbox: &'a Inbox,
 }
 
 struct Backlog {
     highest: Snowflake,
-    requests: Vec<(Snowflake, String)>,
+    requests: BTreeMap<Snowflake, Request>,
+}
+
+struct Request {
+    queued: bool,
+    text: String,
+    reference: Option<Snowflake>,
+    plain: bool,
 }
 
 impl Intake<'_, '_> {
@@ -44,19 +61,11 @@ impl Intake<'_, '_> {
             seconds: poll_seconds,
             gateway,
             legacy,
+            mut discovery,
         } = settings;
         for &channel in channels {
-            let origin = self.origin(channel, Snowflake::FLOOR);
-            if self.worker.cursor(origin)?.is_none() {
-                let latest = if let Some(cursor) = migration::read(legacy, channel)? {
-                    cursor
-                } else {
-                    let history = self.transport.api.history(channel, None, 1).await?;
-                    history
-                        .first()
-                        .map_or(Snowflake::FLOOR, |message| message.id)
-                };
-                self.worker.advance(self.origin(channel, latest))?;
+            if discovery.as_ref().is_none_or(|(d, _)| d.readable(channel)) {
+                self.seed(channel, legacy).await?;
             }
         }
         println!(
@@ -88,54 +97,187 @@ impl Intake<'_, '_> {
                 }
                 pending = wake.receive(), if gateway => pending,
             };
-            'channels: for (index, &channel) in channels.iter().enumerate() {
-                if pending & (1 << index) == 0 {
-                    continue;
+            let (threads, baseline) = match discovery.as_mut() {
+                Some((discovery, routes)) => {
+                    let refreshed = discovery.refresh(&self.transport.api, routes).await;
+                    (
+                        routes.take(refreshed || pending == Wake::ALL),
+                        Some((discovery.startup, *routes)),
+                    )
                 }
-                let Some(cursor) = self.worker.cursor(self.origin(channel, Snowflake::FLOOR))?
-                else {
-                    anyhow::bail!("Discord cursor disappeared during intake");
-                };
-                let backlog = match self.backfill(channel, cursor).await {
-                    Ok(backlog) => backlog,
-                    Err(error) if gateway || poll_seconds > 0 => {
-                        eprintln!("DISCORD_INTAKE_HELD channel={channel}: {error:#}");
-                        continue;
-                    }
-                    Err(error) => return Err(error),
-                };
-                let mut committed = cursor;
-                for (id, text) in backlog.requests {
-                    if *self.stop.borrow() {
-                        return Ok(());
-                    }
-                    let origin = self.origin(channel, id);
-                    match self
-                        .worker
-                        .run_message(&mut self.transport, origin, text.trim(), &mut self.stop)
-                        .await
-                    {
-                        Ok(true) => {}
-                        Ok(false) => return Ok(()),
-                        Err(error) if gateway || poll_seconds > 0 => {
-                            eprintln!(
-                                "DISCORD_LANE_HELD channel={channel} request={id}: {error:#}"
-                            );
-                            continue 'channels;
-                        }
-                        Err(error) => return Err(error),
-                    }
-                    self.worker.advance(origin)?;
-                    committed = id;
+                None => (BTreeSet::new(), None),
+            };
+            let exact = channels.iter().enumerate().filter_map(|(index, &id)| {
+                (pending & (1 << index) != 0
+                    && discovery.as_ref().is_none_or(|(d, _)| d.readable(id)))
+                .then_some((id, None))
+            });
+            let discovered = threads.into_iter().filter_map(|id| {
+                channels
+                    .binary_search(&id)
+                    .is_err()
+                    .then_some((id, baseline))
+            });
+            for (channel, route) in exact.chain(discovered) {
+                if !self
+                    .process_channel(channel, route, legacy, gateway || poll_seconds > 0)
+                    .await?
+                {
+                    return Ok(());
                 }
-                if backlog.highest > committed {
-                    self.worker.advance(self.origin(channel, backlog.highest))?;
-                }
+            }
+            if pending == Wake::ALL {
+                self.inbox.clear_sync()?;
             }
             if !gateway && poll_seconds == 0 {
                 return Ok(());
             }
         }
+    }
+
+    async fn process_channel(
+        &mut self,
+        channel: Snowflake,
+        route: Option<(Snowflake, &Routes)>,
+        legacy: Option<&Path>,
+        continuous: bool,
+    ) -> Result<bool> {
+        let allowed = || route.is_none_or(|(_, routes)| routes.contains(channel));
+        if !allowed() {
+            return Ok(true);
+        }
+        let origin = self.origin(channel, Snowflake::FLOOR);
+        let cursor = match (self.worker.cursor(origin)?, route) {
+            (Some(cursor), _) => cursor,
+            (None, Some((startup, _))) => {
+                let cursor = self.initial_cursor(channel, legacy)?.unwrap_or(startup);
+                self.worker.advance(self.origin(channel, cursor))?;
+                cursor
+            }
+            (None, None) => anyhow::bail!("Discord cursor disappeared during intake"),
+        };
+        let backlog = match self.backfill(channel, cursor).await {
+            Ok(backlog) => backlog,
+            Err(error) if continuous => {
+                eprintln!("DISCORD_INTAKE_HELD channel={channel}: {error:#}");
+                return Ok(true);
+            }
+            Err(error) => return Err(error),
+        };
+        let mut committed = cursor;
+        for (
+            id,
+            Request {
+                queued,
+                text,
+                reference,
+                plain,
+            },
+        ) in backlog.requests
+        {
+            if *self.stop.borrow() {
+                return Ok(false);
+            }
+            if !allowed() {
+                return Ok(true);
+            }
+            let origin = self.origin(channel, id);
+            if self.inbox.settled(channel, id)? {
+                self.confirm(origin, &mut committed, legacy, queued)?;
+                continue;
+            }
+            if let Some(state) = self.ask_state
+                && ask::route(
+                    state,
+                    &ask::Reply {
+                        channel,
+                        message: id,
+                        reference,
+                        owner: self.owner,
+                        text: text.as_str().into(),
+                        plain,
+                    },
+                )?
+            {
+                self.confirm(origin, &mut committed, legacy, queued)?;
+                continue;
+            }
+            match self
+                .worker
+                .run_message(&mut self.transport, origin, text.trim(), &mut self.stop)
+                .await
+            {
+                Ok(true) => self.confirm(origin, &mut committed, legacy, queued)?,
+                Ok(false) => return Ok(false),
+                Err(error) if continuous => {
+                    eprintln!("DISCORD_LANE_HELD channel={channel} request={id}: {error:#}");
+                    return Ok(true);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        if backlog.highest > committed && allowed() {
+            self.confirm(
+                self.origin(channel, backlog.highest),
+                &mut committed,
+                legacy,
+                false,
+            )?;
+        }
+        Ok(true)
+    }
+
+    async fn seed(&self, channel: Snowflake, legacy: Option<&Path>) -> Result<()> {
+        if self
+            .worker
+            .cursor(self.origin(channel, Snowflake::FLOOR))?
+            .is_none()
+        {
+            let latest = match self.initial_cursor(channel, legacy)? {
+                Some(cursor) => cursor,
+                None => self
+                    .transport
+                    .api
+                    .history(channel, None, 1)
+                    .await?
+                    .first()
+                    .map_or(Snowflake::FLOOR, |message| message.id),
+            };
+            self.worker.advance(self.origin(channel, latest))?;
+        }
+        Ok(())
+    }
+
+    fn initial_cursor(
+        &self,
+        channel: Snowflake,
+        legacy: Option<&Path>,
+    ) -> Result<Option<Snowflake>> {
+        if let Some(cursor) = migration::read(legacy, channel)? {
+            return Ok(Some(cursor));
+        }
+        Ok(self
+            .inbox
+            .next(channel, None)?
+            .map(|(message, _)| message.id.preceding().unwrap_or(Snowflake::FLOOR)))
+    }
+
+    fn confirm(
+        &self,
+        origin: Origin,
+        committed: &mut Snowflake,
+        legacy: Option<&Path>,
+        queued: bool,
+    ) -> Result<()> {
+        if origin.message > *committed {
+            migration::write(legacy, origin.channel, origin.message)?;
+            self.worker.advance(origin)?;
+            *committed = origin.message;
+        }
+        if queued {
+            self.inbox.acknowledge(origin.channel, origin.message)?;
+        }
+        Ok(())
     }
 
     const fn origin(&self, channel: Snowflake, message: Snowflake) -> Origin {
@@ -150,7 +292,7 @@ impl Intake<'_, '_> {
     async fn backfill(&self, channel: Snowflake, cursor: Snowflake) -> Result<Backlog> {
         let mut batch = Backlog {
             highest: cursor,
-            requests: Vec::new(),
+            requests: BTreeMap::new(),
         };
         let mut bytes = 0usize;
         let mut before = None;
@@ -163,34 +305,100 @@ impl Intake<'_, '_> {
                 "Discord history did not advance its page boundary"
             );
             for message in page.into_iter().filter(|message| message.id > cursor) {
-                batch.highest = batch.highest.max(message.id);
-                if message.author.id != self.owner
-                    || message.author.bot
-                    || message.author.system
-                    || message.webhook_id.is_some()
-                    || !matches!(message.kind, 0 | 19)
-                {
-                    continue;
-                }
-                let text = message.content.context(
-                    "Discord owner message content unavailable: check Message Content Intent",
-                )?;
-                if !text.trim().is_empty() {
-                    bytes += text.len();
-                    ensure!(
-                        bytes <= 8 * 1024 * 1024,
-                        "Discord owner backlog exceeded its byte limit"
-                    );
-                    batch.requests.push((message.id, text));
-                }
+                self.collect(&mut batch, channel, message, false, &mut bytes)?;
             }
             if complete {
-                batch.requests.sort_unstable_by_key(|(id, _)| *id);
-                batch.requests.dedup_by_key(|(id, _)| *id);
+                self.merge_queued(&mut batch, channel, cursor, &mut bytes)?;
                 return Ok(batch);
             }
             before = oldest;
         }
         anyhow::bail!("Discord backlog exceeds the bounded history window; no cursor was advanced")
+    }
+
+    fn merge_queued(
+        &self,
+        batch: &mut Backlog,
+        channel: Snowflake,
+        cursor: Snowflake,
+        bytes: &mut usize,
+    ) -> Result<()> {
+        let mut after = None;
+        for _ in 0..PAGE_LIMIT * usize::from(PAGE) {
+            let Some((message, native)) = self.inbox.next(channel, after)? else {
+                return Ok(());
+            };
+            after = Some(message.id);
+            if !native && message.id <= cursor {
+                self.inbox.acknowledge(channel, message.id)?;
+            } else {
+                self.collect(batch, channel, message, true, bytes)?;
+            }
+        }
+        ensure!(
+            self.inbox.next(channel, after)?.is_none(),
+            "Discord FIFO exceeded the bounded processing window"
+        );
+        Ok(())
+    }
+
+    fn collect(
+        &self,
+        batch: &mut Backlog,
+        channel: Snowflake,
+        message: Message,
+        queued: bool,
+        bytes: &mut usize,
+    ) -> Result<()> {
+        batch.highest = batch.highest.max(message.id);
+        if let Some(previous) = batch.requests.remove(&message.id) {
+            *bytes -= previous.text.len();
+        }
+        let valid = message.author.id == self.owner
+            && !message.author.bot
+            && !message.author.system
+            && message.webhook_id.is_none()
+            && matches!(message.kind, 0 | 19);
+        let text = if valid {
+            message.content.context(
+                "Discord owner message content unavailable: check Message Content Intent",
+            )?
+        } else {
+            String::new()
+        };
+        if text.trim().is_empty() {
+            if queued {
+                self.inbox.acknowledge(channel, message.id)?;
+            }
+            return Ok(());
+        }
+        *bytes += text.len();
+        ensure!(
+            *bytes <= 8 * 1024 * 1024,
+            "Discord owner backlog exceeded its byte limit"
+        );
+        let reply = message.reference.filter(|reference| reference.kind == 0);
+        if self.ask_state.is_some() {
+            ensure!(
+                reply
+                    .and_then(|reference| reference.channel_id)
+                    .is_none_or(|id| id == channel),
+                "Discord reply belongs to a different conversation"
+            );
+        }
+        batch.requests.insert(
+            message.id,
+            Request {
+                queued,
+                text,
+                reference: reply.and_then(|reference| reference.message_id),
+                plain: message.kind == 0
+                    && message.reference.is_none()
+                    && !message.has_reference_snapshot
+                    && !message.forwarded
+                    && message.attachments.is_empty(),
+            },
+        );
+        Ok(())
     }
 }

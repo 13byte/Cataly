@@ -28,6 +28,9 @@ class World:
         self.force_plain_reply = False
         self.reject_text = None
         self.presence = Queue()
+        self.active_threads = []
+        self.history_channels = set()
+        self.discovery = Queue()
 
     def dispatch(self, name, data):
         self.seq += 1
@@ -46,8 +49,8 @@ class World:
         })
 
 
-def message(ident, text, user="10"):
-    return {"id": ident, "channel_id": "20", "type": 0, "author": {"id": user}, "content": text}
+def message(ident, text, user="10", channel="20"):
+    return {"id": ident, "channel_id": channel, "type": 0, "author": {"id": user}, "content": text}
 
 
 class Discord(BaseHTTPRequestHandler):
@@ -83,17 +86,23 @@ class Discord(BaseHTTPRequestHandler):
                 self.json({"id": "99", "bot": True, "avatar": "already-configured"})
             elif path.path == "/api/v10/applications/@me":
                 self.json({"flags": 1 << 19})
-            elif path.path == "/api/v10/channels/20/messages":
+            elif path.path.startswith("/api/v10/channels/") and path.path.endswith("/messages"):
+                channel = path.path.split("/")[-2]
+                self.world.history_channels.add(channel)
                 query = parse_qs(path.query)
                 limit = int(query["limit"][0])
                 before = int(query.get("before", [str(2 ** 64)])[0])
-                records = sorted(self.world.history, key=lambda msg: int(msg["id"]), reverse=True)
+                records = sorted((msg for msg in self.world.history if msg["channel_id"] == channel),
+                                 key=lambda msg: int(msg["id"]), reverse=True)
                 self.json([msg for msg in records if int(msg["id"]) < before][:limit])
             elif path.path in ("/api/v10/channels/20", "/api/v10/channels/21"):
                 channel = path.path.rsplit("/", 1)[1]
-                self.json({"id": channel, "type": 0 if channel == "20" else 15})
+                self.json({"id": channel, "type": 0 if channel == "20" else 15, "guild_id": "40"})
             elif path.path == "/api/v10/guilds/40/channels":
                 self.json([{"id": "20", "type": 0, "name": "work"}])
+            elif path.path == "/api/v10/guilds/40/threads/active":
+                self.json({"threads": self.world.active_threads})
+                self.world.discovery.put(True)
             else:
                 self.json({}, 404)
 
@@ -104,7 +113,8 @@ class Discord(BaseHTTPRequestHandler):
             assert self.path.endswith("/callback-local-only/callback")
             self.world.callbacks.put((self.path.split("/")[4], data))
             self.json(status=204)
-        elif self.authorized() and self.path == "/api/v10/channels/20/messages":
+        elif self.authorized() and self.path.startswith("/api/v10/channels/") and self.path.endswith("/messages"):
+            channel = self.path.split("/")[-2]
             card = "components" in data
             if self.world.reject_text is not None and self.world.reject_text == data.get("content"):
                 self.json({}, 403)
@@ -118,7 +128,7 @@ class Discord(BaseHTTPRequestHandler):
             self.world.replies.put(data)
             self.world.bound += 1
             reference = None if self.world.force_plain_reply else data.get("message_reference")
-            self.json({"id": "300" if card else str(301 + self.world.bound), "channel_id": "20",
+            self.json({"id": "300" if card else str(301 + self.world.bound), "channel_id": channel,
                        "type": 19 if reference else 0, "message_reference": reference})
         else:
             self.json({}, 404)

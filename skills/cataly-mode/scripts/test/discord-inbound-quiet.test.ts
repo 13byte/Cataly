@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 import { Discord } from "../src/messenger/discord.ts";
 import { discordInbound } from "../src/messenger/discord-inbound.ts";
 import { discordRestWorld, memoryDiscordCursor, ownerMessage } from "./discord-inbound-fakes.ts";
-import { queuedWorld, settle } from "./discord-inbound-live-fakes.ts";
 import { fakeClock } from "./fakes.ts";
 
 test("ten quiet channels request only one head each and never rewrite their cursors", async () => {
@@ -147,27 +146,4 @@ for (const explicit of [false, true]) {
       expect(cursor.store.load()).toBe("100");
     });
   }
-}
-
-// POSIX-only: the Discord inbound queue requires a private (0700) uid-owned directory.
-const posix = test.skipIf(process.platform === "win32");
-
-for (const head of [undefined, "99", "107"]) {
-  posix(`a quiet REST head (${head}) leaves retained older owners available to the admitted FIFO`, async () => {
-    const world = queuedWorld({
-      history: head ? [ownerMessage(head)] : [],
-      messages: [ownerMessage("105"), ownerMessage("109")],
-      cursors: { "20": "107" },
-      admissions: { "105": "102", "109": "107" },
-    });
-    await world.start();
-    await settle();
-    expect(world.received).toEqual(["20:105", "20:109"]);
-    expect(world.saves).toEqual(["20:107", "20:109"]);
-    expect(world.cursor()).toBe("109");
-    expect(world.queue().first()).toBeNull();
-    expect(
-      world.rest.requests.map((request) => new URL(request.url).searchParams.get("limit")).filter(Boolean),
-    ).toEqual(["1", "1"]);
-  });
 }

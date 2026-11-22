@@ -45,7 +45,7 @@ export function publishHeadlessDiscordReceiver(
   return true;
 }
 
-export function headlessDiscordReceiver(stateDir: string, lane: Lane) {
+function headlessDiscordReceiver(stateDir: string, lane: Lane) {
   const ref = lane.sessionRef;
   if (ref?.runtime !== "headless" || !lane.session || !lane.sessionFile || !lane.cwd) return;
   const entry = laneEntry(stateDir, ref);

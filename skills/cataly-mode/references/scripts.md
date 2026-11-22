@@ -133,8 +133,7 @@ The CLI is a thin layer over typed modules you can import in your own scripts:
 | `src/messenger/discord.ts` | `Discord`: send without pings, edit, typing, threads (start, rename, archive) |
 | `src/messenger/discord-gateway.ts` | `discordGateway`: one Gateway connection (HELLO/IDENTIFY/RESUME, heartbeat, backoff, terminal close codes) shared by presence and intake |
 | `src/messenger/discord-presence.ts` | `discordPresence`: the Gateway connection that keeps the bot online |
-| `src/messenger/discord-inbound.ts` | `discordInbound`: owner-only intake with per-channel cursors, awaited delivery, REST history and queued-owner reconciliation |
-| `src/messenger/discord-inbound-live.ts` | `discordInboundLive`: live Gateway delivery with REST backfill after every `READY`/`RESUMED` |
+| `src/messenger/discord-inbound.ts` | `discordInbound`: owner-only REST reads with per-channel cursors, used by the extension's lane receiver. `cataly inbound discord` intake itself runs in the native Rust monitor |
 | `src/messenger/discord-inbound-queue.ts` | `discordInboundQueue`: private disk FIFO, bounded cache and database size, exclusive consumer, restart recovery |
 | `src/messenger/typing.ts` | `typingWhile`: show typing while a piece of work runs, stop when it ends |
 | `src/messenger/voice.ts` | `transcribe`: voice note to text through your hook |
@@ -147,7 +146,7 @@ The CLI is a thin layer over typed modules you can import in your own scripts:
 
 Every module takes its HTTP, clock and timers as arguments. That is how the tests run without the network.
 
-`discordInboundLive` adapters expose `cursorFor(channel)` from their injected store. `storeFor(channel, false)` reads admission state without seeding an unseen channel; wrappers must forward that optional argument. An admission position is not a delivery receipt.
+`storeFor(channel, false)` reads admission state without seeding an unseen channel; wrappers must forward that optional argument. An admission position is not a delivery receipt.
 
 Slack commits a successful poll's own-thread cursors in one ledger transaction, only after all reads and emits finish. `ThreadLedger.markSeen` takes the authenticated `SlackScope` and an array of `{ channel, rootTs, ts }` updates and merges them under the existing writer lock; concurrent thread records survive and seen positions never decrease. Empty batches do not take a lock, and batches with no newer known cursor do not rewrite the ledger. This does not reduce Slack requests or stop watching older threads.
 

@@ -27,21 +27,6 @@ export const envSlackToken = (): string | undefined => {
   }
 };
 
-/** A receiver must release its local state if its supervising IPC channel goes away. */
-export const exitOnDisconnect = (close: () => void): (() => void) => {
-  const disconnected = () => {
-    try {
-      close();
-    } finally {
-      process.exit(1);
-    }
-  };
-  process.once("disconnect", disconnected);
-  return () => {
-    process.off("disconnect", disconnected);
-  };
-};
-
 /** A retry policy may stop (`false`), keep the polling interval (`true`), or specify a delay in milliseconds. */
 export const every = async (
   minutes: number,
