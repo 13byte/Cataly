@@ -383,7 +383,7 @@ mod tests {
             disk_free_gb: 100.0,
             panes: 3,
         };
-        assert!(reasons(&ok, &guard()).is_empty());
+        assert_eq!(reasons(&ok, &guard()), [] as [&str; 0]);
         let full = Sample { panes: 20, ..ok };
         assert_eq!(reasons(&full, &guard()), ["panes"]);
         let unknown = Sample { panes: -1, ..full };

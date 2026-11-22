@@ -312,7 +312,7 @@ mod tests {
         let state = temp();
         let inbox = LaneInbox::open(&state).unwrap();
         inbox.add("s", "1", "10", "legacy").unwrap();
-        assert!(inbox.pending_sessions(Some(ME)).unwrap().is_empty());
+        assert_eq!(inbox.pending_sessions(Some(ME)).unwrap(), []);
         inbox.add_with_reply("s", "1", "11", "first", ME).unwrap();
         inbox.add_with_reply("s", "1", "11", "second", ME).unwrap();
         // A legacy row with the same key never gains a reply request.
@@ -330,18 +330,18 @@ mod tests {
                 has_input: true
             }]
         );
-        assert!(
+        assert_eq!(
             inbox
                 .pending_sessions(Some(ReplyIdentity {
                     bot: "9",
                     owner: "7"
                 }))
-                .unwrap()
-                .is_empty()
+                .unwrap(),
+            []
         );
         // A claimed input (dispatch=1) no longer asks for a wake.
         inbox.execute("UPDATE reply_requests SET dispatch=1");
-        assert!(inbox.pending_sessions(Some(ME)).unwrap().is_empty());
+        assert_eq!(inbox.pending_sessions(Some(ME)).unwrap(), []);
         fs::remove_dir_all(state).unwrap();
     }
 
@@ -394,7 +394,7 @@ mod tests {
         assert_eq!(inbox.next_reply("s", "1", None).unwrap().unwrap().id, "100");
         inbox.discard_reply("s", "1", "100").unwrap();
         assert!(inbox.next_reply("s", "1", Some(ME)).unwrap().is_none());
-        assert!(inbox.pending_sessions(Some(ME)).unwrap().is_empty());
+        assert_eq!(inbox.pending_sessions(Some(ME)).unwrap(), []);
         fs::remove_dir_all(state).unwrap();
     }
 }

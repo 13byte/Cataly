@@ -485,7 +485,7 @@ mod tests {
             ranked.iter().map(|row| row.at).collect::<Vec<_>>(),
             [3, 2, 1]
         );
-        assert!(rank_recall("nothing matches here", rows).is_empty());
+        assert_eq!(rank_recall("nothing matches here", rows), []);
         // Equal score and time keep input (newest-first query) order, as JavaScript's stable sort does.
         let ties = vec![row(7, "alpha first"), row(7, "alpha second")];
         let ranked = rank_recall("alpha", ties);

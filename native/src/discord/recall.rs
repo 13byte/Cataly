@@ -243,7 +243,7 @@ fn open_database(state: &Path) -> Result<Connection> {
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
+    use std::os::unix::fs::PermissionsExt as _;
 
     use super::*;
 
@@ -327,9 +327,16 @@ mod tests {
         ]
         .map(|(role, thread, text)| (role.to_owned(), thread.to_owned(), text.to_owned()));
         assert_eq!(recalled(line), expected);
-        assert!(recalled(said(40, 40, 7, "저번에 말한 배포 일정", now)).is_empty());
-        assert!(recalled(said(50, 50, 8, "earlier: rotate the staging key", now)).is_empty());
-        assert!(recalled(said(50, 50, 8, "earlier: rotate the staging key", now)).is_empty());
+        assert_eq!(recalled(said(40, 40, 7, "저번에 말한 배포 일정", now)), []);
+        assert_eq!(
+            recalled(said(50, 50, 8, "earlier: rotate the staging key", now)),
+            []
+        );
+        // The same message again: its owner turn is already recorded and still excluded from its own recall.
+        assert_eq!(
+            recalled(said(50, 50, 8, "earlier: rotate the staging key", now)),
+            []
+        );
         let mode = fs::metadata(dir.join(STORE)).unwrap().permissions().mode();
         assert_eq!(mode & 0o077, 0);
         // Retention: eight days later with a seven-day window nothing earlier survives.
@@ -337,7 +344,7 @@ mod tests {
         let line = short
             .owner(id(20), id(20), id(9), "yesterday deploy?", now + 8 * DAY_MS)
             .unwrap();
-        assert!(recalled(line).is_empty());
+        assert_eq!(recalled(line), []);
         fs::remove_dir_all(dir).unwrap();
     }
 
