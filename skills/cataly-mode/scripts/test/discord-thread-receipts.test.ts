@@ -62,7 +62,8 @@ test("Windows receipt writes complete file durability without opening a director
   try {
     Object.defineProperty(process, "platform", { ...platform, value: "win32" });
     const store = new DiscordThreadReceipts(state.dir);
-    store.write([{ ...confirmed, state: "pending" }]);
+    const { thread: _thread, message: _message, ...pending } = confirmed;
+    store.write([{ ...pending, state: "pending" }]);
     expect(store.read()[0]?.state).toBe("pending");
     store.write([confirmed]);
     expect(store.read()).toEqual([confirmed]);
