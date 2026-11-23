@@ -30,6 +30,8 @@ hc --skill                          # load its skill unless it is already in you
 
 ## 2. Messenger
 
+Tern (source feature, outside the consumer preview): install Tern so `tern` is on PATH, and set "`sessionRuntime`: "tern"` in the selected home’s config (or `CATALY_RUNTIME=tern` for the command), because the native default and herdr/hc on PATH are selected first. Start the lead in a Tern block with `PI_TUI_NATIVE=0` (OMP’s classic UI; a natively drawn OMP shows `tern capture` no input) and set `leadPane` to its block id (`echo $TERN_PANE` there). Lanes open as tabs in the lead’s own Tern session, or in the session `laneWorkspace` names; set `workspaces` to that session so sweeps read no other one. See [Tern](../../../docs/runtime.md#tern).
+
 For Discord, use the shipped native Cataly bot commands. You need the owner’s own Discord application/bot token, not a user-account session. Node and agent-messenger are not prerequisites for this Discord text flow. Create and invite the bot through the [Discord Developer Portal](https://discord.com/developers/applications).
 
 For other retained messenger integrations, [agent-messenger](https://github.com/agent-messenger/agent-messenger) remains optional platform-specific tooling with its own prerequisites and login procedures. Ask the owner which platform/identity to use before setting up those integrations.

@@ -11,7 +11,8 @@ import { type MigrateJournal, removeJournal, writeJournal } from "./store-journa
 
 export const VERIFY_MS = 3 * 60_000;
 
-/** The group new sessions join on the target: this home's group label on hc, a new "cataly" workspace on herdr. */
+/** The group new sessions join on the target: this home's group label on hc, a new "cataly" workspace on herdr, the
+ * caller's own session (else one named "cataly") on tern. */
 const targetGroup = async (d: Deps, rt: TerminalRuntime, cwd: string): Promise<string> =>
   rt.kind === "hc" ? groupId(d.store.root) : rt.createGroup("cataly", cwd);
 

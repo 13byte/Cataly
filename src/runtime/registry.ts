@@ -1,3 +1,4 @@
+import { selfRef as ternSelf } from "./tern/sessions.ts";
 import {
   HEADLESS_ADDRESS,
   type RuntimeKind,
@@ -13,7 +14,8 @@ class TerminalRuntimeError extends Error {}
 
 /**
  * The caller's own session: a valid native lane ID takes precedence over inherited terminal IDs, then
- * `HC_TERMINAL_ID`, then `HERDR_PANE_ID` (grouped by `HERDR_WORKSPACE_ID` when set).
+ * `HC_TERMINAL_ID`, then `HERDR_PANE_ID` (grouped by `HERDR_WORKSPACE_ID` when set), then `TERN_PANE` inside a Tern
+ * block (hc and herdr can run inside one).
  */
 export const selfSession = (env: Readonly<Record<string, string | undefined>>): SessionRef | undefined => {
   const headless = env["CATALY_HEADLESS_ID"];
@@ -21,7 +23,7 @@ export const selfSession = (env: Readonly<Record<string, string | undefined>>): 
   const terminal = nonEmpty(env["HC_TERMINAL_ID"]);
   if (terminal !== undefined) return { runtime: "hc", id: terminal };
   const pane = nonEmpty(env["HERDR_PANE_ID"]);
-  if (pane === undefined) return undefined;
+  if (pane === undefined) return ternSelf(env);
   const workspace = nonEmpty(env["HERDR_WORKSPACE_ID"]);
   return { runtime: "herdr", id: pane, ...(workspace === undefined ? {} : { group: workspace }) };
 };

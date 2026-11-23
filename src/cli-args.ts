@@ -8,7 +8,7 @@ export const USAGE = `cataly harness - a proactive multi-session harness using n
   cataly harness observe <role|lane|headless:UUID>        show native session identity, recent output and pending dialog IDs (JSON)
   cataly harness answer <role|lane|headless:UUID> --session ID --request ID --text JSON
                                                       explicitly answer one pending native dialog (e.g. {"value":"Deny"})
-  cataly harness role <lead|duty> [REF]                 register an existing terminal role (default: this one)
+  cataly harness role <lead|duty> [REF]                 register a session (w1:p3, herdr:w1:p3, hc:t7, tern:42) as lead or duty (default: this one)
   cataly harness start <key> --brief FILE [--cwd DIR]   open an OMP lane with the brief and lane rules
                           [--priority 1-9]            its turn for a lock (1 first, 9 last; default 5)
   cataly harness priority <key> <1-9>                   set an open lane's priority
@@ -37,7 +37,7 @@ export const USAGE = `cataly harness - a proactive multi-session harness using n
                                                       wait in line for lock <name> (lowest priority number first, then
                                                       first come), run CMD holding it, exit with CMD's code
   cataly harness lock <name> --list                     the lock's holder and its queue, one line
-  cataly harness migrate [--to hc|herdr] (--lane K | --role lead|duty|duty-loop|hourly-loop | --all) [--dry-run]
+  cataly harness migrate [--to hc|herdr|tern] (--lane K | --role lead|duty|duty-loop|hourly-loop | --all) [--dry-run]
                        [--wait-minutes N] [--resume]  hand sessions over to another runtime; MIGRATED, SKIP, DEFERRED,
                                                       or MIGRATE_ROLLBACK (exit 3) per session
   cataly harness owner init | show | snapshot | check   opt-in owner profile ($CATALY_HOME/owner.md) at the end of the

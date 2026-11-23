@@ -84,7 +84,7 @@ async function verifyFooterRuntime() {
     process.env["CATALY_CONFIG"] = configFile;
     const brief = join(dir, "brief.md");
     writeFileSync(brief, "Perform the fixture work.");
-    for (const bin of ["herdr", "hc"])
+    for (const bin of ["herdr", "hc", "tern"])
       writeFileSync(
         join(dir, bin),
         `#!/usr/bin/env bun\nawait Bun.write(process.env.ARGV_LOG, JSON.stringify([${JSON.stringify(bin)}, ...process.argv.slice(2)]));\n`,
@@ -105,6 +105,7 @@ next line`;
       { env: { HC_TERMINAL_ID: "t1" } },
       { env: { HERDR_PANE_ID: "w:p1" } },
       { env: { PATH: dir } },
+      { configured: "tern", env: {}, selected: "tern" },
       { configured: "herdr", env: {}, lead: "" },
       { env: {} },
     ];
@@ -162,7 +163,9 @@ next line`;
         const sent =
           fixture.selected === "herdr"
             ? ["pane", "run", config.leadPane, report]
-            : ["send", config.leadPane, "--", report];
+            : fixture.selected === "tern"
+              ? ["run", config.leadPane, "--", report]
+              : ["send", config.leadPane, "--", report];
         expect(await Bun.file(argvLog).json()).toEqual([fixture.selected, ...sent]);
       } else expect(forward).toBeUndefined();
       expect(await Bun.file(journal.path(key)).text()).toBe(beforeForward);

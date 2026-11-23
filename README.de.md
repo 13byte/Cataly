@@ -141,6 +141,7 @@ Ersetze ein exaktes Release nicht durch einen beliebigen Installer von `main`.
 
 Installiere zuerst git und Bun 1.4.4+. Unter Linux und macOS benötigt die Standardkonfiguration weder herdr noch hc; siehe die
 [Voraussetzungen für die Quellcode-Version](docs/releases.md#current-source-bundle).
+Tern ist eine dritte Session-Laufzeit im Quellcode von `main`; siehe [Tern](docs/runtime.md#tern).
 
 Verwende einen separaten Checkout, keine laufende Installation und kein eingefrorenes Endnutzer-Release:
 

@@ -125,6 +125,7 @@ Cataly 使用你提供的账号和权限工作。对外部系统产生影响的�
 
 请先安装 git 和 Bun 1.4.4+。Linux 和 macOS 的默认配置不需要 herdr 或 hc；详情见
 [源码版前提条件](docs/releases.md#current-source-bundle)。
+源码 `main` 还提供第三种会话运行时 Tern；详见 [Tern](docs/runtime.md#tern)。
 
 请使用独立的检出目录，不要使用正在运行的安装或已冻结的用户发行版：
 

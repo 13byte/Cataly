@@ -107,6 +107,36 @@ describe("explicit terminal selection precedence", () => {
       "hc",
       "detect:path",
     ],
+    ["CATALY_RUNTIME=tern", { CATALY_RUNTIME: "tern", HC_TERMINAL_ID: "t3", PATH: both }, undefined, "tern", "env"],
+    [
+      "TERN_PANE with neither hc nor herdr installed",
+      { TERN_PANE: "42", PATH: pathWith() },
+      undefined,
+      "tern",
+      "detect:TERN_PANE",
+    ],
+    [
+      "TERN_PANE beats tern on PATH but not an installed hc: hc in a Tern block stays hc",
+      { TERN_PANE: "42", PATH: pathWith("tern", "hc") },
+      undefined,
+      "hc",
+      "detect:path",
+    ],
+    [
+      "an installed herdr also comes before TERN_PANE",
+      { TERN_PANE: "42", PATH: pathWith("herdr", "tern") },
+      "{}",
+      "herdr",
+      "detect:path",
+    ],
+    [
+      "HERDR_PANE_ID beats TERN_PANE",
+      { HERDR_PANE_ID: "w1:p1", TERN_PANE: "42", PATH: pathWith("tern") },
+      undefined,
+      "herdr",
+      "detect:HERDR_PANE_ID",
+    ],
+    ["only tern on PATH", { PATH: pathWith("tern") }, undefined, "tern", "detect:path"],
   ] as const)("%s", (_, env, configText, kind, source) => {
     const configPath = configText === undefined ? NO_CONFIG : config(configText);
     expect(readRuntimeChoice({ env, configPath, terminalOnly: true })).toEqual({ kind, source });
@@ -114,7 +144,7 @@ describe("explicit terminal selection precedence", () => {
 });
 
 describe("readRuntimeChoice refusals", () => {
-  test("neither binary and nothing set: RuntimeChoiceError whose message names the config path and the fix", () => {
+  test("no binary and nothing set: RuntimeChoiceError whose message names the config path and the fix", () => {
     const configPath = config("{}");
     let caught: unknown;
     try {
@@ -124,9 +154,9 @@ describe("readRuntimeChoice refusals", () => {
     }
     expect(caught).toBeInstanceOf(RuntimeChoiceError);
     const message = (caught as Error).message;
-    expect(message).toContain("neither herdr nor hc is on PATH");
+    expect(message).toContain("none of herdr, hc or tern is on PATH");
     expect(message).toContain(configPath);
-    expect(message).toContain('"runtime": "herdr" or "hc"');
+    expect(message).toContain('"runtime": "herdr", "hc" or "tern"');
     expect(message).toContain("CATALY_RUNTIME");
     expect(() => readRuntimeChoice({ env: {}, configPath: NO_CONFIG, terminalOnly: true })).toThrow(RuntimeChoiceError);
   });
