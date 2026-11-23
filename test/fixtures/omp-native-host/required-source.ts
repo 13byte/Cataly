@@ -86,7 +86,7 @@ export async function requiredSourceRequest(
       ...(thinkingLevel ? { thinkingLevel } : {}),
       settings,
       bindProcessState: false,
-      cacheWarming: false,
+      cacheWarming: "off",
       disableModelFallback: true,
       toolNames: [],
       disableExtensionDiscovery: true,

@@ -9,19 +9,16 @@ import { sourceManifest } from "../src/update/source.ts";
 import { archive, type ConsumerFixture, fixture, withArchive } from "./release-consumer-setup.ts";
 import { nativeCacheFixture, overlayFixture } from "./source-bundle-setup.ts";
 
-export function boundRelease(f: ConsumerFixture, selected: string, nativeSource?: string) {
+export function boundRelease(
+  f: ConsumerFixture,
+  selected: string,
+  nativeSource?: string,
+  options: { version?: string; populateSource?: (source: string) => void } = {},
+) {
   const original = f.release(selected);
   const source = join(f.root, `bound-${selected}`);
   extractArchive(original.bundle.files, original.bundle.manifest, source);
   const ulw = overlayFixture(source, join(f.root, `ulw-${selected}`), false, selected);
-  if (nativeSource) {
-    mkdirSync(join(source, "native-addon"), { mode: 0o700 });
-    for (const path of ["native-omp.lock", "native-omp.patch", "native-addon/package.json", "native-addon/bun.lock"])
-      copyFileSync(join(nativeSource, path), join(source, path));
-  } else {
-    const native = overlayFixture(source, join(f.root, `native-${selected}`), true);
-    nativeCacheFixture(source, f.paths.home, native.checkout);
-  }
   mkdirSync(join(source, "scripts/consumer"), { recursive: true, mode: 0o700 });
   copyFileSync(
     resolve(import.meta.dir, "../scripts/source-dependencies.ts"),
@@ -29,6 +26,15 @@ export function boundRelease(f: ConsumerFixture, selected: string, nativeSource?
   );
   copyFileSync(resolve(import.meta.dir, "../scripts/consumer/omp"), join(source, "scripts/consumer/omp"));
   chmodSync(join(source, "scripts/consumer/omp"), 0o755);
+  options.populateSource?.(source);
+  if (nativeSource) {
+    mkdirSync(join(source, "native-addon"), { mode: 0o700 });
+    for (const path of ["native-omp.lock", "native-omp.patch", "native-addon/package.json", "native-addon/bun.lock"])
+      copyFileSync(join(nativeSource, path), join(source, path));
+  } else {
+    const native = overlayFixture(source, join(f.root, `native-${selected}`), true, undefined, options.version);
+    nativeCacheFixture(source, f.paths.home, native.checkout);
+  }
   const publicSource = sourceManifest(source);
   const bytes = archive(
     publicSource.files.map((file) => ({
@@ -41,7 +47,10 @@ export function boundRelease(f: ConsumerFixture, selected: string, nativeSource?
     validateReleaseManifest({
       ...original.bundle.manifest,
       source: publicSource,
-      requirements: { ...original.bundle.manifest.requirements, omp: "18.20.0" },
+      requirements: {
+        ...original.bundle.manifest.requirements,
+        omp: readSourceBundle(source, true).lock.nativeVersion,
+      },
       ompUlw: { repository: ulw.lock.repository, commit: ulw.commit },
     }),
     bytes,

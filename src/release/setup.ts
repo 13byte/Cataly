@@ -38,7 +38,7 @@ export function consumerConfigPlan(
     example.stateDir = join(paths.cataly, "state");
     keys.push("stateDir");
   }
-  if (manifest.requirements.omp === "18.20.0" || !isPrimaryConsumer(paths)) {
+  if (manifest.requirements.omp !== "18.18.8" || !isPrimaryConsumer(paths)) {
     example.agentCommand = [
       join(paths.cataly, "bin/omp"),
       ...(example.agentCommand?.slice(1) ?? [

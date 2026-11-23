@@ -8,7 +8,7 @@ On macOS and Linux Cataly starts new sessions in native OMP by default, with no 
 
 For a consumer installation or an upgrade from `v0.1.3`, follow the [verified release guide](../../../docs/releases.md). Historical releases retain their own terminal requirements and launch commands.
 
-Current source and headless-capable releases prepare the [bound OMP 18.20.0 and omp-ulw overlay](../../../docs/releases.md#current-source-bundle); neither stock OMP nor Cargo is required. Use the generated wrapper. Install one of the following terminal tools only if choosing that backend.
+Current source and headless-capable releases prepare the [bound OMP 19.0.1 and omp-ulw overlay](../../../docs/releases.md#current-source-bundle); neither stock OMP nor Cargo is required. Use the generated wrapper. Install one of the following terminal tools only if choosing that backend.
 
 herdr:
 

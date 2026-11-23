@@ -120,12 +120,17 @@ git -C "$compat" fetch --quiet --no-tags https://github.com/dbc-hbin/omp-ulw.git
 git -C "$compat" -c advice.detachedHead=false checkout --quiet "$compat_pin"
 test "$(git -C "$compat" rev-parse HEAD)" = "$compat_pin"
 export CATALY_TEST_COMPAT_ULW_ENTRY="$compat/index.ts"
+rollback_pin=e6b60c9f5efd45925645672e1841a8a9e20e5592
+git cat-file -e "$rollback_pin^{commit}" ||
+  git fetch --no-tags --depth=1 https://github.com/vntrevx/Cataly.git "$rollback_pin"
 (umask 022 && bun run ci)
 ```
 
 Fixture preparation needs network access unless the exact packages are already
 available. The compatibility checkout is test-only, outside the repository, and
 does not select a production dependency or change model/auth settings.
+The rollback fixture reads the historical Cataly commit from the local Git
+object store so the old controller runs with its own dependencies.
 On POSIX, the subshell's `umask 022` keeps test installation fixtures from
 inheriting group write permissions on developer machines. It does not change
 your shell's umask or the installer's ownership and mode checks.
@@ -196,7 +201,7 @@ separators, temp directories or the `PATH` delimiter is fixed with
 
 ### Native and provider boundaries
 
-The root and extension suites require the genuine OMP 18.20.0 host fixture,
+The root and extension suites require the genuine OMP 19.0.1 host fixture,
 including its published declarations. A same-version foreign host, raw checkout
 without `dist/types`, or stock-version stamp is not a substitute. The guarded
 `with the real omp-ulw` tests must execute, not be skipped in the full gate.
@@ -231,7 +236,7 @@ evidence.
 
 Linux `check` also executes the bound ULW code-mode and task-host checks against
 the guarded bound native source. Keep the upstream assertions, including the
-documented 18.20.2 accounting behavior: a failure on the selected 18.20.0 host
+documented 18.20.2 accounting behavior: a failure on the selected 19.0.1 host
 holds the pin or release rather than relaxing the test.
 
 Required-source regressions exercise genuine SDK print/RPC initialization against

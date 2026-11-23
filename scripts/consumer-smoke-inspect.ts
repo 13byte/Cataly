@@ -57,13 +57,13 @@ if (import.meta.main) {
   assert.equal(verifyRelease(paths, expected), source);
   assert.equal(source, releasePath(paths, expected));
   if (previous) verifyRelease(paths, previous);
-  assert.equal(expected.requirements.omp, "18.20.0");
+  assert.equal(expected.requirements.omp, readSourceBundle(source, true).lock.nativeVersion);
   const native: NativeReceipt = assertNativeSource(source, home);
   process.env["PI_NATIVES_DIR"] = join(native.directory, "natives");
   const loader = await import(join(native.directory, "source/packages/natives/native/loader-state.js"));
-  assert.equal(loader.loadNative().__piNativesBuildVersion(), "18.20.0");
+  assert.equal(loader.loadNative().__piNativesBuildVersion(), expected.requirements.omp);
   const addon = loader.nativeAddonStatus();
-  assert.equal(addon.version, "18.20.0");
+  assert.equal(addon.version, expected.requirements.omp);
   assert.equal(addon.stale, false);
   assert.equal(realpathSync(addon.path), realpathSync(native.addon));
   const config: CatalyConfig = await loadConfig(paths.config, home);
@@ -107,7 +107,11 @@ if (import.meta.main) {
       const live = await local.startLoop(ref, { CATALY_STATE_DIR: local.stateDir, CATALY_RUNTIME: "headless" });
       assert.equal(live.status, "working");
       assert.equal(live.harnessRole, "duty-loop");
-      assert.throws(() => assertNoLiveCataly(paths), /Native session .* holds release activation/);
+      // Once the duty process starts, its own controller lock can take precedence over its reservation.
+      assert.throws(
+        () => assertNoLiveCataly(paths),
+        /Native session .* holds release activation|Live Cataly PID \d+ holds duty\/lock/,
+      );
     } finally {
       await local.stopHarnessRole(ref, "duty-loop");
     }
