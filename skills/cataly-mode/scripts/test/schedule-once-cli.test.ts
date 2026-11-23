@@ -115,3 +115,45 @@ test.each(["0", "-1", "1.5", "5s", "", "86401", "Infinity"])("invalid CLI time l
   ).toBe(1);
   expect(JSON.parse(invoke("schedule", "list").out).jobs).toEqual([]);
 });
+
+test("condition CLI persists version 2 policy and default timeout without spawning", () => {
+  const added = invoke(
+    "schedule",
+    "add",
+    "probe",
+    "--every-seconds",
+    "30",
+    "--on-success",
+    "every",
+    "--suppress-unchanged",
+    "--deliver",
+    "log",
+    "--",
+    "false",
+  );
+  expect(added.code).toBe(0);
+  expect(JSON.parse(added.out)).toMatchObject({
+    condition: { everySeconds: 30, onSuccess: "every", suppressUnchanged: true },
+    timeoutSeconds: 30,
+    watch: { armed: true },
+  });
+  expect(JSON.parse(readFileSync(join(dir, "state/schedule.json"), "utf8")).version).toBe(2);
+  expect(added.err).toContain("initial success fires");
+  expect(invoke("schedule", "remove", "probe").code).toBe(0);
+  expect(JSON.parse(readFileSync(join(dir, "state/schedule.json"), "utf8")).version).toBe(1);
+});
+
+test.each(
+  [
+    ["--every-seconds", "29"],
+    ["--every-seconds", "30.5"],
+    ["--every-seconds", "86401"],
+    ["--every-seconds", "30", "--on-success", "sometimes"],
+    ["--every-seconds", "30", "--cron", "* * * * *", "--tz", "UTC"],
+    ["--every-seconds", "30", "--at", "2099-01-01T00:00:00Z"],
+    ["--cron", "* * * * *", "--tz", "UTC", "--suppress-unchanged"],
+  ].map((flags) => ({ flags })),
+)("condition CLI rejects conflicting or invalid policy: %j", ({ flags }) => {
+  expect(invoke("schedule", "add", "bad", ...flags, "--", "false").code).toBe(1);
+  expect(JSON.parse(invoke("schedule", "list").out).jobs).toEqual([]);
+});

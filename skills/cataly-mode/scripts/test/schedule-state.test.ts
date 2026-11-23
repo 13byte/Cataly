@@ -63,7 +63,7 @@ test("concurrent mutations retain every job, and POSIX state stays private", asy
 test("corrupt and future records are rejected without rewriting or silently dropping their policy", async () => {
   const job = await store.add(input(), at);
   const cases = [
-    { version: 2, jobs: [job], adopted: [] },
+    { version: 3, jobs: [job], adopted: [] },
     { version: 1, jobs: [{ ...job, deliver: "future" }], adopted: [] },
     { version: 1, jobs: [{ ...job, surprise: true }], adopted: [] },
     { version: 1, jobs: [job, job], adopted: [] },
