@@ -62,6 +62,7 @@ test.skipIf(process.platform === "win32")("usage rejects ambiguous linked file i
   }
 });
 
+// Creating and removing 4097 files takes seconds on Windows runners (antivirus scans each file), not milliseconds.
 test("usage directory overflow reports an incomplete scan instead of a partial journal list", () => {
   const state = withState();
   try {
@@ -72,7 +73,7 @@ test("usage directory overflow reports an incomplete scan instead of a partial j
   } finally {
     state.done();
   }
-});
+}, 30_000);
 
 test("usage cache bounds are measured in bytes before reading the descriptor", () => {
   const state = withState();
