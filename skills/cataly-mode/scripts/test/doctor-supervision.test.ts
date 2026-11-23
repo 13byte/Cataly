@@ -6,6 +6,7 @@ import { doctorCheck, doctorLocal } from "../src/doctor.ts";
 import { Reports } from "../src/reports.ts";
 import type { BudgetLimits } from "../src/supervision-observe.ts";
 import { Worklog } from "../src/worklog.ts";
+import { doctorCommand } from "./doctor-fixture.ts";
 import { depsFor, fakeClock, newWorld, withState } from "./fakes.ts";
 
 const now = Date.parse("2026-01-01T12:00:00Z");
@@ -108,6 +109,7 @@ test.each([true, false])(
         leadPane: "",
         sessionsDir: join(state.dir, "sessions"),
         doctor: { ignore: ["runtime"] },
+        agentCommand: doctorCommand(state.dir),
       });
       const config = {
         ...deps.config,
@@ -142,6 +144,7 @@ test("doctor and boot both warn when only a completed journal's lane has configu
       leadPane: "",
       sessionsDir: join(state.dir, "sessions"),
       doctor: { ignore: ["runtime"] },
+      agentCommand: doctorCommand(state.dir),
     });
     const config = {
       ...deps.config,

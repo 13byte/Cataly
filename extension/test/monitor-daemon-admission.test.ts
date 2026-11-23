@@ -98,6 +98,8 @@ test("an exited child waiting on bounded delivery is not reported as healthy", a
         return true;
       }
     });
+    // Windows may report the PID gone before Bun has delivered its subprocess exit notification.
+    await until(() => monitors.list(true)[0]?.waiting === true);
     expect(receipts).toBe(0);
     expect(monitors.list()).toEqual([]);
     expect(monitors.list(true)[0]).toMatchObject({ waiting: true });

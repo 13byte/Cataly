@@ -31,40 +31,32 @@ const safe = (path: unknown): path is string =>
   }) &&
   path.split("/").every((part) => !!part && part !== "." && part !== ".." && part !== ".git");
 
-/** Bind the patch bytes as well as the upstream and postimage identities before touching a checkout. */
-export function readSourceBundle(source: string, native = false): BoundBundle {
-  const name = native ? "native-omp" : "omp-ulw.overlay";
-  const path = join(source, `${name}.lock`);
-  const value = readJson(path) as SourceBundle;
-  const keys = [
-    "version",
-    "repository",
-    "commit",
-    "patchSha256",
-    "resultTree",
-    "files",
-    ...(native ? ["nativeVersion", "launcher"] : []),
-  ].sort();
+/** Validate a decoded lock: exact key set, pinned repositories, and a strictly ordered postimage. */
+export function parseSourceBundleLock(path: string, native: boolean, value: unknown): SourceBundle {
+  const keys = ["version", "repository", "commit", "patchSha256", "resultTree", "files"];
+  if (native) keys.push("nativeVersion", "launcher");
+  keys.sort();
+  const lock = value as SourceBundle;
   if (
-    !value ||
-    typeof value !== "object" ||
-    Object.keys(value).sort().join() !== keys.join() ||
-    value.version !== 1 ||
-    !SHA.test(value.commit) ||
-    !SHA.test(value.resultTree) ||
-    !HASH.test(value.patchSha256) ||
-    value.repository !==
+    !lock ||
+    typeof lock !== "object" ||
+    Object.keys(lock).sort().join() !== keys.join() ||
+    lock.version !== 1 ||
+    !SHA.test(lock.commit) ||
+    !SHA.test(lock.resultTree) ||
+    !HASH.test(lock.patchSha256) ||
+    lock.repository !==
       (native ? "https://github.com/can1357/oh-my-pi.git" : "https://github.com/dbc-hbin/omp-ulw.git") ||
-    !Array.isArray(value.files) ||
-    !value.files.length ||
+    !Array.isArray(lock.files) ||
+    !lock.files.length ||
     (native &&
-      (typeof value.nativeVersion !== "string" ||
-        !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(value.nativeVersion) ||
-        !safe(value.launcher)))
+      (typeof lock.nativeVersion !== "string" ||
+        !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(lock.nativeVersion) ||
+        !safe(lock.launcher)))
   )
     throw new Error(`Invalid source bundle lock: ${path}`);
   let previous = "";
-  for (const file of value.files) {
+  for (const file of lock.files) {
     if (
       !file ||
       Object.keys(file).sort().join() !== "executable,path,sha256" ||
@@ -76,6 +68,13 @@ export function readSourceBundle(source: string, native = false): BoundBundle {
       throw new Error(`Invalid source bundle postimage: ${path}`);
     previous = file.path;
   }
+  return lock;
+}
+/** Bind the patch bytes as well as the upstream and postimage identities before touching a checkout. */
+export function readSourceBundle(source: string, native = false): BoundBundle {
+  const name = native ? "native-omp" : "omp-ulw.overlay";
+  const path = join(source, `${name}.lock`);
+  const value = parseSourceBundleLock(path, native, readJson(path));
   const patch = join(source, native ? "native-omp.patch" : "omp-ulw.patch");
   if (!regularFile(patch) || digest(readFileSync(patch)) !== value.patchSha256)
     throw new Error(`Source bundle patch digest differs: ${patch}`);

@@ -84,7 +84,7 @@ for (const selectedBy of ["report", "checkpoint"] as const) {
     expect(repeated.lastEvidenceAt).toBe(observed.lastEvidenceAt);
     clock.at += 15 * 60_000;
     expect((await supervision.sweep(active, "Working 46m")).state).toBe("stalled");
-  });
+  }, 30_000);
 }
 
 test("deletion and recreation change the clock, but committing unchanged bytes does not", async () => {

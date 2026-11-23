@@ -375,6 +375,12 @@ Setup now offers configuration-only previews, preserves owner JSON/YAML values o
 - Lane reports, checkpoints and filesystem observations share an evidence clock independent of report time. Reworded reports, touches, commits of unchanged bytes and identical tool results do not reset it; changed bytes and structured results do. `--evidence-file` and lane-only `cataly_report` preserve idempotent receipts and source-bound native background completions. Rotating observations hash at most 256 paths; new hung declarations require a final all-candidate stat confirmation, not an atomic snapshot. Unstable observations remain unknown and persistent read errors are deduplicated without hiding budget alerts; native timing and declared artifact locators do not masquerade as new results.
 - Equal-millisecond evidence from report and checkpoint journals replays in a shared, locked acceptance sequence. Unchanged observations stay quiet without hiding real file reversions; checkpoint retries, immediate writer refusal and legacy journal reads are preserved.
 - Evidence supervision prepares and commits only for the same lane generation, with observation I/O outside the delivery lock. Reopened lanes retain their own reports and state instead of accepting a stale sweep.
+- Unreleased: Distinguish source-lock declarations, configured models, trusted native model readbacks, historical opaque-launch receipts and credential presence in read-only doctor diagnostics.
+
+- Unreleased: Report current managed source and native runtime identities separately from historical updater deployment receipts.
+
+- Unreleased: Diagnose the selected native executable, source revision and public CLI/API capabilities without falling back to another binary or adding an extension peer to the test gate.
+
 
 ## Unreleased: opt-in once monitors retain terminal outcomes without replaying successful work, with mode-aware listings and a managed-restart safety fence; completion waits for owner-output admission and confirmed file-backed journal persistence, while ended children awaiting admission retain restore ownership without reporting live health PIDs.
 

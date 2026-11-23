@@ -9,6 +9,7 @@ import { monitorFilterFindings } from "../src/doctor-monitors.ts";
 import { monitorPresetFor, monitorPresets } from "../src/monitor-presets.ts";
 import { Reports } from "../src/reports.ts";
 import { Worklog } from "../src/worklog.ts";
+import { doctorCommand } from "./doctor-fixture.ts";
 import { agentIn, depsFor, fakeClock, laneState, newWorld, withState, type TestState } from "./fakes.ts";
 
 let state: TestState;
@@ -84,7 +85,11 @@ test("trusted live lead is distinguished from stale metadata and lane roles", as
   const pane = "w1:p1";
   world.panes = [{ pane_id: pane, workspace_id: "w1", agent: "omp", agent_status: "idle", cwd: "/repo" }];
   agentIn(world, pane);
-  const deps = depsFor(world, fakeClock(now), state.dir, { leadPane: pane, sessionsDir: join(state.dir, "sessions") });
+  const deps = depsFor(world, fakeClock(now), state.dir, {
+    leadPane: pane,
+    sessionsDir: join(state.dir, "sessions"),
+    agentCommand: doctorCommand(state.dir),
+  });
   laneState(state.dir, pane, { role: "cataly", agentStatus: "idle" });
   const result = await doctorCheck(deps);
   expect(result.exitCode).toBe(0);

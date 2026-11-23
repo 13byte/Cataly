@@ -40,6 +40,7 @@ jobs:
               PATH="$native/bin:$(dirname "$(command -v bun)"):/usr/bin:/bin" \
               bun test --timeout 15000 packages/coding-agent/test/agent-session-next-turn-ownership.test.ts
           )
+          bun scripts/check-native-doctor.ts "$smoke/home"
           for check in code-mode-host-check code-mode-task-host-check; do
             env -i HOME="$smoke/home" LANG=C.UTF-8 \
               PATH="$native/bin:$(dirname "$(command -v bun)"):/usr/bin:/bin" \
