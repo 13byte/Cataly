@@ -48,7 +48,11 @@ export async function probeNativeCli(
     ];
   } else if (OMP_EXECUTABLE.test(argv[0] ?? "")) {
     prefix = [executable];
-  } else if (/^(bun|node)$/.test(argv[0]?.split("/").at(-1) ?? "") && entry && OMP_EXECUTABLE.test(entry)) {
+  } else if (
+    /^(bun|node)(?:\.exe)?$/i.test(argv[0]?.split(/[\\/]/).at(-1) ?? "") &&
+    entry &&
+    OMP_EXECUTABLE.test(entry.replace(/\\/g, "/"))
+  ) {
     prefix = [executable, resolve(cwd, entry)];
   } else {
     return { ...physical, reason: "opaque native launcher; entry point cannot be separated from runtime flags" };
