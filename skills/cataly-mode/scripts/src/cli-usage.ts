@@ -109,6 +109,8 @@ export const USAGE = `cataly <command> [options]
                                        open a forum post or text-channel thread; rename, replace tags, archive or reopen
   thread discord status <thread> done|working
                                        lead-owned: change the done prefix of the current title without archiving
+
+                                       --source "discord CHANNEL MESSAGE" --lane KEY opts into verified source/lane receipts
   react discord --to CHANNEL [--thread ID] --message ID [--emoji E] [--remove]
                                        add or remove the bot's own reaction (eyes by default); --thread needs no --to
   voice discord                       opt-in owner-only voice assistant (voice.enabled in config; paid provider usage)
