@@ -32,7 +32,16 @@ export async function scheduleView(store: ScheduleStore, run: Runner, now: numbe
       state: scheduleState(job),
       next: job.paused ? null : new Date(job.nextAt).toISOString(),
       ...(job.last
-        ? { last: { ...job.last, output: scheduleOutput(store.stateDir, job.last.id), pidIsLive: "unverified" } }
+        ? {
+            last: {
+              ...job.last,
+              ...(job.last.conditionFired === false ? {} : { output: scheduleOutput(store.stateDir, job.last.id) }),
+              ...(job.condition && job.last.conditionFired !== false
+                ? { stderr: scheduleOutput(store.stateDir, job.last.id) + ".stderr" }
+                : {}),
+              pidIsLive: "unverified",
+            },
+          }
         : {}),
     })),
     adopted,

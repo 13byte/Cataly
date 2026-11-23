@@ -41,6 +41,7 @@ export class ScheduleStore {
         const document = this.read();
         const before = JSON.stringify(document);
         const result = mutate(document);
+        document.version = document.jobs.some((job) => job.condition !== undefined) ? 2 : 1;
         const after = JSON.stringify(readScheduleDocument(document));
         if (after !== before) this.write(after);
         return result;
@@ -83,19 +84,25 @@ export class ScheduleStore {
     }
   }
   async add(
-    input: Pick<ScheduledJob, "name" | "cron" | "tz" | "at" | "timeoutSeconds" | "argv" | "cwd" | "deliver">,
+    input: Pick<
+      ScheduledJob,
+      "name" | "cron" | "tz" | "at" | "condition" | "timeoutSeconds" | "argv" | "cwd" | "deliver"
+    >,
     now: number,
   ): Promise<ScheduledJob> {
-    scheduleTrigger(input);
+    const watch = input.condition === undefined ? {} : { watch: { armed: true, consecutiveErrors: 0 } };
+    scheduleTrigger({ ...input, ...watch });
     if (input.at !== undefined && input.at <= now) throw new ScheduleError("--at must be in the future");
     const job: ScheduledJob = {
       ...input,
+      ...watch,
+      ...(input.condition === undefined ? {} : { timeoutSeconds: input.timeoutSeconds ?? 30 }),
       id: randomUUID(),
       paused: false,
-      nextAt: input.at ?? nextSchedule(input.cron!, input.tz!, now),
+      nextAt: input.condition === undefined ? (input.at ?? nextSchedule(input.cron!, input.tz!, now)) : now,
       missed: 0,
     };
-    readScheduleDocument({ version: 1, jobs: [job], adopted: [] });
+    readScheduleDocument({ version: job.condition === undefined ? 1 : 2, jobs: [job], adopted: [] });
     return this.update((document) => {
       if ([...document.jobs, ...document.adopted].some((entry) => entry.name === input.name))
         throw new ScheduleError("schedule already exists: " + input.name);
@@ -125,7 +132,9 @@ export class ScheduleStore {
         if (job.last || job.missed) throw new ScheduleError("one-shot occurrence was consumed; create a new schedule");
         if (job.at <= now) throw new ScheduleError("one-shot instant is in the past; create a new schedule");
       }
-      if (!paused && job.paused && job.at === undefined) job.nextAt = nextSchedule(job.cron!, job.tz!, now);
+      if (!paused && job.paused && job.at === undefined)
+        job.nextAt =
+          job.condition === undefined ? nextSchedule(job.cron!, job.tz!, now) : now + job.condition.everySeconds * 1000;
       job.paused = paused;
     });
   }

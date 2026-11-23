@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add opt-in conditional command polling with initial-success/rising-edge or every-success delivery, exact-stdout digest suppression, bounded probes, and version-2 watch state. Related to #214; direct lane/lead actions and routine management extensions remain separate.
+
 - Add optional schedule command deadlines with a five-second termination grace and explicit timed-out receipts; existing schedules remain unlimited unless configured. Remove timeout-bearing jobs with the current CLI before downgrading to an older reader. Related to #214.
 
 - Extend opt-in schedules with one-shot `--at` instants, explicit timezone offsets, durable consumption and no restart replay. Related to #214; condition triggers remain separate work. One-shot records make the whole schedule document unreadable to older versions; inspect and remove them with the current CLI before downgrading.

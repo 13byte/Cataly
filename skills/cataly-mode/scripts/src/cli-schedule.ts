@@ -22,10 +22,28 @@ const schedule: Command = async ({ key, positionals, rest, need, opt, values, co
     const deliver = opt("deliver") ?? "wake";
     scheduleDestination(deliver);
     const at = opt("at");
-    if (at !== undefined && (opt("cron") !== undefined || opt("tz") !== undefined))
-      die("--at cannot be combined with --cron or --tz");
-    if (at === undefined && !opt("cron")) die("schedule add needs --at ISO_INSTANT or --cron EXPR --tz IANA");
-    const trigger = at === undefined ? { cron: need("cron"), tz: need("tz") } : { at: scheduleAt(at) };
+    const every = opt("every-seconds");
+    if ([at, every, opt("cron")].filter((v) => v !== undefined).length !== 1)
+      die("schedule add needs exactly one of --at ISO_INSTANT or --cron EXPR --tz IANA or --every-seconds N");
+    if ((at !== undefined || every !== undefined) && opt("tz") !== undefined) die("--tz requires --cron");
+    if (every === undefined && (opt("on-success") !== undefined || values["suppress-unchanged"] !== undefined))
+      die("--on-success and --suppress-unchanged require --every-seconds");
+    if (every !== undefined && (!/^\d+$/.test(every) || Number(every) < 30 || Number(every) > 86400))
+      die("--every-seconds must be an integer from 30 to 86400");
+    const mode = opt("on-success") ?? "edge";
+    if (mode !== "edge" && mode !== "every") die("--on-success must be edge or every");
+    const trigger =
+      every !== undefined
+        ? {
+            condition: {
+              everySeconds: Number(every),
+              onSuccess: mode as "edge" | "every",
+              suppressUnchanged: values["suppress-unchanged"] === true,
+            },
+          }
+        : at === undefined
+          ? { cron: need("cron"), tz: need("tz") }
+          : { at: scheduleAt(at) };
     const timeout = opt("timeout-seconds");
     if (timeout !== undefined && (!/^\d+$/.test(timeout) || Number(timeout) < 1 || Number(timeout) > 86400))
       die("--timeout-seconds must be an integer from 1 to 86400");
@@ -41,6 +59,10 @@ const schedule: Command = async ({ key, positionals, rest, need, opt, values, co
       deps.clock.now(),
     );
     console.log(JSON.stringify(job, null, 2));
+    if (job.condition !== undefined)
+      console.error(
+        "SCHEDULE_WARNING condition probes start only when cataly scheduler is running; initial success fires and subsequent errors never rearm an edge",
+      );
     if (job.at !== undefined) {
       console.error(
         "SCHEDULE_WARNING adding a one-shot does not start a runner; ensure cataly scheduler is running for this state directory",
@@ -93,7 +115,13 @@ const scheduler: Command = async ({ values, loopMinutes, config }) => {
       const now = instance.now();
       const delay = instance.store
         .read()
-        .jobs.reduce((ms, job) => (job.paused ? ms : Math.min(ms, Math.max(0, job.nextAt - now))), minutes * 60_000);
+        .jobs.reduce(
+          (ms, job) =>
+            job.paused || (job.condition && (job.last?.status === "running" || job.last?.delivery === "pending"))
+              ? ms
+              : Math.min(ms, Math.max(0, job.nextAt - now)),
+          minutes * 60_000,
+        );
       await new Promise<void>((resolveSleep) => {
         const finish = (): void => {
           clearTimeout(timer);
