@@ -18,5 +18,6 @@ else process.exit(1);
 `,
     { mode: 0o700 },
   );
-  return [executable];
+  // Windows cannot exec a shebang script directly: run it through the same runtime there.
+  return process.platform === "win32" ? [process.execPath, executable] : [executable];
 }
