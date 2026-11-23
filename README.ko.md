@@ -166,6 +166,7 @@ git과 Bun 1.4.4 이상을 준비해 별도 체크아웃을 사용하세요. Lin
 기본 실행에 herdr나 hc가 필요 없습니다. 소스 설치기는 고정된 패치 버전 **OMP 19.0.1**과 **omp-ulw** 오버레이를
 준비합니다. 기본 설치에는 사전에 설치한 OMP나 Cargo가 필요 없고, 일반 배포판 `omp`로
 이 구성을 대체하지 않습니다.
+소스 `main`에서는 세 번째 세션 런타임으로 Tern도 쓸 수 있습니다. [Tern](docs/runtime.md#tern)을 참고하세요.
 
 ```bash
 git clone https://github.com/vntrevx/Cataly.git "$HOME/src/Cataly" || exit 1

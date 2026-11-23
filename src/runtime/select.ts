@@ -3,7 +3,7 @@ import { delimiter, join } from "node:path";
 import type { RuntimeKind, TerminalRuntimeKind } from "./types.ts";
 
 export type RuntimeSource =
-  "default" | "env" | "config" | "detect:HC_TERMINAL_ID" | "detect:HERDR_PANE_ID" | "detect:path";
+  "default" | "env" | "config" | "detect:HC_TERMINAL_ID" | "detect:HERDR_PANE_ID" | "detect:TERN_PANE" | "detect:path";
 export type RuntimeChoice = { readonly kind: RuntimeKind; readonly source: RuntimeSource };
 type Settings = { readonly runtime?: TerminalRuntimeKind; readonly sessionRuntime?: RuntimeKind };
 
@@ -13,8 +13,8 @@ export class RuntimeChoiceError extends Error {}
 export class ConfigError extends Error {}
 
 // A record keyed by kind, so a new RuntimeKind cannot be left out here. Key order is not a preference: PATH detection
-// asks for hc first, then herdr, whatever order the keys or the PATH entries have.
-const KIND_SET: Readonly<Record<TerminalRuntimeKind, true>> = { herdr: true, hc: true };
+// asks for hc first, then herdr, then tern, whatever order the keys or the PATH entries have.
+const KIND_SET: Readonly<Record<TerminalRuntimeKind, true>> = { herdr: true, hc: true, tern: true };
 const KINDS = Object.keys(KIND_SET) as TerminalRuntimeKind[];
 const isKind = (value: unknown): value is TerminalRuntimeKind => KINDS.some((k) => k === value);
 export const isSessionRuntime = (value: unknown): value is RuntimeKind => value === "headless" || isKind(value);
@@ -51,7 +51,7 @@ function configSettings(configPath: string): Settings {
   const runtime = "runtime" in parsed ? parsed.runtime : undefined;
   const sessionRuntime = "sessionRuntime" in parsed ? parsed.sessionRuntime : undefined;
   if (runtime !== undefined && !isKind(runtime))
-    throw new ConfigError(`${configPath}: "runtime" must be "herdr" or "hc", got ${JSON.stringify(runtime)}`);
+    throw new ConfigError(`${configPath}: "runtime" must be "herdr", "hc" or "tern", got ${JSON.stringify(runtime)}`);
   if (sessionRuntime !== undefined && !isSessionRuntime(sessionRuntime))
     throw new ConfigError(`${configPath}: invalid sessionRuntime ${JSON.stringify(sessionRuntime)}`);
   return { ...(runtime && { runtime }), ...(sessionRuntime && { sessionRuntime }) };
@@ -89,7 +89,10 @@ export function readRuntimeChoice(options: {
   const found = onPath(env["PATH"], options.exists ?? isExecutableFile);
   if (found.includes("hc")) return { kind: "hc", source: "detect:path" };
   if (found.includes("herdr")) return { kind: "herdr", source: "detect:path" };
+  // Tern comes last: it is a terminal people also run hc or herdr in, so whoever has one of those keeps it.
+  if (nonEmpty(env["TERN_PANE"]) !== undefined) return { kind: "tern", source: "detect:TERN_PANE" };
+  if (found.includes("tern")) return { kind: "tern", source: "detect:path" };
   throw new RuntimeChoiceError(
-    `neither herdr nor hc is on PATH: install hc (herdr-core) or herdr, or set "runtime": "herdr" or "hc" in ${configPath}, or CATALY_RUNTIME`,
+    `none of herdr, hc or tern is on PATH: install hc (herdr-core), herdr or Tern, or set "runtime": "herdr", "hc" or "tern" in ${configPath}, or CATALY_RUNTIME`,
   );
 }

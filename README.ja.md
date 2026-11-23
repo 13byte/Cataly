@@ -134,6 +134,7 @@ Discord モニターを説明しています。特定のリリースを、任意
 
 先に git と Bun 1.4.4+ をインストールしてください。Linux と macOS の標準構成では herdr も hc も不要です。
 詳しくは[ソース版の前提条件](docs/releases.md#current-source-bundle)を参照してください。
+ソースの `main` では、3 つ目のセッションランタイムとして Tern も使えます。[Tern](docs/runtime.md#tern) を参照してください。
 
 稼働中のインストールや固定された利用者向けリリースではなく、別のチェックアウトを使ってください。
 

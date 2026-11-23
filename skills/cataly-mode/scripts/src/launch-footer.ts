@@ -42,7 +42,9 @@ const sendReport = (leadPane: string, runtime: RuntimeKind | undefined): string 
   if (runtime === "headless")
     return parseRef(leadPane)?.runtime === "headless" ? `${CLI} harness send ${leadPane} --text "$line"` : undefined;
   const lead = quoteForPane(leadPane);
-  return runtime === "herdr" ? `herdr pane run ${lead} "$line"` : `hc send ${lead} -- "$line"`;
+  if (runtime === "herdr") return `herdr pane run ${lead} "$line"`;
+  // `tern run` types the line and Enter into the lead's block; `--` keeps the line verbatim.
+  return runtime === "tern" ? `tern run ${lead} -- "$line"` : `hc send ${lead} -- "$line"`;
 };
 
 /** Pin native forwarding to this home’s live lead generation, never just its current execution preference. */

@@ -1,6 +1,6 @@
 # Sessions (lanes)
 
-A lane is one tracked agent session doing one job. On macOS and Linux it normally runs under the native OMP supervisor, without a terminal. With an explicit terminal runtime it runs in a herdr tab or hc terminal. Launch it, track its registry entry, answer it when stuck, and close it when its work is proven done.
+A lane is one tracked agent session doing one job. On macOS and Linux it normally runs under the native OMP supervisor, without a terminal. With an explicit terminal runtime it runs in a herdr tab, hc terminal or Tern tab. Launch it, track its registry entry, answer it when stuck, and close it when its work is proven done.
 
 ## Launching
 

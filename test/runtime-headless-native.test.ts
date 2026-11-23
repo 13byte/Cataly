@@ -132,7 +132,7 @@ test.skipIf(!runSmoke)(
       expect(Bun.which("hc", { PATH: env.PATH })).toBeNull();
       const launch = ["launch", key, "--title", "Live test", "--brief", brief, "--done", `file ${evidence}`];
       await expect(runCli({ ...env, CATALY_LANE_RUNTIME: "terminal" }, ...launch)).rejects.toThrow(
-        "neither herdr nor hc",
+        "none of herdr, hc or tern is on PATH",
       );
       expect(await registry.read(key)).toBeNull();
       configure("{model}", "hc"); // Old installers wrote this preference even without an explicit terminal choice.
