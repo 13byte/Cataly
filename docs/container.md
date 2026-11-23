@@ -21,8 +21,8 @@ Compose's build context is the candidate root (`../..` relative to the compose f
 | hc (optional) | `0.1.18` | Retained upstream version and per-architecture sha256 values; release [manifest](https://releases.herdr.dev/core/0.1.18/manifest.json) |
 | gh | `2.100.0` | Retained upstream version and per-architecture sha256 values |
 | agent-messenger | `2.40.0` | [Published npm metadata](https://registry.npmjs.org/agent-messenger/2.40.0), Node >=22.13.0 |
-| OMP | c308 / 18.20.0 + `native-omp.patch` | Exact `native-omp.lock` upstream/result identity; frozen official `@oh-my-pi/pi-natives@18.20.0` addon, no Cargo |
-| omp-ulw | b215 + `omp-ulw.patch` | Exact `omp-ulw.lock` base plus `omp-ulw.overlay.lock` result; upstream Git tree/gitlinks retained |
+| OMP | f40f3358 / 19.0.1 + `native-omp.patch` | Exact `native-omp.lock` upstream/result identity; frozen official `@oh-my-pi/pi-natives@19.0.1` addon, no Cargo |
+| omp-ulw | `omp-ulw.lock` + `omp-ulw.patch` | Exact base plus `omp-ulw.overlay.lock` result; upstream Git tree/gitlinks retained |
 
 Bun's new asset sha256 values are `bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c` for `bun-linux-x64.zip` and `baa6bb36f51d6e58561e02bbea825038a9df454f673d6d776e8bbf86f8c7850e` for `bun-linux-aarch64.zip`. These were read from the release metadata, not guessed or calculated from a substituted package. The other binary hashes are retained from upstream `97d807b`'s recipe; this port has not downloaded those assets or revalidated their bytes.
 
@@ -175,7 +175,7 @@ docker run --name omp-cataly-source-smoke-headless --network none omp-cataly-can
 '
 ```
 
-Expected for the current recipe: neither terminal binary is present, Bun 1.4.4, OMP 18.20.0 from the bound source launcher, skill help including `harness`, complete root help through all three root entrypoints, existing extension/skill links and the lock-matching ULW base with its exact staged overlay. When checking an optional terminal variant, verify that only its selected binary is present instead. No assertion here is an observed pass or a binary-equivalence claim.
+Expected for the current recipe: Bun 1.4.4+, OMP 19.0.1 from the bound source launcher, skill help including `harness`, complete root help through all three root entrypoints, existing extension/skill links and the lock-matching ULW base with its exact staged overlay. When checking an optional terminal variant, verify that only its selected binary is present instead. No assertion here is an observed pass or a binary-equivalence claim.
 
 Session QA follows first-run setup with synthetic work, an isolated provider
 identity and a separate messenger thread/session: inspect role/session records,

@@ -150,7 +150,7 @@ cd "$HOME/src/Cataly" || exit 1
 CATALY_INSTALL_MODE=side CATALY_NO_PULL=1 CATALY_SRC="$PWD" bash scripts/install-source.sh
 ```
 
-Der Source-Installer richtet das fest zugeordnete, gepatchte OMP 18.20.0 und das
+Der Source-Installer richtet das fest zugeordnete, gepatchte OMP 19.0.1 und das
 ULW-Overlay ein; ein unverändertes `omp` auf `PATH` ist kein Ersatz. Der Side-Modus
 verwendet standardmäßig `~/.omp-cataly`, hat eigene Wrapper und eine eigene
 Konfiguration und lässt die primäre Installation unter `~/.cataly` unberührt.

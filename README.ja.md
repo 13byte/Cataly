@@ -143,7 +143,7 @@ cd "$HOME/src/Cataly" || exit 1
 CATALY_INSTALL_MODE=side CATALY_NO_PULL=1 CATALY_SRC="$PWD" bash scripts/install-source.sh
 ```
 
-ソースインストーラーは、プロジェクト指定の修正版 OMP 18.20.0 と ULW オーバーレイを
+ソースインストーラーは、プロジェクト指定の修正版 OMP 19.0.1 と ULW オーバーレイを
 準備します。`PATH` 上にある標準の `omp` は代わりになりません。side モードは
 既定で `~/.omp-cataly` を使い、専用のラッパーと設定を持ち、メインの
 `~/.cataly` インストールには触れません。インストールによってエージェント、

@@ -32,7 +32,7 @@ jobs:
           native=$(bun scripts/source-dependencies.ts native "$GITHUB_WORKSPACE" "$smoke/home")
           bun scripts/source-dependencies.ts assert-native "$GITHUB_WORKSPACE" "$smoke/home"
           version=$(HOME="$smoke/home" "$native/bin/omp" --version)
-          test "$version" = '18.20.0'
+          test "$version" = "$(bun -e 'console.log((await Bun.file("native-omp.lock").json()).nativeVersion)')"
           CATALY_HEADLESS_SMOKE=1 CATALY_TEST_OMP_EXEC="$native/bin/omp" bun test ./test/runtime-headless-native.test.ts ./test/harness-native.test.ts
           (
             cd "$native/source"

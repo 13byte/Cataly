@@ -83,7 +83,7 @@ export function releaseTargetRuntime(
 /** Leaving the native protocol is intentional only through a verified, explicitly retained rollback. */
 export function assertUpdateProtocol(current: ReleaseManifest | undefined, target: ReleaseManifest): void {
   if (
-    (current?.requirements.omp === "18.20.0" && target.requirements.omp !== "18.20.0") ||
+    (current !== undefined && current.requirements.omp !== "18.18.8" && target.requirements.omp === "18.18.8") ||
     (current?.source.files.some((entry) => entry.path === nativeMetadata) &&
       !target.source.files.some((entry) => entry.path === nativeMetadata))
   )

@@ -30,7 +30,13 @@ import { fixtureGit, nativeCacheFixture, overlayFixture } from "./source-bundle-
 // POSIX-only: release installation refuses non-private directories by POSIX mode bits.
 const posix = test.skipIf(process.platform === "win32");
 
-function bundledRelease(f: ConsumerFixture, selected: string, nativeSource?: string, headless = false) {
+function bundledRelease(
+  f: ConsumerFixture,
+  selected: string,
+  nativeSource?: string,
+  nativeVersion = "18.20.0",
+  headless = false,
+) {
   const original = f.release(selected);
   const source = join(f.root, `bundled-${selected}`);
   extractArchive(original.bundle.files, original.bundle.manifest, source);
@@ -40,7 +46,7 @@ function bundledRelease(f: ConsumerFixture, selected: string, nativeSource?: str
     for (const path of ["native-omp.lock", "native-omp.patch", "native-addon/package.json", "native-addon/bun.lock"])
       copyFileSync(join(nativeSource, path), join(source, path));
   } else {
-    const native = overlayFixture(source, join(f.root, `native-${selected}`), true);
+    const native = overlayFixture(source, join(f.root, `native-${selected}`), true, "reviewed-overlay", nativeVersion);
     nativeCacheFixture(source, f.paths.home, native.checkout);
   }
   mkdirSync(join(source, "scripts/consumer"), { recursive: true, mode: 0o700 });
@@ -67,7 +73,10 @@ function bundledRelease(f: ConsumerFixture, selected: string, nativeSource?: str
     validateReleaseManifest({
       ...original.bundle.manifest,
       source: publicSource,
-      requirements: { ...original.bundle.manifest.requirements, omp: "18.20.0" },
+      requirements: {
+        ...original.bundle.manifest.requirements,
+        omp: readSourceBundle(source, true).lock.nativeVersion,
+      },
       ompUlw: { repository: ulw.lock.repository, commit: ulw.commit },
     }),
     bytes,
@@ -143,6 +152,43 @@ posix(
   },
 );
 
+posix.each(["19.0.0", "19.1.2"])(
+  "bound OMP %s installs and rolls back to retained 18.20.0 without a stock fallback",
+  async (version) => {
+    const f = fixture();
+    const prior = bundledRelease(f, "prior");
+    const one = await installBundle(f.paths, prior.bundle, undefined);
+    const next = bundledRelease(f, "next", undefined, version);
+    const two = await installBundle(f.paths, next.bundle, one);
+    expect(two.current.requirements.omp).toBe(version);
+    const source = releasePath(f.paths, two.current);
+    expect(readlinkSync(join(f.paths.dori, "bin/omp"))).toBe(join(source, "scripts/consumer/omp"));
+    expect(resolveConsumerOmpCommand(["omp"], { home: f.paths.home, sourceRoot: source })[0]).toBe(
+      join(source, "scripts/consumer/omp"),
+    );
+    const rolled = await rollbackRelease(f.paths, two);
+    expect(rolled.current.requirements.omp).toBe("18.20.0");
+    expect(readlinkSync(join(f.paths.dori, "bin/omp"))).toBe(
+      join(releasePath(f.paths, one.current), "scripts/consumer/omp"),
+    );
+    expect(rolled.previous).toBeUndefined();
+    expect(readFileSync(join(releasePath(f.paths, two.current), "native-omp.lock"), "utf8")).toContain(
+      `"nativeVersion":"${version}"`,
+    );
+  },
+);
+
+posix.each(["20.0.0", "19.0.0-beta.1", "19.01.0", "19.0.0;echo injected"])(
+  "unreviewed native runtime %s is rejected",
+  (version) => {
+    const f = fixture();
+    const release = bundledRelease(f, "reviewed", undefined, "19.0.0").bundle.manifest;
+    expect(() =>
+      validateReleaseManifest({ ...release, requirements: { ...release.requirements, omp: version } }),
+    ).toThrow("supported runtime");
+  },
+);
+
 posix(
   "rollback to a genuine older archive keeps its no-lock protocol instead of requiring new source locks",
   async () => {
@@ -170,7 +216,7 @@ onReleaseHost.each(["manual", "automatic"] as const)(
     const f = fixture(true);
     const old = bundledRelease(f, "terminal");
     const before = await installBundle(f.paths, old.bundle, undefined);
-    const candidate = bundledRelease(f, "native", old.source, true);
+    const candidate = bundledRelease(f, "native", old.source, "18.20.0", true);
     const saved = readFileSync(f.paths.config);
     const runtime = process.platform === "darwin" ? "hc" : "herdr";
     expect(JSON.parse(saved.toString()).runtime).toBe(runtime);
