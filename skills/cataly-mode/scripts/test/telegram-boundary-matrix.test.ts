@@ -1,14 +1,21 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { pollTelegramInbound, type TgInbound } from "../src/messenger/telegram-inbound.ts";
 import { withState } from "./fakes.ts";
 import { GROUP, mk, msg, OTHER, OWNER, telegramFake, TOPIC } from "./telegram-inbound-fakes.ts";
-import { telegramTestStore } from "./telegram-win32-fixtures.ts";
+import { telegramTestStore, windowsSecurity } from "./telegram-win32-fixtures.ts";
 
 // Each case can run two PowerShell ACL setups in addition to real NTFS I/O.
 const windowsAclTimeoutMs = process.platform === "win32" ? 15_000 : undefined;
 const state = withState();
+// A cold Windows runner can spend over 10 s on its first PowerShell start alone (loading .NET and the ACL types). Pay
+// that once here, so each case's budget measures only its own ACL work.
+beforeAll(() => {
+  if (process.platform !== "win32") return;
+  mkdirSync(state.dir, { recursive: true });
+  windowsSecurity(state.dir, "$null");
+}, 60_000);
 beforeEach(() => mkdirSync(state.dir, { recursive: true }));
 afterEach(() => state.done());
 
