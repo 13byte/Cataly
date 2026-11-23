@@ -120,7 +120,7 @@ export const updateBoard = async (options: {
         id ? `${messagesPath}/${id}` : messagesPath,
         { content: text, allowed_mentions: { parse: [] } },
       );
-      delivered = id ?? message?.id;
+      delivered = message?.id;
     } else {
       const telegram = new Telegram(http, clock, token);
       const where = { chatId: target.to, ...(target.thread === undefined ? {} : { threadId: target.thread }) };
@@ -130,7 +130,8 @@ export const updateBoard = async (options: {
         delivered = id;
       } else delivered = String(await telegram.send(where, text));
     }
-    if (!isMessageId(delivered)) throw unconfirmedDelivery(" (missing message ID)");
+    if (!isMessageId(delivered) || (id !== undefined && delivered !== id))
+      throw unconfirmedDelivery(" (missing message ID for this target)");
     persist({ ...record, messageId: delivered, pending: false });
     return { action: id ? "edited" : "posted", messageId: delivered };
   } catch (error) {
