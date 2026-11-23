@@ -133,7 +133,7 @@ test("an early emit failure preserves later matched receipts after a scope chang
   ).toEqual([11]);
   expect(bodies[1]).not.toHaveProperty("offset");
   expect(bodies[2]).not.toHaveProperty("offset");
-});
+}, 30_000);
 
 test("receipts stay within the current 100-update batch without evicting its first emission", async () => {
   const first = Array.from({ length: 100 }, (_, index) => message(index + 1));

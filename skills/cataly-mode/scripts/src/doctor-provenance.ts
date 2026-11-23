@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { readSourceBundle } from "../../../../src/release/source-bundle.ts";
+import { readSourceBundleDiagnostic } from "../../../../src/release/source-bundle-diagnostic.ts";
 import { NATIVE_CLI_FEATURES, probeNativeCli } from "../../../../src/runtime/omp-capabilities.ts";
 import { type BootLane, finished } from "./boot-monitors.ts";
 import type { DoctorFinding } from "./doctor.ts";
@@ -149,7 +149,7 @@ export const doctorProvenance = async (
   for (const native of [true, false]) {
     const name = native ? "native-omp" : "omp-ulw.overlay";
     try {
-      const bundle = readSourceBundle(source, native);
+      const bundle = readSourceBundleDiagnostic(source, native);
       findings.push({
         check: "source",
         severity: "INFO",

@@ -1,6 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import { platform } from "../platform/index.ts";
 import { consumerPaths, readJson } from "../release/files.ts";
 import { validateReleaseManifest } from "../release/manifest.ts";
 import { nativeDirectory, nativeLauncher, type NativeReceipt } from "../release/native.ts";
@@ -61,7 +62,16 @@ export async function probeNativeCli(
   let nativeEntry: string | undefined;
   let consumerSource: string | undefined;
   const ownerHome = env["HOME"];
-  if (source && ownerHome) {
+  // Managed POSIX shell launchers cannot be admitted on Windows, even for a metadata probe.
+  const consumer = source && join(source, "scripts/consumer/omp");
+  const cache = ownerHome && join(ownerHome, ".cache/omp-cataly");
+  if (!platform.posixOwnership && consumer) {
+    const normalized = physical.realpath.replaceAll("\\", "/").toLowerCase();
+    const managed = executable === consumer || (existsSync(consumer) && physical.realpath === realpathSync(consumer));
+    if (managed || (cache && normalized.startsWith(`${resolve(cache).replaceAll("\\", "/").toLowerCase()}/`)))
+      return { ...physical, reason: "managed native source requires protected POSIX storage" };
+  }
+  if (source && ownerHome && platform.posixOwnership) {
     const directory = nativeDirectory(source, ownerHome);
     const bound = join(directory, "bin/omp");
     const consumer = join(source, "scripts/consumer/omp");
