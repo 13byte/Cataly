@@ -10,7 +10,11 @@ export function validateScheduleOptions(
     die("usage: cataly scheduler [--loop MIN]");
   if (command === "schedule")
     for (const token of tokens) {
-      if (token.kind === "option" && token.inlineValue && (token.name === "system" || token.name === "ack-interrupted"))
+      if (
+        token.kind === "option" &&
+        token.inlineValue &&
+        (token.name === "system" || token.name === "ack-interrupted" || token.name === "dry-run")
+      )
         die(`--${token.name} is a boolean flag; pass it without a value`);
     }
 }
