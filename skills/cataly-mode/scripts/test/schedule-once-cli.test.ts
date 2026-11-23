@@ -44,6 +44,8 @@ test("public CLI preserves offset instant, claims once and reports no next occur
     "require('node:fs').appendFileSync('runs', 'x')",
   );
   expect(added.code).toBe(0);
+  expect(added.err).toContain("does not start a runner");
+  expect(added.err).not.toContain("less than two minutes");
   const job = JSON.parse(added.out);
   expect(job.at).toBe(Date.parse(future));
   expect(job.cron).toBeUndefined();
@@ -76,4 +78,13 @@ test.each(
 
 test("missing trigger names both supported alternatives", () => {
   expect(invoke("schedule", "add", "bad", "--", "false").err).toContain("--at ISO_INSTANT or --cron");
+});
+
+test("near-term one-shot warns without corrupting JSON output", () => {
+  const instant = new Date(Date.now() + 90_000).toISOString();
+  const added = invoke("schedule", "add", "soon", "--at", instant, "--", "false");
+  expect(added.code).toBe(0);
+  expect(JSON.parse(added.out).name).toBe("soon");
+  expect(added.err).toContain("does not start a runner");
+  expect(added.err).toContain("less than two minutes");
 });

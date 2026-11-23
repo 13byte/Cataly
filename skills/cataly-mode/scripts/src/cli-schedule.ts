@@ -37,6 +37,15 @@ const schedule: Command = async ({ key, positionals, rest, need, opt, values, co
       deps.clock.now(),
     );
     console.log(JSON.stringify(job, null, 2));
+    if (job.at !== undefined) {
+      console.error(
+        "SCHEDULE_WARNING adding a one-shot does not start a runner; ensure cataly scheduler is running for this state directory",
+      );
+      if (job.at - deps.clock.now() < 120_000)
+        console.error(
+          "SCHEDULE_WARNING one-shot is less than two minutes away; occurrences at least one minute late are missed, never replayed",
+        );
+    }
   } else if (key === "list") {
     const view = await scheduleView(store, deps.run, deps.clock.now());
     console.log(JSON.stringify(view, null, 2));

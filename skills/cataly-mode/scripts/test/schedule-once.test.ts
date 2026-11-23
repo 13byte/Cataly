@@ -153,3 +153,26 @@ test.each([
   const run = async () => ({ code: 0, out: "", err: "" });
   expect((await scheduleView(store, run, now)).jobs[0]?.state).toBe("failed");
 });
+
+test("unknown delivery stays distinct from command failure and is never retried", async () => {
+  await store.add(input(), now - 1);
+  runner = new Scheduler(
+    store,
+    () => now,
+    () => {},
+    async () => {
+      throw new Error("ambiguous delivery");
+    },
+  );
+  await runner.open();
+  await runner.tick();
+  await runner.settle();
+  await runner.tick();
+  const run = async () => ({ code: 0, out: "", err: "" });
+  expect((await scheduleView(store, run, now)).jobs[0]).toMatchObject({
+    state: "delivery-unknown",
+    last: { code: 0, delivery: "unknown" },
+  });
+  expect((await scheduleBoot(dir, run, now)).lines[0]).toContain("state=delivery-unknown");
+  expect(readFileSync(join(dir, "runs"), "utf8")).toBe("x");
+});
