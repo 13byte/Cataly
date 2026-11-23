@@ -144,7 +144,7 @@ setup, use one of the options below.
 | -------------- | ----------------------------------------------- | ---------------------------------------------------- |
 | **Build**      | v0.1.2 prerelease                               | current `main`                                       |
 | **Scope**      | Linux x64 / herdr / Discord                     | native headless sessions; optional herdr or hc       |
-| **OMP**        | independently installed native OMP 18.18.8      | pinned, patched OMP 18.20.0 with the omp-ulw overlay |
+| **OMP**        | independently installed native OMP 18.18.8      | pinned, patched OMP 19.0.1 with the omp-ulw overlay |
 | **Home**       | historical primary `~/.dori`                   | side mode `~/.omp-cataly`                            |
 
 ### Try the published preview

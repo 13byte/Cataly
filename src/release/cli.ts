@@ -75,8 +75,8 @@ export async function runConsumerUpdate(argv: string[]): Promise<number> {
       return 0;
     }
     const command = args.positionals[0];
-    if (args.positionals.length !== 1 || !["check", "install", "status", "rollback", "cache"].includes(command ?? ""))
-      throw new Error(USAGE);
+    const commands = ["check", "install", "status", "rollback", "cache"];
+    if (!command || args.positionals.length !== 1 || !commands.includes(command)) throw new Error(USAGE);
     if (args.values.preview && command !== "install") throw new Error("--preview applies only to install");
     if (args.values.version !== undefined && !/^v\d+\.\d+\.\d+$/.test(args.values.version))
       throw new Error("--version must be an exact vX.Y.Z tag");
@@ -218,7 +218,7 @@ export async function runConsumerUpdate(argv: string[]): Promise<number> {
     }
     preflightInstallation(paths);
     if (!bundle) checkRollback(before?.previous);
-    attempt = { paths, before, source: pointer(paths.live), command: command! };
+    attempt = { paths, before, source: pointer(paths.live), command };
     const after = bundle
       ? await installBundle(paths, bundle, before, { config: config! })
       : await rollbackRelease(paths, before, args.values.version, config);

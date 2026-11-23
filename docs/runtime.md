@@ -124,7 +124,7 @@ OMP persists native goals as `mode_change` entries with `mode: "goal" | "goal_pa
 
 Desired monitor state is `<stateDir>/monitors/<encodeURIComponent(sessionId)>.json` with `{version:1,sessionId,monitors:[{name,argv,filter,cwd}]}`. `cataly boot` reads it without private transcript access and remains read-only.
 
-An extension monitor is not a native `AsyncJobManager` job or daemon service. Native `wait` can return "Nothing to wait for" while a Dori monitor remains alive; matching monitor events arrive through the existing extension message delivery. OMP 19's per-user daemon does not adopt these processes or older OMP daemons. Cataly reads its role/session receipts and OS process identity, not `omp ps --json`.
+An extension monitor is not a native `AsyncJobManager` job or daemon service. Native `wait` can return "Nothing to wait for" while a Cataly monitor remains alive; matching monitor events arrive through the existing extension message delivery. OMP 19's per-user daemon does not adopt these processes or older OMP daemons. Cataly reads its role/session receipts and OS process identity, not `omp ps --json`.
 
 ### Manager-tool boundary
 

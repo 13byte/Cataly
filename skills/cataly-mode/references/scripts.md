@@ -91,7 +91,7 @@ requires a Codex account that advertises Ultrafast.
 - For `cataly launch`, set `"defaultModel": "openai-codex/gpt-6.2-sol-ultrafast"`
   in Cataly's `config.json`. Keep `--model {model}` in `agentCommand` so
   per-lane `--model` overrides still work.
-  To create the native goal before the first turn on external OMP 19, end that
+  To create the native goal before the first turn on OMP 19, end that
   template with `"--goal", "{prompt}"` instead of just `"{prompt}"`. Keep
   OMP's `goal.enabled` on and do not pass a second positional prompt. This
   setting is for fresh interactive OMP 19 lanes, including the new bound
