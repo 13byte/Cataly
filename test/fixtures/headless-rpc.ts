@@ -40,6 +40,9 @@ const launchEntry =
             billing: "non-subscription",
             checkedAt: scenario === "stale" ? "2000-01-01T00:00:00.000Z" : new Date().toISOString(),
             source: "native-extension",
+            ...(process.env["CATALY_TEST_MODEL_THINKING"]
+              ? { thinking: JSON.parse(process.env["CATALY_TEST_MODEL_THINKING"]) as unknown }
+              : {}),
           },
         },
       }

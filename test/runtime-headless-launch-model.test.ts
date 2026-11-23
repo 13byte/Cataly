@@ -59,6 +59,58 @@ test.skipIf(process.platform === "win32")(
   15_000,
 );
 
+test.skipIf(process.platform === "win32")(
+  "a thinking-suffixed launch creates the goal once the base model and native level read back",
+  async () => {
+    const f = headlessFixture();
+    const env = { ...f.env, CATALY_TEST_MODEL_THINKING: JSON.stringify({ requested: "high", observed: "high" }) };
+    const rt = new HeadlessRuntime(f.stateDir, env);
+    let ref: SessionRef | undefined;
+    try {
+      const deps = { ...f.deps, env, config: { ...f.deps.config, requireModelReadback: true } };
+      const launched = await launchLane(deps, { ...f.input, model: "fixture/initial:high" });
+      ref = launched.lane.sessionRef;
+      expect(launched.startup).toStartWith("STARTUP_OK");
+      expect((await deps.registry.read(f.input.key))?.modelReadback).toMatchObject({
+        requested: { provider: "fixture", id: "initial:high" },
+        observed: { provider: "fixture", id: "initial" },
+        status: "matched",
+        thinking: { requested: "high", observed: "high" },
+      });
+    } finally {
+      if (ref) await rt.close(ref);
+      rmSync(f.home, { recursive: true, force: true });
+    }
+  },
+  15_000,
+);
+
+for (const [model, thinking] of [
+  ["fixture/initial:high", {}],
+  ["fixture/initial:high", { requested: "high", observed: "low" }],
+  ["fixture/initial:14b", { requested: "14b", observed: "14b" }],
+] as const) {
+  test.skipIf(process.platform === "win32")(
+    `${model} with thinking ${JSON.stringify(thinking)} never creates a native goal`,
+    async () => {
+      const f = headlessFixture();
+      const env = { ...f.env, CATALY_TEST_MODEL_THINKING: JSON.stringify(thinking) };
+      const rt = new HeadlessRuntime(f.stateDir, env);
+      let ref: SessionRef | undefined;
+      try {
+        const launched = await launchLane({ ...f.deps, env }, { ...f.input, model });
+        ref = launched.lane.sessionRef;
+        expect(launched.startup).toContain("STARTUP_MODEL_HOLD: native launch model unconfirmed; no goal created");
+        expect(f.frames().filter((frame) => frame["type"] === "goal")).toEqual([]);
+      } finally {
+        if (ref) await rt.close(ref);
+        rmSync(f.home, { recursive: true, force: true });
+      }
+    },
+    15_000,
+  );
+}
+
 for (const [scenario, detail] of [
   ["mismatch", "mismatch"],
   ["unavailable", "unavailable"],

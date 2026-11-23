@@ -1,4 +1,8 @@
-import { exactModelIdentity, type ModelReadback } from "../../skills/cataly-mode/scripts/src/lane-state.ts";
+import {
+  exactModelIdentity,
+  expectedLaunchModel,
+  type ModelReadback,
+} from "../../skills/cataly-mode/scripts/src/lane-state.ts";
 import { isCatalyEntry } from "../../skills/cataly-mode/scripts/src/session-compat.ts";
 import { type HeadlessObservation, type HeadlessRequest, modelOf, object, string } from "./headless-protocol.ts";
 import type { Reservation } from "./headless-record.ts";
@@ -37,6 +41,7 @@ const launchModelOf = (value: unknown, binding: LaunchBinding): ModelReadback | 
   const checkedAt = string(proof?.["checkedAt"]);
   const status = proof?.["status"];
   const billing = proof?.["billing"];
+  const expected = expectedLaunchModel(binding.model, proof?.["thinking"]);
   if (
     entry?.["refId"] !== binding.refId ||
     entry?.["sessionId"] !== binding.sessionId ||
@@ -49,8 +54,17 @@ const launchModelOf = (value: unknown, binding: LaunchBinding): ModelReadback | 
     (billing !== "unknown" && billing !== "subscription" && billing !== "non-subscription")
   )
     return undefined;
-  if (status === "matched" && (!identity || observed?.toLowerCase() !== binding.model.toLowerCase())) return undefined;
-  return { requested, observed: identity, checkedAt, status, billing, source: "native-extension" };
+  if (status === "matched" && (!identity || !expected || observed?.toLowerCase() !== expected.model.toLowerCase()))
+    return undefined;
+  return {
+    requested,
+    observed: identity,
+    checkedAt,
+    status,
+    billing,
+    source: "native-extension",
+    ...(status === "matched" && expected?.thinking ? { thinking: expected.thinking } : {}),
+  };
 };
 
 const readLaunchModel = async (rpc: HeadlessRpc, binding: LaunchBinding): Promise<ModelReadback | undefined> => {

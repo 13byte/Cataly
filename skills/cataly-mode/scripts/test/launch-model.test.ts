@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { PaneState } from "../src/lane-state.ts";
+import type { ModelReadback, PaneState } from "../src/lane-state.ts";
 import { launchLane } from "../src/launch.ts";
 import { modelLaunchCommand, modelLaunchProblem } from "../src/launch-model.ts";
 import { agentIn, depsFor, fakeClock, laneState, newWorld, sent, withState, type TestState } from "./fakes.ts";
@@ -90,6 +90,60 @@ test("native case-insensitive exact readback is accepted without changing the re
   expect(result.startup).toBe("STARTUP_OK model-gate w:p9");
   expect(sent(world)).toHaveLength(1);
   expect(modelLaunchProblem(["omp", "--model", "{model}", "{prompt}"], "ollama/qwen:14b")).toBeNull();
+});
+
+test("a thinking-suffixed launch delivers once its base model and native level both read back", async () => {
+  const high = {
+    ...matched,
+    requested: { provider: "subscription", id: "exact:high" },
+    thinking: { requested: "high", observed: "high" },
+  };
+  const { result, world } = await launch("subscription/exact:high", { modelReadback: high });
+  expect(result.startup).toBe("STARTUP_OK model-gate w:p9");
+  expect(sent(world)).toHaveLength(1);
+  expect(world.calls.find((argv) => argv[2] === "run")?.at(-1)).toContain(
+    "--cataly-launch-model=subscription/exact:high",
+  );
+  for (const patch of [
+    { ...high, thinking: { requested: "high", observed: "low" } },
+    { ...matched, requested: high.requested },
+    {
+      ...high,
+      observed: { provider: "subscription", id: "exact:high" },
+      thinking: { requested: "low", observed: "low" },
+    },
+  ]) {
+    state.done();
+    state = withState();
+    const held = await launch("subscription/exact:high", { modelReadback: patch });
+    expect(held.result.startup).toStartWith("STARTUP_MODEL_HOLD");
+    expect(sent(held.world)).toEqual([]);
+  }
+});
+
+test("a thinking record must name the request's own effort suffix before it selects the base model", async () => {
+  const proof = (id: string, thinking?: unknown) =>
+    ({
+      ...matched,
+      requested: { provider: "subscription", id },
+      ...(thinking === undefined ? { observed: { provider: "subscription", id } } : { thinking }),
+    }) as ModelReadback;
+  // A literal catalog id that ends in a level keeps the exact path without a thinking record.
+  const literal = await launch("subscription/exact:high", { modelReadback: proof("exact:high") });
+  expect(literal.result.startup).toBe("STARTUP_OK model-gate w:p9");
+  expect(sent(literal.world)).toHaveLength(1);
+  for (const [model, patch] of [
+    ["subscription/exact:high", proof("exact:high", {})],
+    ["subscription/exact:high", proof("exact:high", null)],
+    ["subscription/exact:14b", proof("exact:14b", { requested: "14b", observed: "14b" })],
+    ["subscription/exact:HIGH", proof("exact:HIGH", { requested: "HIGH", observed: "HIGH" })],
+  ] as const) {
+    state.done();
+    state = withState();
+    const held = await launch(model, { modelReadback: patch });
+    expect(held.result.startup).toStartWith("STARTUP_MODEL_HOLD");
+    expect(sent(held.world)).toEqual([]);
+  }
 });
 
 test("unsafe typed launch text is held without a send or an unhandled delivery error", async () => {
