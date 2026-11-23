@@ -49,6 +49,7 @@ export async function readMonitorOutput(
   line: (text: string) => unknown,
   notice: (text: string) => unknown,
   stopped: () => boolean,
+  activity?: () => void,
 ): Promise<void> {
   const buffer = Buffer.alloc(LINE_MAX_BYTES);
   const initialDecoder = new TextDecoder();
@@ -59,6 +60,7 @@ export async function readMonitorOutput(
   try {
     for await (const chunk of stream) {
       if (stopped()) return;
+      if (chunk.byteLength) activity?.();
       let start = 0;
       while (start < chunk.byteLength) {
         if (stopped()) return;

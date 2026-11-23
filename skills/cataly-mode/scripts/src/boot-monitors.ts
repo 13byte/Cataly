@@ -2,18 +2,19 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { formatRef } from "../../../../src/runtime/types.ts";
+import { monitorPolicy } from "../../../../src/update/monitor-policy.ts";
 import { laneWords } from "./monitor-command.ts";
 import { type Lane, sessionOf, statusOf } from "./registry.ts";
 import type { ProgressState } from "./reports.ts";
-
 export type Monitor = {
   /** OMP's desired monitor spec; argv stays structured so a quoted argument is never split into lane keys. */
   readonly name?: string;
-  readonly mode?: "persistent" | "once";
+  readonly mode?: "persistent" | "once" | "daemon";
+  readonly restart?: "on-failure" | { readonly max: number; readonly backoffSec: number };
+  readonly silentAfterMin?: number;
   readonly argv?: readonly string[];
   readonly cwd?: string;
   readonly filter?: string;
-  readonly restart?: "on-failure";
   readonly monitorId?: string;
   readonly sessionId?: string;
   readonly persistent?: boolean;
@@ -188,7 +189,7 @@ export const readMonitorManifests = (
         const data = JSON.parse(readFileSync(path, "utf8")) as Manifest["data"];
         const omp = dir === ompDir;
         if (
-          (data.version !== 1 && !(omp && data.version === 2)) ||
+          (data.version !== 1 && !(omp && (data.version === 2 || data.version === 3))) ||
           !Array.isArray(data.monitors) ||
           typeof data.sessionId !== "string"
         )
@@ -219,21 +220,23 @@ export const readMonitorManifests = (
           })
         )
           throw new Error("invalid monitor entry");
+        if (omp) for (const monitor of data.monitors) monitorPolicy(monitor);
         if (
           omp &&
           !data.monitors.every(
             (monitor) =>
               typeof monitor.name === "string" &&
               monitor.name.length > 0 &&
-              (monitor.mode === undefined ||
-                monitor.mode === "persistent" ||
-                (data.version === 2 && monitor.mode === "once")) &&
+              (data.version >= 2 || monitor.mode === undefined || monitor.mode === "persistent") &&
+              (data.version === 3 ||
+                (monitor.mode !== "daemon" &&
+                  (monitor.restart === undefined || monitor.restart === "on-failure") &&
+                  monitor.silentAfterMin === undefined)) &&
               Array.isArray(monitor.argv) &&
               monitor.argv.length > 0 &&
               monitor.argv.every((arg: unknown) => typeof arg === "string") &&
               typeof monitor.cwd === "string" &&
-              (monitor.filter === undefined || typeof monitor.filter === "string") &&
-              (monitor.restart === undefined || monitor.restart === "on-failure"),
+              (monitor.filter === undefined || typeof monitor.filter === "string"),
           )
         )
           throw new Error("invalid OMP monitor spec");

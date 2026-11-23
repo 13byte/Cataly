@@ -16,6 +16,7 @@ import {
   isHeadAdmissionProtocol,
 } from "../skills/cataly-mode/scripts/src/messenger/head-admission-protocol.ts";
 import { legacyRecipeEnv, recipePaths, type RecipeContext } from "../src/runtime/recipe-env.ts";
+import { monitorPolicy } from "../src/update/monitor-policy.ts";
 import type { MonitorSpec } from "../src/update/deployment-types.ts";
 import type { HeadAdmissions } from "./head-admission.ts";
 import { MonitorOutputFile, readMonitorOutput } from "./monitor-output";
@@ -28,14 +29,20 @@ const BATCH_MAX_BYTES = 64 * 1024;
 const ROUTINE_NOTICE =
   /^(?:(?:LANE_WATCH_READY|HOST_GUARD_READY|PRESENCE_READY|PRESENCE_ACK|PENDING-REPORT)(?:\s|$)|NUDGED\s.*, delivery delivered\s*$)/;
 
+/** Operational retry/silence notices bound displayed names so they never depend on spill storage. */
+const noticeName = (name: string): string => `${name.slice(0, 256)}${name.length > 256 ? "..." : ""}`;
+
 export type MonitorExit = {
   readonly code: number | null;
   readonly signal: string | null;
   readonly at: string;
   readonly error?: string;
+  readonly restartAttempt?: number;
+  readonly exhausted?: boolean;
 };
-type MonitorOptions = Pick<MonitorSpec, "mode" | "restart"> & {
+type MonitorOptions = Pick<MonitorSpec, "mode" | "restart" | "silentAfterMin"> & {
   readonly recordId?: string;
+  readonly restartAttempt?: number;
   readonly onExit?: (result: MonitorExit) => unknown;
 };
 
@@ -53,6 +60,13 @@ type Running = {
   readonly askState: string | undefined;
   stopped: boolean;
   admitting: boolean;
+  /** A daemon between exit and its scheduled retry: recorded intent, not a live child. */
+  waiting: boolean;
+  restartAttempt: number;
+  restartTimer?: Timer | undefined;
+  silentTimer?: Timer | undefined;
+  backoffUntil?: string | undefined;
+  lastData: number;
   prepared?: {
     readonly epoch: number;
     readonly headFile: string;
@@ -70,7 +84,11 @@ export type MonitorInfo = {
   readonly cwd: string;
   readonly restart?: MonitorSpec["restart"];
   readonly mode?: MonitorSpec["mode"];
+  readonly silentAfterMin?: number;
   readonly recordId?: string;
+  readonly restartAttempt?: number;
+  readonly backoffUntil?: string;
+  readonly waiting?: boolean;
 };
 
 export type MonitorDelivery = {
@@ -123,7 +141,7 @@ export class Monitors {
     filter: string,
     cwd: string,
     session: string,
-    options: MonitorOptions | MonitorSpec["restart"] = {},
+    options: MonitorOptions | "on-failure" = {},
   ): MonitorInfo {
     if (!name) throw new Error("monitor name is required");
     if (this.#running.has(name) || this.#restarts.has(name))
@@ -144,6 +162,18 @@ export class Monitors {
   ): MonitorInfo {
     const { restart, mode, recordId } = options;
     if (argv.length === 0) throw new Error("argv must name the command to run");
+    const policy = monitorPolicy(options);
+    const daemonRestart =
+      policy.mode === "daemon" && policy.restart !== undefined && policy.restart !== "on-failure"
+        ? policy.restart
+        : undefined;
+    const firstAttempt = options.restartAttempt ?? 0;
+    if (
+      !Number.isSafeInteger(firstAttempt) ||
+      firstAttempt < 0 ||
+      firstAttempt > (daemonRestart ? daemonRestart.max : 0)
+    )
+      throw new Error("invalid daemon restart attempt");
     const pattern = new RegExp(filter);
     const env = this.#recipeContext
       ? (legacyRecipeEnv(argv, this.#recipeContext) ?? this.#recipeContext.env)
@@ -180,13 +210,21 @@ export class Monitors {
       signal: this.#generation.signal,
       stopped: false,
       admitting: false,
+      waiting: false,
+      restartAttempt: firstAttempt,
+      lastData: performance.now(),
       restart,
       options,
       askState,
     };
     this.#running.set(name, entry);
+    this.#silence(entry);
     const finish = proc.exited.then((code) => {
       this.#admissions?.stop(proc.pid);
+      clearTimeout(entry.silentTimer);
+      entry.silentTimer = undefined;
+      // An exited daemon is recorded intent while its output drains, never a live health PID.
+      if (daemonRestart) entry.waiting = true;
       return code;
     });
     let previous = attempt;
@@ -203,12 +241,46 @@ export class Monitors {
       .then(async ([, , code]) => {
         if (this.#running.get(name) !== entry) return;
         const retryable = restart === "on-failure" && (code !== 0 || Boolean(proc.signalCode));
-        if ((mode === "once" || retryable) && !entry.stopped && this.#current(entry)) {
+        if ((mode === "once" || mode === "daemon" || retryable) && !entry.stopped && this.#current(entry)) {
           // Do not seal or replace the child until the output from this incarnation has drained.
           await this.#flush();
           if (this.#running.get(name) !== entry) return;
         }
         if (entry.stopped || !this.#current(entry)) return;
+        if (daemonRestart) {
+          const retry = entry.restartAttempt < daemonRestart.max;
+          if (retry) entry.restartAttempt++;
+          entry.waiting = retry;
+          if (!retry) this.#running.delete(name);
+          const recorded = await this.#recordExit(entry, code, undefined, {
+            restartAttempt: entry.restartAttempt,
+            exhausted: !retry,
+          });
+          const current = this.#running.get(name);
+          if (entry.stopped || (current !== undefined && current !== entry)) return;
+          if (!this.#current(entry)) {
+            if (current === entry) this.stop(name);
+            return;
+          }
+          await this.#queue(
+            entry,
+            `[${name}] monitor exited (${proc.signalCode ? `signal ${proc.signalCode}` : `code ${code}`}): ${argv.join(" ")}`,
+          );
+          if (!retry) {
+            await this.#queue(
+              entry,
+              `[monitor] ${noticeName(name)} restart limit reached (${daemonRestart.max}); stopped`,
+            );
+            return;
+          }
+          if (entry.stopped || this.#running.get(name) !== entry) return;
+          if (!recorded || !this.#current(entry)) {
+            this.stop(name);
+            return;
+          }
+          this.#daemonTimer(entry, daemonRestart, code);
+          return;
+        }
         await this.#recordExit(entry, code);
         if (entry.stopped || !this.#current(entry) || this.#running.get(name) !== entry) return;
         this.#running.delete(name);
@@ -224,7 +296,14 @@ export class Monitors {
         this.#admissions?.stop(proc.pid);
         entry.proc.kill();
         if (this.#running.get(name) === entry) this.#running.delete(name);
-        await this.#recordExit(entry, proc.exitCode, String(error));
+        await this.#recordExit(
+          entry,
+          proc.exitCode,
+          String(error),
+          daemonRestart
+            ? { restartAttempt: entry.restartAttempt, exhausted: entry.restartAttempt >= daemonRestart.max }
+            : undefined,
+        );
         await this.#queue(
           entry,
           `[monitor] output failed for name=${JSON.stringify(name.slice(0, 256))}${name.length > 256 ? "..." : ""} pid=${proc.pid}; stopped; raw output may be incomplete: ${String(error).slice(0, 2048)}`,
@@ -239,24 +318,89 @@ export class Monitors {
       pid: proc.pid,
       ...(restart ? { restart } : {}),
       ...(mode ? { mode } : {}),
+      ...(policy.silentAfterMin !== undefined ? { silentAfterMin: policy.silentAfterMin } : {}),
       ...(recordId ? { recordId } : {}),
+      ...(daemonRestart ? { restartAttempt: firstAttempt } : {}),
     };
   }
 
-  async #recordExit(entry: Running, code: number | null, error?: string): Promise<void> {
+  async #recordExit(
+    entry: Running,
+    code: number | null,
+    error?: string,
+    daemon?: { readonly restartAttempt: number; readonly exhausted: boolean },
+  ): Promise<boolean> {
     try {
-      await entry.options.onExit?.({
+      const result = await entry.options.onExit?.({
         code,
         signal: entry.proc.signalCode === null ? null : String(entry.proc.signalCode),
         at: new Date().toISOString(),
         ...(error === undefined ? {} : { error }),
+        ...(daemon === undefined ? {} : daemon),
       });
+      return result !== false;
     } catch (cause) {
       await this.#queue(
         entry,
         `[monitor] exit state was not recorded for name=${JSON.stringify(entry.name.slice(0, 256))}; a future resume may restart it: ${String(cause).slice(0, 2048)}`,
       );
+      return false;
     }
+  }
+
+  /** A daemon retry waits out exponential backoff as recorded intent; it is never a live health PID. */
+  #daemonTimer(entry: Running, restart: { readonly max: number; readonly backoffSec: number }, code: number): void {
+    const delay = Math.min(2_147_483_647, restart.backoffSec * 1000 * 2 ** (entry.restartAttempt - 1));
+    entry.backoffUntil = new Date(Date.now() + delay).toISOString();
+    entry.restartTimer = setTimeout(() => {
+      if (entry.stopped || this.#running.get(entry.name) !== entry) return;
+      if (!this.#current(entry)) {
+        this.stop(entry.name);
+        return;
+      }
+      entry.restartTimer = undefined;
+      entry.backoffUntil = undefined;
+      try {
+        const { name, argv, filter, cwd, options, session } = entry;
+        this.#spawn({ name, argv, filter: filter.source, cwd }, session, 0, {
+          ...options,
+          restartAttempt: entry.restartAttempt,
+        });
+        void this.#queue(
+          entry,
+          `[monitor] ${noticeName(name)} restarted (exit ${code}, attempt ${entry.restartAttempt}/${restart.max})`,
+        ).catch((error: unknown) => console.error("monitor restart notice failed", error));
+      } catch (error) {
+        this.stop(entry.name);
+        void this.#recordExit(entry, null, `restart failed: ${String(error)}`, {
+          restartAttempt: entry.restartAttempt,
+          exhausted: entry.restartAttempt >= restart.max,
+        });
+        void this.#queue(
+          entry,
+          `[monitor] ${noticeName(entry.name)} restart failed; stopped: ${String(error).slice(0, 2048)}`,
+        ).catch((reportError: unknown) => console.error("monitor restart reporting failed", reportError));
+      }
+    }, delay);
+  }
+
+  /** One MONITOR_SILENT alert per quiet spell; any raw byte rearms it, and silence never kills the child. */
+  #silence(entry: Running): void {
+    const minutes = entry.options.silentAfterMin;
+    if (!minutes || entry.silentTimer || entry.stopped || entry.waiting) return;
+    const threshold = minutes * 60_000;
+    entry.silentTimer = setTimeout(
+      () => {
+        entry.silentTimer = undefined;
+        if (entry.stopped || entry.waiting || !this.#current(entry)) return;
+        if (performance.now() - entry.lastData < threshold) this.#silence(entry);
+        else
+          void this.#queue(entry, `[monitor] MONITOR_SILENT ${noticeName(entry.name)} ${minutes}m`).catch(
+            (error: unknown) => console.error("monitor silence notice failed", error),
+          );
+      },
+      Math.max(1, threshold - (performance.now() - entry.lastData)),
+    );
   }
 
   #scheduleRestart(entry: Running, previous: number): boolean {
@@ -288,6 +432,7 @@ export class Monitors {
         cwd,
         ...(restart ? { restart } : {}),
         ...(options.mode ? { mode: options.mode } : {}),
+        ...(options.silentAfterMin !== undefined ? { silentAfterMin: options.silentAfterMin } : {}),
         ...(options.recordId ? { recordId: options.recordId } : {}),
       }),
     );
@@ -304,15 +449,20 @@ export class Monitors {
     const entry = this.#running.get(name);
     if (!entry) return false;
     entry.stopped = true;
+    clearTimeout(entry.restartTimer);
+    clearTimeout(entry.silentTimer);
     this.#admissions?.stop(entry.proc.pid);
     entry.proc.kill();
     this.#running.delete(name);
     return true;
   }
 
-  list(): MonitorInfo[] {
+  /** Health callers see only live children; lifecycle callers can include pending daemon backoff. */
+  list(includeWaiting = false): MonitorInfo[] {
     return [...this.#running.values()]
-      .filter(({ proc }) => proc.exitCode === null && proc.signalCode === null)
+      .filter((entry) =>
+        entry.waiting ? includeWaiting : entry.proc.exitCode === null && entry.proc.signalCode === null,
+      )
       .map((entry) => ({
         name: entry.name,
         argv: entry.argv,
@@ -321,7 +471,11 @@ export class Monitors {
         cwd: entry.cwd,
         ...(entry.restart ? { restart: entry.restart } : {}),
         ...(entry.options.mode ? { mode: entry.options.mode } : {}),
+        ...(entry.options.silentAfterMin !== undefined ? { silentAfterMin: entry.options.silentAfterMin } : {}),
         ...(entry.options.recordId ? { recordId: entry.options.recordId } : {}),
+        ...(entry.options.mode === "daemon" ? { restartAttempt: entry.restartAttempt } : {}),
+        ...(entry.backoffUntil ? { backoffUntil: entry.backoffUntil } : {}),
+        ...(entry.waiting ? { waiting: true } : {}),
       }));
   }
 
@@ -477,6 +631,10 @@ export class Monitors {
       (line) => this.#line(entry, line),
       (notice) => (entry.stopped ? undefined : this.#queue(entry, `[${entry.name}] monitor ${source} ${notice}`)),
       () => entry.stopped || !this.#current(entry),
+      () => {
+        entry.lastData = performance.now();
+        this.#silence(entry);
+      },
     );
   }
 
@@ -590,6 +748,8 @@ export const MONITOR_DESCRIPTION = [
   "Persistent background monitors for this Cataly session.",
   'mode "once" retains restore intent until the job exits cleanly, output is delivered, and completion is recorded. Managed restarts wait for unfinished once work.',
   'op "start" runs `argv` (an argument array, never a shell string) in the session cwd and reads its stdout and stderr line by line. Matching `filter` lines wake this session as a message `[name] line`; lines arriving together are delivered in one message. Exits are reported unless an explicit `restart: "on-failure"` schedules a retry. That option retries nonzero exits or signals up to three times in a failure streak, after five seconds each. Clean exits are never retried.',
+  'mode "daemon" restarts after an exit with bounded exponential backoff: restart {max: 5, backoffSec: 10} by default, at most 100 retries. Exhaustion is a durable stop. An explicit start creates a fresh retry budget; /new resets only unfinished intent. The retry count survives session resume; session restore starts a new process immediately using the retained count. Pending retries are cancelled on stop or session change. A recording or output failure stops automatic retries.',
+  "silentAfterMin opts into one MONITOR_SILENT alert per quiet spell, rearmed by any stdout/stderr bytes, including filtered and partial lines. Silence does not restart or kill the child. The interval must be positive and fit the platform timer range.",
   "Lines over 64 KiB are streamed to a private temporary file instead of filtered or truncated. An immediate warning gives its path; completion gives its raw byte count. Batches are limited to 64 KiB including prefixes and separators; an oversized rendered message is preserved in a file too. Read those files for the complete output. They survive monitor stop; remove them only when no longer needed. Storage/read failure stops the monitor and reports potentially incomplete output.",
   'op "stop" kills the monitor `name` and forgets it. op "list" shows running monitors. Names are unique: starting a running name fails.',
   "Started monitors are recorded in this session. Their processes stop when omp exits, and when the session is resumed (herdr restoring it after a restart, or `omp --resume`) every monitor that was not stopped is started again and announced as `[monitor] restored ...`; you do not need to start them again.",
