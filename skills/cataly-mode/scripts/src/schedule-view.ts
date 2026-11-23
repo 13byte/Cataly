@@ -9,6 +9,7 @@ function scheduleState(job: ScheduledJob): string {
     if (job.last?.status === "interrupted") return "interrupted";
     if (job.last?.delivery === "pending") return "delivering";
     if (job.last?.delivery === "unknown") return "delivery-unknown";
+    if (job.last?.timedOut) return "timed-out";
     if (job.last) return job.last.code === 0 ? "completed" : "failed";
     if (job.missed > 0) return "missed";
   }

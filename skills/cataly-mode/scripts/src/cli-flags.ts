@@ -82,6 +82,7 @@ export const parseSkillFlags = (rest: string[]) =>
       worklog: { type: "string" },
       "ignore-author": { type: "string", multiple: true },
       self: { type: "string" },
+      "timeout-seconds": { type: "string" },
       at: { type: "string" },
       cron: { type: "string" },
       tz: { type: "string" },

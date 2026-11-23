@@ -25,7 +25,7 @@ export async function deliverSchedule(
   const bytes = statSync(output).size;
   const body =
     bytes <= 65536 ? readFileSync(output, "utf8") : "Output exceeds 64 KiB; read the complete private log: " + output;
-  const header = `[schedule] ${job.name} at=${new Date(receipt.at).toISOString()} exit=${receipt.code} signal=${receipt.signal ?? "none"} bytes=${bytes}\nlog=${output}`;
+  const header = `[schedule] ${job.name} at=${new Date(receipt.at).toISOString()} exit=${receipt.code}${receipt.timedOut ? " timedOut=true" : ""} signal=${receipt.signal ?? "none"} bytes=${bytes}\nlog=${output}`;
   let text = `${header}\n${body}`;
   if (job.deliver === "wake") {
     await emit("SCHEDULE_WAKE " + JSON.stringify({ name: job.name, run: receipt.id, text, output }));

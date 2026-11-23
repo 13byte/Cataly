@@ -26,10 +26,14 @@ const schedule: Command = async ({ key, positionals, rest, need, opt, values, co
       die("--at cannot be combined with --cron or --tz");
     if (at === undefined && !opt("cron")) die("schedule add needs --at ISO_INSTANT or --cron EXPR --tz IANA");
     const trigger = at === undefined ? { cron: need("cron"), tz: need("tz") } : { at: scheduleAt(at) };
+    const timeout = opt("timeout-seconds");
+    if (timeout !== undefined && (!/^\d+$/.test(timeout) || Number(timeout) < 1 || Number(timeout) > 86400))
+      die("--timeout-seconds must be an integer from 1 to 86400");
     const job = await store.add(
       {
         name: name(),
         ...trigger,
+        ...(timeout === undefined ? {} : { timeoutSeconds: Number(timeout) }),
         deliver: deliver as ScheduleDelivery,
         cwd: resolve(typeof values["cwd"] === "string" ? values["cwd"] : process.cwd()),
         argv,
