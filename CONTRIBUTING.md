@@ -120,12 +120,17 @@ git -C "$compat" fetch --quiet --no-tags https://github.com/dbc-hbin/omp-ulw.git
 git -C "$compat" -c advice.detachedHead=false checkout --quiet "$compat_pin"
 test "$(git -C "$compat" rev-parse HEAD)" = "$compat_pin"
 export CATALY_TEST_COMPAT_ULW_ENTRY="$compat/index.ts"
+rollback_pin=e6b60c9f5efd45925645672e1841a8a9e20e5592
+git cat-file -e "$rollback_pin^{commit}" ||
+  git fetch --no-tags --depth=1 https://github.com/vntrevx/Cataly.git "$rollback_pin"
 (umask 022 && bun run ci)
 ```
 
 Fixture preparation needs network access unless the exact packages are already
 available. The compatibility checkout is test-only, outside the repository, and
 does not select a production dependency or change model/auth settings.
+The rollback fixture reads the historical Cataly commit from the local Git
+object store so the old controller runs with its own dependencies.
 On POSIX, the subshell's `umask 022` keeps test installation fixtures from
 inheriting group write permissions on developer machines. It does not change
 your shell's umask or the installer's ownership and mode checks.

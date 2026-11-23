@@ -145,10 +145,6 @@ export async function installBundle(
   assertInstalledPointer(paths, before);
   const manifest = validateReleaseManifest(bundle.manifest);
   assertUpdateProtocol(before?.current, manifest);
-  if (before && !controllerReads(manifest, before.current))
-    throw new Error(
-      `Release ${manifest.tag} cannot read the OMP 19 receipt of installed ${before.current.tag}; use "cataly update rollback" to restore a retained pre-19 release`,
-    );
   const receipts = readdirSync(paths.manifests)
     .filter((name) => name.endsWith(".json"))
     .map((name) => validateReleaseManifest(readJson(join(paths.manifests, name))));

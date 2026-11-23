@@ -27,8 +27,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { consumerPaths, pointer } from ${JSON.stringify(resolve(import.meta.dir, "../src/release/files.ts"))};
 import { activateRelease, loadInstalled, releasePath } from ${JSON.stringify(resolve(import.meta.dir, "../src/release/state.ts"))};
-const { home, before, after, phase } = JSON.parse(readFileSync(0, "utf8"));
-const paths = consumerPaths(home);
+const { home, installation, before, after, phase } = JSON.parse(readFileSync(0, "utf8"));
+const paths = consumerPaths(home, installation);
 const omp = join(paths.dori, "bin/omp");
 const [nativeBefore, source, target] = [pointer(omp), pointer(paths.live), releasePath(paths, after.current)];
 const published = () => loadInstalled(paths)?.current.commit === after.current.commit;
@@ -68,7 +68,9 @@ posix.each(["18.20.0", "18.18.8"])(
         // The states travel on stdin: their JSON can exceed the kernel's per-argument limit (E2BIG).
         [process.execPath, "-e", interruptedActivation],
         {
-          stdin: Buffer.from(JSON.stringify({ home: f.paths.home, before, after, phase })),
+          stdin: Buffer.from(
+            JSON.stringify({ home: f.paths.home, installation: f.paths.cataly, before, after, phase }),
+          ),
           env: { HOME: f.paths.home, PATH: process.env["PATH"] },
           timeout: 10_000,
         },

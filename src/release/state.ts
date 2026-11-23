@@ -142,7 +142,7 @@ function recoverInstalledUnlocked(paths: ConsumerPaths): InstalledState | undefi
     recovered = journal.before;
   } else throw conflict;
   const expectedNative = nativeTarget(paths, recovered);
-  if ((omp && native !== expectedNative) || forward) assertNoLiveCataly(paths);
+  assertNoLiveCataly(paths);
   if (omp && native !== expectedNative) replacePointer(omp, native, expectedNative);
   if (forward) replacePointer(paths.live, actual, after);
   if (recovered) saveJson(paths.state, recovered);

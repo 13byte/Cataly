@@ -46,6 +46,14 @@ runs:
         git -C "$compat" -c advice.detachedHead=false checkout --quiet "$pin"
         test "$(git -C "$compat" rev-parse HEAD)" = "$pin"
         printf 'CATALY_TEST_COMPAT_ULW_ENTRY=%s/index.ts\n' "$compat" >> "$GITHUB_ENV"
+    - name: Make the historical rollback controller available
+      if: ${{ inputs.fixtures == 'all' }}
+      shell: bash
+      run: |
+        pin=e6b60c9f5efd45925645672e1841a8a9e20e5592
+        git cat-file -e "$pin^{commit}" ||
+          git fetch --quiet --no-tags --depth=1 https://github.com/vntrevx/Cataly.git "$pin"
+        git cat-file -e "$pin^{commit}"
     - name: Install root dependencies
       shell: bash
       run: cd "$GITHUB_WORKSPACE" && bun install --frozen-lockfile

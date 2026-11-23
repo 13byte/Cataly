@@ -41,7 +41,7 @@ posix.each([
   // A manual install of the older release would record the OMP 19 receipt its frozen controller rejects.
   const installed = readFileSync(f.paths.state);
   const receipts = readdirSync(f.paths.manifests).sort();
-  await expect(installBundle(f.paths, legacy, two)).rejects.toThrow('use "dori update rollback"');
+  await expect(installBundle(f.paths, legacy, two)).rejects.toThrow('use "cataly update rollback"');
   expect(readFileSync(f.paths.state)).toEqual(installed);
   expect(readdirSync(f.paths.manifests).sort()).toEqual(receipts);
   expect(readlinkSync(f.paths.live)).toBe(newSource);
@@ -95,7 +95,7 @@ posix("automatic update never activates a newer pre-19 controller over an OMP 19
     source,
   );
   expect(readAutomaticState(f.paths)).toMatchObject({ outcome: "failed" });
-  expect(readAutomaticState(f.paths).detail).toContain('use "dori update rollback"');
+  expect(readAutomaticState(f.paths).detail).toContain('use "cataly update rollback"');
   expect(readFileSync(f.paths.state)).toEqual(installed);
   expect(readdirSync(f.paths.manifests).sort()).toEqual(receipts);
   expect(readlinkSync(f.paths.live)).toBe(source);

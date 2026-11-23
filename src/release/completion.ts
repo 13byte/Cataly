@@ -32,7 +32,7 @@ export function referenceRefresh(paths: ConsumerPaths, state: InstalledState | u
       "--version",
       state.current.tag,
       "--home",
-      paths.dori,
+      paths.cataly,
     ],
   };
 }
@@ -72,7 +72,7 @@ export function releaseFailure(error: unknown, attempt?: ReleaseAttempt): number
           }),
         );
         console.error(
-          `OMP-Dori ${command} committed; ${references ? "reference refresh" : "maintenance"} pending: ${reason}`,
+          `Cataly ${command} committed; ${references ? "reference refresh" : "maintenance"} pending: ${reason}`,
         );
         if (references)
           console.error(
@@ -82,11 +82,11 @@ export function releaseFailure(error: unknown, attempt?: ReleaseAttempt): number
       }
     } catch (inspection) {
       console.error(
-        `OMP-Dori release outcome unresolved: ${reason}; ${inspection instanceof Error ? inspection.message : String(inspection)}; run status with this controller`,
+        `Cataly release outcome unresolved: ${reason}; ${inspection instanceof Error ? inspection.message : String(inspection)}; run status with this controller`,
       );
       return 4;
     }
   }
-  console.error(`OMP-Dori release held: ${reason}`);
+  console.error(`Cataly release held: ${reason}`);
   return 2;
 }

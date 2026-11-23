@@ -134,7 +134,7 @@ onReleaseHost.each(["manual", "automatic"] as const)(
     const f = fixture(true);
     const old = bundledRelease(f, "terminal");
     const before = await installBundle(f.paths, old.bundle, undefined);
-    const candidate = bundledRelease(f, "native", old.source, "18.20.0", true);
+    const candidate = bundledRelease(f, "native", undefined, "19.0.1", true);
     const saved = readFileSync(f.paths.config);
     const runtime = process.platform === "darwin" ? "hc" : "herdr";
     expect(JSON.parse(saved.toString()).runtime).toBe(runtime);
