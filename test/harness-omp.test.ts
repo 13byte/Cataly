@@ -85,7 +85,7 @@ describe("OMP harness launches", () => {
     expect(call.argv.slice(context.length, context.length + 8)).toEqual([
       "sh",
       "-c",
-      "unset HERDR_PANE_ID HERDR_WORKSPACE_ID HC_TERMINAL_ID CATALY_HEADLESS_ID CATALY_HARNESS_ROLE CATALY_MANAGED_STARTUP CATALY_LANE; omp --model 'configured model' --cataly-role lane \"$@\"",
+      "unset HERDR_PANE_ID HERDR_WORKSPACE_ID HC_TERMINAL_ID TERN_PANE CATALY_HEADLESS_ID CATALY_HARNESS_ROLE CATALY_MANAGED_STARTUP CATALY_LANE; omp --model 'configured model' --cataly-role lane \"$@\"",
       "cataly-review",
       "-p",
       "--no-session",

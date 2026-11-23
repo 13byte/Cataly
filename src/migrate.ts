@@ -226,7 +226,7 @@ export async function runMigrate(d: Deps, a: Args): Promise<number> {
       configPath: process.env["CATALY_CONFIG"] ?? join(d.store.root, "config.json"),
       terminalOnly: true,
     }).kind;
-  if (to !== "herdr" && to !== "hc") throw new Refusal(`--to must be herdr or hc`);
+  if (to !== "herdr" && to !== "hc" && to !== "tern") throw new Refusal(`--to must be herdr, hc or tern`);
   const role = one(a, "role") as Role | undefined;
   if (role !== undefined && !ROLE_NAMES.includes(role))
     throw new Refusal(`--role must be one of ${ROLE_NAMES.join(", ")}`);
