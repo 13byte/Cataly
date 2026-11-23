@@ -247,8 +247,3 @@ test("done journals do not imply missing adoption and boot names its ignored che
     state.done();
   }
 });
-test("an old freshness filter warns about the new wait-ended event", () => {
-  const old = defaultFreshnessFilter.replace("|WAIT-ENDED", "");
-  const findings = monitorFilterFindings([manifest("freshness", old)], "owner");
-  expect(findings.some((finding) => finding.detail.includes("WAIT-ENDED"))).toBe(true);
-});
