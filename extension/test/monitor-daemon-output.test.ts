@@ -49,7 +49,7 @@ test("filtered partial stderr bytes prevent silence and rearm one alert after a 
 
 test("a vanished executable records a failed spawn without inventing an exit code", async () => {
   const root = mkdtempSync(join(tmpdir(), "cataly-daemon-spawn-"));
-  const executable = join(root, "child");
+  const executable = join(root, process.platform === "win32" ? "child.exe" : "child");
   const marker = join(root, "runs");
   symlinkSync(process.execPath, executable);
   const exits: MonitorExit[] = [];

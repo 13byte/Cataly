@@ -127,8 +127,13 @@ test.each(["process.exit(0)", "process.kill(process.pid, 'SIGTERM')"])("daemon r
     });
     await until(() => f.exits.at(-1)?.exhausted === true);
     expect(f.runs()).toHaveLength(2);
-    if (end.includes("SIGTERM")) expect(f.exits.at(-1)?.signal).toBe("SIGTERM");
-    else expect(f.exits.at(-1)).toMatchObject({ code: 0, signal: null });
+    if (!end.includes("SIGTERM")) expect(f.exits.at(-1)).toMatchObject({ code: 0, signal: null });
+    else if (process.platform !== "win32") expect(f.exits.at(-1)?.signal).toBe("SIGTERM");
+    else {
+      // Windows terminates the process without a POSIX signal receipt.
+      expect(f.exits.at(-1)?.signal).toBeNull();
+      expect(f.exits.at(-1)?.code).not.toBe(0);
+    }
   } finally {
     f.close();
   }

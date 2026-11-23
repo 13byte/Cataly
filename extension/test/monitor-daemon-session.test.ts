@@ -114,7 +114,12 @@ test("version three preserves daemon and silence policy through boot and managed
     const boot = readMonitorManifests(join(f.root, "sessions"), [], join(f.stateDir, "monitors"));
     expect(boot.errors).toEqual([]);
     expect(boot.manifests[0]?.data.monitors[0]).toMatchObject({ mode: "daemon", silentAfterMin: 1 });
-    const managed = readMonitorSet(join(f.stateDir, "monitors", "daemon-owner.json"), "daemon-owner", true);
+    const readManaged = () => readMonitorSet(join(f.stateDir, "monitors", "daemon-owner.json"), "daemon-owner", true);
+    if (process.platform === "win32") {
+      expect(readManaged).toThrow(/monitor metadata ownership differs|must be private/);
+      return;
+    }
+    const managed = readManaged();
     expect(managed.version).toBe(3);
     expect(managed.monitors).toEqual(f.manifest().monitors);
   } finally {

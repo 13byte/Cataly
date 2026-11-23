@@ -1371,7 +1371,6 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
       name: z.string().optional().describe("monitor name (start, stop)"),
       argv: z.array(z.string()).optional().describe("command and arguments, run without a shell (start)"),
       filter: z.string().optional().describe("regular expression selecting delivered output lines (start)"),
-      restart: z.enum(["on-failure"]).optional().describe("retry unexpected exits for this monitor only (start)"),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (!isLead() || ctx.agent.kind !== "main" || !session)
