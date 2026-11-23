@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { prepareSchedule, schedulePreview } from "../src/schedule-prepare.ts";
 import { join, resolve } from "node:path";
 
 let dir: string;
@@ -45,6 +46,9 @@ test("cron dry-run predicts five IANA trigger instants without creating state or
   expect(view.dryRun).toBe(true);
   expect(view.candidate.id).toBeUndefined();
   expect(view.occurrences).toHaveLength(5);
+  expect(view.occurrencesLocal).toHaveLength(5);
+  expect(view.occurrencesLocal[0]).toMatchObject({ timeZone: "Asia/Seoul" });
+  expect(view.occurrencesLocal[0].local).toContain("09:00:00");
   for (const instant of view.occurrences) expect(instant).toMatch(/T00:00:00.000Z$/);
   expect(existsSync(join(dir, "state"))).toBe(false);
   expect(existsSync(join(dir, "must-not-run"))).toBe(false);
@@ -89,4 +93,22 @@ test("dry-run cannot silently mutate other subcommands and refuses inline false"
   ])
     expect(invoke("schedule", ...args).code).toBe(1);
   expect(existsSync(join(dir, "state"))).toBe(false);
+});
+
+test("DST previews preserve spring-gap and fall-fold trigger semantics", () => {
+  const input = {
+    name: "dst",
+    cron: "30 2 * * *",
+    tz: "America/New_York",
+    cwd: dir,
+    argv: ["false"],
+    deliver: "log" as const,
+  };
+  const spring = schedulePreview(prepareSchedule(input, Date.parse("2027-03-14T06:59:00Z")), 2);
+  expect(spring).toEqual([Date.parse("2027-03-14T07:30:00Z"), Date.parse("2027-03-15T06:30:00Z")]);
+  const fall = schedulePreview(
+    prepareSchedule({ ...input, cron: "30 1 * * *" }, Date.parse("2026-11-01T04:00:00Z")),
+    2,
+  );
+  expect(fall).toEqual([Date.parse("2026-11-01T05:30:00Z"), Date.parse("2026-11-02T06:30:00Z")]);
 });

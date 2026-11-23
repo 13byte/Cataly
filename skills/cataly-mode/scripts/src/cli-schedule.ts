@@ -63,12 +63,26 @@ const schedule: Command = async ({ key, positionals, rest, need, opt, values, co
       if ([...document.jobs, ...document.adopted].some((entry) => entry.name === input.name))
         die("schedule already exists: " + input.name);
       const { id: _id, ...candidate } = prepareSchedule(input, now);
+      const times = schedulePreview({ ...candidate, id: "preview" });
       console.log(
         JSON.stringify(
           {
             dryRun: true,
             candidate,
-            occurrences: schedulePreview({ ...candidate, id: "preview" }).map((at) => new Date(at).toISOString()),
+            occurrences: times.map((at) => new Date(at).toISOString()),
+            ...(candidate.tz
+              ? {
+                  occurrencesLocal: times.map((at) => ({
+                    timeZone: candidate.tz,
+                    local: new Intl.DateTimeFormat("sv-SE", {
+                      timeZone: candidate.tz,
+                      dateStyle: "short",
+                      timeStyle: "long",
+                      hourCycle: "h23",
+                    }).format(at),
+                  })),
+                }
+              : {}),
             estimate:
               input.condition !== undefined
                 ? "idle polls; completion and delivery can delay later polls"
