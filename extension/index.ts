@@ -89,6 +89,7 @@ import {
   recordOwes,
   reminder,
 } from "../skills/cataly-mode/scripts/src/owes";
+import { monitorPolicy } from "../src/update/monitor-policy.ts";
 
 interface SessionEntry {
   id?: string;
@@ -178,8 +179,10 @@ export interface CatalyApi {
   zod: {
     object(shape: Record<string, Schema>): Schema;
     string(): Schema;
+    number(): Schema;
     array(element: Schema): Schema;
     enum(values: readonly [string, ...string[]]): Schema;
+    union(options: readonly Schema[]): Schema;
   };
   setLabel(label: string): void;
   registerFlag(
@@ -666,7 +669,11 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
       tmp,
       JSON.stringify(
         {
-          version: session.monitorSpecs.some((spec) => spec.mode === "once") ? 2 : 1,
+          version: session.monitorSpecs.some((spec) => spec.mode === "daemon" || spec.silentAfterMin !== undefined)
+            ? 3
+            : session.monitorSpecs.some((spec) => spec.mode === "once")
+              ? 2
+              : 1,
           sessionId: session.id,
           monitors: session.monitorSpecs,
           intake: session.intake,
@@ -681,24 +688,28 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
     renameSync(tmp, path);
   };
 
-  const startMonitor = ({ spec, id }: RecordedMonitor, ctx: CatalyContext) => {
+  const startMonitor = (record: RecordedMonitor, ctx: CatalyContext) => {
+    const { spec, id } = record;
     const owner = ctx.sessionManager.getSessionId();
     return monitors.start(spec.name, spec.argv, spec.filter, spec.cwd, owner, {
-      ...(spec.mode ? { mode: spec.mode } : {}),
-      ...(spec.restart ? { restart: spec.restart } : {}),
+      ...monitorPolicy(spec),
+      ...(spec.mode === "daemon" ? { restartAttempt: record.exit?.restartAttempt ?? 0 } : {}),
       ...(id ? { recordId: id } : {}),
       async onExit(exit) {
         const owns = () => isLead() && session?.id === owner && ctx.sessionManager.getSessionId() === owner;
-        if (!owns()) return;
+        if (!owns()) return false;
         const state = () => recordedMonitorStates(ctx.sessionManager.getBranch()).get(spec.name);
         const current = state();
-        if (!current || current.id !== id || current.completed || !sameMonitorSpecs([current.spec], [spec])) return;
-        const completed = spec.mode === "once" && exit.code === 0 && exit.signal === null && exit.error === undefined;
+        if (!current || current.id !== id || current.completed || !sameMonitorSpecs([current.spec], [spec]))
+          return false;
+        const completed =
+          (spec.mode === "once" && exit.code === 0 && exit.signal === null && exit.error === undefined) ||
+          (spec.mode === "daemon" && exit.exhausted === true);
         if (completed && ctx.sessionManager.getSessionFile() && !ctx.sessionManager.ensureOnDisk)
           throw new Error("native monitor journal persistence is unavailable");
         pi.appendEntry(MONITOR_ENTRY, { op: completed ? "stop" : "exit", name: spec.name, id, exit });
         await ctx.sessionManager.ensureOnDisk?.();
-        if (!owns()) return;
+        if (!owns()) return false;
         const persisted = state();
         if (
           !persisted ||
@@ -706,7 +717,7 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
           persisted.exit?.at !== exit.at ||
           !sameMonitorSpecs([persisted.spec], [spec])
         )
-          return;
+          return false;
         const branch = ctx.sessionManager.getBranch();
         saveMonitorSpecs(recordedMonitors(branch), branch);
         savePane(ctx);
@@ -1330,8 +1341,9 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
     name?: string;
     argv?: string[];
     filter?: string;
-    mode?: "once" | "persistent";
-    restart?: "on-failure";
+    mode?: "once" | "persistent" | "daemon";
+    restart?: "on-failure" | { max: number; backoffSec: number };
+    silentAfterMin?: number;
   }>({
     name: "monitor",
     label: "Monitor",
@@ -1339,12 +1351,26 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
     defaultInactive: true,
     loadMode: "essential",
     parameters: z.object({
-      op: z.enum(["start", "stop", "list"]).describe("start, stop and forget, or list running and recorded monitors"),
-      mode: z.enum(["persistent", "once"]).optional().describe("once stops restoring after durable success (start)"),
+      op: z
+        .enum(["start", "stop", "list"])
+        .describe("start a monitor, stop and forget one, or list running and recorded monitors"),
+      mode: z
+        .enum(["persistent", "once", "daemon"])
+        .optional()
+        .describe("persistent (default), once (successful completion), or daemon (bounded automatic restart)"),
+      restart: z
+        .union([z.enum(["on-failure"]), z.object({ max: z.number(), backoffSec: z.number() })])
+        .optional()
+        .describe(
+          "on-failure retries an unexpected exit; daemon only: {max 0..100, backoffSec>0} bounded retries, default {max:5,backoffSec:10} (start)",
+        ),
+      silentAfterMin: z
+        .number()
+        .optional()
+        .describe("positive quiet interval in minutes; any raw stdout/stderr bytes rearm the one-shot alert"),
       name: z.string().optional().describe("monitor name (start, stop)"),
       argv: z.array(z.string()).optional().describe("command and arguments, run without a shell (start)"),
       filter: z.string().optional().describe("regular expression selecting delivered output lines (start)"),
-      restart: z.enum(["on-failure"]).optional().describe("retry unexpected exits for this monitor only (start)"),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (!isLead() || ctx.agent.kind !== "main" || !session)
@@ -1359,8 +1385,7 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
             argv: params.argv,
             filter: params.filter,
             cwd: ctx.cwd,
-            ...(params.restart ? { restart: params.restart } : {}),
-            ...(params.mode === "once" ? { mode: "once" } : {}),
+            ...monitorPolicy(params),
           },
           id: crypto.randomUUID(),
           completed: false,
@@ -1382,7 +1407,7 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
         savePane(ctx);
         text = `stopped monitor "${params.name}"`;
       } else {
-        const running = new Map(monitors.list().map((monitor) => [monitor.name, monitor]));
+        const running = new Map(monitors.list(true).map((monitor) => [monitor.name, monitor]));
         const records = recordedMonitorStates(ctx.sessionManager.getBranch());
         for (const monitor of running.values())
           if (!records.has(monitor.name)) records.set(monitor.name, { spec: monitor, completed: false });
@@ -1390,11 +1415,24 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
           [...records]
             .map(([name, { spec, exit }]) => {
               const active = running.get(name);
-              const status = active ? "running" : exit ? (exit.error === undefined ? "exited" : "failed") : "recorded";
+              const status = active?.waiting
+                ? active.backoffUntil
+                  ? "backoff"
+                  : "recording"
+                : active
+                  ? "running"
+                  : exit?.exhausted
+                    ? "exhausted"
+                    : exit
+                      ? exit.error === undefined
+                        ? "exited"
+                        : "failed"
+                      : "recorded";
+              const policy = `${typeof spec.restart === "object" ? ` retries=${active?.restartAttempt ?? exit?.restartAttempt ?? 0}/${spec.restart.max}` : ""}${active?.backoffUntil ? ` next=${active.backoffUntil}` : ""}${spec.silentAfterMin ? ` silentAfterMin=${spec.silentAfterMin}` : ""}`;
               const outcome = exit
                 ? ` ${active ? "lastExit " : ""}code=${exit.code} signal=${exit.signal ?? "none"} at=${exit.at}${exit.error === undefined ? "" : ` error=${JSON.stringify(exit.error)}`}`
                 : "";
-              return `${name}${active ? ` (pid ${active.pid})` : ""} [mode=${spec.mode ?? "persistent"} status=${status}${outcome}] /${spec.filter}/: ${spec.argv.join(" ")}`;
+              return `${name}${active && !active.waiting ? ` (pid ${active.pid})` : ""} [mode=${spec.mode ?? "persistent"} status=${status}${outcome}${policy}] /${spec.filter}/: ${spec.argv.join(" ")}`;
             })
             .join("\n") || "no monitors running or recorded";
       }
