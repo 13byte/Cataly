@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { type BootLane, type Manifest, finished, readMonitorManifests, terminalMonitorDirs } from "./boot-monitors.ts";
 import type { CatalyConfig } from "./config.ts";
 import type { DoctorCheck } from "./doctor-config.ts";
+import { doctorProvenance } from "./doctor-provenance.ts";
 import { monitorFilterFindings, monitorRuntimeFindings } from "./doctor-monitors.ts";
 import type { FlowDeps } from "./done-flow.ts";
 import type { PaneState } from "./lane-state.ts";
@@ -18,6 +19,8 @@ export type DoctorFinding = {
   readonly check: DoctorCheck;
   readonly severity: "OK" | "INFO" | "WARN";
   readonly detail: string;
+  readonly provenance?: string;
+  readonly next?: string;
 };
 
 /** These local checks also power boot's advisory summary, without another runtime or network probe. */
@@ -240,6 +243,7 @@ export const doctorCheck = async (
   }
   findings.push(...doctorLocal(config, lanes, manifests, repo, lead?.sessionId));
   findings.push(...monitorRuntimeFindings(config.stateDir, manifests, lead, deps.clock.now()));
+  findings.push(...(await doctorProvenance(deps, lanes, lead)));
   const visible = findings.filter((finding) => !config.doctor?.ignore?.includes(finding.check));
   const warnings = visible.filter((finding) => finding.severity === "WARN").length;
   return { findings: visible, warnings, ignored: config.doctor?.ignore ?? [], exitCode: warnings ? 1 : 0 };

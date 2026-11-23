@@ -11,6 +11,7 @@ import { Reports } from "../src/reports.ts";
 import { ChosenRuntimes } from "../src/run.ts";
 import { Worklog } from "../src/worklog.ts";
 import { depsFor, fakeClock, newWorld, withState } from "./fakes.ts";
+import { doctorCommand } from "./doctor-fixture.ts";
 
 test.skipIf(process.platform === "win32")(
   "boot and doctor find the durable lead, prove its native role, and skip obsolete terminal metadata",
@@ -57,6 +58,7 @@ test.skipIf(process.platform === "win32")(
         leadPane: "<your herdr pane id, from: herdr pane current>",
         sessionsDir: legacy,
         workspaces: ["lanes"],
+        agentCommand: doctorCommand(state.dir),
       });
       const deps = {
         ...base,

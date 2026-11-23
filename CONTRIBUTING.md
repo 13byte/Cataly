@@ -135,11 +135,15 @@ On POSIX, the subshell's `umask 022` keeps test installation fixtures from
 inheriting group write permissions on developer machines. It does not change
 your shell's umask or the installer's ownership and mode checks.
 
+Match CI: do not install an additional native peer in `extension`. Extension public types resolve through the pinned-host fixture and the existing TypeScript path aliases; an extra peer can hide a CI-only missing-type failure.
+
+`check:fixtures` prints the resolved interpreter and native package entry, the expected source revision, and explicit public CLI/API probe results. The package fixture does not attest its upstream source revision, so its observed revision remains `unknown`. A missing public export or CLI flag fails with the exact selected path and reason; no alternate binary is selected. These probes do not establish live messenger compatibility. CI also runs `scripts/check-native-doctor.ts` after preparing the bound native source: it exercises both managed entry points through the real doctor CLI, checks the observed revision and unchanged config/state, and rejects an altered consumer wrapper without using a cached executable as a fallback.
+
 The full chain is:
 
 | Command | What it checks |
 | --- | --- |
-| `check:fixtures` | Real ULW, compatibility entry, and exact native-host prerequisites |
+| `check:fixtures` | Real ULW, compatibility entry, exact native host, and public CLI/API prerequisites |
 | `lint` | oxlint, warnings are errors (`--deny-warnings`) |
 | `format:check` | Prettier formatting check; `format` rewrites |
 | `check` | `lint` then `format:check` |

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { doctorCommand } from "./doctor-fixture.ts";
 import { bootCheck } from "../src/boot.ts";
 import type { Manifest } from "../src/boot-monitors.ts";
 import type { CatalyConfig } from "../src/config.ts";
@@ -31,7 +32,6 @@ test("guard and watch diagnostics probe actual state-change events", () => {
     expect(watch[0]?.detail).toContain(event);
   expect(monitorFilterFindings([manifest("watch", "^LANE_")], "owner")).toEqual([]);
 });
-
 const watchFilterBeforeQueue =
   "^LANE_(?:WATCH_READY$|(?:WATCH_WARN|WATCH_ERROR|NOTIFY_HELD|NOTIFY_UNCONFIRMED|DONE_CLAIMED|CHANGED|NOT_DONE|CLOSED|HELD) \\S)";
 
@@ -58,6 +58,7 @@ test("doctor accepts bare readiness lines and payload-bearing monitor events", a
       leadPane: pane,
       sessionsDir: join(state.dir, "sessions"),
       doctor: { ignore: ["monitor-runtime"] },
+      agentCommand: doctorCommand(state.dir),
     });
     const watch = manifest(
       "watch",
@@ -121,6 +122,7 @@ test.each(freshnessFilterCases)(
         sessionsDir: join(state.dir, "sessions"),
         doctor: { ignore: ["monitor-runtime"] },
         ...config,
+        agentCommand: doctorCommand(state.dir),
       });
       const dir = join(state.dir, "monitors");
       mkdirSync(dir);
@@ -189,6 +191,7 @@ test("old session filters stay advisory while the trusted current owner's filter
     const deps = depsFor(world, fakeClock(Date.parse("2026-01-01T12:00:00Z")), state.dir, {
       leadPane: "w1:p1",
       sessionsDir: join(state.dir, "sessions"),
+      agentCommand: doctorCommand(state.dir),
     });
     const dir = join(state.dir, "monitors");
     mkdirSync(dir);
@@ -221,6 +224,7 @@ test("done journals do not imply missing adoption and boot names its ignored che
       leadPane: "",
       sessionsDir: join(state.dir, "sessions"),
       doctor: { ignore: ["runtime", "lessons"] },
+      agentCommand: doctorCommand(state.dir),
     });
     await deps.registry.write({
       key: "complete",

@@ -8,6 +8,7 @@ import type { Manifest } from "../src/boot-monitors.ts";
 import { monitorRuntimeFindings } from "../src/doctor-monitors.ts";
 import { doctorCheck } from "../src/doctor.ts";
 import type { PaneState } from "../src/lane-state.ts";
+import { doctorCommand } from "./doctor-fixture.ts";
 import { agentIn, depsFor, fakeClock, laneState, newWorld, withState } from "./fakes.ts";
 
 const liveSeverity = platform.supportsProcessReaders ? "OK" : "WARN";
@@ -116,6 +117,7 @@ test("only a fresh matching receipt and an owned live child establish monitor li
     const deps = depsFor(world, fakeClock(Date.parse(startedAt)), state.dir, {
       leadPane: lead.paneId,
       sessionsDir: join(state.dir, "sessions"),
+      agentCommand: doctorCommand(state.dir),
     });
     const dir = join(state.dir, "monitors");
     mkdirSync(dir);
