@@ -107,7 +107,11 @@ if (import.meta.main) {
       const live = await local.startLoop(ref, { CATALY_STATE_DIR: local.stateDir, CATALY_RUNTIME: "headless" });
       assert.equal(live.status, "working");
       assert.equal(live.harnessRole, "duty-loop");
-      assert.throws(() => assertNoLiveCataly(paths), /Native session .* holds release activation/);
+      // Once the duty process starts, its own controller lock can take precedence over its reservation.
+      assert.throws(
+        () => assertNoLiveCataly(paths),
+        /Native session .* holds release activation|Live Cataly PID \d+ holds duty\/lock/,
+      );
     } finally {
       await local.stopHarnessRole(ref, "duty-loop");
     }

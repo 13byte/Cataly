@@ -51,7 +51,7 @@ Consumers need neither the GitHub CLI nor GitHub write permission to install, ch
 
 Use the canonical repository **https://github.com/vntrevx/Cataly**. Confirm the exact tag, repository owner and release commit before downloading. The historical preview is `v0.1.2`. Do not substitute a fork, an arbitrary `main` script or an unverified mirror.
 
-Each release has four matching assets. The historical archive and manifest product names are still part of the release wire format so the `v0.1.3` updater can authenticate a newer release. They do not name the current command, skill or installation home.
+Each release has four matching assets. The archive and manifest retain their historical product names for wire compatibility. Those names do not imply that an older updater supports the native version in a newer manifest, and they do not name the current command, skill or installation home.
 
 | Asset                    | Purpose                                                                                                                         |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
@@ -159,14 +159,10 @@ delete `roles.json` to bypass the hold. You can use a separate fresh home
 without adopting those sessions.
 
 The verified new bootstrap can upgrade a stopped legacy home **without** the
-old terminal tool. The old `v0.1.3` command, for example
-`"$HOME/.dori/bin/dori" update install --from "$download_dir"`, is a compatibility
-route only when the old client’s required herdr or hc is still installed.
-On a **primary** home that immutable updater only publishes the v0.1.3 link
-names. If you already updated that way, run the verified new bootstrap in
-step 2 against the same release and the same home to install `bin/cataly` and
-`bin/cataly-harness`. This does not require another version change. Starting
-with the new bootstrap instead completes the upgrade in one step.
+old terminal tool. Use it for this OMP 19 release: the frozen `v0.1.3` updater
+rejects OMP 19 manifests even with herdr or hc installed. The bootstrap works
+with the original installation home and publishes `bin/cataly` and
+`bin/cataly-harness` in the same upgrade.
 The legacy command and discovery
 names in an upgraded home are retained for owned update/rollback references;
 use `cataly` for current operation.
@@ -578,7 +574,7 @@ The output is a review artifact, not an installed update. A conflict requires a 
 - **Missing/wrong toolchain:** current headless releases require git and Bun 1.4.4+ and verify their bound OMP receipt. For a historical or explicitly selected terminal profile, also check the required backend. The bootstrap does not replace global tools.
 - **Checksum/manifest/archive failure:** stop using that download. Retain the error, confirm the canonical owner/tag, and download the complete matching asset set again. Do not disable checks or combine files from different releases.
 - **Live actor, unmanaged source or path collision:** keep the existing source/state intact and resolve the reported ownership or session condition. A hold is a nonzero result, not an installed update.
-- **Interrupted activation:** run `~/.cataly/bin/cataly update status` and retain the release state/journal if it reports an unresolved inconsistency. After an isolated 19-to-18 rollback, use the [newer controller\'s status and reference repair](#committed-rollback-with-reference-refresh-pending). Do not hand-edit the active pointer to manufacture success.
+- **Interrupted activation:** run the installation's `bin/cataly update status` and retain the release state/journal if it reports an unresolved inconsistency. After an isolated 19-to-18 rollback, use the [newer controller's status and reference repair](#committed-rollback-with-reference-refresh-pending). Do not hand-edit the active pointer to manufacture success.
 - **Discord messages work but the bot is offline:** inspect the opt-in Gateway presence monitor, its genuine READY/RESUMED and heartbeat logs, your token/intents and the actual Discord indicator. REST success alone proves none of these.
 
 For a support report, include the exact tag, release commit/source hash shown by the manifest or status, OS/architecture, Bun/OMP versions, selected runtime, command and sanitized output. State whether the input was a canonical network release or `--from`. Report checksum failure, skipped checks and unexercised behavior honestly. Exclude tokens, auth files, private session transcripts and project data. Use the repository's [issues](https://github.com/vntrevx/Cataly/issues) after reviewing what you are submitting.

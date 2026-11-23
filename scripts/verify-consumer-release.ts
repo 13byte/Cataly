@@ -92,6 +92,7 @@ const b = readManifest(distB);
 assert.equal(a.tag, "v0.1.3");
 assert.equal(a.commit, "97371823c4936f7e83f656cfa6ca9d446ecf1995", "Source A must be the actual old tagged updater");
 assert.equal(b.tag, "v0.1.4");
+const crossesNativeGeneration = b.requirements.omp.startsWith("19.");
 const controllerPath = "native-bin/linux-x64/cataly";
 const controller = b.source.files.find(({ path }) => path === controllerPath);
 if (process.platform === "linux") {
@@ -124,19 +125,15 @@ const bootstrap = (dist: string, target: string, manifest: ReleaseManifest, lega
     { legacy },
   );
 
-// Even without the old binary, the actual old updater must parse the new package and admit its v1 profile.
-const checked = await run("historical-check", [
-  bun,
-  join(sourceA, "src/release/cli.ts"),
-  "check",
-  "--from",
-  distB,
-  "--home",
-  side,
-  "--version",
-  b.tag,
-]);
-assert.equal(JSON.parse(checked.stdout).available, b.tag);
+const checked = await run(
+  "historical-check",
+  [bun, join(sourceA, "src/release/cli.ts"), "check", "--from", distB, "--home", side, "--version", b.tag],
+  { allowFailure: crossesNativeGeneration },
+);
+if (crossesNativeGeneration) {
+  assert.equal(checked.code, 2);
+  assert.match(checked.stderr, /Release requirements do not match the supported runtime/);
+} else assert.equal(JSON.parse(checked.stdout).available, b.tag);
 
 if (runtimeBin) {
   await run("historical-runtime-version", [runtimeBin, "--version"]);
@@ -146,6 +143,11 @@ if (runtimeBin) {
   const bytes = snapshot(realpathSync(join(side, "src")));
   const owner = readFileSync(join(side, "releases/consumer-owner.json"));
   const before = snapshot(side);
+  const nativeCacheName = () =>
+    `${platform.nativeCacheLabel()}-${readSourceBundle(realpathSync(join(side, "src")), true).identity}`;
+  const priorCache = join(home, ".cache/omp-dori", nativeCacheName());
+  const receipt = readFileSync(join(priorCache, "receipt.json"));
+  const launcher = readFileSync(join(priorCache, "bin/omp"));
   for (const kind of ["checksum", "manifest"] as const) {
     const bad = join(out, `rejected-${kind}`);
     cpSync(distB, bad, { recursive: true, errorOnExist: true, force: false });
@@ -161,34 +163,42 @@ if (runtimeBin) {
       );
       writeFileSync(join(bad, "SHA256SUMS"), sums);
     }
-    const rejected = await run(`reject-${kind}`, [legacyCli, "update", "install", "--from", bad], {
-      allowFailure: true,
-      legacy: true,
-    });
-    assert.equal(rejected.code, 2);
+    const rejected = await run(
+      `reject-${kind}`,
+      crossesNativeGeneration
+        ? [join(tools, "bash"), join(distB, "install.sh"), "--from", bad, "--home", side]
+        : [legacyCli, "update", "install", "--from", bad],
+      { allowFailure: true, legacy: !crossesNativeGeneration },
+    );
+    assert.equal(rejected.code, crossesNativeGeneration ? 1 : 2);
     assert.match(
       rejected.stderr,
-      kind === "checksum" ? /Release checksum differs/ : /Release identity\/version\/tag\/commit\/tree is invalid/,
+      kind === "checksum"
+        ? /Release checksum differs/
+        : /Invalid public release manifest|Release identity\/version\/tag\/commit\/tree is invalid/,
     );
     assert.equal(snapshot(side), before, `${kind} rejection mutated prior state/config/wrappers`);
   }
-  const held = await run("legacy-updater-needs-tool", [legacyCli, "update", "install", "--from", distB], {
-    allowFailure: true,
-  });
-  assert.equal(held.code, 2);
-  assert.match(held.stderr, new RegExp(`${legacyRuntime} is required`));
-  await run("historical-updater-installs-headless", [legacyCli, "update", "install", "--from", distB], {
-    legacy: true,
-  });
+  const legacyInstall = [legacyCli, "update", "install", "--from", distB];
+  if (crossesNativeGeneration) {
+    const held = await run("legacy-updater-rejects-omp-19", legacyInstall, { legacy: true, allowFailure: true });
+    assert.equal(held.code, 2);
+    assert.match(held.stderr, /Release requirements do not match the supported runtime/);
+    assert.equal(snapshot(side), before, "The old updater changed the installation while refusing OMP 19");
+    await bootstrap(distB, side, b);
+  } else {
+    const held = await run("legacy-updater-needs-tool", legacyInstall, { allowFailure: true });
+    assert.equal(held.code, 2);
+    assert.match(held.stderr, new RegExp(`${legacyRuntime} is required`));
+    await run("historical-updater-installs-headless", legacyInstall, { legacy: true });
+  }
   assert(readFileSync(join(side, "config.json")).equals(config));
   // Nothing else has installed this identity. Prove the first operator launch before any reinstall can repair it.
-  const source = realpathSync(join(side, "src"));
-  const identity = `${platform.nativeCacheLabel()}-${readSourceBundle(source, true).identity}`;
+  const identity = nativeCacheName();
   const oldCache = join(home, ".cache/omp-dori", identity);
   const newCache = join(home, ".cache/omp-cataly", identity);
-  const receipt = readFileSync(join(oldCache, "receipt.json"));
-  const launcher = readFileSync(join(oldCache, "bin/omp"));
-  assert(!existsSync(newCache));
+  assert(existsSync(crossesNativeGeneration ? newCache : oldCache));
+  assert(!existsSync(crossesNativeGeneration ? oldCache : newCache));
   assert.equal(
     (await run("first-upgraded-native-version", [join(side, "bin/omp"), "--version"])).stdout.trim(),
     b.requirements.omp,
@@ -201,9 +211,12 @@ if (runtimeBin) {
   } finally {
     await run("first-upgraded-harness-stop", [cli, "harness", "stop"]);
   }
-  assert(readFileSync(join(oldCache, "receipt.json")).equals(receipt));
-  assert(readFileSync(join(oldCache, "bin/omp")).equals(launcher));
-  assert(!existsSync(newCache), "First launch must not duplicate the authenticated native cache");
+  assert(readFileSync(join(priorCache, "receipt.json")).equals(receipt));
+  assert(readFileSync(join(priorCache, "bin/omp")).equals(launcher));
+  assert(
+    !existsSync(crossesNativeGeneration ? oldCache : newCache),
+    "First launch must not duplicate the native cache",
+  );
   await run("check-without-terminal", [cli, "update", "check", "--from", distB]);
   await run("reinstall-without-terminal", [cli, "update", "install", "--from", distB]);
   await run("installed-native-bindings", [
@@ -238,6 +251,20 @@ if (runtimeBin) {
     "Rollback did not restore exact legacy wrappers",
   );
   assert.equal(snapshot(realpathSync(join(side, "src"))), bytes, "Rollback did not restore exact legacy source");
+  if (crossesNativeGeneration) {
+    const status = await run("restored-legacy-status", [legacyCli, "update", "status"], { legacy: true });
+    assert.equal(
+      JSON.parse(status.stdout).previous,
+      null,
+      "The frozen updater must not see an unreadable OMP 19 receipt",
+    );
+    assert.equal(
+      (
+        await run("restored-legacy-native-version", [join(side, "bin/omp"), "--version"], { legacy: true })
+      ).stdout.trim(),
+      a.requirements.omp,
+    );
+  }
   // Rescue the same home with the new bootstrap after withholding access to the legacy binary again.
   await bootstrap(distB, side, b);
   assert(readFileSync(join(side, "config.json")).equals(config));
@@ -258,9 +285,9 @@ await isolated.run("fresh-bootstrap", [
 const freshConfig = JSON.parse(readFileSync(join(fresh, "config.json"), "utf8"));
 assert.equal(freshConfig.runtime, undefined);
 assert.equal(freshConfig.sessionRuntime, undefined);
-assert.match(
-  (await isolated.run("headless-native-version", [join(fresh, "bin/omp"), "--version"])).stdout,
-  /\b18\.20\.0\b/,
+assert.equal(
+  (await isolated.run("headless-native-version", [join(fresh, "bin/omp"), "--version"])).stdout.trim(),
+  b.requirements.omp,
 );
 assert.equal(
   JSON.parse((await isolated.run("headless-status", [join(fresh, "bin/cataly"), "update", "status"])).stdout).installed
