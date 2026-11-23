@@ -34,7 +34,7 @@ test("Discord DM creation remains an explicit uncertain write during discovery",
   expect(calls).toBe(1);
 });
 
-test("cancelling an in-flight Discord write preserves the signal reason and does not retry", async () => {
+test("cancelling an in-flight Discord write preserves delivery uncertainty and does not retry", async () => {
   const controller = new AbortController();
   const reason = new Error("fixture write cancelled");
   const started = Promise.withResolvers<void>();
@@ -52,7 +52,7 @@ test("cancelling an in-flight Discord write preserves the signal reason and does
   // A missing signal rejects the call rather than leaving the test waiting for the transport.
   await Promise.race([started.promise, result]);
   controller.abort(reason);
-  await expect(result).rejects.toBe(reason);
+  await expect(result).rejects.toMatchObject({ outcome: "uncertain", code: "DELIVERY_UNCERTAIN" });
   expect(calls).toBe(1);
 });
 

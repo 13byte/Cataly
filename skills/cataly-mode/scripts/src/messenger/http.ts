@@ -9,6 +9,7 @@ export type HttpRequest = {
   readonly operation?: string;
   readonly headers?: Readonly<Record<string, string>>;
   readonly body?: string | FormData | Uint8Array<ArrayBuffer>;
+  readonly redirect?: "error" | "follow" | "manual";
   readonly signal?: AbortSignal;
 };
 export type HttpResponse = {
@@ -23,6 +24,7 @@ export const fetchHttp: Http = async (req) => {
     method: req.method,
     ...(req.headers === undefined ? {} : { headers: req.headers }),
     ...(req.body === undefined ? {} : { body: req.body }),
+    ...(req.redirect === undefined ? {} : { redirect: req.redirect }),
     ...(req.signal === undefined ? {} : { signal: req.signal }),
   });
   const headers: Record<string, string> = {};
@@ -45,13 +47,17 @@ export class MessengerError extends Error {
 }
 
 export class DeliveryUncertainError extends MessengerError {
-  constructor(operation: string, status = 0) {
+  /** Unverified ID from a fully read 2xx body, never a confirmed receipt. */
+  declare readonly candidateReceipt?: { readonly id: string };
+
+  constructor(operation: string, status = 0, candidateReceipt?: { readonly id: string }) {
     super(
       `${operation}: delivery uncertain${status ? ` (HTTP ${status})` : ""}; the request may have succeeded; do not resend. Inspect the original remote target and reconcile its IDs before retrying.`,
       status,
       "DELIVERY_UNCERTAIN",
       "uncertain",
     );
+    if (candidateReceipt !== undefined) this.candidateReceipt = candidateReceipt;
   }
 }
 
@@ -125,7 +131,6 @@ export const withBackoff = async (
       last = await http(req);
     } catch (error) {
       if (!mutation) throw error;
-      req.signal?.throwIfAborted();
       const code = error !== null && typeof error === "object" && "code" in error ? error.code : undefined;
       const safeCode =
         typeof code === "string" && ["ECONNREFUSED", "ECONNRESET", "ENOTFOUND", "ETIMEDOUT", "EAI_AGAIN"].includes(code)
@@ -133,9 +138,22 @@ export const withBackoff = async (
           : "";
       throw new DeliveryUncertainError(`${operation}${safeCode}`);
     }
+    if (
+      mutation &&
+      (last.status === 408 || last.status >= 500 || (last.status >= 200 && last.status < 400 && req.signal?.aborted))
+    ) {
+      let candidateReceipt: { readonly id: string } | undefined;
+      if (last.status >= 200 && last.status < 300) {
+        try {
+          const body = JSON.parse(last.body) as { readonly id?: unknown } | null;
+          if (typeof body?.id === "string" && body.id.length > 0) candidateReceipt = { id: body.id };
+        } catch {
+          // A non-JSON body cannot supply an ID candidate.
+        }
+      }
+      throw new DeliveryUncertainError(operation, last.status, candidateReceipt);
+    }
     req.signal?.throwIfAborted();
-    if (mutation && (last.status === 408 || last.status >= 500))
-      throw new DeliveryUncertainError(operation, last.status);
     // Platform 429 responses reject the request; 5xx on reads can be retried safely.
     if (last.status !== 429 && last.status < 500) return last;
     const rateLimited = last.status === 429;

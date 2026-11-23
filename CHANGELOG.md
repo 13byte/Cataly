@@ -379,3 +379,7 @@ Setup now offers configuration-only previews, preserves owner JSON/YAML values o
 ## Unreleased: opt-in once monitors retain terminal outcomes without replaying successful work, with mode-aware listings and a managed-restart safety fence; completion waits for owner-output admission and confirmed file-backed journal persistence, while ended children awaiting admission retain restore ownership without reporting live health PIDs.
 
 ## Unreleased: opt-in daemon monitors use bounded exponential-backoff retries after confirmed file-backed journal persistence, retain retry budgets and exhausted outcomes across resume, and support one raw-output silence alert per quiet spell; version 3 metadata preserves policy without changing persistent defaults, once protection, or raw-output retention.
+
+- Unreleased (source only): Slack external uploads validate the file ID and HTTPS files.slack.com/upload/v1/ destination before sending bytes, forbid upload redirects, and require completion to identify the requested file. The upload signature, original file-ID return value, title/thread options, and credential-free byte request stay unchanged; unknown completion never triggers an automatic reupload. Adapted validation retains its component MIT notice in NOTICE.
+
+- Slack upload hardening also preserves typed board uncertainty and cancellation-after-mutation uncertainty without replay, while keeping current rate-limit budgets and route validation.

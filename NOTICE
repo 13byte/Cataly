@@ -72,6 +72,18 @@ host-owner/src/transport.rs at 3eafa0e9e36133c71f7cbced47dc7d2b38bdf8cd.
 It bounds native routing responses without an extra serialization buffer.
 The same MIT notice below applies to the adapted code.
 
+Slack external-upload validation
+--------------------------------
+
+The upload-ticket URL/file-ID validation and completion-receipt checks in
+skills/cataly-mode/scripts/src/messenger/slack.ts are adapted from
+dbc-hbin/omp-superagent src/slack.ts at
+db3d74e4f37191dfbb74f8259563d1399c22f3b7.
+Source: https://github.com/dbc-hbin/omp-superagent
+
+The following MIT notice applies to those adapted portions only. It does
+not relicense the existing Slack implementation or SUL-derived material.
+
 MIT License
 
 Copyright (c) 2026 dbc-hbin
@@ -120,3 +132,4 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+

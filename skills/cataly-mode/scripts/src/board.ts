@@ -63,11 +63,11 @@ export const updateBoard = async (options: {
       closeSync(fd);
     }
     renameSync(tmp, path);
-    const directory = openSync(dir, "r");
+    const directory = process.platform === "win32" ? undefined : openSync(dir, "r");
     try {
-      fsyncSync(directory);
+      if (directory !== undefined) fsyncSync(directory);
     } finally {
-      closeSync(directory);
+      if (directory !== undefined) closeSync(directory);
     }
   };
   let freshCreate = false;
@@ -120,7 +120,7 @@ export const updateBoard = async (options: {
         id ? `${messagesPath}/${id}` : messagesPath,
         { content: text, allowed_mentions: { parse: [] } },
       );
-      delivered = id ?? message?.id;
+      delivered = message?.id;
     } else {
       const telegram = new Telegram(http, clock, token);
       const where = { chatId: target.to, ...(target.thread === undefined ? {} : { threadId: target.thread }) };
@@ -130,7 +130,8 @@ export const updateBoard = async (options: {
         delivered = id;
       } else delivered = String(await telegram.send(where, text));
     }
-    if (!isMessageId(delivered)) throw unconfirmedDelivery(" (missing message ID)");
+    if (!isMessageId(delivered) || (id !== undefined && delivered !== id))
+      throw unconfirmedDelivery(" (missing message ID for this target)");
     persist({ ...record, messageId: delivered, pending: false });
     return { action: id ? "edited" : "posted", messageId: delivered };
   } catch (error) {
@@ -143,11 +144,11 @@ export const updateBoard = async (options: {
       error.status < 500
     ) {
       unlinkSync(path);
-      const directory = openSync(dir, "r");
+      const directory = process.platform === "win32" ? undefined : openSync(dir, "r");
       try {
-        fsyncSync(directory);
+        if (directory !== undefined) fsyncSync(directory);
       } finally {
-        closeSync(directory);
+        if (directory !== undefined) closeSync(directory);
       }
     }
     if (error instanceof MessengerError && error.outcome === "uncertain") {
