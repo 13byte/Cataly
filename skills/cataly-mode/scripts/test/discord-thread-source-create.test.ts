@@ -35,7 +35,7 @@ test("a source-bound forum post sends one suppressed, tagged POST and a new proc
       message: { content: text, allowed_mentions: { parse: [] } },
       applied_tags: [ids.working],
     });
-    expect(receiptMode(f)).toBe(0o600);
+    if (process.platform !== "win32") expect(receiptMode(f)).toBe(0o600);
     const bytes = receiptBytes(f);
     const replay = await f.invoke(create(["--text", text]), options());
     expect([replay.code, replay.err, replay.out, mutations(replay.keys)]).toEqual([0, "", posted, []]);

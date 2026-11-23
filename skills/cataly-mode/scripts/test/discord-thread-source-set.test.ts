@@ -30,7 +30,7 @@ test("a source-bound rename patches only the registered thread's title and repla
     expect([first.code, first.err, first.out, mutations(first.keys)]).toEqual([0, "", `THREAD ${ids.thread}`, [patch]]);
     // A title alone never sends an archived key.
     expect(bodyOf(first)).toEqual({ name: "renamed" });
-    expect(receiptMode(f)).toBe(0o600);
+    if (process.platform !== "win32") expect(receiptMode(f)).toBe(0o600);
     const bytes = receiptBytes(f);
     const replay = await f.invoke(set(ids.thread, renamed), options(routes));
     expect([replay.code, replay.out, mutations(replay.keys)]).toEqual([0, first.out, []]);

@@ -73,7 +73,7 @@ test("write-ahead precedes HTTP, a live competing writer fails closed, and creat
     if (init?.method === "POST" && path === "/channels/30/threads") {
       mutations.push(path);
       expect(f.store.read()[0]?.state).toBe("pending");
-      expect(statSync(f.store.path).mode & 0o777).toBe(0o600);
+      if (process.platform !== "win32") expect(statSync(f.store.path).mode & 0o777).toBe(0o600);
       entered.resolve();
       await release.promise;
       return Response.json(created);
