@@ -22,6 +22,8 @@
     "test:ci": "bun test --parallel=1 --timings=.bun-test-timings.json ./test/",
     "test:skill": "cd skills/cataly-mode/scripts && bun test",
     "test:extension": "cd extension && bun test",
+    "dev:setup": "bun scripts/dev-setup.ts",
+    "test:local": "bun scripts/test-local.ts",
     "ci": "bun run check:fixtures && bun run check && bun run typecheck && bun run knip && bun run lint:loc && bun run test:ci && bun run test:skill && bun run test:extension"
   },
   "devDependencies": {

@@ -102,6 +102,42 @@ preserve notices and existing settings.
 
 ## Run the gates
 
+### Match CI locally
+
+```sh
+bun run dev:setup                              # once, and after lockfile or pin changes
+bun run test:local [root|skill|ext|all] [args] # default: all three suites
+```
+
+`dev:setup` runs the `run:` steps of `.github/actions/setup` (`fixtures: all`)
+verbatim, so the installs, the native host check against `native-omp.lock` and
+the omp-ulw compatibility pin stay defined in one place. It uses the running Bun
+when it matches `packageManager` in `package.json`, otherwise it installs that
+version under `target/bun-<version>/` (checked against the release's
+`SHASUMS256.txt`). Fixtures live under `target/dev-fixtures/`, and it writes
+`target/dev-env.sh` with the pinned Bun first on `PATH`, `CATALY_TEST_OMP_ROOT`
+and `CATALY_TEST_COMPAT_ULW_ENTRY`. A second run reuses the compatibility
+checkout and finishes in about a second.
+
+`test:local` sources that file, re-executes itself under the pinned Bun if
+another Bun started it, and runs the suites with CI's package scripts. Extra
+arguments go to `bun test`; root paths are relative to the checkout, skill and
+extension paths to their suite directory, e.g.
+`bun run test:local ext test/index.test.ts`. It changes only its own process
+and children, never your shell or `~/.bun`:
+
+- **Pinned Bun.** Even Bun patch releases change test-runner and module
+  behavior; results from another version are not evidence for CI.
+- **umask 022.** Cataly refuses group-writable private paths. Under a developer
+  umask such as `002`, fixtures the tests create fail those checks, which never
+  happens on CI.
+- **Private `TMPDIR`.** The same checks walk parent directories, so a `TMPDIR`
+  below a group-writable directory fails. Each run uses a fresh
+  `mktemp -d /tmp/cataly-test-XXXXXX` under the sticky system `/tmp`, as CI
+  does, and removes it afterwards.
+
+The manual steps below are the equivalent long form.
+
 Prepare the real fixtures before the full local gate:
 
 ```sh
