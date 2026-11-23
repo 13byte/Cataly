@@ -23,7 +23,7 @@ test("thread receipts round-trip privately and reads leave their exact bytes unt
     expect(store.read()).toEqual([]);
     store.write([confirmed]);
     const bytes = readFileSync(store.path, "utf8");
-    expect(statSync(store.path).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(store.path).mode & 0o777).toBe(0o600);
     expect(store.read()).toEqual([confirmed]);
     expect(readFileSync(store.path, "utf8")).toBe(bytes);
   } finally {
@@ -55,3 +55,19 @@ for (const [index, attempts] of corrupt.entries())
       state.done();
     }
   });
+
+test("Windows receipt writes complete file durability without opening a directory", () => {
+  const state = withState();
+  const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+  try {
+    Object.defineProperty(process, "platform", { ...platform, value: "win32" });
+    const store = new DiscordThreadReceipts(state.dir);
+    store.write([{ ...confirmed, state: "pending" }]);
+    expect(store.read()[0]?.state).toBe("pending");
+    store.write([confirmed]);
+    expect(store.read()).toEqual([confirmed]);
+  } finally {
+    Object.defineProperty(process, "platform", platform);
+    state.done();
+  }
+});

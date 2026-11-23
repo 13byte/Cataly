@@ -163,11 +163,11 @@ export class DiscordThreadReceipts {
           closeSync(fd);
         }
         renameSync(tmp, this.path);
-        const directory = openSync(this.stateDir, "r");
+        const directory = process.platform === "win32" ? undefined : openSync(this.stateDir, "r");
         try {
-          fsyncSync(directory);
+          if (directory !== undefined) fsyncSync(directory);
         } finally {
-          closeSync(directory);
+          if (directory !== undefined) closeSync(directory);
         }
       } finally {
         rmSync(tmp, { force: true });
