@@ -495,7 +495,7 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
             display: true,
             ...(delivery.details === undefined ? {} : { details: delivery.details }),
           },
-          { triggerTurn: true, deliverAs: "aside" },
+          { triggerTurn: delivery.wake, deliverAs: delivery.wake ? "aside" : "nextTurn" },
         );
     },
     () => (isLead() ? session?.id : undefined),
@@ -1343,7 +1343,7 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
       mode: z.enum(["persistent", "once"]).optional().describe("once stops restoring after durable success (start)"),
       name: z.string().optional().describe("monitor name (start, stop)"),
       argv: z.array(z.string()).optional().describe("command and arguments, run without a shell (start)"),
-      filter: z.string().optional().describe("regular expression; matching output lines wake the session (start)"),
+      filter: z.string().optional().describe("regular expression selecting delivered output lines (start)"),
       restart: z.enum(["on-failure"]).optional().describe("retry unexpected exits for this monitor only (start)"),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {

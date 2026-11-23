@@ -1,7 +1,7 @@
 /**
  * Persistent monitors for the Cataly session: a command runs in the background (argv, never a shell) and every
- * stdout/stderr line matching its filter wakes the session. This is the "your monitor tool" the Cataly setup
- * expects; omp has no built-in equivalent.
+ * matching stdout/stderr line is delivered. Known routine notices wait for the next turn; other output wakes
+ * the session. This is the "your monitor tool" the Cataly setup expects; omp has no built-in equivalent.
  */
 import type { Subprocess } from "bun";
 import { resolve } from "node:path";
@@ -25,6 +25,8 @@ export const BATCH_MS = 300;
 /** A burst longer than this is split so one message never grows unbounded. */
 const BATCH_MAX_LINES = 100;
 const BATCH_MAX_BYTES = 64 * 1024;
+const ROUTINE_NOTICE =
+  /^(?:(?:LANE_WATCH_READY|HOST_GUARD_READY|PRESENCE_READY|PRESENCE_ACK|PENDING-REPORT)(?:\s|$)|NUDGED\s.*, delivery delivered\s*$)/;
 
 export type MonitorExit = {
   readonly code: number | null;
@@ -72,6 +74,7 @@ export type MonitorInfo = {
 };
 
 export type MonitorDelivery = {
+  readonly wake: boolean;
   readonly session: string;
   readonly signal: AbortSignal;
   readonly details?: unknown;
@@ -82,7 +85,7 @@ type Deliver = (content: string, delivery: MonitorDelivery) => unknown;
 export class Monitors {
   readonly #running = new Map<string, Running>();
   readonly #restarts = new Map<string, { entry: Running; timer: Timer }>();
-  #pending: Array<{ readonly entry: Running; readonly text: string }> = [];
+  #pending: Array<{ readonly entry: Running; readonly text: string; readonly wake: boolean }> = [];
   #timer: Timer | undefined;
   #pendingBytes = 0;
   #generation = new AbortController();
@@ -439,6 +442,7 @@ export class Monitors {
               .map((line) => `[${entry.name}] ${line}`)
               .join("\n");
             await this.#deliver(this.#bounded(entry, text), {
+              wake: true,
               session: entry.session,
               signal: entry.signal,
               isCurrent,
@@ -483,7 +487,8 @@ export class Monitors {
   }
 
   async #line(entry: Running, line: string): Promise<void> {
-    if (!entry.stopped && entry.filter.test(line)) await this.#queue(entry, `[${entry.name}] ${line}`);
+    if (!entry.stopped && entry.filter.test(line))
+      await this.#queue(entry, `[${entry.name}] ${line}`, !ROUTINE_NOTICE.test(line));
   }
 
   #bounded(entry: Running, text: string): string {
@@ -500,8 +505,9 @@ export class Monitors {
     return text;
   }
 
-  async #queue(entry: Running, text: string): Promise<void> {
+  async #queue(entry: Running, text: string, wake = true): Promise<void> {
     if (!this.#current(entry)) return;
+    if (Buffer.byteLength(text) > BATCH_MAX_BYTES) wake = true;
     text = this.#bounded(entry, text);
     const bytes = Buffer.byteLength(text);
     while (
@@ -512,7 +518,7 @@ export class Monitors {
       if (!this.#current(entry)) return;
     }
     this.#pendingBytes += bytes + (this.#pending.length ? 1 : 0);
-    this.#pending.push({ entry, text });
+    this.#pending.push({ entry, text, wake });
     if (this.#pending.length >= BATCH_MAX_LINES || this.#pendingBytes >= BATCH_MAX_BYTES) await this.#flush();
     else
       this.#timer ??= setTimeout(() => {
@@ -539,6 +545,7 @@ export class Monitors {
         const delivery: MonitorDelivery = {
           session: first.session,
           signal: first.signal,
+          wake: lines.some((line) => line.wake),
           isCurrent: () => this.#current(first),
         };
         try {
@@ -560,7 +567,7 @@ export class Monitors {
           }
           const notice = `[monitor] delivery failed for name=${JSON.stringify(first.name.slice(0, 256))}; stopped ${entries.length} monitor(s); raw output may be incomplete: ${String(error).slice(0, 2048)}`;
           try {
-            if (delivery.isCurrent()) await this.#deliver(notice, delivery);
+            if (delivery.isCurrent()) await this.#deliver(notice, { ...delivery, wake: true });
           } catch (reportError) {
             console.error(notice, reportError);
           }
