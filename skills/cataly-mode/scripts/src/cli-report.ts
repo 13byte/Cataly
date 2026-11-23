@@ -62,6 +62,7 @@ export const report: Command = async ({ key, need, opt, strings, values, lane, c
       const ref = sessionOf(target),
         currentRef = sessionOf(current);
       if (
+        current.nativeCloseIntent !== undefined ||
         !sameLaneGeneration(target, current) ||
         (ref ? !currentRef || !sameSession(ref, currentRef) : currentRef !== undefined) ||
         JSON.stringify(reports.read(target.key, reportScope(current))?.lastReport) !== JSON.stringify(before) ||

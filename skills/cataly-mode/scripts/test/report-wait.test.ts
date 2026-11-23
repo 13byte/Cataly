@@ -111,3 +111,25 @@ test("malformed proof metadata is dropped without dropping its blocker", async (
   expect(decoded).toMatchObject({ type: "report", kind: "blocker" });
   expect(decoded).not.toHaveProperty("wait");
 });
+
+test("a native close intent arriving during the probe fences the wait append", async () => {
+  f.control.onProbe = async () => {
+    await f.deps.registry.update(
+      f.lane.key,
+      (lane) =>
+        lane && {
+          ...lane,
+          nativeCloseIntent: {
+            ref: { runtime: "herdr", id: f.lane.pane! },
+            session: SESSION,
+            note: "close pending",
+            checks: [],
+            settlingClaim: false,
+          },
+        },
+    );
+  };
+  await expect(f.report("job:bg_1")).rejects.toThrow("lane state changed");
+  expect(f.reports.read(f.lane.key)).toBeNull();
+  expect((await f.deps.registry.read(f.lane.key))?.nativeCloseIntent).toBeDefined();
+});
