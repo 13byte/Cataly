@@ -1,6 +1,7 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AsyncJobSnapshot } from "@oh-my-pi/pi-coding-agent";
 
 import type { CommandOptions as Command, CatalyApi, CatalyContext, ToolDefinition as Tool } from "../index";
 
@@ -40,6 +41,10 @@ export type FakePi = {
   notes: string[];
   statuses: Map<string, string>;
   session: FakeSession;
+  /** The agent the next context names; a subagent's context reads its own jobs. */
+  agent: Agent;
+  /** What `getAsyncJobSnapshot` returns; null is OMP's "no job manager". */
+  jobs: AsyncJobSnapshot | null;
   ctx(): CatalyContext;
   /** Runs handlers in registration order, chaining before_agent_start prompt replacements as OMP does. */
   emit(event: string, payload?: unknown): Promise<unknown[]>;
@@ -50,7 +55,6 @@ const schema = { optional: () => schema, describe: () => schema };
 
 export const fakePi = (options: FakeOptions): FakePi => {
   const flags = new Map<string, boolean | string>(Object.entries(options.flags ?? {}));
-  const agent: Agent = options.agent ?? { kind: "main", id: "Main" };
   const fake: FakePi = {
     handlers: new Map(),
     commands: new Map(),
@@ -61,12 +65,14 @@ export const fakePi = (options: FakeOptions): FakePi => {
     notes: [],
     statuses: new Map(),
     session: options.session,
+    agent: options.agent ?? { kind: "main", id: "Main" },
+    jobs: null,
     ctx: () => ({
       cwd: tmpdir(),
       abort: () => void calls.push("abort"),
       mode: options.mode ?? "print",
       ...(options.hasUI === undefined ? {} : { hasUI: options.hasUI }),
-      agent,
+      agent: fake.agent,
       model: options.model,
       modelRegistry: {
         getAvailableForProviders: (providers) =>
@@ -88,6 +94,7 @@ export const fakePi = (options: FakeOptions): FakePi => {
           else fake.statuses.set(key, text);
         },
       },
+      getAsyncJobSnapshot: () => fake.jobs,
     }),
     emit: async (event, payload = { type: event }) => {
       const results: unknown[] = [];
