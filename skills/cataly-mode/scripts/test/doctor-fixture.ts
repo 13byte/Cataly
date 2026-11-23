@@ -1,10 +1,14 @@
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { readSourceBundle } from "../../../../src/release/source-bundle.ts";
 
 export function doctorCommand(directory: string): readonly string[] {
   const executable = join(directory, "omp");
-  const version = readSourceBundle(resolve(import.meta.dir, "../../../.."), true).lock.nativeVersion;
+  // Read the pinned version plainly: the real bundle ownership checks refuse CI's group-writable checkouts.
+  const version = (
+    JSON.parse(readFileSync(resolve(import.meta.dir, "../../../../native-omp.lock"), "utf8")) as {
+      nativeVersion: string;
+    }
+  ).nativeVersion;
   writeFileSync(
     executable,
     `#!${process.execPath}

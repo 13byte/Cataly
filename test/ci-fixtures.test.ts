@@ -140,7 +140,7 @@ test("a missing public native API fails with its exact resolved module and featu
   const f = fixture();
   const code = String.raw`
     Bun.plugin({ name: "missing-native-api", setup(build) {
-      build.onLoad({ filter: /\/extensibility\/extensions\/loader\.ts$/ }, () => ({
+      build.onLoad({ filter: /[/\\]extensibility[/\\]extensions[/\\]loader\.ts$/ }, () => ({
         loader: "object", exports: { ExtensionRuntime: class {}, loadExtensionFromFactory() {} }
       }));
     }});
@@ -154,7 +154,9 @@ test("a missing public native API fails with its exact resolved module and featu
   });
   expect(child.exitCode).toBe(1);
   expect(child.stderr.toString()).toContain("missing public native API importExtensionModule");
-  expect(child.stderr.toString()).toContain(realpathSync(join(nativeHost, "src/extensibility/extensions/loader.ts")));
+  expect(child.stderr.toString().replaceAll("\\", "/")).toContain(
+    realpathSync(join(nativeHost, "src/extensibility/extensions/loader.ts")).replaceAll("\\", "/"),
+  );
 });
 
 test("the real prerequisite CLI exits nonzero without a successful marker for missing prerequisites", () => {
