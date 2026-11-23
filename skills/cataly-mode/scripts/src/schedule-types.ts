@@ -1,9 +1,11 @@
 import { Cron } from "croner";
 import { isAbsolute } from "node:path";
-import { MessengerError } from "./messenger/http.ts";
-import { slackScope } from "./messenger/thread-ledger.ts";
+import { scheduleDestination } from "./schedule-destination.ts";
+export { scheduleDestination } from "./schedule-destination.ts";
+import { validateCondition, type ScheduleCondition, type ScheduleWatch } from "./schedule-condition.ts";
 
-export class ScheduleError extends Error {}
+import { ScheduleError } from "./schedule-error.ts";
+export { ScheduleError } from "./schedule-error.ts";
 export type ScheduleDelivery = "wake" | "log" | `post:${string}`;
 export type ScheduleRun = {
   id: string;
@@ -16,6 +18,7 @@ export type ScheduleRun = {
   signal?: string | null;
   error?: string;
   timedOut?: boolean;
+  conditionFired?: boolean;
   delivery: "pending" | "logged" | "wake-emitted" | "posted" | "unknown";
   deliveryError?: string;
   receipts?: string[];
@@ -26,6 +29,8 @@ export type ScheduledJob = {
   cron?: string;
   tz?: string;
   at?: number;
+  condition?: ScheduleCondition;
+  watch?: ScheduleWatch;
   timeoutSeconds?: number;
   argv: string[];
   cwd: string;
@@ -36,7 +41,7 @@ export type ScheduledJob = {
   last?: ScheduleRun;
 };
 export type AdoptedSchedule = { name: string; unit: string; system: boolean };
-export type ScheduleDocument = { version: 1; jobs: ScheduledJob[]; adopted: AdoptedSchedule[] };
+export type ScheduleDocument = { version: 1 | 2; jobs: ScheduledJob[]; adopted: AdoptedSchedule[] };
 const NAME = /^[a-zA-Z0-9][a-zA-Z0-9._@-]{0,127}$/;
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const instant = (value: unknown): value is number =>
@@ -92,59 +97,20 @@ export function scheduleAt(value: string): number {
     throw new ScheduleError("--at needs a valid ISO instant with seconds and Z or an explicit offset");
   return at;
 }
-export function scheduleTrigger(job: Pick<ScheduledJob, "cron" | "tz" | "at">): void {
-  if (job.at !== undefined) {
+export function scheduleTrigger(job: Pick<ScheduledJob, "cron" | "tz" | "at" | "condition" | "watch">): void {
+  if (job.condition !== undefined) {
+    if (job.at !== undefined || job.cron !== undefined || job.tz !== undefined)
+      throw new ScheduleError("condition cannot be combined with at/cron/tz");
+    validateCondition(job.condition, job.watch);
+  } else if (job.at !== undefined) {
+    if (job.watch !== undefined) throw new ScheduleError("watch requires condition");
     if (!instant(job.at) || job.cron !== undefined || job.tz !== undefined)
       throw new ScheduleError("one-shot schedules need a valid at instant without cron or tz");
   } else {
+    if (job.watch !== undefined) throw new ScheduleError("watch requires condition");
     if (typeof job.cron !== "string" || typeof job.tz !== "string")
       throw new ScheduleError("cron schedules need cron and tz");
     scheduleCron(job.cron, job.tz);
-  }
-}
-
-type ScheduleDestination =
-  | { readonly platform: "discord"; readonly to: string }
-  | { readonly platform: "telegram"; readonly to: string; readonly thread?: string }
-  | { readonly platform: "slack"; readonly to: string; readonly channel: string; readonly thread?: string };
-
-export function scheduleDestination(value: string): ScheduleDestination | null {
-  if (value === "wake" || value === "log") return null;
-  const match = /^post:(discord|slack|telegram):([^/]+)(?:\/(.+))?$/.exec(value);
-  const [, platform, to, thread] = match ?? [];
-  if (!to) throw new ScheduleError("--deliver must be wake, log or post:<discord|slack|telegram>:<target>[/thread]");
-  const suffix = thread === undefined ? {} : { thread };
-  switch (platform) {
-    case "discord":
-      if (!/^[1-9]\d{5,29}$/.test(to) || thread !== undefined)
-        throw new ScheduleError("Discord post target must be a channel or thread ID without /thread");
-      return { platform, to };
-    case "telegram":
-      if (
-        !/^-?[1-9]\d*$/.test(to) ||
-        (thread !== undefined && (!/^[1-9]\d*$/.test(thread) || !Number.isSafeInteger(Number(thread))))
-      )
-        throw new ScheduleError("Telegram post target must be a chat ID with an optional positive /topic ID");
-      return { platform, to, ...suffix };
-    case "slack": {
-      const [teamId, userId, channel, extra] = to.split(":");
-      if (
-        !channel ||
-        extra !== undefined ||
-        !/^[CGD][A-Za-z0-9_-]+$/.test(channel) ||
-        (thread !== undefined && !/^\d+\.\d+$/.test(thread))
-      )
-        throw new ScheduleError("Slack post target must be post:slack:WORKSPACE:ACCOUNT:CHANNEL[/THREAD_TS]");
-      try {
-        slackScope(teamId, userId);
-      } catch (error) {
-        if (error instanceof MessengerError) throw new ScheduleError(error.message);
-        throw error;
-      }
-      return { platform, to: `slack:${to}`, channel, ...suffix };
-    }
-    default:
-      throw new ScheduleError("--deliver has an unknown post platform");
   }
 }
 
@@ -154,7 +120,7 @@ export function readScheduleDocument(value: unknown): ScheduleDocument {
   };
   if (
     !record(value, "version jobs adopted") ||
-    value["version"] !== 1 ||
+    (value["version"] !== 1 && value["version"] !== 2) ||
     !Array.isArray(value["jobs"]) ||
     !Array.isArray(value["adopted"])
   )
@@ -163,7 +129,7 @@ export function readScheduleDocument(value: unknown): ScheduleDocument {
   const ids = new Set<string>();
   for (const raw of value["jobs"]) {
     if (
-      !record(raw, "id name cron tz at timeoutSeconds argv cwd deliver paused nextAt missed last") ||
+      !record(raw, "id name cron tz at condition watch timeoutSeconds argv cwd deliver paused nextAt missed last") ||
       typeof raw["id"] !== "string" ||
       !UUID.test(raw["id"]) ||
       ids.has(raw["id"]) ||
@@ -191,6 +157,8 @@ export function readScheduleDocument(value: unknown): ScheduleDocument {
     names.add(raw["name"]);
     ids.add(raw["id"]);
     scheduleTrigger(raw as unknown as ScheduledJob);
+    if (raw["condition"] !== undefined && (value["version"] !== 2 || raw["timeoutSeconds"] === undefined)) return bad();
+    if (raw["condition"] === undefined && raw["watch"] !== undefined) return bad();
     if (raw["at"] !== undefined && raw["at"] !== raw["nextAt"]) return bad();
     scheduleDestination(raw["deliver"]);
     if (raw["last"] !== undefined) {
@@ -198,7 +166,7 @@ export function readScheduleDocument(value: unknown): ScheduleDocument {
       if (
         !record(
           last,
-          "id at startedAt finishedAt pid status code signal error timedOut delivery deliveryError receipts",
+          "id at startedAt finishedAt pid status code signal error timedOut conditionFired delivery deliveryError receipts",
         ) ||
         typeof last["id"] !== "string" ||
         !UUID.test(last["id"]) ||
@@ -212,6 +180,8 @@ export function readScheduleDocument(value: unknown): ScheduleDocument {
         (last["pid"] !== undefined && (!Number.isSafeInteger(last["pid"]) || Number(last["pid"]) <= 0)) ||
         (last["code"] !== undefined && (!Number.isSafeInteger(last["code"]) || Number(last["code"]) < 0)) ||
         (last["signal"] !== undefined && last["signal"] !== null && typeof last["signal"] !== "string") ||
+        (last["conditionFired"] !== undefined &&
+          (value["version"] !== 2 || typeof last["conditionFired"] !== "boolean")) ||
         (last["timedOut"] !== undefined && typeof last["timedOut"] !== "boolean") ||
         (last["error"] !== undefined && typeof last["error"] !== "string") ||
         (last["deliveryError"] !== undefined && typeof last["deliveryError"] !== "string") ||

@@ -126,6 +126,8 @@ export const CATALY_VALUE_OPTIONS: Record<string, true> = {
   "adopt-legacy-threads": true,
   self: true,
   "timeout-seconds": true,
+  "every-seconds": true,
+  "on-success": true,
   at: true,
   cron: true,
   tz: true,

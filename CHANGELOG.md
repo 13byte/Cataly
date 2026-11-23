@@ -2,9 +2,17 @@
 
 ## Unreleased
 
+- Add read-only schedule show and add --dry-run previews for one-shot, cron and conditional trigger times. Related to #214.
+
+- Add opt-in conditional command polling with initial-success/rising-edge or every-success delivery, exact-stdout digest suppression, bounded probes, and version-2 watch state. Related to #214; direct lane/lead actions and routine management extensions remain separate.
+
+- Routine monitor readiness/heartbeat acknowledgements, pending report notices and confirmed nudges are retained for the next turn without waking Cataly. Other output, mixed batches, process exits and output preservation warnings still wake; session ownership, filters and byte limits are unchanged.
+
 - Add optional schedule command deadlines with a five-second termination grace and explicit timed-out receipts; existing schedules remain unlimited unless configured. Remove timeout-bearing jobs with the current CLI before downgrading to an older reader. Related to #214.
 
 - Extend opt-in schedules with one-shot `--at` instants, explicit timezone offsets, durable consumption and no restart replay. Related to #214; condition triggers remain separate work. One-shot records make the whole schedule document unreadable to older versions; inspect and remove them with the current CLI before downgrading.
+
+- Discord voice can opt into the Live WebRTC transport (`voice.transport: "webrtc"`, default `websocket` unchanged) through the optional pure-TypeScript `werift`, and with it GPT-Live standby (`voice.standby`: `idleTimeoutSec` 5-60, optional `vadThreshold`, required `dailyMinuteCap`). With standby, minute limits count active seconds and the standby cap counts paused seconds; standby sessions do not greet and hold lead replies while paused. Optional `voice.livePrices` adds an estimated Live cost line to the session summary.
 
 - Use Cataly for the current commands, skill, role and environment. Fresh homes
   default to `~/.cataly` or `~/.omp-cataly`. The verified new bootstrap can
@@ -154,6 +162,8 @@
 - Discord Gateway intake spools pending work to a private SQLite FIFO instead of retaining an unbounded Promise chain during REST backfill failures. A bounded page cache and one decoded record keep application backlog memory independent of queue length; pending work survives shutdown and restart, with existing cursor and delivery-error boundaries preserved. Disk writes and backlog-sized storage replace in-memory retention. Both REST and Gateway acquire the queue lock before authentication or polling, including a fresh state directory. Intake stops at the 256 MiB database limit or when another consumer owns the same queue, and REST-only mode refuses pending Gateway work until it is drained in Gateway mode.
 
 - Discord backfill reconciles durably queued owners with older REST gaps before newer delivery or filtered checkpoints, preserving requests absent from REST. Indexed one-record reads keep queued backlog out of application arrays. Admission metadata and exact-ID acknowledgements preserve late frames without regressing cursors; ordering is qualified at each delivery selection. Emit/checkpoint crashes, late acknowledgement crashes and conservative legacy-row recovery can repeat requests. Existing queue ownership, privacy and storage limits remain in force; migration indexes consume database budget and temporary construction space.
+
+- New session runtime `tern` beside herdr and hc (`src/runtime/tern/`), for the Tern terminal. Choose it with `DORI_RUNTIME=tern` or `"runtime": "tern"`; it is detected only after hc and herdr (`TERN_PANE`, then `tern` on PATH), so existing selections are unchanged. A Dori session is one Tern block (`tern:<block id>`, inbox file `tern--<id>.jsonl`), its group the Tern session and its container the tab: lanes open as named tabs in the session `laneWorkspace` names, else the caller's own Tern session, else `dori`. Blocks start OMP's classic UI (`PI_TUI_NATIVE=0`) so `tern capture` can read the input. Status is the foreground process plus Tern's busy flag, refined by the attested OMP record the extension now also writes under `TERN_PANE`. Delivery pastes once and presses Enter; the submit is confirmed on OMP's classic input and falls back to herdr-style typed delivery on a screen it does not recognise. `dori harness migrate --to tern`, target refs and lane footers (`tern run <lead block> -- "$line"`) accept it. herdr, hc, releases and the installer are unchanged; CI covers the adapter against a recorder only. See [Tern](docs/runtime.md#tern).
 
 - Discord REST intake batches filtered-message cursor writes into the next successful owner checkpoint or one trailing checkpoint. Owner emits still checkpoint individually, live Gateway delivery is unchanged, and failures never commit past an undelivered owner message.
 
@@ -371,3 +381,7 @@ Setup now offers configuration-only previews, preserves owner JSON/YAML values o
 
 - Unreleased: Diagnose the selected native executable, source revision and public CLI/API capabilities without falling back to another binary or adding an extension peer to the test gate.
 
+
+## Unreleased: opt-in once monitors retain terminal outcomes without replaying successful work, with mode-aware listings and a managed-restart safety fence; completion waits for owner-output admission and confirmed file-backed journal persistence, while ended children awaiting admission retain restore ownership without reporting live health PIDs.
+
+## Unreleased: opt-in daemon monitors use bounded exponential-backoff retries after confirmed file-backed journal persistence, retain retry budgets and exhausted outcomes across resume, and support one raw-output silence alert per quiet spell; version 3 metadata preserves policy without changing persistent defaults, once protection, or raw-output retention.

@@ -16,7 +16,7 @@ function scheduleState(job: ScheduledJob): string {
   return job.paused ? "paused" : "scheduled";
 }
 
-export async function scheduleView(store: ScheduleStore, run: Runner, now: number) {
+export async function scheduleView(store: Pick<ScheduleStore, "read" | "stateDir">, run: Runner, now: number) {
   const document = store.read();
   const adopted = [];
   for (const entry of document.adopted) {
@@ -30,9 +30,28 @@ export async function scheduleView(store: ScheduleStore, run: Runner, now: numbe
     jobs: document.jobs.map((job) => ({
       ...job,
       state: scheduleState(job),
+      ...(job.watch?.diagnosticRunId
+        ? {
+            diagnostic: {
+              output: scheduleOutput(store.stateDir, job.watch.diagnosticRunId),
+              stderr: scheduleOutput(store.stateDir, job.watch.diagnosticRunId) + ".stderr",
+            },
+          }
+        : {}),
       next: job.paused ? null : new Date(job.nextAt).toISOString(),
       ...(job.last
-        ? { last: { ...job.last, output: scheduleOutput(store.stateDir, job.last.id), pidIsLive: "unverified" } }
+        ? {
+            last: {
+              ...job.last,
+              ...(job.last.conditionFired === false && job.watch?.diagnosticRunId !== job.last.id
+                ? {}
+                : { output: scheduleOutput(store.stateDir, job.last.id) }),
+              ...(job.condition && (job.last.conditionFired !== false || job.watch?.diagnosticRunId === job.last.id)
+                ? { stderr: scheduleOutput(store.stateDir, job.last.id) + ".stderr" }
+                : {}),
+              pidIsLive: "unverified",
+            },
+          }
         : {}),
     })),
     adopted,

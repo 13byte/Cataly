@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { closeSync, fsyncSync, mkdirSync, openSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
+import { finishCondition, interruptCondition } from "./schedule-condition-finish.ts";
 import { deliverSchedule } from "./schedule-delivery.ts";
 import { tryScheduleOwnership } from "./schedule-ownership.ts";
 import { scheduleOutput, type ScheduleStore } from "./schedule-store.ts";
@@ -69,6 +70,11 @@ export class Scheduler {
         const now = this.now();
         const job = document.jobs.find((entry) => entry.id === seen.id);
         if (this.#stop.signal.aborted || !job || job.paused || job.nextAt > now) return;
+        if (job.condition !== undefined) {
+          if (job.last?.status === "running" || job.last?.delivery === "pending") return;
+          job.last = { id: randomUUID(), at: job.nextAt, startedAt: now, status: "running", delivery: "pending" };
+          return structuredClone(job);
+        }
         if (job.at !== undefined) {
           job.paused = true; // Consume the one-shot atomically before spawning or skipping it.
           if (job.at <= now - 60_000 || job.last) {
@@ -127,7 +133,15 @@ export class Scheduler {
     if (this.#stop.signal.aborted) return; // The durable claim is recovered as interrupted, never replayed.
     const receipt = job.last!;
     mkdirSync(join(this.store.stateDir, "schedule-runs"), { recursive: true, mode: 0o700 });
-    const fd = openSync(scheduleOutput(this.store.stateDir, receipt.id), "wx", 0o600);
+    const output = scheduleOutput(this.store.stateDir, receipt.id);
+    const fd = openSync(output, "wx", 0o600);
+    let stderr: number;
+    try {
+      stderr = job.condition === undefined ? fd : openSync(output + ".stderr", "wx", 0o600);
+    } catch (cause) {
+      closeSync(fd);
+      throw cause;
+    }
     let proc: Subprocess | undefined;
     let code = 127;
     let signal: string | null = null;
@@ -136,12 +150,12 @@ export class Scheduler {
     let timedOut = false;
     try {
       try {
-        proc = Bun.spawn(job.argv, { cwd: job.cwd, stdin: "ignore", stdout: fd, stderr: fd });
+        proc = Bun.spawn(job.argv, { cwd: job.cwd, stdin: "ignore", stdout: fd, stderr });
         this.#children.add(proc);
         deadline = scheduleTimeout(proc, job.timeoutSeconds);
       } catch (cause) {
         error = String(cause);
-        writeSync(fd, error + "\n");
+        writeSync(stderr, error + "\n");
       }
       if (proc) {
         try {
@@ -155,10 +169,12 @@ export class Scheduler {
         }
       }
       fsyncSync(fd);
+      if (stderr !== fd) fsyncSync(stderr);
     } finally {
       timedOut = deadline?.expired() ?? false;
       deadline?.clear();
       closeSync(fd);
+      if (stderr !== fd) closeSync(stderr);
       if (proc) this.#children.delete(proc);
     }
     const completed: ScheduleRun = {
@@ -172,7 +188,13 @@ export class Scheduler {
       ...(timedOut ? { timedOut: true } : {}),
       delivery: "pending",
     };
-    await this.save(job, completed);
+    if (job.condition !== undefined && this.#stop.signal.aborted) {
+      await interruptCondition(this.store, job, completed);
+      return;
+    }
+    if (job.condition !== undefined) {
+      if (!(await finishCondition(this.store, job, completed, this.emit))) return;
+    } else await this.save(job, completed);
     let delivered: Pick<ScheduleRun, "delivery" | "receipts" | "deliveryError">;
     try {
       delivered = await this.deliver(this.store.stateDir, job, completed, this.#stop.signal, this.emit);

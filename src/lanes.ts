@@ -75,12 +75,13 @@ async function startAdmitted(
   await Bun.write(briefPath, `${readFileSync(briefFile, "utf8").trimEnd()}\n\n${footer}`);
 
   // The group is the caller's own when it runs in a session of the selected runtime (a lane opened from the lead's
-  // workspace stays there); otherwise herdr gets a new "cataly" workspace and hc this home's group label.
+  // workspace stays there); otherwise herdr gets a new "cataly" workspace, tern a session named "cataly", and hc and
+  // native lanes this home's group label.
   const self = d.runtimes.selfAny(process.env);
   const group =
     opts.group ??
     (self?.runtime === rt.kind ? self.group : undefined) ??
-    (rt.kind === "herdr" ? await rt.createGroup("cataly", cwd) : groupId(d.store.root));
+    (rt.kind === "herdr" || rt.kind === "tern" ? await rt.createGroup("cataly", cwd) : groupId(d.store.root));
   const kickoff = `Read your brief at ${briefPath} and execute it. Your lane key is ${key}.`;
   const env = harnessLaneEnv(d, key);
   const spec = { name: key, role: "lane", container: "tab", cwd, env, group } as const;
