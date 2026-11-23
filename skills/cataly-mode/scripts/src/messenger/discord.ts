@@ -18,20 +18,19 @@ export type DcChannel = {
   readonly topic?: string | null;
   readonly parent_id?: string | null;
   readonly available_tags?: readonly { readonly id: string; readonly name: string }[];
+  readonly flags?: number;
+  readonly owner_id?: string;
+  readonly message?: { readonly id: string };
 };
 
 type Delivery = { readonly ids: string[]; readonly replyConfirmed: boolean };
+export type ThreadCreated = (thread: DcChannel) => Promise<void>;
 
-/** Forum and media channels contain posts, each represented by a thread. */
 export const isForumType = (type: number): boolean => type === 15 || type === 16;
 
-/** Only these channel types give parent_id the meaning of a thread parent. */
 export const isThreadType = (type: unknown): boolean => type === 10 || type === 11 || type === 12;
 
-/**
- * An environment-supplied REST API prefix may target only loopback HTTP.
- * Credentials and query/fragment components are not usable API prefixes.
- */
+/** Environment API prefixes allow only loopback HTTP without credentials, query or fragment. */
 export function discordApiBase(value: string | undefined): string {
   const fallback = "https://discord.com/api/v10";
   if (value === undefined || value === "") return fallback;
@@ -149,7 +148,6 @@ export class Discord {
     return { ids, replyConfirmed };
   }
 
-  /** One message is edited in place: text over the limit is refused before any request, never split. */
   async edit(channelId: string, messageId: string, content: string): Promise<void> {
     const guarded = guardText(content);
     if (guarded.length > DISCORD_LIMIT)
@@ -165,10 +163,13 @@ export class Discord {
     await this.call("POST", `/channels/${channelId}/typing`);
   }
 
-  async startThread(channelId: string, messageId: string, name: string): Promise<string> {
-    const path = `/channels/${channelId}/messages/${messageId}/threads`;
-    const thread = await this.call("POST", path, { name: guardText(name).slice(0, 100) });
-    return responseId(thread, `discord POST ${path}`);
+  async startThread(channelId: string, messageId: string, name: string, created?: ThreadCreated): Promise<string> {
+    const thread = await this.call<DcChannel>("POST", `/channels/${channelId}/messages/${messageId}/threads`, {
+      name: guardText(name).slice(0, 100),
+    });
+    const id = responseId(thread, `discord POST /channels/${channelId}/messages/${messageId}/threads`);
+    if (created) await created(thread);
+    return id;
   }
 
   async setThread(
@@ -188,38 +189,40 @@ export class Discord {
   async createThread(
     channel: DcChannel,
     name: string,
-    opts: { readonly text?: string; readonly appliedTags?: readonly string[] } = {},
+    opts: { readonly text?: string; readonly appliedTags?: readonly string[]; readonly created?: ThreadCreated } = {},
   ): Promise<{ readonly id: string; readonly messageId?: string }> {
     const title = guardText(name).slice(0, 100);
     const text = opts.text === undefined ? undefined : guardText(opts.text);
     const path = `/channels/${channel.id}/threads`;
     if (isForumType(channel.type)) {
-      // The starter message holds the first part; longer text continues as messages in the new post.
       const [starter = "", ...more] = splitForDiscord(text ?? name);
-      const thread = await this.call<{ id: string; message?: { id: string } }>("POST", path, {
+      const thread = await this.call<DcChannel>("POST", path, {
         name: title,
         message: { content: starter, allowed_mentions: { parse: [] } },
         ...(opts.appliedTags !== undefined ? { applied_tags: opts.appliedTags } : {}),
       });
       const id = responseId(thread, `discord POST ${path}`);
+      if (opts.created) await opts.created(thread);
       const messageId =
         thread.message === undefined ? undefined : responseId(thread.message, `discord forum starter ${id}`);
       if (more.length > 0) await this.post(id, more, undefined, messageId === undefined ? [] : [messageId]);
       return messageId === undefined ? { id } : { id, messageId };
     }
-    const id = responseId(await this.call("POST", path, { name: title, type: 11 }), `discord POST ${path}`);
+    const thread = await this.call<DcChannel>("POST", path, { name: title, type: 11 });
+    const id = responseId(thread, `discord POST ${path}`);
+    if (opts.created) await opts.created(thread);
     return text === undefined ? { id } : { id, ...(await this.firstOf(id, text)) };
   }
 
-  /** A thread on an existing message, then optional text inside it. */
   async threadOnMessage(
     channelId: string,
     messageId: string,
     name: string,
     text?: string,
+    created?: ThreadCreated,
   ): Promise<{ readonly id: string; readonly messageId?: string }> {
     const guarded = text === undefined ? undefined : guardText(text);
-    const id = await this.startThread(channelId, messageId, name);
+    const id = await this.startThread(channelId, messageId, name, created);
     return guarded === undefined ? { id } : { id, ...(await this.firstOf(id, guarded)) };
   }
 
