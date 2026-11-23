@@ -29,16 +29,16 @@ function fixture(sessionId = "legacy-session", lead = true) {
     process.env.CATALY_HEADLESS_ID = HEADLESS;
     process.env.CATALY_HARNESS_ROLE = "lead";
     mkdirSync(reservation, { recursive: true, mode: 0o700 });
-  writeFileSync(
-    join(reservation, "reservation.json"),
-    JSON.stringify({
-      ref: { runtime: "headless", id: HEADLESS },
-      name: "lead",
-      cwd: tmpdir(),
-      startedAt: new Date().toISOString(),
-      role: "lead",
-    }),
-    { mode: 0o600 },
+    writeFileSync(
+      join(reservation, "reservation.json"),
+      JSON.stringify({
+        ref: { runtime: "headless", id: HEADLESS },
+        name: "lead",
+        cwd: tmpdir(),
+        startedAt: new Date().toISOString(),
+        role: "lead",
+      }),
+      { mode: 0o600 },
     );
   }
   const bootstrap = join(stateDir, "..", "trusted-bootstrap.json");
@@ -286,18 +286,18 @@ posix(
               cwd: tmpdir(),
             },
           },
-        },
-      ],
-    },
-    flags: { "cataly-role": "cataly" },
-  });
-  sessions.push(cataly);
-  await cataly.emit("session_start");
-  expect(cataly.messages.at(-1)?.options).toMatchObject({ triggerTurn: false });
-  expect((JSON.parse(readFileSync(f.healthPath, "utf8")) as RuntimeHealth).monitors).toEqual([]);
-  await cataly.emit("session_tree");
-  expect(cataly.messages.at(-1)?.options).toMatchObject({ triggerTurn: true });
-});
+        ],
+      },
+      flags: { "cataly-role": "cataly" },
+    });
+    sessions.push(cataly);
+    await cataly.emit("session_start");
+    expect(cataly.messages.at(-1)?.options).toMatchObject({ triggerTurn: false });
+    expect((JSON.parse(readFileSync(f.healthPath, "utf8")) as RuntimeHealth).monitors).toEqual([]);
+    await cataly.emit("session_tree");
+    expect(cataly.messages.at(-1)?.options).toMatchObject({ triggerTurn: true });
+  },
+);
 
 // POSIX-only: runtime health is published only for the headless lead.
 posix("role health records a failed preset load even when role and PID metadata exist", async () => {
