@@ -6,7 +6,7 @@ import { processIdentity } from "../../src/update/deployment-process.ts";
 import type { RuntimeHealth } from "../../src/update/deployment-types.ts";
 import { type FakeOptions, type FakePi, load as loadPi, until, useConfig } from "./fake-pi.ts";
 
-// The kernels whose process identity deployment can bind.
+// The kernels whose process identity deployment can bind, and where the headless lead (a Unix socket) runs.
 const posix = test.skipIf(process.platform !== "linux" && process.platform !== "darwin");
 
 /** The native harness lead's headless reservation: only it publishes runtime health. */
@@ -22,12 +22,13 @@ afterEach(async () => {
     else process.env[name] = value;
   }
 });
-function fixture(sessionId = "legacy-session") {
+function fixture(sessionId = "legacy-session", lead = true) {
   const stateDir = useConfig(join(import.meta.dir, "fake-ulw.ts"));
-  process.env.CATALY_HEADLESS_ID = HEADLESS;
-  process.env.CATALY_HARNESS_ROLE = "lead";
   const reservation = join(stateDir, "headless", HEADLESS);
-  mkdirSync(reservation, { recursive: true, mode: 0o700 });
+  if (lead) {
+    process.env.CATALY_HEADLESS_ID = HEADLESS;
+    process.env.CATALY_HARNESS_ROLE = "lead";
+    mkdirSync(reservation, { recursive: true, mode: 0o700 });
   writeFileSync(
     join(reservation, "reservation.json"),
     JSON.stringify({
@@ -38,7 +39,8 @@ function fixture(sessionId = "legacy-session") {
       role: "lead",
     }),
     { mode: 0o600 },
-  );
+    );
+  }
   const bootstrap = join(stateDir, "..", "trusted-bootstrap.json");
   const intake = { path: join(stateDir, "heartbeat"), monitor: "inbound", maxAgeMs: 120_000 };
   // The real child is portable; only deployment health's kernel start-tick attestation requires Linux.
@@ -231,8 +233,9 @@ posix(
   },
 );
 
+// Portable: monitor replacement needs no headless lead, so no runtime health is published.
 test("branch movement replaces a changed specification under the same monitor name", async () => {
-  const f = fixture();
+  const f = fixture("legacy-session", false);
   const cataly = await load({ session: { id: "legacy-session", entries: [] }, flags: { "cataly-role": "cataly" } });
   sessions.push(cataly);
   await cataly.emit("session_start");
@@ -262,22 +265,26 @@ test("branch movement replaces a changed specification under the same monitor na
   });
 }, 20_000);
 
-test("a managed initial restore reports failure without starting model work, then ordinary restore keeps its repair behavior", async () => {
-  const f = fixture();
-  process.env.CATALY_MANAGED_STARTUP = "1";
-  const cataly = await load({
-    session: {
-      id: "legacy-session",
-      entries: [
-        {
-          type: "custom",
-          customType: "omp-cataly:monitor",
-          data: {
-            op: "start",
-            name: "failed-intake",
-            argv: [join(f.stateDir, "absent-command")],
-            filter: ".",
-            cwd: tmpdir(),
+// POSIX-only: runtime health is published only for the headless lead.
+posix(
+  "a managed initial restore reports failure without starting model work, then ordinary restore keeps its repair behavior",
+  async () => {
+    const f = fixture();
+    process.env.CATALY_MANAGED_STARTUP = "1";
+    const cataly = await load({
+      session: {
+        id: "legacy-session",
+        entries: [
+          {
+            type: "custom",
+            customType: "omp-cataly:monitor",
+            data: {
+              op: "start",
+              name: "failed-intake",
+              argv: [join(f.stateDir, "absent-command")],
+              filter: ".",
+              cwd: tmpdir(),
+            },
           },
         },
       ],
@@ -292,7 +299,8 @@ test("a managed initial restore reports failure without starting model work, the
   expect(cataly.messages.at(-1)?.options).toMatchObject({ triggerTurn: true });
 });
 
-test("role health records a failed preset load even when role and PID metadata exist", async () => {
+// POSIX-only: runtime health is published only for the headless lead.
+posix("role health records a failed preset load even when role and PID metadata exist", async () => {
   const f = fixture();
   writeFileSync(
     join(f.stateDir, "..", "config.json"),

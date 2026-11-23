@@ -10,6 +10,9 @@ import { digest } from "../src/update/source.ts";
 import { sourceRecoveryPending } from "../src/update/source-update-state.ts";
 import { fixture } from "./update-deploy-setup.ts";
 
+// The durable journal is read back through the product's owner and mode check, which Windows cannot satisfy.
+const it = test.skipIf(process.platform === "win32");
+
 test("a terminal-era deployment config is refused by the upgrade guard", () => {
   const { root, config } = fixture();
   expect(() =>
@@ -18,7 +21,7 @@ test("a terminal-era deployment config is refused by the upgrade guard", () => {
   expect(() => parseDeploymentConfig({ ...config, hc: "/bin/hc", pane: "t7" }, root)).toThrow(LegacyRuntimeError);
 });
 
-test("a terminal-era in-flight journal is held as written: never resumed, rolled back or restarted", async () => {
+it("a terminal-era in-flight journal is held as written: never resumed, rolled back or restarted", async () => {
   const { root, config } = fixture();
   ownReleaseRoot(config);
   const input = {
