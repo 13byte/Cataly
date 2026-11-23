@@ -15,6 +15,7 @@ export type ScheduleRun = {
   code?: number;
   signal?: string | null;
   error?: string;
+  timedOut?: boolean;
   delivery: "pending" | "logged" | "wake-emitted" | "posted" | "unknown";
   deliveryError?: string;
   receipts?: string[];
@@ -25,6 +26,7 @@ export type ScheduledJob = {
   cron?: string;
   tz?: string;
   at?: number;
+  timeoutSeconds?: number;
   argv: string[];
   cwd: string;
   deliver: ScheduleDelivery;
@@ -161,7 +163,7 @@ export function readScheduleDocument(value: unknown): ScheduleDocument {
   const ids = new Set<string>();
   for (const raw of value["jobs"]) {
     if (
-      !record(raw, "id name cron tz at argv cwd deliver paused nextAt missed last") ||
+      !record(raw, "id name cron tz at timeoutSeconds argv cwd deliver paused nextAt missed last") ||
       typeof raw["id"] !== "string" ||
       !UUID.test(raw["id"]) ||
       ids.has(raw["id"]) ||
@@ -175,6 +177,10 @@ export function readScheduleDocument(value: unknown): ScheduleDocument {
       raw["cwd"].includes("\0") ||
       typeof raw["deliver"] !== "string" ||
       typeof raw["paused"] !== "boolean" ||
+      (raw["timeoutSeconds"] !== undefined &&
+        (!Number.isSafeInteger(raw["timeoutSeconds"]) ||
+          Number(raw["timeoutSeconds"]) < 1 ||
+          Number(raw["timeoutSeconds"]) > 86400)) ||
       !instant(raw["nextAt"]) ||
       !Number.isSafeInteger(raw["missed"]) ||
       Number(raw["missed"]) < 0
@@ -190,7 +196,10 @@ export function readScheduleDocument(value: unknown): ScheduleDocument {
     if (raw["last"] !== undefined) {
       const last = raw["last"];
       if (
-        !record(last, "id at startedAt finishedAt pid status code signal error delivery deliveryError receipts") ||
+        !record(
+          last,
+          "id at startedAt finishedAt pid status code signal error timedOut delivery deliveryError receipts",
+        ) ||
         typeof last["id"] !== "string" ||
         !UUID.test(last["id"]) ||
         !instant(last["at"]) ||
@@ -203,6 +212,7 @@ export function readScheduleDocument(value: unknown): ScheduleDocument {
         (last["pid"] !== undefined && (!Number.isSafeInteger(last["pid"]) || Number(last["pid"]) <= 0)) ||
         (last["code"] !== undefined && (!Number.isSafeInteger(last["code"]) || Number(last["code"]) < 0)) ||
         (last["signal"] !== undefined && last["signal"] !== null && typeof last["signal"] !== "string") ||
+        (last["timedOut"] !== undefined && typeof last["timedOut"] !== "boolean") ||
         (last["error"] !== undefined && typeof last["error"] !== "string") ||
         (last["deliveryError"] !== undefined && typeof last["deliveryError"] !== "string") ||
         (last["receipts"] !== undefined &&

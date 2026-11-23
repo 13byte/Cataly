@@ -125,6 +125,7 @@ export const CATALY_VALUE_OPTIONS: Record<string, true> = {
   "ignore-author": true,
   "adopt-legacy-threads": true,
   self: true,
+  "timeout-seconds": true,
   at: true,
   cron: true,
   tz: true,

@@ -88,3 +88,30 @@ test("near-term one-shot warns without corrupting JSON output", () => {
   expect(added.err).toContain("does not start a runner");
   expect(added.err).toContain("less than two minutes");
 });
+
+test("time limit round-trips through the actual CLI", () => {
+  const added = invoke(
+    "schedule",
+    "add",
+    "bounded",
+    "--cron",
+    "* * * * *",
+    "--tz",
+    "UTC",
+    "--timeout-seconds",
+    "5",
+    "--",
+    "false",
+  );
+  expect(added.code).toBe(0);
+  expect(JSON.parse(added.out).timeoutSeconds).toBe(5);
+  expect(JSON.parse(invoke("schedule", "list").out).jobs[0].timeoutSeconds).toBe(5);
+});
+
+test.each(["0", "-1", "1.5", "5s", "", "86401", "Infinity"])("invalid CLI time limit creates no job: %j", (value) => {
+  expect(
+    invoke("schedule", "add", "bad", "--cron", "* * * * *", "--tz", "UTC", "--timeout-seconds", value, "--", "false")
+      .code,
+  ).toBe(1);
+  expect(JSON.parse(invoke("schedule", "list").out).jobs).toEqual([]);
+});

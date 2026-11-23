@@ -446,7 +446,9 @@ A restart never re-executes a claimed occurrence. An unfinished claim becomes `i
 
 Use an owner-controlled local state directory (owner-only ACLs on Windows). A crash can leave `scheduler.lock` or `schedule.json.lock`; neither is automatically taken over, even if old. To recover, first stop all launchers and verify no scheduler, job or schedule writer still owns the directory; preserve the marker and inspect `schedule.json` and its run logs. Only after confirming quiescence, move the orphaned marker out of the state directory, then restart and inspect interrupted runs before acknowledging them. Do not run mixed scheduler versions against the same state directory.
 
-SIGINT/SIGTERM stops the runner's own current children, allowing five seconds before SIGKILL. Commands must stay in the foreground; detached descendants are not supervised, and delivery snapshots the log when the direct child exits.
+SIGINT/SIGTERM stops the runner's own current children, allowing five seconds before SIGKILL. `schedule add` accepts optional `--timeout-seconds N` (an integer from 1 through 86400) for either cron or one-shot commands. Omission preserves the existing unlimited run duration. The timer begins when the foreground child starts, sends SIGTERM at the limit and escalates to SIGKILL after five seconds if it has not exited. Windows termination follows Bun/OS signal behavior rather than promising a catchable POSIX SIGTERM. Receipts retain the actual exit/signal plus `timedOut: true`; list/boot report `timed-out` and wake/post headers include that flag. A timeout does not retry a consumed occurrence; later cron occurrences remain independent. The execution deadline does not cover the subsequent bounded delivery. Older readers reject records carrying this new policy rather than silently running without a deadline, so inspect/remove those records with the current CLI before a downgrade.
+
+Commands must stay in the foreground; detached descendants are not supervised, and delivery snapshots the log when the direct child exits.
 
 Output and delivery:
 

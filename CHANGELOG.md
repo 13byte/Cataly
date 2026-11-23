@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add optional schedule command deadlines with a five-second termination grace and explicit timed-out receipts; existing schedules remain unlimited unless configured. Related to #214.
+
 - Extend opt-in schedules with one-shot `--at` instants, explicit timezone offsets, durable consumption and no restart replay. Related to #214; condition triggers remain separate work. One-shot records make the whole schedule document unreadable to older versions; inspect and remove them with the current CLI before downgrading.
 
 - Use Cataly for the current commands, skill, role and environment. Fresh homes

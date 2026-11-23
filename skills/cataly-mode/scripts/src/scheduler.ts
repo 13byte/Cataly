@@ -5,6 +5,7 @@ import type { Subprocess } from "bun";
 import { deliverSchedule } from "./schedule-delivery.ts";
 import { tryScheduleOwnership } from "./schedule-ownership.ts";
 import { scheduleOutput, type ScheduleStore } from "./schedule-store.ts";
+import { scheduleTimeout } from "./schedule-timeout.ts";
 import { scheduleCron, ScheduleError, type ScheduledJob, type ScheduleRun } from "./schedule-types.ts";
 
 type Delivery = typeof deliverSchedule;
@@ -131,10 +132,13 @@ export class Scheduler {
     let code = 127;
     let signal: string | null = null;
     let error: string | undefined;
+    let deadline: ReturnType<typeof scheduleTimeout> | undefined;
+    let timedOut = false;
     try {
       try {
         proc = Bun.spawn(job.argv, { cwd: job.cwd, stdin: "ignore", stdout: fd, stderr: fd });
         this.#children.add(proc);
+        deadline = scheduleTimeout(proc, job.timeoutSeconds);
       } catch (cause) {
         error = String(cause);
         writeSync(fd, error + "\n");
@@ -152,6 +156,8 @@ export class Scheduler {
       }
       fsyncSync(fd);
     } finally {
+      timedOut = deadline?.expired() ?? false;
+      deadline?.clear();
       closeSync(fd);
       if (proc) this.#children.delete(proc);
     }
@@ -163,6 +169,7 @@ export class Scheduler {
       code,
       signal,
       ...(error === undefined ? {} : { error }),
+      ...(timedOut ? { timedOut: true } : {}),
       delivery: "pending",
     };
     await this.save(job, completed);

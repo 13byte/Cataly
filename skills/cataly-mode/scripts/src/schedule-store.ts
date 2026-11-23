@@ -83,7 +83,7 @@ export class ScheduleStore {
     }
   }
   async add(
-    input: Pick<ScheduledJob, "name" | "cron" | "tz" | "at" | "argv" | "cwd" | "deliver">,
+    input: Pick<ScheduledJob, "name" | "cron" | "tz" | "at" | "timeoutSeconds" | "argv" | "cwd" | "deliver">,
     now: number,
   ): Promise<ScheduledJob> {
     scheduleTrigger(input);
