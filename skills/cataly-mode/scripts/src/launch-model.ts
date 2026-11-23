@@ -3,7 +3,7 @@ import { classifyOmpArgv, mayRunOmpArgv } from "../../../../src/runtime/omp-argv
 import { NATIVE_VALUE_FLAGS } from "../../../../src/runtime/omp-options.ts";
 import { NATIVE_BOOLEAN_FLAGS, RESUME_FLAG } from "../../../../src/update/native-argv.ts";
 import { fill } from "./config.ts";
-import { exactModelIdentity, type ModelReadback } from "./lane-state.ts";
+import { exactModelIdentity, expectedLaunchModel, type ModelReadback } from "./lane-state.ts";
 import type { SessionRef } from "../../../../src/runtime/types.ts";
 import type { FlowDeps } from "./done-flow.ts";
 import { runtimesOf } from "./run.ts";
@@ -127,8 +127,7 @@ export const deliverModelBrief = async (
   }
   const proof = state?.modelReadback;
   // A thinking-suffixed selection reads back as its base model plus the live native level.
-  const level = proof?.thinking;
-  const selected = level ? model.slice(0, -level.requested.length - 1) : model;
+  const expected = proof && expectedLaunchModel(model, proof.thinking);
   if (
     state?.role !== "lane" ||
     state.approvalPending ||
@@ -140,8 +139,8 @@ export const deliverModelBrief = async (
     proof?.source !== "native-extension" ||
     proof.status !== "matched" ||
     `${proof.requested?.provider}/${proof.requested?.id}` !== model ||
-    `${proof.observed?.provider}/${proof.observed?.id}`.toLowerCase() !== selected.toLowerCase() ||
-    (level !== undefined && (level.observed !== level.requested || !model.endsWith(`:${level.requested}`))) ||
+    !expected ||
+    `${proof.observed?.provider}/${proof.observed?.id}`.toLowerCase() !== expected.model.toLowerCase() ||
     !(Date.parse(proof.checkedAt) >= launchedAt)
   )
     return `native model ${proof?.status ?? "unknown"}; brief not sent; no automatic substitution`;

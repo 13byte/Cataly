@@ -50,10 +50,30 @@ export const exactModelIdentity = (value: string): ModelReadback["requested"] =>
 
 const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
-/** OMP's trailing `:<level>` model selector suffix; any other colon suffix stays part of a literal id. */
+/**
+ * OMP's trailing `:<level>` model selector suffix; any other colon suffix stays part of a literal id. Case-sensitive like
+ * OMP's grammar, where `:HIGH` is a literal id: every level comparison goes through this one parse.
+ */
 export const thinkingSuffix = (id: string): { readonly base: string; readonly level: string } | null => {
   const at = id.lastIndexOf(":");
   return at > 0 && THINKING_LEVELS.has(id.slice(at + 1)) ? { base: id.slice(0, at), level: id.slice(at + 1) } : null;
+};
+
+/**
+ * The `provider/model` a matched readback of `model` must observe, from its persisted and therefore untrusted thinking
+ * record: the literal request without one, else the base model when the request ends in a recognized level that was
+ * both requested and observed. Null holds a malformed or inconsistent record.
+ */
+export const expectedLaunchModel = (
+  model: string,
+  thinking: unknown,
+): { readonly model: string; readonly thinking?: NonNullable<ModelReadback["thinking"]> } | null => {
+  if (thinking === undefined) return { model };
+  const suffix = thinkingSuffix(model);
+  const record = typeof thinking === "object" && thinking !== null ? (thinking as Record<string, unknown>) : null;
+  return suffix && record?.["requested"] === suffix.level && record["observed"] === suffix.level
+    ? { model: suffix.base, thinking: { requested: suffix.level, observed: suffix.level } }
+    : null;
 };
 
 export const paneStateDir = (stateDir: string): string => join(stateDir, "sessions");
