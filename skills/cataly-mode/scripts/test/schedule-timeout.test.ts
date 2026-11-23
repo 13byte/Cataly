@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Scheduler } from "../src/scheduler.ts";
 import { ScheduleStore } from "../src/schedule-store.ts";
+import { scheduleTimeout } from "../src/schedule-timeout.ts";
+import type { Subprocess } from "bun";
 import { scheduleView } from "../src/schedule-view.ts";
 
 let dir: string;
@@ -87,3 +89,41 @@ test("corrupt timeout and timeout receipt fields fail closed without rewriting",
     expect(readFileSync(store.path, "utf8")).toBe(raw);
   }
 });
+
+test.each([
+  { exitCode: 0, signalCode: null },
+  { exitCode: null, signalCode: "SIGTERM" },
+])("already-ended children do not become timed out: %j", async (ended) => {
+  let killed = false;
+  const proc = {
+    ...ended,
+    kill: () => {
+      killed = true;
+    },
+  } as unknown as Subprocess;
+  const deadline = scheduleTimeout(proc, 0.001);
+  try {
+    await Bun.sleep(20);
+    expect(deadline.expired()).toBe(false);
+    expect(killed).toBe(false);
+  } finally {
+    deadline.clear();
+  }
+});
+
+test("timeout with ambiguous delivery exposes both facts without retry", async () => {
+  await store.add(input("setInterval(() => {}, 100)"), now - 1);
+  scheduler = new Scheduler(
+    store,
+    () => now,
+    () => {},
+    async () => {
+      throw Error("uncertain post");
+    },
+  );
+  await scheduler.open();
+  await scheduler.tick();
+  await scheduler.settle();
+  const view = await scheduleView(store, async () => ({ code: 0, out: "", err: "" }), now);
+  expect(view.jobs[0]).toMatchObject({ state: "delivery-unknown", last: { timedOut: true, delivery: "unknown" } });
+}, 10_000);

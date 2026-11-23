@@ -8,6 +8,7 @@ export function scheduleTimeout(proc: Subprocess, seconds: number | undefined) {
     seconds === undefined
       ? undefined
       : setTimeout(() => {
+          if (proc.exitCode !== null || proc.signalCode !== null) return;
           timedOut = true;
           proc.kill();
           force = setTimeout(() => proc.kill("SIGKILL"), 5000);
