@@ -6,6 +6,7 @@ import type { RuntimeKind } from "../runtime/types.ts";
 import { readSetupFile, type SetupSnapshot } from "../setup-files.ts";
 import { object } from "../update/config.ts";
 import { headlessReleaseProfiles, nativeMetadata, supportsReleaseProfile, terminalMetadata } from "./capabilities.ts";
+import { controllerReads } from "./controller.ts";
 import type { ConsumerPaths } from "./files.ts";
 import type { ReleaseManifest } from "./types.ts";
 
@@ -82,8 +83,12 @@ export function releaseTargetRuntime(
 
 /** Leaving the native protocol is intentional only through a verified, explicitly retained rollback. */
 export function assertUpdateProtocol(current: ReleaseManifest | undefined, target: ReleaseManifest): void {
+  if (current && !controllerReads(target, current))
+    throw new Error(
+      `Install cannot downgrade the bound runtime protocol: release ${target.tag} cannot read the OMP 19 receipt of installed ${current.tag}; use "cataly update rollback" to restore a retained pre-19 release`,
+    );
   if (
-    (current?.requirements.omp === "18.20.0" && target.requirements.omp !== "18.20.0") ||
+    (current?.requirements.omp === "18.20.0" && target.requirements.omp === "18.18.8") ||
     (current?.source.files.some((entry) => entry.path === nativeMetadata) &&
       !target.source.files.some((entry) => entry.path === nativeMetadata))
   )

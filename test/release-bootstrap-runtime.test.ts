@@ -53,31 +53,69 @@ console.log(JSON.stringify(runtimeChoice(await loadConfig(), process.env)));`,
 );
 
 posix.each([
-  [linux, ".dori"],
-  [darwin, ".omp-dori"],
-] as const)("headless bootstrap accepts historical config without either executable: %j", (profile, folder) => {
-  const f = fixture(profile);
-  f.assets(
-    { version: 1, profiles: [linux, darwin] },
-    { version: 1, profiles: [linux, darwin].map((host) => ({ ...host, runtime: "headless" })) },
-  );
-  const home = join(f.home, folder);
-  mkdirSync(home);
-  const config = join(home, "config.json");
-  const old = `{"runtime":"${profile.runtime}","ownerValue":"keep"}\n`;
-  writeFileSync(config, old);
-  const bin = join(f.root, "bin");
-  for (const tool of ["hc", "herdr"]) renameSync(join(bin, tool), join(f.root, tool));
-  const fresh = f.run([], { PATH: `${bin}:/usr/bin:/bin` });
-  expect(fresh.exitCode, fresh.stderr.toString()).toBe(0);
-  expect(f.selected()).toEqual(f.expected(join(f.home, folder === ".dori" ? ".cataly" : ".omp-cataly"), "headless"));
-  const result = f.run(["--home", home], { PATH: `${bin}:/usr/bin:/bin` });
-  expect(result.exitCode, result.stderr.toString()).toBe(0);
+  [linux, ".dori", "18.20.0"],
+  [darwin, ".omp-dori", "18.20.0"],
+  [linux, ".dori", "19.0.1"],
+  [darwin, ".omp-dori", "19.0.1"],
+] as const)(
+  "headless bootstrap accepts historical config without either executable: %j, %s, OMP %s",
+  (profile, folder, version) => {
+    const f = fixture(profile);
+    f.assets(
+      { version: 1, profiles: [linux, darwin] },
+      { version: 1, profiles: [linux, darwin].map((host) => ({ ...host, runtime: "headless" })) },
+      version,
+    );
+    const home = join(f.home, folder);
+    mkdirSync(home);
+    const config = join(home, "config.json");
+    const old = `{"runtime":"${profile.runtime}","ownerValue":"keep"}\n`;
+    writeFileSync(config, old);
+    const bin = join(f.root, "bin");
+    for (const tool of ["hc", "herdr"]) renameSync(join(bin, tool), join(f.root, tool));
+    const fresh = f.run([], { PATH: `${bin}:/usr/bin:/bin` });
+    expect(fresh.exitCode, fresh.stderr.toString()).toBe(0);
+    expect(f.selected()).toEqual(f.expected(join(f.home, folder === ".dori" ? ".cataly" : ".omp-cataly"), "headless"));
+    const result = f.run(["--home", home], { PATH: `${bin}:/usr/bin:/bin` });
+    expect(result.exitCode, result.stderr.toString()).toBe(0);
+    expect(f.selected()).toEqual(f.expected(home, "headless"));
+    expect(readFileSync(config, "utf8")).toBe(old);
+    const explicit = f.run(["--runtime", profile.runtime], { PATH: `${bin}:/usr/bin:/bin` });
+    expect(explicit.exitCode).not.toBe(0);
+    expect(explicit.stderr.toString()).toContain(`${profile.runtime} is required`);
+  },
+);
+
+posix("bootstrap permits an OMP 18-to-19 upgrade but holds a pre-19 install over a 19 receipt", () => {
+  const f = fixture(linux);
+  const home = join(f.home, ".dori");
+  const releases = join(home, "releases");
+  mkdirSync(releases, { recursive: true });
+  const receipt = join(releases, "consumer-installed.json");
+  const state = (omp: string) => JSON.stringify({ current: { requirements: { omp } } });
+  const terminal = { version: 1, profiles: [linux] };
+  const headless = { version: 1, profiles: [{ ...linux, runtime: "headless" }] };
+  writeFileSync(receipt, state("18.20.0"));
+  f.assets(terminal, headless, "19.0.1");
+  const upgraded = f.run(["--home", home]);
+  expect(upgraded.exitCode, upgraded.stderr.toString()).toBe(0);
   expect(f.selected()).toEqual(f.expected(home, "headless"));
-  expect(readFileSync(config, "utf8")).toBe(old);
-  const explicit = f.run(["--runtime", profile.runtime], { PATH: `${bin}:/usr/bin:/bin` });
-  expect(explicit.exitCode).not.toBe(0);
-  expect(explicit.stderr.toString()).toContain(`${profile.runtime} is required`);
+  const selected = state("19.0.1");
+  writeFileSync(receipt, selected);
+  f.assets(terminal, headless, "18.20.0");
+  const held = f.run(["--home", home]);
+  expect(held.exitCode).not.toBe(0);
+  expect(held.stderr.toString()).toContain("cannot downgrade");
+  expect(readFileSync(receipt, "utf8")).toBe(selected);
+});
+
+posix.each(["18.18.8", "19.0.1-rc.1", "20.0.0"])("headless bootstrap refuses unsupported OMP %s", (version) => {
+  const f = fixture(linux);
+  f.assets({ version: 1, profiles: [linux] }, { version: 1, profiles: [{ ...linux, runtime: "headless" }] }, version);
+  const result = f.run();
+  expect(result.exitCode).not.toBe(0);
+  expect(result.stderr.toString()).toContain("Headless capability requires a bound native OMP payload");
+  expect(existsSync(f.result)).toBe(false);
 });
 
 posix("bootstrap retirement dispatches the verified new CLI without installation or terminal prerequisites", () => {

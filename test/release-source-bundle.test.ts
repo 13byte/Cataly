@@ -1,18 +1,7 @@
 import { expect, test } from "bun:test";
-import {
-  chmodSync,
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readlinkSync,
-  renameSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { extractArchive, readArchive } from "../src/release/archive.ts";
 import { automaticUpdate } from "../src/release/automatic.ts";
-import { saveJson } from "../src/release/files.ts";
 import { installBundle, rollbackRelease } from "../src/release/install.ts";
 import { validateReleaseManifest } from "../src/release/manifest.ts";
 import {
@@ -20,76 +9,14 @@ import {
   resolveConsumerOmpUlwPath,
   resolveProcessOmpUlwPath,
 } from "../src/release/runtime.ts";
-import { readSourceBundle } from "../src/release/source-bundle.ts";
 import { releasePath } from "../src/release/state.ts";
-import { digest, sourceManifest } from "../src/update/source.ts";
 import { isPolicyLaneCommand } from "../skills/cataly-mode/scripts/src/lane-policy-launch.ts";
-import { archive, type ConsumerFixture, fixture, withArchive } from "./release-consumer-setup.ts";
-import { fixtureGit, nativeCacheFixture, overlayFixture } from "./source-bundle-setup.ts";
+import { fixture } from "./release-consumer-setup.ts";
+import { bundledRelease } from "./release-source-bundle-setup.ts";
+import { fixtureGit } from "./source-bundle-setup.ts";
 
 // POSIX-only: release installation refuses non-private directories by POSIX mode bits.
 const posix = test.skipIf(process.platform === "win32");
-
-function bundledRelease(f: ConsumerFixture, selected: string, nativeSource?: string, headless = false) {
-  const original = f.release(selected);
-  const source = join(f.root, `bundled-${selected}`);
-  extractArchive(original.bundle.files, original.bundle.manifest, source);
-  const ulw = overlayFixture(source, join(f.root, `ulw-${selected}`), false, selected);
-  if (nativeSource) {
-    mkdirSync(join(source, "native-addon"), { mode: 0o700 });
-    for (const path of ["native-omp.lock", "native-omp.patch", "native-addon/package.json", "native-addon/bun.lock"])
-      copyFileSync(join(nativeSource, path), join(source, path));
-  } else {
-    const native = overlayFixture(source, join(f.root, `native-${selected}`), true);
-    nativeCacheFixture(source, f.paths.home, native.checkout);
-  }
-  mkdirSync(join(source, "scripts/consumer"), { recursive: true, mode: 0o700 });
-  // Real helper bytes are carried; addon loading remains a separate real isolated installation gate.
-  copyFileSync(
-    resolve(import.meta.dir, "../scripts/source-dependencies.ts"),
-    join(source, "scripts/source-dependencies.ts"),
-  );
-  copyFileSync(resolve(import.meta.dir, "../scripts/consumer/omp"), join(source, "scripts/consumer/omp"));
-  chmodSync(join(source, "scripts/consumer/omp"), 0o755);
-  if (headless) {
-    for (const path of ["release-capabilities.json", "release-headless.json"])
-      copyFileSync(resolve(import.meta.dir, "..", path), join(source, path));
-  }
-  const publicSource = sourceManifest(source);
-  const bytes = archive(
-    publicSource.files.map((file) => ({
-      name: `${original.bundle.manifest.archive.root}/${file.path}`,
-      bytes: readFileSync(join(source, file.path)),
-      mode: file.executable ? 0o755 : 0o644,
-    })),
-  );
-  const manifest = withArchive(
-    validateReleaseManifest({
-      ...original.bundle.manifest,
-      source: publicSource,
-      requirements: { ...original.bundle.manifest.requirements, omp: "18.20.0" },
-      ompUlw: { repository: ulw.lock.repository, commit: ulw.commit },
-    }),
-    bytes,
-  );
-  const bundle = readSourceBundle(source);
-  const dependency = join(f.paths.dependencies, `omp-ulw-${ulw.commit}-${bundle.identity}`);
-  renameSync(ulw.checkout, dependency);
-  saveJson(`${dependency}.json`, {
-    version: 1,
-    repository: ulw.lock.repository,
-    commit: ulw.commit,
-    identity: bundle.identity,
-  });
-  const metadata = Buffer.from(JSON.stringify(manifest));
-  writeFileSync(join(original.dist, manifest.archive.name), bytes);
-  writeFileSync(join(original.dist, "release-manifest.json"), metadata);
-  writeFileSync(
-    join(original.dist, "SHA256SUMS"),
-    `${digest(bytes)}  ${manifest.archive.name}\n${digest(metadata)}  release-manifest.json\n`,
-  );
-  return { source, dependency, dist: original.dist, bundle: { manifest, files: readArchive(bytes, manifest) } };
-}
 
 posix(
   "consumer install, update and reuse select each loaded release's bound overlay without rewriting config",
@@ -143,6 +70,43 @@ posix(
   },
 );
 
+posix.each(["19.0.0", "19.1.2"])(
+  "bound OMP %s installs and rolls back to retained 18.20.0 without a stock fallback",
+  async (version) => {
+    const f = fixture();
+    const prior = bundledRelease(f, "prior");
+    const one = await installBundle(f.paths, prior.bundle, undefined);
+    const next = bundledRelease(f, "next", undefined, version);
+    const two = await installBundle(f.paths, next.bundle, one);
+    expect(two.current.requirements.omp).toBe(version);
+    const source = releasePath(f.paths, two.current);
+    expect(readlinkSync(join(f.paths.dori, "bin/omp"))).toBe(join(source, "scripts/consumer/omp"));
+    expect(resolveConsumerOmpCommand(["omp"], { home: f.paths.home, sourceRoot: source })[0]).toBe(
+      join(source, "scripts/consumer/omp"),
+    );
+    const rolled = await rollbackRelease(f.paths, two);
+    expect(rolled.current.requirements.omp).toBe("18.20.0");
+    expect(readlinkSync(join(f.paths.dori, "bin/omp"))).toBe(
+      join(releasePath(f.paths, one.current), "scripts/consumer/omp"),
+    );
+    expect(rolled.previous).toBeUndefined();
+    expect(readFileSync(join(releasePath(f.paths, two.current), "native-omp.lock"), "utf8")).toContain(
+      `"nativeVersion":"${version}"`,
+    );
+  },
+);
+
+posix.each(["20.0.0", "19.0.0-beta.1", "19.01.0", "19.0.0;echo injected"])(
+  "unreviewed native runtime %s is rejected",
+  (version) => {
+    const f = fixture();
+    const release = bundledRelease(f, "reviewed", undefined, "19.0.0").bundle.manifest;
+    expect(() =>
+      validateReleaseManifest({ ...release, requirements: { ...release.requirements, omp: version } }),
+    ).toThrow("supported runtime");
+  },
+);
+
 posix(
   "rollback to a genuine older archive keeps its no-lock protocol instead of requiring new source locks",
   async () => {
@@ -170,7 +134,7 @@ onReleaseHost.each(["manual", "automatic"] as const)(
     const f = fixture(true);
     const old = bundledRelease(f, "terminal");
     const before = await installBundle(f.paths, old.bundle, undefined);
-    const candidate = bundledRelease(f, "native", old.source, true);
+    const candidate = bundledRelease(f, "native", undefined, "19.0.1", true);
     const saved = readFileSync(f.paths.config);
     const runtime = process.platform === "darwin" ? "hc" : "herdr";
     expect(JSON.parse(saved.toString()).runtime).toBe(runtime);

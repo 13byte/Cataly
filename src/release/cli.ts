@@ -3,10 +3,10 @@ import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { ConfigError } from "../../skills/cataly-mode/scripts/src/config.ts";
 import { captureSetupFile } from "../setup-files.ts";
 import { acquireBundle } from "./bundle.ts";
 import { runAutomaticCommand } from "./automatic-cli.ts";
+import { type ReleaseAttempt, referenceRefresh, releaseFailure } from "./completion.ts";
 import { acquireConsumerLock, consumerPaths, initialize, pointer, realDirectory } from "./files.ts";
 import { installBundle, preflightInstallation, rollbackRelease } from "./install.ts";
 import { runCacheCommand } from "./native-cache-cli.ts";
@@ -48,6 +48,7 @@ export async function runConsumerUpdate(argv: string[]): Promise<number> {
   if (argv[0] !== "retire-legacy-roles") importLegacyEnvironment();
   if (argv[0] === "auto") return runAutomaticCommand(argv.slice(1));
   let releaseLock: (() => void) | undefined;
+  let attempt: ReleaseAttempt | undefined;
   try {
     if (argv[0] === "retire-legacy-roles") return await runRetireLegacyCommand(argv.slice(1));
     const args = parseArgs({
@@ -74,8 +75,8 @@ export async function runConsumerUpdate(argv: string[]): Promise<number> {
       return 0;
     }
     const command = args.positionals[0];
-    if (args.positionals.length !== 1 || !["check", "install", "status", "rollback", "cache"].includes(command ?? ""))
-      throw new Error(USAGE);
+    const commands = ["check", "install", "status", "rollback", "cache"];
+    if (!command || args.positionals.length !== 1 || !commands.includes(command)) throw new Error(USAGE);
     if (args.values.preview && command !== "install") throw new Error("--preview applies only to install");
     if (args.values.version !== undefined && !/^v\d+\.\d+\.\d+$/.test(args.values.version))
       throw new Error("--version must be an exact vX.Y.Z tag");
@@ -195,24 +196,29 @@ export async function runConsumerUpdate(argv: string[]): Promise<number> {
       checkRollback(loadInstalled(paths)?.previous);
     initialize(paths);
     releaseLock = acquireConsumerLock(paths);
+    if (lstatSync(paths.journal, { throwIfNoEntry: false }))
+      attempt = { paths, before: loadInstalled(paths), source: pointer(paths.live), command: "recovery" };
     const before = recoverInstalled(paths);
     if (command === "status") {
       if (before) verifyRelease(paths, before.current);
       if (before?.previous) verifyRelease(paths, before.previous);
+      const references = referenceRefresh(paths, before);
       console.log(
         JSON.stringify(
           {
             installed: before ? identity(before.current) : null,
             previous: before?.previous ? identity(before.previous) : null,
+            references,
           },
           null,
           2,
         ),
       );
-      return 0;
+      return references ? 3 : 0;
     }
     preflightInstallation(paths);
     if (!bundle) checkRollback(before?.previous);
+    attempt = { paths, before, source: pointer(paths.live), command };
     const after = bundle
       ? await installBundle(paths, bundle, before, { config: config! })
       : await rollbackRelease(paths, before, args.values.version, config);
@@ -232,14 +238,7 @@ export async function runConsumerUpdate(argv: string[]): Promise<number> {
     );
     return 0;
   } catch (error) {
-    const reason =
-      error instanceof SyntaxError || error instanceof ConfigError
-        ? "Invalid configuration or release metadata; inspect the selected files"
-        : error instanceof Error
-          ? error.message
-          : String(error);
-    console.error(`Cataly release held: ${reason}`);
-    return 2;
+    return releaseFailure(error, attempt);
   } finally {
     releaseLock?.();
   }

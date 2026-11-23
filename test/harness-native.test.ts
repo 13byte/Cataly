@@ -31,7 +31,7 @@ test.skipIf(!enabled)(
     const executable = process.env["CATALY_TEST_OMP_EXEC"];
     const host = process.env["CATALY_TEST_OMP_ROOT"];
     const omp = executable ? [executable] : host ? [process.execPath, join(host, "dist", "cli.js")] : undefined;
-    if (!omp) throw new Error("set CATALY_TEST_OMP_EXEC or CATALY_TEST_OMP_ROOT to native OMP 18.20.0");
+    if (!omp) throw new Error("set CATALY_TEST_OMP_EXEC or CATALY_TEST_OMP_ROOT to the bound native OMP");
     const home = realpathSync(mkdtempSync("/tmp/cataly-native-harness-"));
     const stateDir = join(home, "state");
     const cwd = join(home, "work");

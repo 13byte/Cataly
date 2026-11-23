@@ -38,7 +38,7 @@ export function headlessReleaseProfiles(manifest: ReleaseManifest, metadata?: Ui
   const profiles = readReleaseProfiles(manifest, nativeMetadata, metadata, HEADLESS_PROFILES);
   if (
     profiles &&
-    (manifest.requirements.omp !== "18.20.0" || !manifest.source.files.some((entry) => entry.path === terminalMetadata))
+    (manifest.requirements.omp === "18.18.8" || !manifest.source.files.some((entry) => entry.path === terminalMetadata))
   )
     throw new Error("Headless capability requires a bound native OMP payload and historical release profiles");
   return profiles ?? [];

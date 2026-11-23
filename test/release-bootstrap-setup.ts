@@ -69,7 +69,7 @@ writeFileSync(process.env.BOOTSTRAP_RESULT, JSON.stringify({ home, runtime: "her
     tree: "b".repeat(40),
     prerelease: false,
   };
-  const assets = (capabilities?: unknown, headless?: unknown) => {
+  const assets = (capabilities?: unknown, headless?: unknown, omp = headless === undefined ? "18.18.8" : "18.20.0") => {
     const payload = capabilities === undefined ? undefined : JSON.stringify(capabilities);
     const native = headless === undefined ? undefined : JSON.stringify(headless);
     const consumer = payload === undefined ? legacyCli : cli;
@@ -88,7 +88,7 @@ writeFileSync(process.env.BOOTSTRAP_RESULT, JSON.stringify({ home, runtime: "her
     const name = "omp-dori-v1.2.3.tar.gz";
     const metadata = JSON.stringify({
       ...base,
-      requirements: { omp: native === undefined ? "18.18.8" : "18.20.0" },
+      requirements: { omp },
       archive: { name, root: "omp-dori-1.2.3", sha256: digest(bytes), bytes: bytes.length },
       source: {
         version: 1,

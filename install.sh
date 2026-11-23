@@ -247,7 +247,9 @@ try {
     ? readProfiles(terminalFile, ["linux/x64/herdr", "darwin/arm64/hc"])
     : new Set(["linux/x64/herdr"]);
   const native = nativeFile ? readProfiles(nativeFile, ["linux/x64/headless", "darwin/arm64/headless"]) : undefined;
-  if (native && (!terminalFile || manifest.requirements?.omp !== "18.20.0"))
+  const native19 = (version) => typeof version === "string" && /^19\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version);
+  const omp = manifest.requirements?.omp;
+  if (native && (!terminalFile || (omp !== "18.20.0" && !native19(omp))))
     fail("Headless capability requires a bound native OMP payload and historical release profiles");
   if (retire && !native) fail("--retire-legacy-roles requires the new verified release, not the v0.1.3 archive");
   if (home === undefined) selectHome(!native);
@@ -287,7 +289,9 @@ try {
     const selected = name === "consumer-journal.json" ? [receipt.before?.current, receipt.after?.current] : [receipt.current];
     for (const current of selected) {
       if (!current) continue;
-      if ((current.requirements?.omp === "18.20.0" && manifest.requirements?.omp !== "18.20.0") ||
+      const installedOmp = current.requirements?.omp;
+      if ((native19(installedOmp) && !native19(omp)) ||
+        (installedOmp === "18.20.0" && omp === "18.18.8") ||
         (!native && current.source?.files?.some((file) => file.path === "release-headless.json")))
         fail("Install cannot downgrade the bound runtime protocol; use rollback with its required tools");
     }
