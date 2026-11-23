@@ -63,11 +63,11 @@ export const updateBoard = async (options: {
       closeSync(fd);
     }
     renameSync(tmp, path);
-    const directory = openSync(dir, "r");
+    const directory = process.platform === "win32" ? undefined : openSync(dir, "r");
     try {
-      if (process.platform !== "win32") fsyncSync(directory);
+      if (directory !== undefined) fsyncSync(directory);
     } finally {
-      closeSync(directory);
+      if (directory !== undefined) closeSync(directory);
     }
   };
   let freshCreate = false;
@@ -144,11 +144,11 @@ export const updateBoard = async (options: {
       error.status < 500
     ) {
       unlinkSync(path);
-      const directory = openSync(dir, "r");
+      const directory = process.platform === "win32" ? undefined : openSync(dir, "r");
       try {
-        if (process.platform !== "win32") fsyncSync(directory);
+        if (directory !== undefined) fsyncSync(directory);
       } finally {
-        closeSync(directory);
+        if (directory !== undefined) closeSync(directory);
       }
     }
     if (error instanceof MessengerError && error.outcome === "uncertain") {
