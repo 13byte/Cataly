@@ -22,8 +22,9 @@ export type ScheduleRun = {
 export type ScheduledJob = {
   id: string;
   name: string;
-  cron: string;
-  tz: string;
+  cron?: string;
+  tz?: string;
+  at?: number;
   argv: string[];
   cwd: string;
   deliver: ScheduleDelivery;
@@ -73,6 +74,31 @@ export function nextSchedule(cron: string, tz: string, after: number): number {
   const next = scheduleCron(cron, tz).nextRun(new Date(after));
   if (!next) throw new ScheduleError("cron has no future occurrence");
   return next.getTime();
+}
+
+/** One-shot instants must carry an offset; never infer the operator's local timezone. */
+export function scheduleAt(value: string): number {
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(?:\.(\d{1,3}))?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+  const at = Date.parse(value);
+  const local = match ? Date.parse(match[1] + "T" + match[2] + "." + (match[3] ?? "0").padEnd(3, "0") + "Z") : NaN;
+  if (
+    !match ||
+    !Number.isFinite(at) ||
+    !Number.isFinite(local) ||
+    new Date(local).toISOString().slice(0, 19) !== match[1] + "T" + match[2]
+  )
+    throw new ScheduleError("--at needs a valid ISO instant with seconds and Z or an explicit offset");
+  return at;
+}
+export function scheduleTrigger(job: Pick<ScheduledJob, "cron" | "tz" | "at">): void {
+  if (job.at !== undefined) {
+    if (!instant(job.at) || job.cron !== undefined || job.tz !== undefined)
+      throw new ScheduleError("one-shot schedules need a valid at instant without cron or tz");
+  } else {
+    if (typeof job.cron !== "string" || typeof job.tz !== "string")
+      throw new ScheduleError("cron schedules need cron and tz");
+    scheduleCron(job.cron, job.tz);
+  }
 }
 
 type ScheduleDestination =
@@ -135,13 +161,11 @@ export function readScheduleDocument(value: unknown): ScheduleDocument {
   const ids = new Set<string>();
   for (const raw of value["jobs"]) {
     if (
-      !record(raw, "id name cron tz argv cwd deliver paused nextAt missed last") ||
+      !record(raw, "id name cron tz at argv cwd deliver paused nextAt missed last") ||
       typeof raw["id"] !== "string" ||
       !UUID.test(raw["id"]) ||
       ids.has(raw["id"]) ||
       typeof raw["name"] !== "string" ||
-      typeof raw["cron"] !== "string" ||
-      typeof raw["tz"] !== "string" ||
       !Array.isArray(raw["argv"]) ||
       raw["argv"].length === 0 ||
       !raw["argv"].every((arg) => typeof arg === "string" && !arg.includes("\0")) ||
@@ -160,7 +184,8 @@ export function readScheduleDocument(value: unknown): ScheduleDocument {
     if (names.has(raw["name"])) return bad();
     names.add(raw["name"]);
     ids.add(raw["id"]);
-    scheduleCron(raw["cron"], raw["tz"]);
+    scheduleTrigger(raw as unknown as ScheduledJob);
+    if (raw["at"] !== undefined && raw["at"] !== raw["nextAt"]) return bad();
     scheduleDestination(raw["deliver"]);
     if (raw["last"] !== undefined) {
       const last = raw["last"];

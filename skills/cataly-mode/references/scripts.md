@@ -426,6 +426,7 @@ Schedules are opt-in and live in the selected configuration's `<stateDir>/schedu
 
 ```sh
 cataly schedule add usage-board --cron "*/15 * * * *" --tz Asia/Seoul --deliver log -- bun usage-board.mjs
+cataly schedule add release-check --at 2026-12-01T09:00:00+09:00 --deliver wake -- bun release-check.mjs
 cataly schedule list
 cataly scheduler
 cataly schedule pause usage-board
@@ -434,6 +435,8 @@ cataly schedule remove usage-board
 ```
 
 `add NAME --cron EXPR --tz IANA [--cwd DIR] [--deliver wake|log|post:PLATFORM:TARGET] -- COMMAND ARG...` saves the exact argv, not a shell command, and the absolute working directory (default: the caller's directory). Croner 11 parses five-field expressions; seconds and time-dependent `?` substitution are refused. IANA timezone rules apply, with conventional day-of-month/day-of-week OR matching. Fixed-time jobs in a spring-forward gap run after the jump that day and run only once in a fall-back fold. Interval expressions skip the gap and include both repeated intervals. `next` is a stored UTC cursor, not a promise that a runner is alive.
+
+`add NAME --at ISO_INSTANT [--cwd DIR] [--deliver MODE] -- COMMAND ARG...` registers one future instant instead of a cron expression. Include seconds and either `Z` or an explicit UTC offset; local wall-clock timestamps and combinations with `--cron`/`--tz` are refused. A one-shot uses the same durable claim, late-occurrence and delivery rules. It pauses atomically when claimed or counted as missed, retaining its receipt and logs. An unconsumed paused one-shot can resume only before its original instant. A claimed or missed one-shot cannot be re-armed with `resume`, even with `--ack-interrupted`; inspect it and create a new named schedule if another attempt is wanted. Older scheduler versions reject one-shot records rather than dropping their policy.
 
 One `scheduler` owns each state directory. It checks every second by default; `--loop MIN` accepts a positive polling ceiling below one minute, with sleep shortened to the earliest unpaused occurrence and `--loop 0` does one due-work pass, waits for its claimed foreground commands and delivery, then exits. Every occurrence is durably claimed and its cursor advanced before spawning. An occurrence at least a minute late is counted as missed, never burst-replayed; a recovery tick advances at most 1000 missed occurrences per job. A job never overlaps its own unfinished run or delivery. Other jobs can run concurrently. Busy occurrences also increment `missed`.
 

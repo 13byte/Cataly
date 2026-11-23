@@ -8,6 +8,7 @@ import {
   readScheduleDocument,
   type ScheduleDocument,
   ScheduleError,
+  scheduleTrigger,
   type ScheduledJob,
 } from "./schedule-types.ts";
 
@@ -82,14 +83,16 @@ export class ScheduleStore {
     }
   }
   async add(
-    input: Pick<ScheduledJob, "name" | "cron" | "tz" | "argv" | "cwd" | "deliver">,
+    input: Pick<ScheduledJob, "name" | "cron" | "tz" | "at" | "argv" | "cwd" | "deliver">,
     now: number,
   ): Promise<ScheduledJob> {
+    scheduleTrigger(input);
+    if (input.at !== undefined && input.at <= now) throw new ScheduleError("--at must be in the future");
     const job: ScheduledJob = {
       ...input,
       id: randomUUID(),
       paused: false,
-      nextAt: nextSchedule(input.cron, input.tz, now),
+      nextAt: input.at ?? nextSchedule(input.cron!, input.tz!, now),
       missed: 0,
     };
     readScheduleDocument({ version: 1, jobs: [job], adopted: [] });
@@ -111,14 +114,18 @@ export class ScheduleStore {
   async pause(name: string, paused: boolean, now: number, acknowledgeInterrupted = false): Promise<void> {
     await this.update((document) => {
       const job = document.jobs.find((entry) => entry.name === name);
-      if (!job) throw new ScheduleError("no cron schedule named " + name + "; adopted systemd units are read-only");
+      if (!job) throw new ScheduleError("no schedule named " + name + "; adopted systemd units are read-only");
       if (!paused && job.last?.status === "running")
         throw new ScheduleError("cannot resume a claimed run before it finishes");
       if (!paused && job.last?.status === "interrupted" && !acknowledgeInterrupted)
         throw new ScheduleError(
           "inspect the interrupted job and possible orphan first, then resume with --ack-interrupted; the claimed occurrence is never retried",
         );
-      if (!paused && job.paused) job.nextAt = nextSchedule(job.cron, job.tz, now);
+      if (!paused && job.at !== undefined) {
+        if (job.last || job.missed) throw new ScheduleError("one-shot occurrence was consumed; create a new schedule");
+        if (job.at <= now) throw new ScheduleError("one-shot instant is in the past; create a new schedule");
+      }
+      if (!paused && job.paused && job.at === undefined) job.nextAt = nextSchedule(job.cron!, job.tz!, now);
       job.paused = paused;
     });
   }

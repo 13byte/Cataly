@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { type Command, die } from "./cli-context.ts";
 import { ScheduleStore } from "./schedule-store.ts";
 import { observeSystemd } from "./schedule-systemd.ts";
-import { scheduleDestination, ScheduleError, type ScheduleDelivery } from "./schedule-types.ts";
+import { scheduleAt, scheduleDestination, ScheduleError, type ScheduleDelivery } from "./schedule-types.ts";
 import { scheduleView } from "./schedule-view.ts";
 
 const schedule: Command = async ({ key, positionals, rest, need, opt, values, config, deps }) => {
@@ -21,11 +21,14 @@ const schedule: Command = async ({ key, positionals, rest, need, opt, values, co
     if (positionals.length - argv.length !== 2) die("schedule add needs exactly one name before --");
     const deliver = opt("deliver") ?? "wake";
     scheduleDestination(deliver);
+    const at = opt("at");
+    if (at !== undefined && (opt("cron") !== undefined || opt("tz") !== undefined))
+      die("--at cannot be combined with --cron or --tz");
+    const trigger = at === undefined ? { cron: need("cron"), tz: need("tz") } : { at: scheduleAt(at) };
     const job = await store.add(
       {
         name: name(),
-        cron: need("cron"),
-        tz: need("tz"),
+        ...trigger,
         deliver: deliver as ScheduleDelivery,
         cwd: resolve(typeof values["cwd"] === "string" ? values["cwd"] : process.cwd()),
         argv,

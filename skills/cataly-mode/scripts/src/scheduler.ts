@@ -68,7 +68,16 @@ export class Scheduler {
         const now = this.now();
         const job = document.jobs.find((entry) => entry.id === seen.id);
         if (this.#stop.signal.aborted || !job || job.paused || job.nextAt > now) return;
-        const cron = scheduleCron(job.cron, job.tz);
+        if (job.at !== undefined) {
+          job.paused = true; // Consume the one-shot atomically before spawning or skipping it.
+          if (job.at <= now - 60_000 || job.last) {
+            job.missed++;
+            return;
+          }
+          job.last = { id: randomUUID(), at: job.at, startedAt: now, status: "running", delivery: "pending" };
+          return structuredClone(job);
+        }
+        const cron = scheduleCron(job.cron!, job.tz!);
         const advance = (): void => {
           const next = cron.nextRun(new Date(job.nextAt));
           if (!next) throw new ScheduleError("cron has no next occurrence: " + job.name);
