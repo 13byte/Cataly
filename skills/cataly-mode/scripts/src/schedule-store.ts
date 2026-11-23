@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { prepareSchedule, type ScheduleInput } from "./schedule-prepare.ts";
 import { tryScheduleOwnership } from "./schedule-ownership.ts";
 import {
   type AdoptedSchedule,
@@ -8,7 +9,6 @@ import {
   readScheduleDocument,
   type ScheduleDocument,
   ScheduleError,
-  scheduleTrigger,
   type ScheduledJob,
 } from "./schedule-types.ts";
 
@@ -83,26 +83,8 @@ export class ScheduleStore {
       if (!replaced) rmSync(temp, { force: true });
     }
   }
-  async add(
-    input: Pick<
-      ScheduledJob,
-      "name" | "cron" | "tz" | "at" | "condition" | "timeoutSeconds" | "argv" | "cwd" | "deliver"
-    >,
-    now: number,
-  ): Promise<ScheduledJob> {
-    const watch = input.condition === undefined ? {} : { watch: { armed: true, consecutiveErrors: 0 } };
-    scheduleTrigger({ ...input, ...watch });
-    if (input.at !== undefined && input.at <= now) throw new ScheduleError("--at must be in the future");
-    const job: ScheduledJob = {
-      ...input,
-      ...watch,
-      ...(input.condition === undefined ? {} : { timeoutSeconds: input.timeoutSeconds ?? 30 }),
-      id: randomUUID(),
-      paused: false,
-      nextAt: input.condition === undefined ? (input.at ?? nextSchedule(input.cron!, input.tz!, now)) : now,
-      missed: 0,
-    };
-    readScheduleDocument({ version: job.condition === undefined ? 1 : 2, jobs: [job], adopted: [] });
+  async add(input: ScheduleInput, now: number): Promise<ScheduledJob> {
+    const job = prepareSchedule(input, now);
     return this.update((document) => {
       if ([...document.jobs, ...document.adopted].some((entry) => entry.name === input.name))
         throw new ScheduleError("schedule already exists: " + input.name);

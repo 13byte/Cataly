@@ -94,6 +94,8 @@ export const USAGE = `cataly <command> [options]
   schedule add NAME --at ISO_INSTANT [--deliver MODE] [--cwd DIR] -- argv...
                                        optional --timeout-seconds 1..86400 bounds the foreground command
   schedule add NAME --every-seconds N [--on-success edge|every] [--suppress-unchanged] -- argv...
+  schedule show NAME                   inspect one owned job or adopted unit read-only
+  schedule add ... --dry-run           validate and print next five trigger estimates without saving/running
   schedule list | pause NAME | resume NAME [--ack-interrupted] | remove NAME
   schedule adopt [NAME] --systemd UNIT [--system]   observe an external timer/service read-only
   scheduler [--loop MIN]               opt-in runner; --loop 0 claims one tick and waits

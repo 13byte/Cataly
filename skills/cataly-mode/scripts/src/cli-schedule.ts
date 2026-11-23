@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { type Command, die } from "./cli-context.ts";
+import { prepareSchedule, schedulePreview } from "./schedule-prepare.ts";
 import { ScheduleStore } from "./schedule-store.ts";
 import { observeSystemd } from "./schedule-systemd.ts";
 import { scheduleAt, scheduleDestination, ScheduleError, type ScheduleDelivery } from "./schedule-types.ts";
@@ -9,11 +10,12 @@ const schedule: Command = async ({ key, positionals, rest, need, opt, values, co
   if (
     (key === "list" && positionals.length !== 1) ||
     (key === "adopt" && positionals.length > 2) ||
-    (["pause", "resume", "remove"].includes(key ?? "") && positionals.length !== 2)
+    (["pause", "resume", "remove", "show"].includes(key ?? "") && positionals.length !== 2)
   )
     die(`schedule ${key} has unexpected positional arguments`);
   const store = new ScheduleStore(config.stateDir);
   const name = (): string => positionals[1] || die("schedule needs a name");
+  if (values["dry-run"] !== undefined && key !== "add") die("--dry-run is only supported by schedule add");
   if (key === "add") {
     const separator = rest.indexOf("--");
     if (separator < 0 || separator === rest.length - 1) die("schedule add needs -- followed by the command argv");
@@ -47,17 +49,52 @@ const schedule: Command = async ({ key, positionals, rest, need, opt, values, co
     const timeout = opt("timeout-seconds");
     if (timeout !== undefined && (!/^\d+$/.test(timeout) || Number(timeout) < 1 || Number(timeout) > 86400))
       die("--timeout-seconds must be an integer from 1 to 86400");
-    const job = await store.add(
-      {
-        name: name(),
-        ...trigger,
-        ...(timeout === undefined ? {} : { timeoutSeconds: Number(timeout) }),
-        deliver: deliver as ScheduleDelivery,
-        cwd: resolve(typeof values["cwd"] === "string" ? values["cwd"] : process.cwd()),
-        argv,
-      },
-      deps.clock.now(),
-    );
+    const input = {
+      name: name(),
+      ...trigger,
+      ...(timeout === undefined ? {} : { timeoutSeconds: Number(timeout) }),
+      deliver: deliver as ScheduleDelivery,
+      cwd: resolve(typeof values["cwd"] === "string" ? values["cwd"] : process.cwd()),
+      argv,
+    };
+    const now = deps.clock.now();
+    if (values["dry-run"] === true) {
+      const document = store.read();
+      if ([...document.jobs, ...document.adopted].some((entry) => entry.name === input.name))
+        die("schedule already exists: " + input.name);
+      const { id: _id, ...candidate } = prepareSchedule(input, now);
+      const times = schedulePreview({ ...candidate, id: "preview" });
+      console.log(
+        JSON.stringify(
+          {
+            dryRun: true,
+            candidate,
+            occurrences: times.map((at) => new Date(at).toISOString()),
+            ...(candidate.tz
+              ? {
+                  occurrencesLocal: times.map((at) => ({
+                    timeZone: candidate.tz,
+                    local: new Intl.DateTimeFormat("sv-SE", {
+                      timeZone: candidate.tz,
+                      dateStyle: "short",
+                      timeStyle: "long",
+                      hourCycle: "h23",
+                    }).format(at),
+                  })),
+                }
+              : {}),
+            estimate:
+              input.condition !== undefined
+                ? "idle polls; completion and delivery can delay later polls"
+                : "trigger instants; runner availability unverified",
+          },
+          null,
+          2,
+        ),
+      );
+      return;
+    }
+    const job = await store.add(input, now);
     console.log(JSON.stringify(job, null, 2));
     if (job.condition !== undefined)
       console.error(
@@ -72,6 +109,16 @@ const schedule: Command = async ({ key, positionals, rest, need, opt, values, co
           "SCHEDULE_WARNING one-shot is less than two minutes away; occurrences at least one minute late are missed, never replayed",
         );
     }
+  } else if (key === "show") {
+    const document = store.read();
+    const job = document.jobs.find((entry) => entry.name === name());
+    const adopted = document.adopted.find((entry) => entry.name === name());
+    if (!job && !adopted) die("schedule not found: " + name());
+    const selected = {
+      read: () => ({ ...document, jobs: job ? [job] : [], adopted: adopted ? [adopted] : [] }),
+      stateDir: store.stateDir,
+    };
+    console.log(JSON.stringify(await scheduleView(selected, deps.run, deps.clock.now()), null, 2));
   } else if (key === "list") {
     const view = await scheduleView(store, deps.run, deps.clock.now());
     console.log(JSON.stringify(view, null, 2));
@@ -88,7 +135,7 @@ const schedule: Command = async ({ key, positionals, rest, need, opt, values, co
   } else if (key === "remove") {
     await store.remove(name());
     console.log("SCHEDULE " + name() + " removed; retained logs and systemd units were not touched");
-  } else die("schedule needs add, list, pause, resume, remove or adopt");
+  } else die("schedule needs add, show, list, pause, resume, remove or adopt");
 };
 
 const scheduler: Command = async ({ values, loopMinutes, config }) => {

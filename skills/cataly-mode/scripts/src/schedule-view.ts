@@ -16,7 +16,7 @@ function scheduleState(job: ScheduledJob): string {
   return job.paused ? "paused" : "scheduled";
 }
 
-export async function scheduleView(store: ScheduleStore, run: Runner, now: number) {
+export async function scheduleView(store: Pick<ScheduleStore, "read" | "stateDir">, run: Runner, now: number) {
   const document = store.read();
   const adopted = [];
   for (const entry of document.adopted) {
