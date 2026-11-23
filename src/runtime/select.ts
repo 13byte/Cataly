@@ -1,23 +1,20 @@
 import { accessSync, constants, readFileSync, statSync } from "node:fs";
 import { delimiter, join } from "node:path";
-import type { RuntimeKind, TerminalRuntimeKind } from "./types.ts";
+import { LegacyRuntimeError } from "./registry.ts";
+import type { RuntimeKind } from "./types.ts";
 
-export type RuntimeSource =
-  "default" | "env" | "config" | "detect:HC_TERMINAL_ID" | "detect:HERDR_PANE_ID" | "detect:TERN_PANE" | "detect:path";
+export type RuntimeSource = "default" | "env" | "config" | "detect:TERN_PANE" | "detect:path";
 export type RuntimeChoice = { readonly kind: RuntimeKind; readonly source: RuntimeSource };
-type Settings = { readonly runtime?: TerminalRuntimeKind; readonly sessionRuntime?: RuntimeKind };
+type Settings = { readonly runtime?: unknown; readonly sessionRuntime?: unknown };
 
 /** No runtime could be chosen; the message is the one-line fix. */
 export class RuntimeChoiceError extends Error {}
 /** A runtime setting that is present but unusable (bad value, unreadable config file). */
 export class ConfigError extends Error {}
 
-// A record keyed by kind, so a new RuntimeKind cannot be left out here. Key order is not a preference: PATH detection
-// asks for hc first, then herdr, then tern, whatever order the keys or the PATH entries have.
-const KIND_SET: Readonly<Record<TerminalRuntimeKind, true>> = { herdr: true, hc: true, tern: true };
-const KINDS = Object.keys(KIND_SET) as TerminalRuntimeKind[];
-const isKind = (value: unknown): value is TerminalRuntimeKind => KINDS.some((k) => k === value);
-export const isSessionRuntime = (value: unknown): value is RuntimeKind => value === "headless" || isKind(value);
+export const isSessionRuntime = (value: unknown): value is RuntimeKind => value === "headless" || value === "tern";
+/** The removed terminal runtimes: a setting that still names one stops with the upgrade instructions. */
+const LEGACY_NAMES: readonly unknown[] = ["herdr", "hc"];
 
 const isExecutableFile = (path: string): boolean => {
   try {
@@ -48,23 +45,21 @@ function configSettings(configPath: string): Settings {
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
     throw new ConfigError(`${configPath} must hold a JSON object`);
-  const runtime = "runtime" in parsed ? parsed.runtime : undefined;
-  const sessionRuntime = "sessionRuntime" in parsed ? parsed.sessionRuntime : undefined;
-  if (runtime !== undefined && !isKind(runtime))
-    throw new ConfigError(`${configPath}: "runtime" must be "herdr", "hc" or "tern", got ${JSON.stringify(runtime)}`);
-  if (sessionRuntime !== undefined && !isSessionRuntime(sessionRuntime))
-    throw new ConfigError(`${configPath}: invalid sessionRuntime ${JSON.stringify(sessionRuntime)}`);
-  return { ...(runtime && { runtime }), ...(sessionRuntime && { sessionRuntime }) };
+  return {
+    runtime: "runtime" in parsed ? parsed.runtime : undefined,
+    sessionRuntime: "sessionRuntime" in parsed ? parsed.sessionRuntime : undefined,
+  };
 }
 
-function onPath(pathVar: string | undefined, exists: (path: string) => boolean): TerminalRuntimeKind[] {
-  const dirs = (pathVar ?? "").split(delimiter).filter((dir) => dir !== "");
-  return KINDS.filter((kind) => dirs.some((dir) => exists(join(dir, kind))));
-}
+const ternOnPath = (pathVar: string | undefined, exists: (path: string) => boolean): boolean =>
+  (pathVar ?? "").split(delimiter).some((dir) => dir !== "" && exists(join(dir, "tern")));
 
 /**
- * Old installers wrote `runtime` even when the owner made no choice. Consult it, the enclosing pane and PATH
- * only when terminal execution was requested, or on Windows where the native socket host is unavailable.
+ * Sessions run on headless OMP by default on macOS and Linux. Tern is consulted only when terminal execution was
+ * requested (`terminalOnly`), named by `CATALY_RUNTIME` or `sessionRuntime`, or on Windows where the native socket host
+ * is unavailable: config `runtime: "tern"`, then an enclosing Tern block (`TERN_PANE`), then `tern` on PATH. A setting
+ * that still names the removed herdr/hc runtime (`CATALY_RUNTIME`, config `runtime` or `sessionRuntime`) throws
+ * LegacyRuntimeError.
  */
 export function readRuntimeChoice(options: {
   readonly env: Readonly<Record<string, string | undefined>>;
@@ -75,24 +70,26 @@ export function readRuntimeChoice(options: {
 }): RuntimeChoice {
   const { env, configPath } = options;
   const fromEnv = nonEmpty(env["CATALY_RUNTIME"]);
-  if (fromEnv !== undefined) {
-    if (!isSessionRuntime(fromEnv)) throw new ConfigError(`invalid CATALY_RUNTIME: ${JSON.stringify(fromEnv)}`);
-    if (!options.terminalOnly || fromEnv !== "headless") return { kind: fromEnv, source: "env" };
-  }
+  if (fromEnv !== undefined && LEGACY_NAMES.includes(fromEnv)) throw new LegacyRuntimeError(configPath);
+  if (fromEnv !== undefined && !isSessionRuntime(fromEnv))
+    throw new ConfigError(`invalid CATALY_RUNTIME: ${JSON.stringify(fromEnv)}`);
   const config = options.config ?? configSettings(configPath);
-  if (config.sessionRuntime && (!options.terminalOnly || config.sessionRuntime !== "headless"))
-    return { kind: config.sessionRuntime, source: "config" };
+  if (LEGACY_NAMES.includes(config.runtime) || LEGACY_NAMES.includes(config.sessionRuntime))
+    throw new LegacyRuntimeError(configPath);
+  if (config.runtime !== undefined && config.runtime !== "tern")
+    throw new ConfigError(`${configPath}: "runtime" must be "tern", got ${JSON.stringify(config.runtime)}`);
+  const sessionRuntime = config.sessionRuntime;
+  if (sessionRuntime !== undefined && !isSessionRuntime(sessionRuntime))
+    throw new ConfigError(`${configPath}: invalid sessionRuntime ${JSON.stringify(sessionRuntime)}`);
+  if (fromEnv !== undefined && (!options.terminalOnly || fromEnv !== "headless"))
+    return { kind: fromEnv, source: "env" };
+  if (sessionRuntime !== undefined && (!options.terminalOnly || sessionRuntime !== "headless"))
+    return { kind: sessionRuntime, source: "config" };
   if (!options.terminalOnly && process.platform !== "win32") return { kind: "headless", source: "default" };
-  if (config.runtime) return { kind: config.runtime, source: "config" };
-  if (nonEmpty(env["HC_TERMINAL_ID"]) !== undefined) return { kind: "hc", source: "detect:HC_TERMINAL_ID" };
-  if (nonEmpty(env["HERDR_PANE_ID"]) !== undefined) return { kind: "herdr", source: "detect:HERDR_PANE_ID" };
-  const found = onPath(env["PATH"], options.exists ?? isExecutableFile);
-  if (found.includes("hc")) return { kind: "hc", source: "detect:path" };
-  if (found.includes("herdr")) return { kind: "herdr", source: "detect:path" };
-  // Tern comes last: it is a terminal people also run hc or herdr in, so whoever has one of those keeps it.
+  if (config.runtime === "tern") return { kind: "tern", source: "config" };
   if (nonEmpty(env["TERN_PANE"]) !== undefined) return { kind: "tern", source: "detect:TERN_PANE" };
-  if (found.includes("tern")) return { kind: "tern", source: "detect:path" };
+  if (ternOnPath(env["PATH"], options.exists ?? isExecutableFile)) return { kind: "tern", source: "detect:path" };
   throw new RuntimeChoiceError(
-    `none of herdr, hc or tern is on PATH: install hc (herdr-core), herdr or Tern, or set "runtime": "herdr", "hc" or "tern" in ${configPath}, or CATALY_RUNTIME`,
+    `tern is not on PATH: install Tern, or set "runtime": "tern" in ${configPath}, or CATALY_RUNTIME`,
   );
 }

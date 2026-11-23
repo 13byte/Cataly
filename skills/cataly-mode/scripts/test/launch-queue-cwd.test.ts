@@ -33,31 +33,23 @@ const linkedDirectories = async () => {
 
 test("an ordinary launch and relative Done check use the same legacy cwd with a symlink in the config", async () => {
   const { config, lexical } = await linkedDirectories();
-  let terminalReadback: string | undefined;
-  const deps: FlowDeps = {
-    ...f.deps,
-    config,
-    run: async (argv, options) => {
-      if (argv[0] === "herdr" && argv[1] === "tab" && argv[2] === "create") {
-        const cwd = argv[6];
-        if (argv[5] !== "--cwd" || cwd === undefined) throw new Error("launch did not send a working directory");
-        // The runtime boundary follows the filesystem spelling, then the child opens a relative file there.
-        const probe = Bun.spawnSync(
-          [process.execPath, "-e", 'console.log(process.cwd()); console.log(await Bun.file("done.marker").exists())'],
-          { cwd: realpathSync.native(cwd), stdout: "pipe", stderr: "pipe" },
-        );
-        if (probe.exitCode !== 0) throw new Error(probe.stderr.toString());
-        terminalReadback = probe.stdout.toString().trim();
-      }
-      return f.deps.run(argv, options);
-    },
+  let runtimeReadback: string | undefined;
+  f.world.onCreate = (spec) => {
+    // The runtime boundary follows the filesystem spelling, then the child opens a relative file there.
+    const probe = Bun.spawnSync(
+      [process.execPath, "-e", 'console.log(process.cwd()); console.log(await Bun.file("done.marker").exists())'],
+      { cwd: realpathSync.native(spec.cwd), stdout: "pipe", stderr: "pipe" },
+    );
+    if (probe.exitCode !== 0) throw new Error(probe.stderr.toString());
+    runtimeReadback = probe.stdout.toString().trim();
   };
+  const deps: FlowDeps = { ...f.deps, config };
 
   await launchLane(deps, { ...f.input, done: doneSignal });
 
   const lane = await deps.registry.read(f.input.key);
   if (!lane?.cwd) throw new Error("launch did not record a working directory");
-  expect(terminalReadback).toBe(`${realpathSync.native(lexical)}\ntrue`);
+  expect(runtimeReadback).toBe(`${realpathSync.native(lexical)}\ntrue`);
   expect(lane.cwd).toBe(lexical);
   expect(await checkDone(lane.done, deps.run, { cwd: lane.cwd })).toMatchObject([{ ok: true }]);
 });
@@ -83,13 +75,15 @@ for (const source of ["relative --cwd", "absolute --cwd", "home-relative default
     expect(new LaunchQueue(f.state.dir).read(f.input.key)?.input.cwd).toBe(expected);
     renameSync(link, `${link}.old`);
     symlinkSync(lexical, link, "dir");
+    const created: string[] = [];
+    f.world.onCreate = (spec) => {
+      created.push(spec.cwd);
+    };
     expect((await startQueued(f.deps, f.input.key, roomy)).code).toBe(0);
     const lane = await f.deps.registry.read(f.input.key);
     if (!lane?.cwd) throw new Error("queued launch did not record a working directory");
     expect(lane.cwd).toBe(expected);
-    expect(f.world.calls.find((argv) => argv[0] === "herdr" && argv[1] === "tab" && argv[2] === "create")?.[6]).toBe(
-      expected,
-    );
+    expect(created).toEqual([expected]);
     expect(await checkDone(lane.done, f.deps.run, { cwd: lane.cwd })).toMatchObject([{ ok: false }]);
   });
 }

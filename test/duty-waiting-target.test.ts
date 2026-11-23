@@ -14,9 +14,12 @@ const MIN = 60_000;
 const URL =
   "https://github.com/example-org/example-repo/actions/runs/123456789012/job/987654321098?check_suite_focus=true";
 
-/** A 41-character lane key, its idle pane waiting on `target`; `at(m)` runs one duty pass m minutes after it started. */
-async function longWait(target = URL) {
-  const s = setup();
+/**
+ * A 41-character lane key, its idle session waiting on `target`, on headless unless `runtime` says Tern; `at(m)` runs
+ * one duty pass m minutes after it started.
+ */
+async function longWait(target = URL, runtime?: "tern") {
+  const s = setup(runtime ? { runtime } : {});
   const key = `k${"-long".repeat(8)}`;
   const lane = await startLane(s.d, key, s.brief, { group: "w1" });
   const pane = s.w.panes.get(lane.paneId)!;
@@ -70,7 +73,8 @@ describe("a long waiting target or evidence link", () => {
   });
 
   test("the board keeps the lane on its line and puts the whole target below it when the line cut it", async () => {
-    const { d, w, key, lane } = await longWait();
+    // A Tern block's short ref leaves the lane's waiting field room on its line; a headless UUID ref, never cut, does not.
+    const { d, w, key, lane } = await longWait(URL, "tern");
     const lines = laneBoard(d.store.lanes(), w.clock);
     expect(lines[0]).toMatch(new RegExp(`^${key} .* waiting: https://\\S*… since ${hhmm(lane.createdAt)}`));
     expect(lines).toContain(`  ${URL}`);

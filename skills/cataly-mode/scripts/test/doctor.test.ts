@@ -10,7 +10,7 @@ import { monitorPresetFor, monitorPresets } from "../src/monitor-presets.ts";
 import { Reports } from "../src/reports.ts";
 import { Worklog } from "../src/worklog.ts";
 import { doctorCommand } from "./doctor-fixture.ts";
-import { agentIn, depsFor, fakeClock, laneState, newWorld, withState, type TestState } from "./fakes.ts";
+import { depsFor, fakeClock, nativeLead, newWorld, sent, sid, withState, type TestState } from "./fakes.ts";
 
 let state: TestState;
 beforeEach(() => {
@@ -80,17 +80,14 @@ test("doctor diagnoses configuration and missing filter outcomes without modifyi
   expect(world.calls).toEqual([]);
 });
 
-test("trusted live lead is distinguished from stale metadata and lane roles", async () => {
+test("trusted live lead is distinguished from lane and non-lead harness roles", async () => {
   const world = newWorld();
-  const pane = "w1:p1";
-  world.panes = [{ pane_id: pane, workspace_id: "w1", agent: "omp", agent_status: "idle", cwd: "/repo" }];
-  agentIn(world, pane);
+  const pane = nativeLead(world, 1);
   const deps = depsFor(world, fakeClock(now), state.dir, {
     leadPane: pane,
     sessionsDir: join(state.dir, "sessions"),
     agentCommand: doctorCommand(state.dir),
   });
-  laneState(state.dir, pane, { role: "cataly", agentStatus: "idle" });
   const result = await doctorCheck(deps);
   expect(result.exitCode).toBe(0);
   expect(result.findings).toContainEqual(
@@ -100,19 +97,14 @@ test("trusted live lead is distinguished from stale metadata and lane roles", as
       detail: expect.stringContaining("role=cataly status=idle"),
     }),
   );
-  laneState(state.dir, pane, { role: "lane" });
-  expect((await doctorCheck(deps)).findings).toContainEqual(
-    expect.objectContaining({ check: "runtime", severity: "WARN" }),
-  );
-  laneState(state.dir, pane, { role: "cataly", pid: 9876 });
-  expect((await doctorCheck(deps)).findings).toContainEqual(
-    expect.objectContaining({ check: "runtime", severity: "WARN" }),
-  );
-  expect(
-    world.calls.every(
-      (argv) => argv[0] === "ps" || (argv[0] === "herdr" && ["get", "process-info"].includes(argv[2] ?? "")),
-    ),
-  ).toBe(true);
+  for (const patch of [{ role: "lane" }, { harnessRole: "duty" }] as const) {
+    nativeLead(world, 1, patch);
+    expect((await doctorCheck(deps)).findings).toContainEqual(
+      expect.objectContaining({ check: "runtime", severity: "WARN" }),
+    );
+  }
+  expect(world.sessions[sid(1)]).toBeDefined();
+  expect(sent(world)).toEqual([]);
 });
 
 test("damaged metadata and incomplete lane signals remain visible; ignore is explicit and reported", async () => {
@@ -156,9 +148,11 @@ test("presets cover all diagnostic probes, match renamed direct commands, and ag
 });
 
 test("boot adds an advisory local summary without changing its exit policy or writing state", async () => {
-  const deps = depsFor(newWorld(), fakeClock(now), state.dir, {
+  const world = newWorld();
+  // The desired monitors belong to an earlier owner session, so their filters stay advisory.
+  const deps = depsFor(world, fakeClock(now), state.dir, {
     sessionsDir: join(state.dir, "sessions"),
-    leadPane: "w1:p1",
+    leadPane: nativeLead(world, 1, { sessionId: "lead" }),
   });
   mkdirSync(join(state.dir, "monitors"));
   writeFileSync(join(state.dir, "monitors", "owner.json"), JSON.stringify(desired("^NUDGED").data));

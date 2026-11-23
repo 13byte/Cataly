@@ -5,14 +5,16 @@ import { remoteSocketDir, remoteSocketPath } from "../../src/remote/socket-path.
 type EndpointOptions = {
   readonly session?: string;
   readonly pane?: string;
-  readonly beforeClose?: () => Promise<void>;
+  readonly cwd?: string;
+  readonly pid?: number;
   readonly legacyLead?: boolean;
 };
 
+/** An OMP session's same-host remote endpoint, as the Cataly extension publishes it. */
 export async function startTestEndpoint(
   state: string,
   cleanup: Array<() => void | Promise<void>>,
-  { session = "native-001", pane, beforeClose, legacyLead = false }: EndpointOptions = {},
+  { session = "native-001", pane, cwd = "/project", pid, legacyLead = false }: EndpointOptions = {},
 ) {
   const dir = remoteSocketDir(state);
   mkdirSync(dir, { mode: 0o700, recursive: true });
@@ -23,8 +25,9 @@ export async function startTestEndpoint(
     generation: "original",
     role: "lane",
     status: "idle",
-    cwd: "/project",
+    cwd,
     ...(pane === undefined ? {} : { pane }),
+    ...(pid === undefined ? {} : { pid }),
   } as const;
   let inputs = 0;
   let closeReply: "refused" | "lost" = "refused";
@@ -46,12 +49,8 @@ export async function startTestEndpoint(
         inputs++;
         connection.end(`${JSON.stringify({ ok: true, data: { status: "admitted", text: request.text } })}\n`);
       } else if (request.op === "close") {
-        const reply = () => {
-          if (closeReply === "lost") connection.end();
-          else connection.end('{"ok":false,"error":"close held by approval"}\n');
-        };
-        if (beforeClose) void beforeClose().then(reply, () => connection.destroy());
-        else reply();
+        if (closeReply === "lost") connection.end();
+        else connection.end('{"ok":false,"error":"close held by approval"}\n');
       } else connection.end('{"ok":false,"error":"unsupported"}\n');
     });
   });

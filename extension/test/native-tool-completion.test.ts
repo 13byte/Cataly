@@ -32,17 +32,17 @@ const host = async <T>(path: string): Promise<T> => {
   return (await import(join(realpathSync(process.env["CATALY_TEST_OMP_ROOT"] ?? ""), "src", path))) as T;
 };
 
-const PANE = "w1:p6";
+const HEADLESS = "00000000-0000-4000-8000-000000000006";
 const KEY = "native-evidence-lane";
 beforeEach(async () => {
   const stateDir = useConfig("");
-  process.env.HERDR_PANE_ID = PANE;
-  delete process.env.HC_TERMINAL_ID;
+  process.env.CATALY_HEADLESS_ID = HEADLESS;
   await new Registry(stateDir).write({
     key: KEY,
     title: "native evidence",
     thread: "none",
-    pane: PANE,
+    pane: HEADLESS,
+    sessionRef: { runtime: "headless", id: HEADLESS },
     brief: "/brief.md",
     done: "file /done.md",
     openedAt: "2026-01-01T00:00:00.000Z",
@@ -50,7 +50,7 @@ beforeEach(async () => {
   });
 });
 afterEach(() => {
-  delete process.env.HERDR_PANE_ID;
+  delete process.env.CATALY_HEADLESS_ID;
 });
 
 /**
@@ -121,6 +121,10 @@ const nativeLane = async (cwd = import.meta.dir) => {
       compact: forbidden,
       getSystemPrompt: () => [],
     },
+    undefined,
+    // A headless lane runs in rpc mode with the supervisor's UI channel: a UI distinct from the runner's no-op one.
+    Object.create(runner.getUIContext()),
+    "rpc",
   );
   // Agent events reach extensions through the session's own mapping, as AgentSession#emitExtensionEvent sends them.
   const emit = async (event: SessionEvent): Promise<void> => {

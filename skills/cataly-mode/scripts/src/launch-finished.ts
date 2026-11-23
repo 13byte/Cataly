@@ -1,6 +1,4 @@
 import type { Runtimes } from "../../../../src/runtime/registry.ts";
-import { isKind } from "../../../../src/runtime/hc/exec.ts";
-import { reasonOf, ToolError } from "../../../../src/runtime/herdr/exec.ts";
 import { isMissing } from "../../../../src/runtime/tern/exec.ts";
 import type { SessionRef } from "../../../../src/runtime/types.ts";
 import { finished } from "./boot-monitors.ts";
@@ -35,11 +33,6 @@ export const goalShown = (screen: string, marker: string): boolean =>
     .join("\n")
     .includes(marker);
 
-const missingSession = (ref: SessionRef, error: unknown): boolean =>
-  isKind(error, "not_found") ||
-  isMissing(error) ||
-  (ref.runtime === "herdr" && error instanceof ToolError && /not.?found/i.test(reasonOf(error)));
-
 export const launchFinished = async (deps: FlowDeps, launched: Lane): Promise<boolean> => {
   const lane = await deps.registry.read(launched.key);
   if (
@@ -63,15 +56,14 @@ export const launchScreen = async (
   try {
     return await startupScreen(rts, ref);
   } catch (error) {
-    if (missingSession(ref, error) && (await launchFinished(deps, lane))) return null;
+    if (isMissing(error) && (await launchFinished(deps, lane))) return null;
     throw error;
   }
 };
 
 /**
  * The runtime's own status word for the lane's session. Unlike agentStatus it keeps `shell` (no agent in the session)
- * apart from no status yet: herdr lists an agent that has not reported as `unknown` and a pane with no agent as `shell`.
- * hc lists both with no status, so a session listed with none is probed, which names a shell in front. A session missing
+ * apart from no status yet: a session listed with no status is probed, which names a shell in front. A session missing
  * from the list is `gone`. OMP instead uses its live-process-bound probe, including approval and shell guards.
  */
 export const launchStatus = async (
@@ -90,7 +82,7 @@ export const launchStatus = async (
     const probed = (await rts.for(ref).probe(ref)).status;
     return probed === "shell" || probed === "gone" ? { status: probed } : {};
   } catch (e) {
-    if (missingSession(ref, e)) return { status: "gone" };
+    if (isMissing(e)) return { status: "gone" };
     return { error: e instanceof Error ? e.message : String(e) };
   }
 };

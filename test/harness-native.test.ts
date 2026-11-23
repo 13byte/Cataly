@@ -83,7 +83,6 @@ test.skipIf(!enabled)(
     writeFileSync(
       config,
       JSON.stringify({
-        runtime: "hc", // Historical generated preference does not select terminal execution.
         stateDir,
         ompUlwPath: "",
         defaultModel: "cataly-local/harness-fixture",

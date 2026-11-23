@@ -9,7 +9,7 @@ import { acquireLaunchGate, assertNoConsumerLaunches, registerConsumerLaunch } f
 import { loadInstalled, releasePath } from "../src/release/state.ts";
 import { processIdentity } from "../src/update/deployment-process.ts";
 import { portableFixture as fixture } from "./release-consumer-setup.ts";
-import { blockStatePublication } from "./release-native-recovery-setup.ts";
+import { blockStatePublication, boundRelease } from "./release-native-recovery-setup.ts";
 
 // POSIX-only: release installation refuses non-private directories by POSIX mode bits.
 const posix = test.skipIf(process.platform === "win32");
@@ -39,7 +39,7 @@ posix.each(["due", "disabled", "ttl", "managed", "-h", "-v", "--help", "--versio
 posix("a concurrently registered launch holds the updater at activation, not the new launch", async () => {
   const f = fixture();
   const one = await installBundle(f.paths, f.release("one").bundle, undefined);
-  const next = f.release("two").bundle;
+  const next = boundRelease(f, "two").bundle;
   const candidate = { ...next, manifest: { ...next.manifest, prerelease: false } };
   const source = releasePath(f.paths, one.current);
   const selected = await automaticUpdate(f.paths, {
@@ -104,7 +104,7 @@ posix("a launch lease remains live across shell exec and is reclaimed only after
 posix("the owner of an automatic startup may activate while other live launch owners still veto it", async () => {
   const f = fixture();
   await installBundle(f.paths, f.release("one").bundle, undefined);
-  const next = f.release("two").bundle;
+  const next = boundRelease(f, "two").bundle;
   const gate = acquireLaunchGate(f.paths);
   try {
     registerConsumerLaunch(f.paths, process.pid);
@@ -126,7 +126,7 @@ posix("the owner of an automatic startup may activate while other live launch ow
 posix("a registered launcher recovers a failed state publication and still runs the old verified release", async () => {
   const f = fixture();
   const one = await installBundle(f.paths, f.release("one").bundle, undefined);
-  const next = f.release("two").bundle;
+  const next = boundRelease(f, "two").bundle;
   const candidate = { ...next, manifest: { ...next.manifest, prerelease: false } };
   const fault = blockStatePublication(f.paths, f.root, releasePath(f.paths, candidate.manifest));
   const gate = acquireLaunchGate(f.paths);

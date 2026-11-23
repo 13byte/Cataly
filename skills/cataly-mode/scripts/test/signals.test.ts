@@ -3,7 +3,8 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { claimDone, watchTick } from "../src/done-flow.ts";
-import { adoptLane, LaunchError } from "../src/launch.ts";
+import { LaunchError } from "../src/launch.ts";
+import { validateLaunch } from "../src/launch-input.ts";
 import type { Http } from "../src/messenger/http.ts";
 import { statusOf } from "../src/registry.ts";
 import { run } from "../src/run.ts";
@@ -108,16 +109,18 @@ test("a Done line with a malformed signal is refused at launch, with the reason"
   ];
   for (const done of bad) expect(doneSyntaxErrors(done)).toHaveLength(1);
   await expect(
-    adoptLane(deps, { key: "qa-lane", title: "qa", brief: "/b.md", done: "command bun test", pane: "w:p9" }),
+    validateLaunch(deps, { key: "qa-lane", title: "qa", brief: "/b.md", done: "command bun test" }, LaunchError),
   ).rejects.toBeInstanceOf(LaunchError);
-  const lane = await adoptLane(deps, {
-    key: "qa-lane",
-    title: "qa",
-    brief: "/b.md",
-    done: 'command ["bun","test"] stdout~"0 fail"; file ~/qa/report.json json:.passed=true; url http://localhost:3000/health',
-    pane: "w:p9",
-  });
-  expect(lane.done).toContain("command");
+  await validateLaunch(
+    deps,
+    {
+      key: "qa-lane",
+      title: "qa",
+      brief: "/b.md",
+      done: 'command ["bun","test"] stdout~"0 fail"; file ~/qa/report.json json:.passed=true; url http://localhost:3000/health',
+    },
+    LaunchError,
+  );
 });
 
 test("a QA-only lane's claim is re-checked at close time: the lane says done, but the command still fails, so it stays open", async () => {
@@ -125,15 +128,17 @@ test("a QA-only lane's claim is re-checked at close time: the lane says done, bu
   const clock = fakeClock(Date.parse("2026-01-01T00:00:00Z"));
   const flag = join(state.dir, "qa-passed");
   const deps = { ...depsFor(world, clock, state.dir, { defaultCwd: state.dir }), run, signalIo: { cwd: state.dir } };
-  const lane = await adoptLane(deps, {
+  const lane = {
     key: "local-setup",
     title: "setup",
+    thread: "none",
     brief: "/b.md",
     // The path is JSON-encoded, as a Done line is: Windows paths carry backslashes JSON would read as escapes.
     done: `command ${JSON.stringify(["test", "-f", flag])}`,
-    pane: "w:p3",
     cwd: state.dir,
-  });
+    openedAt: new Date(clock.at).toISOString(),
+  };
+  await deps.registry.write(lane);
   await claimDone(deps, lane, "I ran the setup and it works");
   clock.at += 6 * 60_000;
   await watchTick(deps);

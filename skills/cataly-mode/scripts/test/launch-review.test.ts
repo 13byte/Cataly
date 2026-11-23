@@ -5,8 +5,7 @@ import { launchLane } from "../src/launch.ts";
 import { BRIEF_START } from "../src/launch-footer.ts";
 import { cancelQueued, enqueueLaunch, queueTick, startQueued } from "../src/launch-queue.ts";
 import { LaunchQueue } from "../src/launch-queue-store.ts";
-import { pauseLane } from "../src/pause.ts";
-import { queueFixture, roomy, type QueueFixture } from "./launch-queue-fixture.ts";
+import { queueFixture, roomy, type QueueFixture, unspawnableTern } from "./launch-queue-fixture.ts";
 
 let f: QueueFixture;
 beforeEach(async () => {
@@ -17,7 +16,7 @@ const store = () => new LaunchQueue(f.state.dir);
 
 const cli = async (...args: string[]) => {
   const config = join(f.state.dir, "config.json");
-  writeFileSync(config, JSON.stringify({ ...f.deps.config, runtime: "herdr" }));
+  writeFileSync(config, JSON.stringify(f.deps.config));
   const child = Bun.spawn([process.execPath, join(import.meta.dir, "../src/cli.ts"), ...args], {
     env: { PATH: f.state.dir, HOME: f.state.dir, CATALY_CONFIG: config },
     stdout: "pipe",
@@ -63,6 +62,10 @@ test.each(["default", "explicit", "legacy"])("queued %s cwd controls disk admiss
   } else {
     expect(store().read(f.input.key)?.input.cwd).toBe(expected);
   }
+  const created: string[] = [];
+  f.world.onCreate = (spec) => {
+    created.push(spec.cwd);
+  };
   const deps = {
     ...f.deps,
     config: {
@@ -79,45 +82,9 @@ test.each(["default", "explicit", "legacy"])("queued %s cwd controls disk admiss
   expect((await startQueued(deps, f.input.key)).code).toBe(0);
   const lane = await deps.registry.read(f.input.key);
   if (!lane) throw new Error("queued lane did not register");
-  const create = f.world.calls.find((argv) => argv[0] === "herdr" && argv[1] === "tab" && argv[2] === "create");
-  expect(create?.[5]).toBe("--cwd");
-  expect(create?.[6]).toBe(expected);
+  expect(created).toEqual([expected]);
   expect(lane.cwd).toBe(expected);
   expect(readFileSync(lane.brief, "utf8")).toContain(`Recorded working directory: ${JSON.stringify(expected)}`);
-});
-
-test("pause remains usable while a launched agent is awaiting its startup check", async () => {
-  const waiting = Promise.withResolvers<void>();
-  const release = Promise.withResolvers<void>();
-  const deps = {
-    ...f.deps,
-    clock: {
-      now: f.deps.clock.now,
-      sleep: async (ms: number) => {
-        if (ms === 20_000) {
-          waiting.resolve();
-          await release.promise;
-        }
-        await f.deps.clock.sleep(ms);
-      },
-    },
-  };
-  const launched = launchLane(deps, f.input);
-  try {
-    await waiting.promise;
-    f.world.panes = f.world.panes.map((p) => ({ ...p, agent: "omo", agent_status: "idle" }));
-    f.world.screens = ["\u276f ", "Goal paused\n\u276f "];
-    const lane = await f.deps.registry.read(f.input.key);
-    if (!lane) throw new Error("launch did not register its lane before startup verification");
-    const paused = await pauseLane(f.deps, lane, "owner interrupted startup");
-    expect(paused.code).toBe(0);
-    expect((await f.deps.registry.read(f.input.key))?.status).toBe("paused");
-    expect(f.world.calls.some((a) => a.includes("/goal pause"))).toBe(true);
-  } finally {
-    release.resolve();
-    await launched;
-  }
-  expect((await f.deps.registry.read(f.input.key))?.status).toBe("paused");
 });
 
 test("watch reads stored prerequisites without executing Done commands or host probes", async () => {
@@ -222,14 +189,7 @@ test("queued templates replay the exact snapshot including quoted footer markers
 
 test("failed pre-registration creation needs explicit cancel and a fresh reservation", async () => {
   const original = await enqueueLaunch(f.deps, f.input, [f.prior.key]);
-  const deps = {
-    ...f.deps,
-    run: async (...args: Parameters<typeof f.deps.run>) =>
-      args[0][0] === "herdr" && args[0][1] === "tab" && args[0][2] === "create"
-        ? { code: 1, out: "", err: '{"error":{"code":"server_not_running"}}' }
-        : f.deps.run(...args),
-  };
-  await expect(startQueued(deps, f.input.key, roomy)).rejects.toThrow("session create failed");
+  await expect(startQueued(unspawnableTern(f), f.input.key, roomy)).rejects.toThrow("session create failed");
   expect(existsSync(join(f.state.dir, "queued-briefs", `${original.id}.md`))).toBe(false);
   expect(readdirSync(join(f.state.dir, "queued-briefs", `${original.id}.md.attempts`))).toEqual([]);
   expect(store().read(f.input.key)?.status).toBe("starting");

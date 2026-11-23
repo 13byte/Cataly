@@ -21,13 +21,10 @@ use super::command::{WakeCommand, headless_argv, wake_command};
 use super::guard::{Guard, can_launch};
 use super::headless::{self, HeadlessRef};
 use super::json::Json;
-use super::registry::{
-    Lane, RESERVED_LANE_KEY, Registry, SessionRef, pane_role, pane_state, record_execution,
-    valid_key,
-};
+use super::registry::{Lane, RESERVED_LANE_KEY, Registry, SessionRef, record_execution, valid_key};
 use super::route::delivery_lock;
 use super::transcript;
-use super::util::{now_ms, parse_iso, signalable, uuid};
+use super::util::{now_ms, uuid};
 
 const PREFIX: &str = "discord-wake-pending:";
 const BOUND_PREFIX: &str = "discord-wake-pending:bound:";
@@ -192,13 +189,6 @@ async fn lease(launch: &Launch, argv: &[String], session: &str, cwd: &Path) -> L
     }
 }
 
-fn real(path: &str) -> Result<String> {
-    std::fs::canonicalize(path)?
-        .into_os_string()
-        .into_string()
-        .map_err(|_| anyhow!("path is not UTF-8"))
-}
-
 /// The retired session a wake would resume, with the gates its prior runtime can still prove.
 struct Retired {
     session: String,
@@ -206,8 +196,8 @@ struct Retired {
     cwd: String,
     goal: String,
     model: String,
-    /// The headless reservation the prior session ran in, if any.
-    prior: Option<HeadlessRef>,
+    /// The headless reservation the prior session ran in.
+    prior: HeadlessRef,
 }
 
 /// `startHeadlessWake`'s eligibility: a cleanly stopped native lane with a recorded retirement goal.
@@ -256,107 +246,11 @@ fn retired_headless(
         cwd: binding.cwd().to_owned(),
         goal,
         model,
-        prior: Some(prior),
+        prior,
     }))
 }
 
-/// `startExactLane`'s Herdr eligibility, minus the pane probe: the extension retired the pane cleanly (pid 0).
-fn retired_pane(
-    state: &Path,
-    launch: &Launch,
-    lane: &Lane,
-    pane: &str,
-) -> Result<Result<Retired, Wake>> {
-    let Some(session) = lane.session() else {
-        return Ok(Err(held("no exact Herdr session registered")));
-    };
-    let old = pane_state(state, pane);
-    let goal = old
-        .as_ref()
-        .and_then(|old| old.get("goal"))
-        .and_then(|goal| goal.str("status"))
-        .filter(|goal| matches!(*goal, "none" | "active" | "complete" | "dropped"))
-        .map(str::to_owned);
-    let Some((old, goal)) = old.zip(goal) else {
-        return Ok(Err(held("retired pane identity or goal not eligible")));
-    };
-    let old_cwd = old.str("cwd").filter(|cwd| Path::new(cwd).is_absolute());
-    let updated = old.str("updatedAt").and_then(parse_iso);
-    let opened = lane.0.str("openedAt").and_then(parse_iso);
-    if old.str("paneId") != Some(pane)
-        || pane_role(&old) != Some("lane")
-        || old.get("discordLaneInbox") != Some(&Json::Bool(true))
-        || old.get("pid").and_then(Json::as_f64) != Some(0.0)
-        || old.str("sessionId") != Some(session)
-        || old.get("approvalPending") != Some(&Json::Bool(false))
-        || old.str("sessionFile").is_none()
-        || old_cwd.is_none()
-        || !matches!((updated, opened), (Some(updated), Some(opened)) if updated >= opened)
-    {
-        return Ok(Err(held("retired pane identity or goal not eligible")));
-    }
-    if launch.command.as_ref().and_then(headless_argv).is_none() {
-        return Ok(Err(held(
-            "agent command is not an exact interactive OMP template",
-        )));
-    }
-    let cwd = real(old_cwd.unwrap_or_default())?;
-    if lane
-        .cwd()
-        .map(real)
-        .transpose()?
-        .is_some_and(|lane_cwd| lane_cwd != cwd)
-        || !std::fs::metadata(&cwd)?.is_dir()
-    {
-        return Ok(Err(held("recorded lane directory differs")));
-    }
-    let Some(exact) = transcript::exact(
-        old.str("sessionFile").unwrap_or_default(),
-        &launch.sessions_dir,
-        session,
-        Path::new(&cwd),
-    )?
-    else {
-        return Ok(Err(held("exact saved transcript not verified")));
-    };
-    let file = exact
-        .file
-        .into_os_string()
-        .into_string()
-        .map_err(|_| anyhow!("transcript path is not UTF-8"))?;
-    if lane
-        .session_file()
-        .map(real)
-        .transpose()?
-        .is_some_and(|recorded| recorded != file)
-    {
-        return Ok(Err(held("exact saved transcript not verified")));
-    }
-    // A headless lane attests the saved model, so a pane transcript without one cannot be woken here.
-    let Some(model) = exact.model else {
-        return Ok(Err(held("exact saved transcript and model not verified")));
-    };
-    Ok(Ok(Retired {
-        session: session.to_owned(),
-        file,
-        cwd,
-        goal,
-        model,
-        prior: None,
-    }))
-}
-
-/// `parseRef(id)?.id === id` for a bare Herdr pane: `^w[0-9A-Za-z]+:p[0-9A-Za-z]+$`.
-fn herdr_pane(id: &str) -> bool {
-    let word = |part: &str, head: char| {
-        part.strip_prefix(head)
-            .is_some_and(|rest| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphanumeric()))
-    };
-    id.split_once(':')
-        .is_some_and(|(workspace, pane)| word(workspace, 'w') && word(pane, 'p'))
-}
-
-/// No other registered lane, live headless broker or live pane writer owns the session.
+/// No other registered lane or live headless broker owns the session.
 async fn owned_elsewhere(state: &Path, lane: &Lane, retired: &Retired) -> Result<bool> {
     let scan = Registry::new(state).scan()?;
     let prior = lane.session_ref();
@@ -380,32 +274,12 @@ async fn owned_elsewhere(state: &Path, lane: &Lane, retired: &Retired) -> Result
         return Ok(true);
     }
     for (reference, seen) in headless::hosts(state).await? {
-        if retired
-            .prior
-            .as_ref()
-            .is_some_and(|prior| prior.id == reference.id)
-        {
+        if retired.prior.id == reference.id {
             return Ok(true);
         }
         if seen.session_id.as_deref() == Some(retired.session.as_str()) || seen.status == "unknown"
         {
             return Ok(true);
-        }
-    }
-    if let Ok(entries) = std::fs::read_dir(state.join("sessions")) {
-        for entry in entries.flatten() {
-            let Ok(raw) = super::util::read_limited(&entry.path(), super::util::RECORD_LIMIT)
-            else {
-                continue;
-            };
-            let Ok(pane) = serde_json::from_slice::<Json>(&raw) else {
-                continue;
-            };
-            if pane.str("sessionId") == Some(retired.session.as_str())
-                && super::registry::int_field(&pane, "pid").is_some_and(signalable)
-            {
-                return Ok(true);
-            }
         }
     }
     Ok(false)
@@ -521,24 +395,19 @@ async fn start_exact(
         .as_ref()
         .and_then(SessionRef::runtime)
         .map(str::to_owned);
-    let pane = prior.as_ref().and_then(SessionRef::id).map(str::to_owned);
     if is_pending(lane.epoch()) {
         *reserved = true;
-        // An unattested Herdr wake from an earlier monitor needs the terminal runtime this binary no longer drives.
+        // An unattested non-headless wake from an earlier monitor needs a runtime this binary no longer drives.
         if runtime.as_deref() != Some("headless") {
             return Ok(held("earlier wake requires inspection"));
         }
         return attest(state, launch, &lane, None).await;
     }
-    let retired = match (runtime.as_deref(), pane) {
-        (Some("headless"), _) => {
-            let prior = HeadlessRef::of(&lane).ok_or_else(|| anyhow!("invalid headless ref"))?;
-            retired_headless(state, launch, &lane, prior)?
-        }
-        (Some("herdr"), Some(pane)) if lane.session().is_some() && herdr_pane(&pane) => {
-            retired_pane(state, launch, &lane, &pane)?
-        }
-        _ => Err(held("no exact Herdr session registered")),
+    let retired = if runtime.as_deref() == Some("headless") {
+        let prior = HeadlessRef::of(&lane).ok_or_else(|| anyhow!("invalid headless ref"))?;
+        retired_headless(state, launch, &lane, prior)?
+    } else {
+        Err(held("lane uses the removed herdr/hc runtime"))
     };
     let retired = match retired {
         Ok(retired) => retired,
@@ -607,7 +476,7 @@ async fn launch_retired(
         return Ok(held("lane changed before wake"));
     };
     *reserved = true;
-    let group = retired.prior.as_ref().and_then(|prior| prior.group.clone());
+    let group = retired.prior.group.clone();
     let reference = headless::reserve(state, lane.key(), cwd, group)?;
     let bound = registry
         .transition(&intent, |current| {
@@ -615,10 +484,7 @@ async fn launch_retired(
                 return Ok(None);
             }
             let mut next = current;
-            // A Herdr pane's tab does not describe the new native session; a headless row keeps its fields.
-            if retired.prior.is_none() {
-                next.0.remove("tab");
-            }
+            // A headless row keeps its fields.
             next.0.set("sessionRef", reference.json());
             next.0.set("pane", Json::string(&reference.id));
             next.0.set("cwd", Json::string(&retired.cwd));
@@ -706,7 +572,40 @@ mod tests {
         assert!(!is_pending(Some("x")) && !is_pending(None));
         assert_eq!(completed("discord-wake-pending:bound:e"), Some("e"));
         assert_eq!(completed("discord-wake-pending:e"), None);
-        assert!(herdr_pane("w1:p2") && !herdr_pane("w1:x2") && !herdr_pane("w:p2"));
+    }
+
+    #[tokio::test]
+    async fn a_removed_runtime_lane_is_held_without_reservation() {
+        use std::os::unix::fs::DirBuilderExt as _;
+        let state = std::env::temp_dir().join(format!("cataly-lane-wake-{}", uuid().unwrap()));
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(state.join("lanes"))
+            .unwrap();
+        let row = r#"{"key":"aa","thread":"discord:1","sessionRef":{"runtime":"herdr","id":"w1:p1"},"session":"s1","openedAt":"2026-01-01T00:00:00.000Z"}"#;
+        std::fs::write(state.join("lanes/aa.json"), row).unwrap();
+        let launch = Launch {
+            command: wake_command(&["omp".to_owned(), "{prompt}".to_owned()]),
+            sessions_dir: state.join("sessions"),
+            guard: Guard {
+                mem_free_min_pct: 0.0,
+                disk_free_min_gb: 0.0,
+                panes_max: 0.0,
+            },
+            lane_env: BTreeMap::new(),
+            wake_config: state.join("wake.yml"),
+            broker: Vec::new(),
+            base_env: BTreeMap::new(),
+        };
+        let lane = Registry::new(&state).read("aa").unwrap().unwrap();
+        let mut reserved = false;
+        let wake = start_exact(&state, &launch, &lane, &mut reserved).await;
+        let after = std::fs::read_to_string(state.join("lanes/aa.json")).unwrap();
+        std::fs::remove_dir_all(&state).ok();
+        assert_eq!(wake.unwrap(), Wake::Held);
+        assert!(!reserved);
+        assert_eq!(after, row, "nothing is reserved or rewritten");
     }
 
     #[test]

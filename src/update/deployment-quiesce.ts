@@ -39,7 +39,7 @@ export function verifyQuiesceCheckpoint(
     value["deploymentId"] !== record.id ||
     value["commit"] !== record.commit ||
     value["sourceHash"] !== record.sourceHash ||
-    value["pane"] !== runtime.pane ||
+    value["ref"] !== runtime.ref ||
     value["sessionId"] !== runtime.sessionId ||
     value["pid"] !== runtime.pid ||
     value["startTicks"] !== runtime.startTicks ||

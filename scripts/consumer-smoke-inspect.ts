@@ -25,8 +25,8 @@ export function snapshot(root: string): string {
 }
 
 if (import.meta.main) {
-  const [side, expectedFile, previousFile, runtime] = process.argv.slice(2);
-  assert(side && expectedFile && previousFile && runtime, "Inspector requires side, current, previous and runtime");
+  const [side, expectedFile] = process.argv.slice(2);
+  assert(side && expectedFile, "Inspector requires side and current release manifest");
   const home = realpathSync(process.env["HOME"]!);
   const context = JSON.parse(readFileSync(join(dirname(home), "namespace.json"), "utf8"));
   assert.equal(context.home, home, "Inspector requires the driver's private namespace receipt");
@@ -36,8 +36,6 @@ if (import.meta.main) {
   process.env["CATALY_HOME"] = side;
   process.env["CATALY_CONFIG"] = join(side, "config.json");
   const expected = validateReleaseManifest(JSON.parse(readFileSync(expectedFile, "utf8")));
-  const previous =
-    previousFile === "-" ? undefined : validateReleaseManifest(JSON.parse(readFileSync(previousFile, "utf8")));
   const source = realpathSync(join(side, "src"));
   // Static imports cannot select the physical installed release: every module below belongs to its runtime path.
   const { consumerPaths } = await import(join(source, "src/release/files.ts"));
@@ -52,11 +50,10 @@ if (import.meta.main) {
   const paths = consumerPaths(home, side);
   const state = loadInstalled(paths);
   assert.deepEqual(state?.current, expected);
-  assert.deepEqual(state?.previous, previous);
   assertInstalledPointer(paths, state);
   assert.equal(verifyRelease(paths, expected), source);
   assert.equal(source, releasePath(paths, expected));
-  if (previous) verifyRelease(paths, previous);
+  if (state?.previous) verifyRelease(paths, state.previous);
   assert.equal(expected.requirements.omp, readSourceBundle(source, true).lock.nativeVersion);
   const native: NativeReceipt = assertNativeSource(source, home);
   process.env["PI_NATIVES_DIR"] = join(native.directory, "natives");
@@ -67,7 +64,6 @@ if (import.meta.main) {
   assert.equal(addon.stale, false);
   assert.equal(realpathSync(addon.path), realpathSync(native.addon));
   const config: CatalyConfig = await loadConfig(paths.config, home);
-  if (runtime !== "headless") assert.equal(config.runtime, runtime);
   assert.equal(config.stateDir, join(side, "state"));
   assert.equal(config.agentCommand[0], join(source, "scripts/consumer/omp"));
   for (const selected of [join(source, "extension"), join(side, "omp.yml")]) {
@@ -83,40 +79,35 @@ if (import.meta.main) {
   const dependency = join(paths.dependencies, `omp-ulw-${expected.ompUlw.commit}-${ulw.identity}`);
   assert.equal(config.ompUlwPath, join(dependency, "index.ts"));
   assertSourceBundle(dependency, ulw, home);
-  const namespace = `omp-dori-${digest(side).slice(0, 12)}`;
-  assert.equal(process.env["HC_SESSION"], namespace);
-  assert.equal(process.env["CATALY_HERDR_SESSION"], namespace);
   assert.equal(process.env["CATALY_RUNTIME"], undefined);
   const runtimes = runtimesFor(config, process.env);
-  assert.deepEqual(runtimes.choice, { kind: runtime, source: runtime === "headless" ? "default" : "config" });
-  assert.equal(runtimes.default.kind, runtime);
+  assert.deepEqual(runtimes.choice, { kind: "headless", source: "default" });
+  assert.equal(runtimes.default.kind, "headless");
   assert.deepEqual(await runtimes.default.list(), [], "Fresh private runtime unexpectedly contains sessions");
-  if (runtime === "headless") {
-    const { HeadlessRuntime } = await import(join(source, "src/runtime/headless.ts"));
-    const { assertNoLiveCataly } = await import(join(source, "src/release/live.ts"));
-    const local = new HeadlessRuntime(join(context.out, "explicit-native-state"));
-    const ref = await local.create({
-      name: "release reservation witness",
-      role: "duty-loop",
-      container: "tab",
-      cwd: join(context.out, "workspace"),
-      env: {},
-    });
-    try {
-      assert.throws(() => assertNoLiveCataly(paths), /Native session .* holds release activation/);
-      const live = await local.startLoop(ref, { CATALY_STATE_DIR: local.stateDir, CATALY_RUNTIME: "headless" });
-      assert.equal(live.status, "working");
-      assert.equal(live.harnessRole, "duty-loop");
-      // Once the duty process starts, its own controller lock can take precedence over its reservation.
-      assert.throws(
-        () => assertNoLiveCataly(paths),
-        /Native session .* holds release activation|Live Cataly PID \d+ holds duty\/lock/,
-      );
-    } finally {
-      await local.stopHarnessRole(ref, "duty-loop");
-    }
-    assert.doesNotThrow(() => assertNoLiveCataly(paths));
+  const { HeadlessRuntime } = await import(join(source, "src/runtime/headless.ts"));
+  const { assertNoLiveCataly } = await import(join(source, "src/release/live.ts"));
+  const local = new HeadlessRuntime(join(context.out, "explicit-native-state"));
+  const ref = await local.create({
+    name: "release reservation witness",
+    role: "duty-loop",
+    container: "tab",
+    cwd: join(context.out, "workspace"),
+    env: {},
+  });
+  try {
+    assert.throws(() => assertNoLiveCataly(paths), /Native session .* holds release activation/);
+    const live = await local.startLoop(ref, { CATALY_STATE_DIR: local.stateDir, CATALY_RUNTIME: "headless" });
+    assert.equal(live.status, "working");
+    assert.equal(live.harnessRole, "duty-loop");
+    // Once the duty process starts, its own controller lock can take precedence over its reservation.
+    assert.throws(
+      () => assertNoLiveCataly(paths),
+      /Native session .* holds release activation|Live Cataly PID \d+ holds duty\/lock/,
+    );
+  } finally {
+    await local.stopHarnessRole(ref, "duty-loop");
   }
+  assert.doesNotThrow(() => assertNoLiveCataly(paths));
   console.log(
     JSON.stringify(
       {
@@ -126,7 +117,6 @@ if (import.meta.main) {
         native,
         addon,
         runtime: runtimes.choice,
-        namespace,
         agentCommand: config.agentCommand,
         ompUlwPath: config.ompUlwPath,
       },

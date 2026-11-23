@@ -12,7 +12,6 @@ export const artifactFixture = async () => {
   mkdirSync(root);
   const config = {
     ...defaultConfig(state.dir),
-    runtime: "herdr" as const,
     stateDir: join(state.dir, "state"),
     defaultCwd: root,
     ompUlwPath: "",

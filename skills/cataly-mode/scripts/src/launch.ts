@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { headlessArgv } from "../../../../src/runtime/headless.ts";
 import { mayRunOmpArgv } from "../../../../src/runtime/omp-argv.ts";
-import { parseRef } from "../../../../src/runtime/types.ts";
+import { isLegacyRuntime } from "../../../../src/runtime/types.ts";
 import { configPath } from "./config.ts";
 import { renderTemplate } from "./launch-template.ts";
 import { type LaunchInput, runtimeForLaunch, validateLaunch } from "./launch-input.ts";
@@ -14,7 +14,7 @@ import { BRIEF_START, laneFooterFor, originalBrief } from "./launch-footer.ts";
 import { deliverModelBrief, modelLaunchCommand, modelLaunchProblem, unavailableLaunchModel } from "./launch-model.ts";
 import { selectionFor } from "./launch-selection.ts";
 import { laneStartCommand, openLaneSession, type OpenedLane, startLaunchRun } from "./launch-session.ts";
-import { type Lane, sameLaneGeneration, sessionFields, sessionOf, upgradeLane } from "./registry.ts";
+import { type Lane, sameLaneGeneration, sessionFields, sessionOf } from "./registry.ts";
 import { type ChosenRuntimes, iso, runtimesOf } from "./run.ts";
 import { Reports } from "./reports.ts";
 import { Lessons, renderLessons } from "./lessons.ts";
@@ -45,13 +45,13 @@ export const adoptLane = async (
     cwd: input.cwd ?? deps.config.defaultCwd,
     openedAt: iso(deps.clock),
   };
-  // `hc:t7` or `herdr:w1:p3` names its runtime; any other id is a herdr pane, as before runtimes existed.
-  const ref = parseRef(input.pane);
-  if (ref?.runtime === "headless") throw new LaunchError("headless lanes must be launched, not adopted");
-  const lane = ref ? { ...base, ...sessionFields(ref) } : upgradeLane({ ...base, pane: input.pane });
-  const registered = await withTerminalAdoptionLock(deps, parseOwnershipRef(input.pane), () =>
-    deps.registry.create(lane),
-  );
+  // `tern:42` or a bare Tern block id; a headless lane is launched, and herdr/hc were removed.
+  const ref = parseOwnershipRef(input.pane);
+  if (!ref) throw new LaunchError(`--pane must be a Tern block (tern:<id> or <id>), got ${input.pane}`);
+  if (ref.runtime === "headless") throw new LaunchError("headless lanes must be launched, not adopted");
+  if (isLegacyRuntime(ref.runtime)) throw new LaunchError("herdr and hc panes can no longer be adopted; use Tern");
+  const lane = { ...base, ...sessionFields(ref) };
+  const registered = await withTerminalAdoptionLock(deps, ref, () => deps.registry.create(lane));
   if (!registered.ok)
     throw new LaunchError(`terminal adoption held for lane ${input.key}; retry after terminal lifecycle work`);
   if (!registered.value) throw new LaunchError(`lane ${input.key} is already registered`);

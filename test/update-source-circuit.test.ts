@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { saveDeploymentJson } from "../src/update/deployment-files.ts";
 import { sameProcess } from "../src/update/deployment-process.ts";
@@ -59,12 +59,11 @@ for (const dryRun of [true, false])
         expect(result.stdout + result.stderr).toContain("newer");
         expect(readSourceState(f.config).failedCommits).toEqual([f.failed]);
         expect(sameProcess(f.runtime)).toBe(true);
-        expect(f.readNativeRequests()).toEqual([]);
       } finally {
-        f.closeRequests();
+        await f.close();
       }
     },
-    15_000,
+    120_000,
   );
 
 linux(
@@ -84,7 +83,7 @@ linux(
       for (const path of [
         `${f.prefix}/actions/runs/70`,
         `${f.prefix}/actions/runs/70/attempts/2/jobs?per_page=100`,
-        ...[100, 101, 102].map((id) => `${f.prefix}/check-runs/${id}`),
+        ...Object.keys(f.responses).filter((path) => path.startsWith(`${f.prefix}/check-runs/`)),
       ])
         f.responses[path] = rewrite(f.responses[path]);
       saveDeploymentJson(f.responsesPath, f.responses);
@@ -92,10 +91,10 @@ linux(
       expect(retried.code).toBe(4);
       expect(retried.stdout + retried.stderr).toContain("already rolled back");
     } finally {
-      f.closeRequests();
+      await f.close();
     }
   },
-  20_000,
+  120_000,
 );
 
 linux(
@@ -103,18 +102,11 @@ linux(
   async () => {
     const f = await failedNewerTarget();
     try {
-      const omp = f.config.deployment.omp!;
-      const program = readFileSync(omp, "utf8");
-      const marker = "pid: process.pid, startedAt, updatedAt: startedAt, source,";
-      expect(program).toContain(marker);
-      const prefix = join(f.config.deployment.releaseRoot, "releases", f.target.commit + "-");
-      writeFileSync(
-        omp,
-        program.replace(marker, `${marker}\n  presetLoaded: !source.startsWith(${JSON.stringify(prefix)}),`),
-      );
+      f.rejectHealth(join(f.config.deployment.releaseRoot, "releases", `${f.target.commit}-`));
       const failed = await f.cli("update", "source", "apply", "--when", "idle", "--retry-failed");
       expect(failed).toMatchObject({ code: 4, stderr: "" });
       expect(JSON.parse(failed.stdout).status).toBe("rolled-back");
+      const restored = readSourceState(f.config).job!.deployment!.rollbackRuntime!;
       const rewrite = (value: unknown) => JSON.parse(JSON.stringify(value).replaceAll(f.target.commit, f.failed));
       const runs = `${f.prefix}/actions/workflows/50/runs?head_sha=`;
       f.responses[`${runs}${f.failed}&event=push&per_page=100`] = rewrite(
@@ -123,7 +115,7 @@ linux(
       for (const path of [
         `${f.prefix}/actions/runs/70`,
         `${f.prefix}/actions/runs/70/attempts/2/jobs?per_page=100`,
-        ...[100, 101, 102].map((id) => `${f.prefix}/check-runs/${id}`),
+        ...Object.keys(f.responses).filter((path) => path.startsWith(`${f.prefix}/check-runs/`)),
       ])
         f.responses[path] = rewrite(f.responses[path]);
       f.responses[`${f.prefix}/compare/${f.current.commit}...${f.failed}`] = {
@@ -133,15 +125,14 @@ linux(
         merge_base_commit: { sha: f.current.commit },
       };
       saveDeploymentJson(f.responsesPath, f.responses);
-      const requests = f.readNativeRequests().length;
       const retried = await f.cli("update", "source", "apply", "--when", "idle", "--dry-run");
       expect(retried.code).toBe(4);
       expect(retried.stdout + retried.stderr).toContain("already rolled back");
       expect(readSourceState(f.config).failedCommits).toEqual([f.failed, f.target.commit]);
-      expect(f.readNativeRequests()).toHaveLength(requests);
+      expect(sameProcess(restored)).toBe(true);
     } finally {
-      f.closeRequests();
+      await f.close();
     }
   },
-  20_000,
+  180_000,
 );

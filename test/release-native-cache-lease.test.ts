@@ -159,12 +159,12 @@ test("a root process whose working directory cannot be read holds unless --trust
   expect(trusted.quarantined.map((entry) => entry.directory)).toEqual([x.directory]);
 });
 
-posix("direct legacy inspection leases its identity before executable or fence verification", async () => {
+posix("direct native inspection leases its identity before executable or fence verification", async () => {
   const c = pruneFixture();
   const x = c.native("legacy");
   const f = preparationFixture();
   await expect(
-    inspectRuntimeToolchain({ ...f.config, home: c.home }, f.record, join(x.directory, "bin/missing"), true),
+    inspectRuntimeToolchain({ ...f.config, home: c.home }, f.record, join(x.directory, "bin/missing")),
   ).rejects.toThrow("is gone from the native cache");
   const leases = join(c.home, ".cache/omp-cataly/native-leases", x.identity);
   expect(readdirSync(leases).some((name) => name.startsWith(`${process.pid}-`))).toBe(true);

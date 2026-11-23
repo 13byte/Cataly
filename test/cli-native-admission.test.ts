@@ -31,10 +31,7 @@ posix("a lightweight command in a consumer release still validates every native 
   mkdirSync(join(state, "lanes"), { recursive: true });
   writeFileSync(join(state, "lanes/fixture.json"), JSON.stringify({ key: "fixture", status: "working" }));
   const config = join(home, "config.json");
-  writeFileSync(
-    config,
-    JSON.stringify({ runtime: "herdr", stateDir: state, agentCommand: ["omp"], ompUlwPath: "/explicit-ulw" }),
-  );
+  writeFileSync(config, JSON.stringify({ stateDir: state, agentCommand: ["omp"], ompUlwPath: "/explicit-ulw" }));
   const cli = join(source, "skills/cataly-mode/scripts/src/cli.ts");
   const invoke = (preload?: string) =>
     Bun.spawnSync([process.execPath, ...(preload ? ["--preload", preload] : []), cli, "checkpoints", "fixture"], {

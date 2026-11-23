@@ -15,12 +15,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import {
-  headlessReleaseProfiles,
-  nativeMetadata,
-  supportsReleaseProfile,
-  terminalMetadata,
-} from "../src/release/capabilities.ts";
+import { headlessReleaseProfiles, nativeMetadata, terminalMetadata } from "../src/release/capabilities.ts";
 import { validateReleaseManifest } from "../src/release/manifest.ts";
 import type { ReleaseManifest } from "../src/release/types.ts";
 import { isReleaseVersion, releaseVersion } from "../src/release/version.ts";
@@ -237,20 +232,19 @@ export async function packageReleaseTree(
         arch: "x64",
         bun: "1.4.4",
         omp: native.lock.nativeVersion,
+        // Frozen v1 requirement value: updaters installed before the headless-only cutover validate it exactly.
         runtime: "herdr",
         messenger: "discord",
       },
       ompUlw: { repository: "https://github.com/dbc-hbin/omp-ulw.git", commit: pin },
     });
-    const historical = readFileSync(join(source, terminalMetadata));
     const profiles = headlessReleaseProfiles(manifest, readFileSync(join(source, nativeMetadata)));
-    for (const runtime of [manifest.requirements, { platform: "darwin", arch: "arm64", runtime: "hc" }]) {
-      if (!supportsReleaseProfile(manifest, runtime, historical))
-        throw new Error(
-          `Release must retain the historical ${runtime.platform}/${runtime.arch}/${runtime.runtime} profile`,
-        );
-      if (!profiles.some((profile) => profile.platform === runtime.platform && profile.arch === runtime.arch))
-        throw new Error(`Release must provide headless on ${runtime.platform}/${runtime.arch}`);
+    for (const host of [
+      { platform: "linux", arch: "x64" },
+      { platform: "darwin", arch: "arm64" },
+    ]) {
+      if (!profiles.some((profile) => profile.platform === host.platform && profile.arch === host.arch))
+        throw new Error(`Release must provide headless on ${host.platform}/${host.arch}`);
     }
     const assets: Record<string, Buffer> = {
       [manifest.archive.name]: archive,

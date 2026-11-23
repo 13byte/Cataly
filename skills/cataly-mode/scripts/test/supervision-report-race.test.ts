@@ -19,7 +19,8 @@ test.each(["done", "halted", "blocker"] as const)(
         key: "terminal-race",
         title: "race",
         thread: "none",
-        pane: "w:p7",
+        pane: "5007",
+        sessionRef: { runtime: "tern" as const, id: "5007" },
         brief: "/b.md",
         done: "file /done.md",
         openedAt: new Date(now - 60_000).toISOString(),
@@ -29,7 +30,7 @@ test.each(["done", "halted", "blocker"] as const)(
       await new Reports(state.dir).report(lane.key, "milestone", "initial", now);
       const module = (name: string) => JSON.stringify(pathToFileURL(join(import.meta.dir, `../src/${name}.ts`)).href);
       const config = join(state.dir, "config.json");
-      writeFileSync(config, JSON.stringify({ stateDir: state.dir, runtime: "herdr" }));
+      writeFileSync(config, JSON.stringify({ stateDir: state.dir, runtime: "tern" }));
       const hook = join(state.dir, "terminal.mjs");
       writeFileSync(
         hook,

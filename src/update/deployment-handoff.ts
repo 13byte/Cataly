@@ -1,30 +1,19 @@
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { readActiveDeployment } from "./deployment-active.ts";
-import { legacyDeploymentConfig, matchesDeploymentConfigHash } from "./deployment-config.ts";
 import { capturePointer, saveDeploymentJson } from "./deployment-files.ts";
-import { deploymentEnvArgs, legacyDeploymentSource } from "./deployment-legacy-brand.ts";
-import { legacyMonitorReceipts } from "./deployment-legacy-monitors.ts";
-import { monitorProcessReceipts, readRuntimeHealth } from "./deployment-monitor-receipts.ts";
-import { readMonitorSet } from "./deployment-monitors.ts";
-import { captureRuntime, nativeCli } from "./deployment-native.ts";
+import { captureRuntime } from "./deployment-harness.ts";
+import { leadRuntimeHealth, monitorProcessReceipts } from "./deployment-monitor-receipts.ts";
 import { admitRuntimeToolchains } from "./deployment-prior.ts";
-import {
-  actorEnv,
-  DeploymentBusy,
-  DeploymentHeld,
-  processIdentity,
-  sameProcess,
-  underProcess,
-} from "./deployment-process.ts";
+import { actorEnv, DeploymentBusy, DeploymentHeld, sameProcess } from "./deployment-process.ts";
 import type {
   DeploymentConfig,
   DeploymentRecord,
   MonitorProcessIdentity,
+  RuntimeHealth,
   RuntimeIdentity,
 } from "./deployment-types.ts";
 import { digest, sourceManifest } from "./source.ts";
-import { procCmdline } from "./proc.ts";
 
 export function prepareLauncher(config: DeploymentConfig, record: DeploymentRecord): string {
   const manifest = sourceManifest(record.releasePath);
@@ -36,15 +25,36 @@ export function prepareLauncher(config: DeploymentConfig, record: DeploymentReco
       throw new DeploymentHeld("configured shim target is outside admitted release source");
   }
   const configPath = join(record.directory, "config.json");
-  const legacy = legacyDeploymentSource(record.releasePath, record.sourceHash);
-  saveDeploymentJson(configPath, legacy ? legacyDeploymentConfig(config) : config);
+  saveDeploymentJson(configPath, config);
   const path = join(record.directory, "managed-restart.sh");
   const quote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
-  // Fixed controller code remains available even if the stable source pointer rolls back to a legacy checkout.
-  const environment = deploymentEnvArgs(actorEnv(config), legacy).map(quote).join(" ");
+  // Fixed controller code remains available even if the stable source pointer rolls back.
+  const environment = Object.entries(actorEnv(config))
+    .map(([key, value]) => quote(`${key}=${value}`))
+    .join(" ");
   const launcher = `#!/bin/sh\ncd ${quote(record.directory)} || exit 2\nexec /usr/bin/env -i ${environment} ${quote(config.bun)} ${quote(join(record.releasePath, "src/update/deployment-launcher.ts"))} ${quote(configPath)} "$@"\n`;
   writeFileSync(path, launcher, { mode: 0o755 });
   return path;
+}
+
+/** Fresh health from this lead's extension, loaded from `source`. */
+export function convergedHealth(
+  config: DeploymentConfig,
+  runtime: RuntimeIdentity,
+  source: string,
+  since = Number.NEGATIVE_INFINITY,
+): RuntimeHealth {
+  const health = leadRuntimeHealth(config.stateDir, runtime);
+  if (
+    !health ||
+    !health.presetLoaded ||
+    realpathSync(health.source) !== realpathSync(source) ||
+    Date.parse(health.updatedAt) < since ||
+    Date.now() - Date.parse(health.updatedAt) > 5_000 ||
+    health.extensionHash !== digest(readFileSync(join(source, "extension/index.ts")))
+  )
+    throw new DeploymentHeld("native lead code health has not converged on its source");
+  return health;
 }
 
 export async function captureHandoff(
@@ -52,44 +62,20 @@ export async function captureHandoff(
   record: DeploymentRecord,
   launcher?: string,
 ): Promise<RuntimeIdentity> {
-  const runtime = await captureRuntime(config, nativeCli(config), true);
+  const runtime = await captureRuntime(config, true);
   if (runtime.approvalPending) throw new DeploymentHeld("native Cataly has an approval; deployment is held");
   if (!launcher && runtime.busy) throw new DeploymentBusy("managed restart waits for the native idle boundary");
-  const health = readRuntimeHealth(config);
-  const bootstrap = !health || health.pid !== runtime.pid || health.startedAt !== runtime.startedAt;
-  if (bootstrap && !config.monitorBootstrapFile)
-    throw new DeploymentHeld("first legacy handoff needs trusted monitor bootstrap");
-  const monitors = bootstrap
-    ? readMonitorSet(config.monitorBootstrapFile!, config.sessionId, true)
-    : readMonitorSet(
-        join(config.stateDir, "monitors", `${encodeURIComponent(config.sessionId)}.json`),
-        config.sessionId,
-      );
   record.oldSource = realpathSync(config.liveSource);
   record.oldSourceHash = sourceManifest(record.oldSource).hash;
-  if (
-    !bootstrap &&
-    (!health ||
-      !health.presetLoaded ||
-      realpathSync(health.source) !== record.oldSource ||
-      health.extensionHash !== digest(readFileSync(join(record.oldSource, "extension/index.ts"))))
-  )
-    throw new DeploymentHeld("prior native loaded code differs from its source pointer");
-  const active = readActiveDeployment(config);
-  const priorRuntime = await admitRuntimeToolchains(config, record, runtime, active, launcher !== undefined);
-  record.oldMonitors =
-    bootstrap &&
-    active !== undefined &&
-    matchesDeploymentConfigHash(config, active.configHash) &&
-    active.sourceHash === record.oldSourceHash &&
-    active.runtime.sessionId === runtime.sessionId &&
-    active.runtime.sessionFile === runtime.sessionFile &&
-    active.runtime.startedAt === runtime.startedAt &&
-    sameProcess(active.runtime, runtime)
-      ? legacyMonitorReceipts(runtime.pid, active.monitorProcesses)
-      : monitorProcessReceipts(config, runtime, monitors, bootstrap);
-  record.monitors = monitors;
-  record.bootstrap = bootstrap;
+  const health = convergedHealth(config, runtime, record.oldSource);
+  const priorRuntime = await admitRuntimeToolchains(
+    config,
+    record,
+    runtime,
+    readActiveDeployment(config),
+    launcher !== undefined,
+  );
+  record.oldMonitors = monitorProcessReceipts(runtime, health);
   record.oldRuntime = priorRuntime;
   if (launcher)
     record.pointers = [
@@ -100,25 +86,19 @@ export async function captureHandoff(
   return priorRuntime;
 }
 
-/** Capture only observed monitor children, including a partially restored set after failed startup. */
-export function captureStartedMonitors(
+/** Capture only observed monitor children of the started lead, including a partially restored set. */
+export async function captureStartedMonitors(
   config: DeploymentConfig,
   record: DeploymentRecord,
-): readonly MonitorProcessIdentity[] {
-  const root = record.runtime ?? record.launchProcess;
-  if (!root || !sameProcess(root)) return record.runtimeMonitors ?? [];
-  const health = readRuntimeHealth(config);
-  if (!health || health.pid !== root.pid) return record.runtimeMonitors ?? [];
-  return health.monitors.map((monitor) => {
-    const identity = processIdentity(monitor.pid);
-    if (
-      !identity ||
-      monitor.pid === root.pid ||
-      identity.startTicks !== monitor.startTicks ||
-      !underProcess(monitor.pid, root.pid)
-    )
-      throw new DeploymentHeld("started monitor ownership differs");
-    const argv = procCmdline(monitor.pid).split("\0").filter(Boolean);
-    return { ...identity, name: monitor.name, argv };
-  });
+): Promise<readonly MonitorProcessIdentity[]> {
+  let root = record.runtime;
+  if (!root) {
+    try {
+      root = await captureRuntime(config, true);
+    } catch (error) {
+      if (!(error instanceof DeploymentHeld)) throw error;
+    }
+  }
+  const health = root && sameProcess(root) ? leadRuntimeHealth(config.stateDir, root) : undefined;
+  return root && health ? monitorProcessReceipts(root, health) : (record.runtimeMonitors ?? []);
 }

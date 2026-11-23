@@ -75,7 +75,7 @@ export function isolatedEnv(
   }
   const shortCache = join(runtime, "cache");
   const config = join(runtime, "cataly.json");
-  saveJson(config, { runtime: "herdr", stateDir: state, sessionsDir: sessions, defaultCwd: directory, hooks: {} });
+  saveJson(config, { stateDir: state, sessionsDir: sessions, defaultCwd: directory, hooks: {} });
   // OMP 18.18.8 filters these discovery providers before MCP startup; model auth/settings remain referenced.
   saveJson(join(runtime, "omp.json"), {
     update: { auto: false },
@@ -111,7 +111,6 @@ export function isolatedEnv(
     CATALY_CONFIG: config,
     CATALY_STATE_DIR: state,
     CATALY_HOME: join(runtime, "harness"),
-    CATALY_RUNTIME: "herdr",
     CATALY_TELEMETRY: "0",
     DO_NOT_TRACK: "1",
     PI_CODING_AGENT_DIR: capability === "model" ? (ctx.config.modelAgentDir ?? agent) : agent,
@@ -122,12 +121,6 @@ export function isolatedEnv(
     GIT_CEILING_DIRECTORIES: target,
     GIT_TERMINAL_PROMPT: "0",
   };
-  if (capability === "model") {
-    // A headless model child must never address (or overwrite records of) the parent's herdr/hc server.
-    const namespace = `cataly-update-${digest(directory).slice(0, 16)}`;
-    env["CATALY_HERDR_SESSION"] = namespace;
-    env["HC_SESSION"] = namespace;
-  }
   const names = capability === "model" ? ctx.config.modelEnv : capability === "reporter" ? ctx.config.reporterEnv : [];
   for (const name of names) {
     // The CLI translated the operator environment, but a retained reporter still requests its exact legacy keys.

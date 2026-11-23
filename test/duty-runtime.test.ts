@@ -1,15 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { dutyTick } from "../src/duty.ts";
-import type { SessionRef } from "../src/runtime/types.ts";
 import type { Lane } from "../src/store-types.ts";
-import { terminal } from "./fake-hc.ts";
-import { World } from "./fake.ts";
+import { World, href, sid } from "./fake.ts";
 
-const REF: SessionRef = { runtime: "hc", id: "t1", group: "g" };
+const ID = sid(7);
 const lane = (over: Partial<Lane> = {}): Lane => ({
-  key: "hc-lane",
-  sessionRef: REF,
-  paneId: "t1",
+  key: "native-lane",
+  sessionRef: href(ID),
+  paneId: ID,
   tabId: "",
   brief: "/b.md",
   cwd: "/w",
@@ -21,41 +19,25 @@ const lane = (over: Partial<Lane> = {}): Lane => ({
   ...over,
 });
 
-describe("the duty pass on hc lanes", () => {
+describe("the duty pass on native lanes", () => {
   test("an agent in error waits like a blocked one: never nudged (the lead hears of it at 40 minutes)", async () => {
     const w = new World();
-    const d = w.deps({ runtime: "hc" });
-    w.hc.terminals.set("t1", terminal({ status: { state: "error", app: "omo" } }));
+    const d = w.deps();
+    const pane = w.addPane(ID, "error");
     d.store.saveLane(lane());
     w.clock = 39 * 60_000;
     expect(await dutyTick(d)).toEqual([]);
-    expect(d.store.lane("hc-lane")!.nudges).toBe(0);
-    expect(w.hc.sent).toEqual([]);
+    expect(d.store.lane("native-lane")!.nudges).toBe(0);
+    expect(pane.received).toEqual([]);
   });
 
-  test("a lane under migration is left alone: not lost, not nudged, its activity stamp untouched", async () => {
+  test("a legacy record still marked as under migration is left alone: not lost, not nudged", async () => {
     const w = new World();
-    const d = w.deps({ runtime: "hc" });
+    const d = w.deps();
     d.store.saveLane(lane({ migration: true }));
     w.clock = 60 * 60_000;
     expect(await dutyTick(d)).toEqual([]);
-    expect(d.store.lane("hc-lane")).toMatchObject({ status: "working", nudges: 0, lastActivityAt: 0 });
-    expect(w.hc.calls).toEqual([]);
-  });
-
-  test("a migration that starts during the probe is seen by the re-read before saving", async () => {
-    const w = new World();
-    const d = w.deps({ runtime: "hc" });
-    d.store.saveLane(lane());
-    const exec = w.hc.exec;
-    w.hc.terminals.set("t1", terminal({ state: "finished" }));
-    Object.defineProperty(w.hc, "exec", {
-      value: async (cmd: string, argv: readonly string[]) => {
-        d.store.saveLane({ ...d.store.lane("hc-lane")!, migration: true });
-        return exec(cmd, argv);
-      },
-    });
-    expect(await dutyTick(d)).toEqual([]);
-    expect(d.store.lane("hc-lane")!.status).toBe("working");
+    expect(d.store.lane("native-lane")).toMatchObject({ status: "working", nudges: 0, lastActivityAt: 0 });
+    expect(w.calls).toEqual([]);
   });
 });

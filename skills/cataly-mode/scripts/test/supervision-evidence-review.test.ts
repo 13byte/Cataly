@@ -8,7 +8,7 @@ import { type Lane, Registry } from "../src/registry.ts";
 import { Reports } from "../src/reports.ts";
 import type { Runner } from "../src/run.ts";
 import { Supervision } from "../src/supervision.ts";
-import { depsFor, fakeClock, newWorld, type TestState, withState } from "./fakes.ts";
+import { depsFor, fakeClock, nativeLane, newWorld, type TestState, withState } from "./fakes.ts";
 
 let state: TestState;
 const start = Date.parse("2026-01-01T00:00:00Z");
@@ -143,12 +143,11 @@ for (const reached of [false, true]) {
   test(`the production freshness path exposes Git failure and ${reached ? "reached" : "unavailable"} ceilings`, async () => {
     mkdirSync(join(state.dir, ".git"));
     const world = newWorld();
-    world.screen = "Working 21m";
-    world.panes.push({ pane_id: "w:p7", workspace_id: "w", agent: "omp", agent_status: "working" });
+    const native = nativeLane(world, 7, { status: "working", activeSince: start - 21 * 60_000 });
     const deps = depsFor(world, fakeClock(start), state.dir, {
       supervision: { defaults: { tokens: 1, ...(reached ? { wallMinutes: 0 } : {}) } },
     });
-    const active = { ...lane(), pane: "w:p7" };
+    const active = { ...lane(), ...native };
     await deps.registry.write(active);
     await new Reports(state.dir).report(active.key, "milestone", "started", start);
     const original = deps.run;

@@ -7,6 +7,8 @@ import type { SessionRef } from "../src/runtime/types.ts";
 import type { Lane } from "../src/store-types.ts";
 import { World } from "./fake.ts";
 
+const UUID = "00000000-0000-4000-8000-000000000003";
+
 const lane = (key: string, sessionRef: SessionRef, status: Lane["status"] = "working"): Lane => ({
   key,
   sessionRef,
@@ -32,6 +34,7 @@ function setup() {
 describe("resolveTarget: prefixed ref, role, open lane key, bare herdr pane", () => {
   test.each([
     ["hc:t7", { runtime: "hc", id: "t7" }],
+    [`headless:${UUID}`, { runtime: "headless", id: UUID }],
     ["herdr:w1:p3", { runtime: "herdr", id: "w1:p3" }],
     ["w1:p3", { runtime: "herdr", id: "w1:p3" }],
     ["lead", { runtime: "herdr", id: "w1:p1" }],
@@ -52,6 +55,7 @@ describe("resolveTarget: prefixed ref, role, open lane key, bare herdr pane", ()
     ["nobody", "unknown target nobody"],
     ["hc:w1:p3", "not a session ref"],
     ["herdr:t7", "not a session ref"],
+    ["headless:t7", "not a session ref"],
     ["hourly-loop", "no hourly-loop session registered"],
   ])("%s is refused: %s", (target, why) => {
     expect(() => resolveTarget(setup(), target)).toThrow(Refusal);

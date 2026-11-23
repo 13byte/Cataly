@@ -6,7 +6,7 @@ import { dutyTick } from "../src/duty.ts";
 import { hhmm } from "../src/fit.ts";
 import { done, ready, report, startLane } from "../src/lanes.ts";
 import { HOUR, loopTick } from "../src/loop.ts";
-import { setup } from "./loop-setup.ts";
+import { LEAD, setup } from "./loop-setup.ts";
 
 describe("hourly loop", () => {
   test("starts by priority, then age, then id, within the per-run and lane budget; skips a second run in the hour", async () => {
@@ -23,7 +23,7 @@ describe("hourly loop", () => {
     expect(run.started).toEqual(["urgent (p1)", "old-five (p5)"]);
     expect(run.held).toEqual(["2 item(s) waiting: 1 free of 3 lanes, max 2/run"]);
     expect(d.store.item("urgent")!.status).toBe("running");
-    expect(w.panes.get(d.store.lane("urgent")!.paneId)!.ran[0]).toStartWith("omo 'Read your brief at ");
+    expect(w.panes.get(d.store.lane("urgent")!.paneId)!.received[0]).toStartWith("Read your brief at ");
     expect(lead.received.filter((m) => m.startsWith("[START"))).toHaveLength(2);
     const loopMsg = lead.received.find((m) => m.startsWith("[LOOP"))!;
     expect(loopMsg).toContain("lanes 2/3");
@@ -173,18 +173,18 @@ describe("hourly loop", () => {
   });
 
   test("failed lane starts are recorded, each uses a slot, and the run still reports what is waiting; with no lead nothing starts", async () => {
-    const failing = setup({
-      exec: (inner) => async (cmd, argv) =>
-        cmd === "herdr" && argv[0] === "tab" ? { code: 1, stdout: "", stderr: "server down" } : inner(cmd, argv),
-    });
+    const failing = setup();
+    failing.w.onCreate = () => {
+      throw new Error("server down");
+    };
     failing.add("one");
     failing.add("two");
     failing.add("three");
     const run = await failing.tick({ maxStarts: 2 });
     expect(run.started).toEqual([]);
     expect(run.findings).toEqual([
-      expect.stringContaining("start one failed: herdr tab create"),
-      expect.stringContaining("start three failed: herdr tab create"),
+      expect.stringContaining("start one failed: server down"),
+      expect.stringContaining("start three failed: server down"),
     ]);
     expect(run.held).toEqual(["1 item(s) waiting: 3 free of 3 lanes, max 2/run"]);
     expect(failing.d.store.item("one")).toMatchObject({ status: "open", attempts: 0, startFailures: 1 });
@@ -220,12 +220,8 @@ describe("hourly loop", () => {
 
 describe("hardening", () => {
   test("a lane that opened but whose [START] could not reach the lead counts as started", async () => {
-    const { d, add, tick } = setup({
-      exec: (inner) => async (cmd, argv) =>
-        cmd === "herdr" && argv[0] === "agent" && argv[2] === "w1:p1"
-          ? { code: 1, stdout: "", stderr: "lead pane hung" }
-          : inner(cmd, argv),
-    });
+    const { w, d, add, tick } = setup();
+    w.deliverFails.set(LEAD, "lead pane hung");
     add("solo");
     const run = await tick({ maxStarts: 1 });
     expect(run.started).toEqual(["solo (p5)"]);

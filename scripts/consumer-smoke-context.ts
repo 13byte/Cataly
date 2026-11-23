@@ -2,15 +2,10 @@ import assert from "node:assert/strict";
 import { existsSync, lstatSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, sep } from "node:path";
-import { digest } from "../src/update/source.ts";
 import { snapshot } from "./consumer-smoke-inspect.ts";
 
 /** All writes and all child selections belong to one previously nonexistent namespace. */
-export function createConsumerSmokeContext(
-  rawOut: string,
-  tar: string,
-  legacy?: { readonly runtime: string; readonly binary: string },
-) {
+export function createConsumerSmokeContext(rawOut: string, tar: string) {
   const out = join(realpathSync(dirname(rawOut)), basename(rawOut));
   assert(!lstatSync(out, { throwIfNoEntry: false }), "Output namespace must not exist");
   for (const name of [
@@ -31,14 +26,12 @@ export function createConsumerSmokeContext(
     assert(within === ".." || within.startsWith(`..${sep}`), `Output must be outside the real ${name}`);
   }
   const home = join(out, "consumer-home");
-  const side = join(home, ".omp-dori");
+  const side = join(home, ".omp-cataly");
   const tools = join(out, "tools");
   const compilerTools = join(out, "compiler-tools");
-  const terminalTools = join(out, "legacy-tools");
   const cwd = join(out, "workspace");
-  const namespace = `omp-dori-${digest(side).slice(0, 12)}`;
   mkdirSync(out, { mode: 0o700 });
-  for (const path of [home, tools, terminalTools, cwd, join(out, "logs"), join(out, "tmp")]) {
+  for (const path of [home, tools, cwd, join(out, "logs"), join(out, "tmp")]) {
     mkdirSync(path, { mode: 0o700 });
   }
   const binaries = {
@@ -68,8 +61,7 @@ export function createConsumerSmokeContext(
       symlinkSync(realpathSync(path), join(compilerTools, name));
     }
   }
-  if (legacy) symlinkSync(legacy.binary, join(terminalTools, legacy.runtime));
-  // An allowlist, not a spread: no inherited DORI/HC/HERDR/OMP selection, credentials or provider settings cross.
+  // An allowlist, not a spread: no inherited DORI/CATALY/OMP selection, credentials or provider settings cross.
   const env = {
     HOME: home,
     PATH: `${tools}:/usr/bin:/bin`,
@@ -86,8 +78,6 @@ export function createConsumerSmokeContext(
     // Running OMP writes its session and model databases. Keep those separate from the primary discovery sentinels.
     PI_CODING_AGENT_DIR: join(out, "agent"),
     PI_CONFIG_DIR: ".omp-smoke",
-    HC_SESSION: namespace,
-    CATALY_HERDR_SESSION: namespace,
     CATALY_INSTALL_MODE: "side",
     CATALY_TELEMETRY: "0",
     GIT_MASTER: "1",
@@ -100,13 +90,11 @@ export function createConsumerSmokeContext(
   async function run(
     label: string,
     argv: string[],
-    options: { readonly allowFailure?: boolean; readonly legacy?: boolean; readonly producer?: boolean } = {},
+    options: { readonly allowFailure?: boolean; readonly producer?: boolean } = {},
   ) {
     const child = Bun.spawn(argv, {
       cwd,
-      env: options.legacy
-        ? { ...env, PATH: `${terminalTools}:${env.PATH}`, DORI_INSTALL_MODE: "side" }
-        : { ...env, ...(options.producer ? compilerEnv : undefined) },
+      env: { ...env, ...(options.producer ? compilerEnv : undefined) },
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",
@@ -137,10 +125,9 @@ export function createConsumerSmokeContext(
   const primaryRoots = [join(home, ".dori"), join(home, ".agents"), join(home, ".omp")];
   const primary = primaryRoots.map(snapshot);
   const unchangedPrimary = () => assert.deepEqual(primaryRoots.map(snapshot), primary, "Primary sentinel tree changed");
-  writeFileSync(
-    join(out, "namespace.json"),
-    `${JSON.stringify({ out, home, side, namespace, env, primary }, null, 2)}\n`,
-    { flag: "wx", mode: 0o600 },
-  );
+  writeFileSync(join(out, "namespace.json"), `${JSON.stringify({ out, home, side, env, primary }, null, 2)}\n`, {
+    flag: "wx",
+    mode: 0o600,
+  });
   return { out, home, side, tools, env, run, unchangedPrimary };
 }

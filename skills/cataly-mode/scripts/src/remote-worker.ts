@@ -7,7 +7,6 @@ import {
   type Session,
 } from "../../../../src/remote/client.ts";
 import { remotePolicy } from "../../../../src/remote/policy.ts";
-import { readRequest } from "../../../../src/remote/transport.ts";
 import { HeadlessRuntime } from "../../../../src/runtime/headless.ts";
 import type { SessionRef } from "../../../../src/runtime/types.ts";
 import type { FlowDeps } from "./done-flow.ts";
@@ -33,6 +32,7 @@ const OPERATIONS = new Set([
   "wake",
 ]);
 
+// Stored lanes may still name a legacy herdr/hc session; that is a parseable owner, not an unreadable row.
 const validRef = (raw: unknown): boolean => {
   if (raw === undefined) return true;
   const ref = object(raw);
@@ -96,11 +96,10 @@ async function requireStandaloneClose(deps: FlowDeps, target: Session, ref: Sess
   throw new Error(`Remote close held for registered lane ${owner.key}; ${guidance}`);
 }
 
-export async function remoteOperation(deps: FlowDeps, request: Request, peer: boolean): Promise<unknown> {
+/** Same-host operations on live OMP sessions: headless lanes via their supervisor, others via their endpoint. */
+export async function remoteOperation(deps: FlowDeps, request: Request): Promise<unknown> {
   const { stateDir } = deps.config;
   if (!OPERATIONS.has(request.op)) throw new Error("Unsupported Cataly remote operation");
-  const policy = remotePolicy(stateDir);
-  if (peer && !policy.control) throw new Error("Remote control is disabled on this Cataly installation");
   if (request.op === "open") return await openRemoteSession(deps, request);
   if (request.op === "sessions") {
     const lanes = await deps.registry.list();
@@ -111,24 +110,14 @@ export async function remoteOperation(deps: FlowDeps, request: Request, peer: bo
   }
   if (!request.session || request.session.length > 128) throw new Error("An OMP session ID is required");
   if (request.op === "wake") {
-    if (!policy.wake) throw new Error("Session wake is disabled on this Cataly installation");
+    if (!remotePolicy(stateDir).wake) throw new Error("Session wake is disabled on this Cataly installation");
     return await wakeRemoteSession(deps, request.session);
   }
   const target = selectSession(await liveSessions(stateDir), request.session);
   if (request.generation !== undefined && request.generation !== target.generation)
     throw new Error("OMP session generation changed; inspect its current state first");
   if (request.op === "info") return target;
-  if (request.op === "attach") {
-    if (!target.pane || !/^t[0-9a-z]+$/.test(target.pane))
-      return { mode: "transcript", session: target.session, generation: target.generation };
-    // Also attest the pane's process, not just the numeric terminal ID in metadata.
-    const ref = { runtime: "hc", id: target.pane } as const;
-    const bound = await runtimesOf(deps).for(ref).probe(ref);
-    if (!target.pid || !bound.foreground?.some((proc) => proc.pid === target.pid) || bound.shellInFront)
-      throw new Error("The terminal no longer owns the requested native OMP session");
-    if (!bound.rootPid) throw new Error("Could not verify the target terminal process");
-    return { terminal: target.pane, rootPid: bound.rootPid, session: target.session };
-  }
+  if (request.op === "attach") return { mode: "transcript", session: target.session, generation: target.generation };
   const targetRef = typeof target.pane === "string" ? parseOwnershipRef(target.pane) : undefined;
   const headless = targetRef?.runtime === "headless" ? targetRef : undefined;
   if (headless && !["read", "events"].includes(request.op)) {
@@ -187,17 +176,4 @@ export async function remoteOperation(deps: FlowDeps, request: Request, peer: bo
   const result = await call();
   if (request.op === "send") return { ...object(result), session: target.session, generation: target.generation };
   return result;
-}
-
-export async function acceptRemote(deps: FlowDeps): Promise<void> {
-  try {
-    // Reject before reading peer-controlled payloads while disabled; check again at execution.
-    if (!remotePolicy(deps.config.stateDir).control)
-      throw new Error("Remote control is disabled on this Cataly installation");
-    const request = await readRequest(process.stdin);
-    const data = await remoteOperation(deps, request, true);
-    console.log(JSON.stringify({ ok: true, data }));
-  } catch (error) {
-    console.log(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }));
-  }
 }

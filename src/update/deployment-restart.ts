@@ -1,10 +1,9 @@
+import { LegacyRuntimeError } from "../runtime/registry.ts";
 import { saveActiveDeployment } from "./deployment-active.ts";
 import { ownReleaseRoot } from "./deployment-files.ts";
 import { captureStartedMonitors } from "./deployment-handoff.ts";
+import { assertHeadlessRecord, startHarness } from "./deployment-harness.ts";
 import { observeDeploymentHealth, waitDeploymentHealth } from "./deployment-health.ts";
-import { launchRuntime } from "./deployment-launch.ts";
-import { nativeCli, stopRecordedMonitors, stopRuntime } from "./deployment-native.ts";
-import { forwardStopStarted, holdPendingNativeUiExit } from "./deployment-native-ui.ts";
 import { acquireRestartLock, DeploymentBusy, DeploymentHeld } from "./deployment-process.ts";
 import {
   deferRestartIntent,
@@ -13,34 +12,36 @@ import {
   readRestartIntent,
   saveRestartIntent,
 } from "./deployment-restart-state.ts";
-import { rollbackDeployment, waitLaunchedProcess } from "./deployment-rollback.ts";
+import { rollbackDeployment } from "./deployment-rollback.ts";
+import { forwardStopStarted, holdPendingStop, stopRecordedMonitors, stopRuntime } from "./deployment-stop.ts";
 import type { DeploymentConfig, DeploymentRecord } from "./deployment-types.ts";
 
-/** Model-watch enters here before any signal. Interrupted restarts reconcile their durable native identity first. */
+/** Restart the native harness on its current source. Interrupted restarts reconcile their durable identity first. */
 export async function restartDeployment(
   config: DeploymentConfig,
   signal?: AbortSignal,
-  beforeForwardStop?: (record: DeploymentRecord) => Promise<void> | Promise<() => void>,
+  beforeForwardStop?: (record: DeploymentRecord) => Promise<void> | Promise<() => void | Promise<void>>,
 ): Promise<DeploymentRecord> {
   ownReleaseRoot(config);
+  const pending = readRestartIntent(config);
+  if (pending) assertHeadlessRecord(config, pending);
   const releaseLock = acquireRestartLock(config);
   let record: DeploymentRecord | undefined;
   let completed = false;
   const persist = (value: DeploymentRecord): void => saveRestartIntent(config, value);
   try {
     record = readRestartIntent(config) ?? (await newRestartIntent(config, signal));
+    assertHeadlessRecord(config, record);
     completed = record.status === "healthy";
     if (record.status === "failed") return record;
-    const cli = nativeCli(config, signal);
     if (record.status === "rolled-back" || record.step === "rollback") {
-      const restored = record.status === "rolled-back" ? record : await rollbackDeployment(config, record, persist);
+      const restored =
+        record.status === "rolled-back" ? record : await rollbackDeployment(config, record, persist, signal);
       restored.rollbackRuntime = await observeDeploymentHealth(
         config,
-        cli,
         restored,
         restored.oldSource!,
         restored.rollbackLaunchRequestedAt ?? restored.oldRuntime!.startedAt,
-        restored.bootstrap === true,
         true,
       );
       saveActiveDeployment(config, restored, true);
@@ -49,14 +50,7 @@ export async function restartDeployment(
       return restored;
     }
     if (completed) {
-      record.runtime = await observeDeploymentHealth(
-        config,
-        cli,
-        record,
-        record.releasePath,
-        record.launchRequestedAt!,
-        record.bootstrap === true,
-      );
+      record.runtime = await observeDeploymentHealth(config, record, record.releasePath, record.launchRequestedAt!);
       saveActiveDeployment(config, record);
       persist(record);
       finishRestartIntent(config, record);
@@ -64,11 +58,18 @@ export async function restartDeployment(
     }
     persist(record);
     if (record.step === "prepare" || record.step === "stop") {
-      const admission = !forwardStopStarted(config, record) ? await beforeForwardStop?.(record) : undefined;
+      const admission = !forwardStopStarted(record) ? await beforeForwardStop?.(record) : undefined;
       record.status = "stopping";
       record.step = "stop";
       persist(record);
-      await stopRuntime(config, cli, record, persist, false, typeof admission === "function" ? admission : undefined);
+      await stopRuntime(
+        config,
+        record,
+        persist,
+        false,
+        typeof admission === "function" ? admission : undefined,
+        signal,
+      );
       await stopRecordedMonitors(config, record.oldMonitors ?? []);
       record.step = "start";
       persist(record);
@@ -76,27 +77,16 @@ export async function restartDeployment(
     if (signal?.aborted) throw new DeploymentHeld("managed restart interrupted after stop");
     if (record.step === "start") {
       record.status = "starting";
-      if (!record.launchRequestedAt) {
-        record.launchRequestedAt = new Date().toISOString();
-        persist(record);
-        await launchRuntime(config, cli, record);
-      }
-      const launched = await waitLaunchedProcess(config, record, record.launchRequestedAt);
-      if (launched) record.launchProcess = launched;
+      record.launchRequestedAt ??= new Date().toISOString();
+      persist(record);
+      const { cwd, sessionId } = record.oldRuntime!;
+      await startHarness(config, record.releasePath, record.toolchain!, cwd, sessionId, signal);
       record.step = "health";
       persist(record);
     }
     if (!record.launchRequestedAt) throw new DeploymentHeld("managed restart launch intent is absent");
-    record.runtime = await waitDeploymentHealth(
-      config,
-      cli,
-      record,
-      record.releasePath,
-      record.launchRequestedAt,
-      record.bootstrap === true,
-      signal,
-    );
-    if (!record.bootstrap) record.runtimeMonitors = captureStartedMonitors(config, record);
+    record.runtime = await waitDeploymentHealth(config, record, record.releasePath, record.launchRequestedAt, signal);
+    record.runtimeMonitors = await captureStartedMonitors(config, record);
     record.status = "healthy";
     record.step = "done";
     record.healthyAt = new Date().toISOString();
@@ -105,15 +95,15 @@ export async function restartDeployment(
     finishRestartIntent(config, record);
     return record;
   } catch (error) {
-    if (!record) throw error;
+    if (!record || error instanceof LegacyRuntimeError) throw error;
     record.error = error instanceof DeploymentHeld ? error.message : "managed restart failed";
-    if (holdPendingNativeUiExit(record)) {
+    if (holdPendingStop(record)) {
       persist(record);
       return record;
     }
-    if (!completed && forwardStopStarted(config, record)) {
+    if (!completed && forwardStopStarted(record)) {
       try {
-        const restored = await rollbackDeployment(config, record, persist);
+        const restored = await rollbackDeployment(config, record, persist, signal);
         saveActiveDeployment(config, restored, true);
         finishRestartIntent(config, restored);
         return restored;
@@ -126,7 +116,7 @@ export async function restartDeployment(
       }
     } else record.status = "held";
     persist(record);
-    if (error instanceof DeploymentBusy && !forwardStopStarted(config, record)) {
+    if (error instanceof DeploymentBusy && !forwardStopStarted(record)) {
       deferRestartIntent(config, record);
       throw error;
     }

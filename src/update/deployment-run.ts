@@ -1,21 +1,27 @@
 import { randomUUID } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { LegacyRuntimeError } from "../runtime/registry.ts";
 import { saveActiveDeployment } from "./deployment-active.ts";
 import { matchesDeploymentConfigHash } from "./deployment-config.ts";
 import { ownReleaseRoot, saveDeploymentJson, switchPointer } from "./deployment-files.ts";
 import { captureHandoff, captureStartedMonitors, prepareLauncher } from "./deployment-handoff.ts";
+import { assertHeadlessRecord, startHarness } from "./deployment-harness.ts";
 import { observeDeploymentHealth, waitDeploymentHealth } from "./deployment-health.ts";
 import { assertPreparedLayout, refreshBusyHandoff, verifyBusyHold } from "./deployment-hold.ts";
-import { launchRuntime } from "./deployment-launch.ts";
 import { waitForRestartLock } from "./deployment-lock.ts";
-import { nativeCli, stopRecordedMonitors, stopRuntime } from "./deployment-native.ts";
-import { assertRetryDeadline, forwardStopStarted, holdPendingNativeUiExit } from "./deployment-native-ui.ts";
 import { prepareRelease, validateDeploymentInput } from "./deployment-prepare.ts";
 import { acquireRestartLock, DeploymentBusy, DeploymentHeld, DeploymentRetryable } from "./deployment-process.ts";
 import { restartDeployment } from "./deployment-restart.ts";
 import { readRestartIntent } from "./deployment-restart-state.ts";
-import { rollbackDeployment, waitLaunchedProcess } from "./deployment-rollback.ts";
+import { rollbackDeployment } from "./deployment-rollback.ts";
+import {
+  assertRetryDeadline,
+  forwardStopStarted,
+  holdPendingStop,
+  stopRecordedMonitors,
+  stopRuntime,
+} from "./deployment-stop.ts";
 import type { DeploymentConfig, DeploymentInput, DeploymentRecord } from "./deployment-types.ts";
 import { digest } from "./source.ts";
 
@@ -26,7 +32,7 @@ export async function deployRelease(
   previous: DeploymentRecord | undefined,
   persist: (record: DeploymentRecord) => void,
   signal?: AbortSignal,
-  beforeForwardStop?: (record: DeploymentRecord) => Promise<void> | Promise<() => void>,
+  beforeForwardStop?: (record: DeploymentRecord) => Promise<void> | Promise<() => void | Promise<void>>,
 ): Promise<DeploymentRecord> {
   const inputHash = digest(JSON.stringify(input));
   const configHash = previous?.configHash ?? digest(JSON.stringify(config));
@@ -66,6 +72,7 @@ export async function deployRelease(
       durable.releasePath !== current.releasePath
     )
       throw new DeploymentHeld("durable deployment intent differs");
+    assertHeadlessRecord(config, durable);
     const deadline = current.retryDeadlineAt;
     if (
       deadline !== undefined &&
@@ -89,11 +96,13 @@ export async function deployRelease(
       current.releasePath !== join(config.releaseRoot, "releases", `${input.commit}-${input.sourceHash.slice(0, 16)}`)
     )
       throw new DeploymentHeld("deployment journal identity differs");
+    // A terminal-era journal names a pane actor; it is never resumed by the headless controller.
+    assertHeadlessRecord(config, current);
     ownReleaseRoot(config);
     resume();
-    assertRetryDeadline(config, current);
+    assertRetryDeadline(current);
     await waitForRestartLock(config, signal);
-    assertRetryDeadline(config, current);
+    assertRetryDeadline(current);
     if (readRestartIntent(config)) {
       try {
         const recovered = await restartDeployment(config, signal, beforeForwardStop);
@@ -105,16 +114,10 @@ export async function deployRelease(
     }
     releaseLock = acquireRestartLock(config);
     resume();
-    assertRetryDeadline(config, current);
+    assertRetryDeadline(current);
     if (current.status === "healthy") {
       if (!current.launchRequestedAt) throw new DeploymentHeld("healthy deployment has no launch receipt");
-      current.runtime = await observeDeploymentHealth(
-        config,
-        nativeCli(config, signal),
-        current,
-        current.releasePath,
-        current.launchRequestedAt,
-      );
+      current.runtime = await observeDeploymentHealth(config, current, current.releasePath, current.launchRequestedAt);
       current.healthyAt = new Date().toISOString();
       saveActiveDeployment(config, current);
       save(current);
@@ -122,7 +125,7 @@ export async function deployRelease(
     }
     if (current.status === "rolled-back" || current.status === "failed") return current;
     if (current.step === "rollback") {
-      const rolledBack = await rollbackDeployment(config, current, save);
+      const rolledBack = await rollbackDeployment(config, current, save, signal);
       saveActiveDeployment(config, rolledBack, true);
       return rolledBack;
     }
@@ -133,7 +136,7 @@ export async function deployRelease(
       current.preparedAt = new Date().toISOString();
       save(current);
     } else validateDeploymentInput(input);
-    if ((retryingHandoff || current.step === "stop") && !forwardStopStarted(config, current) && !current.quiesceHash) {
+    if ((retryingHandoff || current.step === "stop") && !forwardStopStarted(current) && !current.quiesceHash) {
       await refreshBusyHandoff(config, current);
       save(current);
     }
@@ -142,14 +145,13 @@ export async function deployRelease(
       await captureHandoff(config, current, launcher);
       save(current);
     }
-    const cli = nativeCli(config, signal);
     if (current.step === "prepare" || current.step === "stop") {
-      if (!forwardStopStarted(config, current)) assertPreparedLayout(config, current);
-      const admission = !forwardStopStarted(config, current) ? await beforeForwardStop?.(current) : undefined;
+      if (!forwardStopStarted(current)) assertPreparedLayout(config, current);
+      const admission = !forwardStopStarted(current) ? await beforeForwardStop?.(current) : undefined;
       current.status = "stopping";
       current.step = "stop";
       save(current);
-      await stopRuntime(config, cli, current, save, true, typeof admission === "function" ? admission : undefined);
+      await stopRuntime(config, current, save, true, typeof admission === "function" ? admission : undefined, signal);
       await stopRecordedMonitors(config, current.oldMonitors ?? []);
       current.step = "switch";
       save(current);
@@ -164,27 +166,23 @@ export async function deployRelease(
     }
     if (current.step === "start") {
       current.status = "starting";
-      if (!current.launchRequestedAt) {
-        current.launchRequestedAt = new Date().toISOString();
-        save(current);
-        await launchRuntime(config, cli, current, current.bootstrap === true);
-      }
-      const identity = await waitLaunchedProcess(config, current, current.launchRequestedAt);
-      if (identity) current.launchProcess = identity;
+      current.launchRequestedAt ??= new Date().toISOString();
+      save(current);
+      // The new release starts the whole harness in the old lead's working directory, resuming the old lead session.
+      const { cwd, sessionId } = current.oldRuntime!;
+      await startHarness(config, current.releasePath, current.toolchain!, cwd, sessionId, signal);
       current.step = "health";
       save(current);
     }
     if (!current.launchRequestedAt) throw new DeploymentHeld("deployment launch intent is absent");
     current.runtime = await waitDeploymentHealth(
       config,
-      cli,
       current,
       current.releasePath,
       current.launchRequestedAt,
-      false,
       signal,
     );
-    current.runtimeMonitors = captureStartedMonitors(config, current);
+    current.runtimeMonitors = await captureStartedMonitors(config, current);
     current.status = "healthy";
     current.step = "done";
     current.healthyAt = new Date().toISOString();
@@ -193,16 +191,18 @@ export async function deployRelease(
     save(current);
     return current;
   } catch (error) {
+    // A terminal-era journal is left exactly as written; nothing stops, rolls back or restarts on its behalf.
+    if (error instanceof LegacyRuntimeError) throw error;
     current.error = error instanceof DeploymentHeld ? error.message : "release preparation or native startup failed";
-    if (holdPendingNativeUiExit(current)) {
+    if (holdPendingStop(current)) {
       current.retryableHold = true;
       if (releaseLock) save(current);
       else persist(current);
       return current;
     }
-    if (!completed && releaseLock && forwardStopStarted(config, current) && current.oldRuntime) {
+    if (!completed && releaseLock && forwardStopStarted(current) && current.oldRuntime) {
       try {
-        const rolledBack = await rollbackDeployment(config, current, save);
+        const rolledBack = await rollbackDeployment(config, current, save, signal);
         saveActiveDeployment(config, rolledBack, true);
         return rolledBack;
       } catch (rollbackError) {
@@ -210,8 +210,8 @@ export async function deployRelease(
         current.rollbackError =
           rollbackError instanceof DeploymentHeld ? rollbackError.message : "rollback did not restore verified service";
       }
-    } else current.status = !forwardStopStarted(config, current) || error instanceof DeploymentHeld ? "held" : "failed";
-    if (error instanceof DeploymentBusy && releaseLock && !forwardStopStarted(config, current)) {
+    } else current.status = !forwardStopStarted(current) || error instanceof DeploymentHeld ? "held" : "failed";
+    if (error instanceof DeploymentBusy && releaseLock && !forwardStopStarted(current)) {
       try {
         await verifyBusyHold(config, current);
         current.retryableHold = true;
@@ -223,13 +223,13 @@ export async function deployRelease(
     }
     if (
       error instanceof DeploymentRetryable &&
-      !forwardStopStarted(config, current) &&
+      !forwardStopStarted(current) &&
       (current.step === "prepare" || current.step === "stop")
     ) {
       current.retryableHold = true;
       current.retryDeadlineAt ??= new Date(Date.now() + 3_600_000).toISOString();
       try {
-        assertRetryDeadline(config, current);
+        assertRetryDeadline(current);
       } catch (deadlineError) {
         delete current.retryableHold;
         current.error = (deadlineError as Error).message;

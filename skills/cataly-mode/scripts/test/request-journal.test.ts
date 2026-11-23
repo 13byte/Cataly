@@ -8,6 +8,7 @@ import { recordExecution } from "../src/lane-run.ts";
 import { Registry } from "../src/registry.ts";
 import { reportId } from "../src/reports.ts";
 import { withDiscordCli } from "./discord-fakes.ts";
+import { href, sid } from "./fakes.ts";
 import {
   CURRENT_RUN,
   NEXT_RUN,
@@ -166,7 +167,7 @@ test("a generation switch while a report waits on the registry lock keeps each r
       // it. The attribution assertions hold whether or not they did, so a slow start cannot make this pass wrongly.
       await Bun.sleep(500);
       const next = { ...lane, runId: NEXT_RUN, lifecycleEpoch: "next-generation", session: "native-next" };
-      const bound = { ...next, sessionRef: { runtime: "herdr", id: "w1:p9" } } as const;
+      const bound = { ...next, sessionRef: href(sid(9)) };
       recordExecution(stateDir, bound, T0);
       recordExecution(stateDir, bound, T0, next.session);
       writeFileSync(registry.path(KEY), JSON.stringify(next));

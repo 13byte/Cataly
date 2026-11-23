@@ -2,9 +2,8 @@ import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { expandHome } from "../../skills/cataly-mode/scripts/src/config.ts";
 import { platform } from "../platform/index.ts";
-import { classifyOmpArgv, isOmpArgv, mayRunOmpArgv, nonPidPreservingPrefix } from "../runtime/omp-argv.ts";
 import { canonical, contains, object, UpdateError } from "./config.ts";
-import { checkNativeArgv } from "./native-argv.ts";
+import { checkAgent } from "./native-agent.ts";
 import { parsePromotionConfig } from "./publish-config.ts";
 import type { UpdateCommand, UpdateConfig } from "./types.ts";
 
@@ -32,7 +31,7 @@ const CONFIG_KEYS = [
   "promotion",
 ] as const;
 const RESERVED_ENV =
-  /^(?:HOME|PATH|TMP.*|TEMP|XDG_.*|(?:CATALY|DORI)_.*|PI_.*|OMP_.*|BUN_.*|NODE_.*|GIT_.*|GH_.*|GITHUB_.*|SSH_.*|HERDR_.*|HC_.*|DO_NOT_TRACK)$/;
+  /^(?:HOME|PATH|TMP.*|TEMP|XDG_.*|(?:CATALY|DORI)_.*|PI_.*|OMP_.*|BUN_.*|NODE_.*|GIT_.*|GH_.*|GITHUB_.*|SSH_.*|DO_NOT_TRACK)$/;
 const MESSENGER_ENV = /^(?:CATALY|DORI)_(?:SLACK_TOKEN|SLACK_COOKIE|TELEGRAM_TOKEN|DISCORD_TOKEN)$/;
 const REPORTER_TOKENS = /\{(?!text\}|job\}|upstream\}|phase\})\w+\}/;
 
@@ -56,24 +55,6 @@ const positive = (value: unknown, label: string): number => {
 };
 const allow = (raw: Record<string, unknown>, names: readonly string[], label: string): void => {
   for (const key of Object.keys(raw)) if (!names.includes(key)) throw new UpdateError(`${label}.${key} is unknown`);
-};
-
-/** Validate native update prefixes at load and again before launching their model process. */
-export const nativeAgent = (command: UpdateCommand, label = command.name): boolean => {
-  if (command.engine === "external") return false;
-  const native = command.engine === "omp" || isOmpArgv(command.argv);
-  const prefix = nonPidPreservingPrefix(command.argv);
-  if (prefix !== undefined && (native || mayRunOmpArgv(command.argv)))
-    throw new UpdateError(
-      `${label}.argv requires a PID-preserving native launch; ${prefix} may fork; use a direct/exec-preserving command or set ${label}.engine to "external"`,
-    );
-  return native;
-};
-
-/** The part of a native agent's argv that its CLI parses, after assignments and readable launch prefixes. */
-export const ompPart = (argv: readonly string[]): readonly string[] => {
-  const classified = classifyOmpArgv(argv);
-  return classified.kind === "unparsed" ? argv : classified.command;
 };
 
 const command = (value: unknown, label: string, agent = false): UpdateCommand => {
@@ -114,23 +95,6 @@ const envNames = (value: unknown, label: string): string[] => {
   return names;
 };
 
-const checkAgent = (agent: UpdateCommand, label: string): void => {
-  if (!agent.argv.some((arg) => arg.includes("{prompt}") || arg.includes("{brief}"))) {
-    throw new UpdateError(`${label}.argv must consume {prompt} or {brief}`);
-  }
-  if (agent.cwd !== undefined) throw new UpdateError(`${label}.cwd is fixed to the candidate`);
-  const native = nativeAgent(agent, label);
-  // An unreadable command prefix hides which arguments OMP gets, so native checks cannot cover it:
-  // only an explicitly external wrapper, which owns its own contract, may use one.
-  if (agent.engine !== "external" && classifyOmpArgv(agent.argv).kind === "unparsed") {
-    throw new UpdateError(
-      `${label}.argv has a command prefix Cataly cannot read; attach bun/node option values with = (such as --preload=FILE), drop -S and unknown env options, or set ${label}.engine to "external"; a shell script or package runner string that names OMP is not read either`,
-    );
-  }
-  if (!native) return; // an explicit external wrapper owns its own fresh-context and capability contract
-  checkNativeArgv(ompPart(agent.argv), label);
-};
-
 const remoteOf = (value: unknown, base: string): string => {
   const remote = text(value, "remote");
   if (platform.isAbsolutePath(remote) || !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(remote)) {
@@ -169,8 +133,13 @@ export function loadUpdateConfig(path: string): UpdateConfig {
   }
   if (!object(raw)) throw new UpdateError("update config must be an object");
   allow(raw, CONFIG_KEYS, "update");
-  if (raw["version"] !== 1 || (raw["target"] !== "cataly" && raw["target"] !== "dori") || raw["runtime"] !== "herdr") {
-    throw new UpdateError('update requires version:1, target:"cataly", runtime:"herdr"');
+  // `runtime: "herdr"` was required before the headless-only cutover; existing configs keep it and it is ignored.
+  if (
+    raw["version"] !== 1 ||
+    (raw["target"] !== "cataly" && raw["target"] !== "dori") ||
+    (raw["runtime"] !== undefined && raw["runtime"] !== "herdr")
+  ) {
+    throw new UpdateError('update requires version:1, target:"cataly"');
   }
   const root = canonical(resolve(base, text(raw["root"], "root")));
   const localSource = resolve(base, text(raw["localSource"], "localSource"));
@@ -230,7 +199,6 @@ export function loadUpdateConfig(path: string): UpdateConfig {
   return {
     version: 1,
     target: "cataly",
-    runtime: "herdr",
     root,
     remote: remoteOf(raw["remote"], base),
     ref,

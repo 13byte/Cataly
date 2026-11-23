@@ -13,9 +13,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { FlowDeps } from "../src/done-flow.ts";
 import { launchLane } from "../src/launch.ts";
-import { depsFor, fakeClock, newWorld, type TestState, withState, type World } from "./fakes.ts";
+import { depsFor, fakeClock, newWorld, sid, type TestState, withState, type World } from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00.000Z");
 const DONE = "closed acme/app#1";
@@ -36,16 +35,7 @@ afterEach(() => {
 // POSIX-only: a read-only directory (0500) and file modes have no meaning on Windows.
 const posix = test.skipIf(process.platform === "win32");
 
-// The lane's tab, as herdr answers a create.
-const withTab = (base: FlowDeps): FlowDeps => ({
-  ...base,
-  run: async (argv, opts) =>
-    argv[0] === "herdr" && argv[1] === "tab" && argv[2] === "create"
-      ? { code: 0, out: JSON.stringify({ result: { root_pane: { pane_id: "w:p9" }, tab_id: "w:t9" } }), err: "" }
-      : base.run(argv, opts),
-});
-
-posix("a brief that cannot be written stops the launch before a tab or a lane record exists", async () => {
+posix("a brief that cannot be written stops the launch before a session or a lane record exists", async () => {
   const brief = join(briefs, "lane.md");
   writeFileSync(brief, "brief");
   chmodSync(briefs, 0o500);
@@ -55,16 +45,16 @@ posix("a brief that cannot be written stops the launch before a tab or a lane re
     "brief not writable",
   );
 
-  expect(world.calls.filter((c) => c[0] === "herdr" && c[1] === "tab")).toEqual([]);
+  expect(world.calls.filter((c) => c[0] === "headless")).toEqual([]);
   expect(await deps.registry.read("brief-lane")).toBeNull();
   expect(readFileSync(brief, "utf8")).toBe("brief");
   expect(readdirSync(briefs)).toEqual(["lane.md"]);
 });
 
-test("a brief that cannot be put in place after registration undoes the record, the tab and the staged brief", async () => {
+test("a brief that cannot be put in place after registration undoes the record, the session and the staged brief", async () => {
   const brief = join(briefs, "lane.md");
   writeFileSync(brief, "brief");
-  const deps = withTab(depsFor(world, fakeClock(T0), state.dir));
+  const deps = depsFor(world, fakeClock(T0), state.dir);
   const original = fs.writeFileSync;
   let refused = false;
   const spy = spyOn(fs, "writeFileSync").mockImplementation(((...args: Parameters<typeof fs.writeFileSync>) => {
@@ -83,15 +73,15 @@ test("a brief that cannot be put in place after registration undoes the record, 
   }
 
   expect(await deps.registry.read("brief-lane")).toBeNull();
-  expect(world.calls.filter((c) => c[0] === "herdr" && c[2] === "close")).toEqual([["herdr", "tab", "close", "w:t9"]]);
+  expect(world.calls.filter((c) => c[0] === "headless" && c[1] === "close")).toEqual([["headless", "close", sid(1)]]);
   expect(readFileSync(brief, "utf8")).toBe("brief");
   expect(readdirSync(briefs)).toEqual(["lane.md"]);
 });
 
-test("a staged brief that cannot be removed does not stop the record and tab rollback", async () => {
+test("a staged brief that cannot be removed does not stop the record and session rollback", async () => {
   const brief = join(briefs, "lane.md");
   writeFileSync(brief, "brief");
-  const deps = withTab(depsFor(world, fakeClock(T0), state.dir));
+  const deps = depsFor(world, fakeClock(T0), state.dir);
   const write = fs.writeFileSync;
   const remove = fs.rmSync;
   const spies = [
@@ -113,7 +103,7 @@ test("a staged brief that cannot be removed does not stop the record and tab rol
   }
 
   expect(await deps.registry.read("brief-lane")).toBeNull();
-  expect(world.calls.filter((c) => c[0] === "herdr" && c[2] === "close")).toEqual([["herdr", "tab", "close", "w:t9"]]);
+  expect(world.calls.filter((c) => c[0] === "headless" && c[1] === "close")).toEqual([["headless", "close", sid(1)]]);
   expect(readFileSync(brief, "utf8")).toBe("brief");
 });
 
@@ -122,7 +112,7 @@ test("a brief that links to a template is written through the link", async () =>
   writeFileSync(template, "template");
   const brief = join(briefs, "lane.md");
   symlinkSync(template, brief);
-  const deps = withTab(depsFor(world, fakeClock(T0), state.dir));
+  const deps = depsFor(world, fakeClock(T0), state.dir);
 
   await launchLane(deps, { key: "linked-lane", title: "t", brief, done: DONE });
 
@@ -137,7 +127,7 @@ posix.each([0o600, 0o640])("staging preserves an existing brief's %s permissions
   chmodSync(brief, mode);
   const before = process.umask(0);
   try {
-    const deps = withTab(depsFor(world, fakeClock(T0), state.dir));
+    const deps = depsFor(world, fakeClock(T0), state.dir);
     await launchLane(deps, { key: "private-lane", title: "t", brief, done: DONE });
     expect(statSync(brief).mode & 0o777).toBe(mode);
     process.umask(0o077);
@@ -157,7 +147,7 @@ test.skipIf(otherGroup === undefined)("staging keeps an existing brief's group a
   writeFileSync(brief, "team instructions");
   chmodSync(brief, 0o640);
   fs.chownSync(brief, process.geteuid?.() ?? -1, otherGroup!);
-  const deps = withTab(depsFor(world, fakeClock(T0), state.dir));
+  const deps = depsFor(world, fakeClock(T0), state.dir);
 
   await launchLane(deps, { key: "shared-lane", title: "t", brief, done: DONE });
 
@@ -171,7 +161,7 @@ test("the brief is written in place: its inode and a hard link to it stay", asyn
   writeFileSync(brief, "linked instructions");
   fs.linkSync(brief, shared);
   const inode = statSync(brief).ino;
-  const deps = withTab(depsFor(world, fakeClock(T0), state.dir));
+  const deps = depsFor(world, fakeClock(T0), state.dir);
 
   await launchLane(deps, { key: "inode-lane", title: "t", brief, done: DONE });
 
@@ -203,7 +193,7 @@ test.skipIf(!aclsWork).each(["own", "inherited"] as const)("the brief keeps its 
   ).toBe(true);
   const getAcl = ["getfacl", "-cp", brief];
   const before = Bun.spawnSync(getAcl).stdout.toString();
-  const deps = withTab(depsFor(world, fakeClock(T0), state.dir));
+  const deps = depsFor(world, fakeClock(T0), state.dir);
 
   await launchLane(deps, { key: "acl-lane", title: "t", brief, done: DONE });
 
@@ -218,12 +208,12 @@ test.each([false, true])("a read-only brief or linked template refuses replaceme
   chmodSync(target, 0o444);
   if (linked) symlinkSync(target, brief);
   try {
-    const deps = withTab(depsFor(world, fakeClock(T0), state.dir));
+    const deps = depsFor(world, fakeClock(T0), state.dir);
     await expect(launchLane(deps, { key: "readonly-lane", title: "t", brief, done: DONE })).rejects.toThrow(
       "brief not writable",
     );
     expect(await deps.registry.read("readonly-lane")).toBeNull();
-    expect(world.calls.some((argv) => argv[0] === "herdr" && argv[1] === "tab")).toBe(false);
+    expect(world.calls.some((argv) => argv[0] === "headless")).toBe(false);
     expect(readFileSync(target, "utf8")).toBe("protected instructions");
     expect(statSync(target).mode & 0o777).toBe(0o444);
     expect(lstatSync(brief).isSymbolicLink()).toBe(linked);

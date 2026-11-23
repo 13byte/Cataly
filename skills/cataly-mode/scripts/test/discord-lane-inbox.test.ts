@@ -1,20 +1,18 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import type { DiscordInbound } from "../src/messenger/discord-inbound-api.ts";
 import { openDiscordLaneInbox, pendingDiscordLane } from "../src/messenger/discord-lane-inbox.ts";
-import { discordLaneRoute, discordLaneTarget } from "../src/messenger/discord-lane-routing.ts";
-import { type Lane, Registry } from "../src/registry.ts";
-import { laneState, type TestState, withState } from "./fakes.ts";
+import type { Lane } from "../src/registry.ts";
+import { href, sid, type TestState, withState } from "./fakes.ts";
 
 const posix = test.skipIf(process.platform === "win32");
 const channel = "123";
 const session = "native-session";
-const pane = "w:p1";
 const lane: Lane = {
   key: "discord-work",
   title: "Discord work",
   thread: `discord:${channel}`,
-  pane,
-  sessionRef: { runtime: "herdr", id: pane },
+  pane: sid(1),
+  sessionRef: href(sid(1)),
   session,
   brief: "/brief.md",
   done: "work complete",
@@ -22,14 +20,10 @@ const lane: Lane = {
 };
 
 let state: TestState;
-let registry: Registry;
 beforeEach(() => {
   state = withState();
-  registry = new Registry(state.dir);
 });
 afterEach(() => state.done());
-
-const route = async (target = channel) => (await discordLaneTarget(state.dir, target))?.session;
 
 const inbound = (message: string, text: string, target = channel): DiscordInbound => ({
   channel: target,
@@ -40,77 +34,11 @@ const inbound = (message: string, text: string, target = channel): DiscordInboun
   attachments: [],
 });
 
-test("an old pane record without the native inbox flag falls back to the lead", async () => {
-  await registry.write(lane);
-  laneState(state.dir, pane, { sessionId: session, discordLaneKey: lane.key });
-  expect(await route()).toBeUndefined();
-});
-
-test("only the exact registered Discord channel resolves to the native lane", async () => {
-  await registry.write(lane);
-  laneState(state.dir, pane, { pid: process.pid, sessionId: session, discordLaneInbox: true });
-  expect(await route()).toBe(session);
-  expect(await route("12")).toBeUndefined();
-  expect(await route("1234")).toBeUndefined();
-});
-
-test("two open registrations for one channel are ambiguous even if only one has a native pane", async () => {
-  await registry.write(lane);
-  laneState(state.dir, pane, { pid: process.pid, sessionId: session, discordLaneInbox: true });
-  const other: Lane = { ...lane, key: "duplicate-work", pane: "w:p2", sessionRef: { runtime: "herdr", id: "w:p2" } };
-  await registry.write(other);
-  expect(await discordLaneRoute(state.dir, channel)).toEqual({ kind: "ambiguous" });
-  expect(await route()).toBeUndefined();
-  await registry.write({ ...other, status: "closed" });
-  expect(await route()).toBe(session);
-});
-
-test("missing, wrong-role, and stale pane sessions do not route to a lane", async () => {
-  await registry.write(lane);
-  expect(await route()).toBeUndefined();
-  laneState(state.dir, pane, { pid: process.pid, sessionId: session, role: "cataly", discordLaneInbox: true });
-  expect(await route()).toBeUndefined();
-  laneState(state.dir, pane, {
-    pid: process.pid,
-    sessionId: "replacement-session",
-    discordLaneInbox: true,
-    discordLaneKey: lane.key,
-  });
-  expect(await route()).toBeUndefined();
-});
-
-test("only a matching launch key binds a native pane before the registry records a session", async () => {
-  const { session: _session, ...unbound } = lane;
-  await registry.write(unbound);
-  laneState(state.dir, pane, { pid: process.pid, sessionId: session, discordLaneInbox: true });
-  expect(await route()).toBeUndefined();
-  laneState(state.dir, pane, {
-    pid: process.pid,
-    sessionId: session,
-    discordLaneInbox: true,
-    discordLaneKey: "wrong-key",
-  });
-  expect(await route()).toBeUndefined();
-  laneState(state.dir, pane, {
-    pid: process.pid,
-    sessionId: session,
-    discordLaneInbox: true,
-    discordLaneKey: lane.key,
-  });
-  expect(await route()).toBe(session);
-});
-
-posix("a retired lane buffers chat until its pane binding is ambiguous", async () => {
-  await registry.write(lane);
-  laneState(state.dir, pane, { pid: 0, sessionId: session, discordLaneInbox: true });
-  expect(await route()).toBe(session);
+posix("a registered lane counts its buffered chat as pending until it is acknowledged", () => {
   const inbox = openDiscordLaneInbox(state.dir);
   try {
     inbox.add(session, inbound("9", "buffered for resume"));
     expect(pendingDiscordLane(state.dir, lane)).toBe(true);
-    await registry.write({ ...lane, key: "same-pane", thread: "discord:456" });
-    expect(await route()).toBeUndefined();
-    expect(await route("456")).toBeUndefined();
     inbox.acknowledge(session, channel, "9");
     expect(pendingDiscordLane(state.dir, lane)).toBe(false);
   } finally {

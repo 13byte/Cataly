@@ -9,9 +9,9 @@ import { Registry } from "../../skills/cataly-mode/scripts/src/registry.ts";
 import { Reports } from "../../skills/cataly-mode/scripts/src/reports.ts";
 import { type FakePi, load, useConfig } from "./fake-pi";
 
-const PANE = "w1:p5";
+const HEADLESS = "00000000-0000-4000-8000-000000000005";
 const KEY = "receipt-race";
-const ENV = ["CATALY_CONFIG", "CATALY_STATE_DIR", "HERDR_PANE_ID", "HC_TERMINAL_ID"] as const;
+const ENV = ["CATALY_CONFIG", "CATALY_STATE_DIR", "CATALY_HEADLESS_ID"] as const;
 const TEXTS: readonly string[] = ["first racer", "second racer"];
 const MOVED = "1 of 1 evidence items are new; the evidence clock moved";
 const STILL = "the same evidence was recorded before; the evidence clock did not move";
@@ -62,14 +62,14 @@ const race = async (rewrite?: string, switchSession = false): Promise<Accepted[]
   try {
     const stateDir = useConfig(join(import.meta.dir, "fake-ulw.ts"));
     root = dirname(stateDir);
-    process.env.HERDR_PANE_ID = PANE;
-    delete process.env.HC_TERMINAL_ID;
+    process.env.CATALY_HEADLESS_ID = HEADLESS;
     const registry = new Registry(stateDir);
     await registry.write({
       key: KEY,
       title: "receipt race",
       thread: "none",
-      pane: PANE,
+      pane: HEADLESS,
+      sessionRef: { runtime: "headless", id: HEADLESS },
       brief: "/brief.md",
       done: "file /done.md",
       openedAt: "2026-01-01T00:00:00.000Z",
@@ -79,7 +79,12 @@ const race = async (rewrite?: string, switchSession = false): Promise<Accepted[]
     lockPath = `${registry.path(KEY)}.lock`;
     const source = join(root, "result.txt");
     fs.writeFileSync(source, "bytes read by the first racer");
-    pi = await load({ session: { id: "receipt-race", entries: [] }, flags: { "cataly-role": "lane" } });
+    pi = await load({
+      session: { id: "receipt-race", entries: [] },
+      flags: { "cataly-role": "lane" },
+      mode: "rpc",
+      hasUI: true,
+    });
     await pi.emit("session_start");
     const tool = pi.tools.get("cataly_report");
     if (!tool) throw new Error("cataly_report is not registered");

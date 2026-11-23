@@ -20,7 +20,7 @@ export const BRIEF_START = "<!-- cataly launch: the brief starts below -->";
 const FOOTER_START = "<!-- cataly launch: footer start -->";
 const FOOTER_END = "<!-- cataly launch: footer end -->";
 
-// startLane writes the launch text over the brief before the tab exists, so a retry after a failed tab create reads a
+// Launch writes the launch text over the brief before the session exists, so a retry after a failed create reads a
 // brief that already has lessons and a footer. Rebuild from the text between the markers launch wrote, so a retry ships
 // what a first launch would. Only a file that ends with launch's footer is cut: the owner's text may quote the heading.
 export const originalBrief = (text: string): string => {
@@ -41,10 +41,8 @@ const sendReport = (leadPane: string, runtime: RuntimeKind | undefined): string 
   if (!leadPane || !runtime) return undefined;
   if (runtime === "headless")
     return parseRef(leadPane)?.runtime === "headless" ? `${CLI} harness send ${leadPane} --text "$line"` : undefined;
-  const lead = quoteForPane(leadPane);
-  if (runtime === "herdr") return `herdr pane run ${lead} "$line"`;
   // `tern run` types the line and Enter into the lead's block; `--` keeps the line verbatim.
-  return runtime === "tern" ? `tern run ${lead} -- "$line"` : `hc send ${lead} -- "$line"`;
+  return `tern run ${quoteForPane(leadPane)} -- "$line"`;
 };
 
 /** Pin native forwarding to this home’s live lead generation, never just its current execution preference. */
@@ -54,11 +52,14 @@ export const laneFooterFor = async (deps: FlowDeps, lane: Lane): Promise<string>
   const target = leadAddress(deps.config, deps.env ?? process.env);
   if ("ref" in target) {
     const ref = target.ref;
-    if (ref.runtime === "headless" || ref.runtime !== rts.choice?.kind) {
+    // A lead still recorded on the removed herdr/hc runtime has no send command.
+    const runtime = ref.runtime === "headless" || ref.runtime === "tern" ? ref.runtime : undefined;
+    if (runtime === undefined) return footer(lane, "", repoIdentities, undefined, freshness);
+    if (runtime === "headless" || runtime !== rts.choice?.kind) {
       const state = await trustedPaneState(deps.run, deps.config.stateDir, ref, rts).catch(() => null);
       if (state?.role !== "cataly") return footer(lane, "", repoIdentities, undefined, freshness);
     }
-    return footer(lane, ref.runtime === "headless" ? formatRef(ref) : ref.id, repoIdentities, ref.runtime, freshness);
+    return footer(lane, runtime === "headless" ? formatRef(ref) : ref.id, repoIdentities, runtime, freshness);
   }
   // A legacy terminal alias is meaningful only on an explicitly selected terminal and without a conflicting binding.
   const runtime = rts.choice?.kind;

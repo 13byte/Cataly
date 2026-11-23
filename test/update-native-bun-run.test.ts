@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { classifyOmpArgv } from "../src/runtime/omp-argv.ts";
-import { loadUpdateConfig, nativeAgent } from "../src/update/load.ts";
+import { loadUpdateConfig } from "../src/update/load.ts";
+import { nativeAgent } from "../src/update/native-agent.ts";
 
 const directories: string[] = [];
 afterEach(() => {
@@ -21,7 +22,6 @@ const load = (argv: readonly string[], role: "worker" | "reviewer", engine?: "om
     JSON.stringify({
       version: 1,
       target: "cataly",
-      runtime: "herdr",
       root: join(directory, "updates"),
       remote: join(directory, "remote"),
       ref: "refs/heads/main",

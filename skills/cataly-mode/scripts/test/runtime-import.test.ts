@@ -12,6 +12,7 @@ test("the session runtime resolves from the clone the skill lives in", async () 
       `cataly-mode scripts need the cataly-superagent clone around them (${RUNTIME} is missing): the skill was copied out of the clone; link it with install.sh instead`,
     );
   const types = await import("../../../../src/runtime/types.ts");
-  expect(types.parseRef("hc:t7")).toEqual({ runtime: "hc", id: "t7" });
-  expect(types.formatRef({ runtime: "hc", id: "t7" })).toBe("hc:t7");
+  const id = "00000000-0000-4000-8000-000000000001";
+  expect(types.parseRef(`headless:${id}`)).toEqual({ runtime: "headless", id });
+  expect(types.formatRef({ runtime: "headless", id })).toBe(`headless:${id}`);
 });

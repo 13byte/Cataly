@@ -5,17 +5,15 @@ import type { AsyncJobSnapshot } from "@oh-my-pi/pi-coding-agent";
 import { readPaneState } from "../../skills/cataly-mode/scripts/src/lane-state";
 import { type FakePi, load, useConfig } from "./fake-pi";
 
-const PANE = "w1:p71";
+const PANE = "5071";
 const T0 = Date.parse("2026-11-19T00:00:00Z");
 const previousEnv = new Map<string, string | undefined>();
 let stateDir: string;
 
 beforeEach(() => {
-  for (const key of ["CATALY_CONFIG", "CATALY_STATE_DIR", "HERDR_PANE_ID", "HC_TERMINAL_ID"])
-    previousEnv.set(key, process.env[key]);
+  for (const key of ["CATALY_CONFIG", "CATALY_STATE_DIR", "TERN_PANE"]) previousEnv.set(key, process.env[key]);
   stateDir = useConfig(join(import.meta.dir, "fake-ulw.ts"));
-  process.env.HERDR_PANE_ID = PANE;
-  delete process.env.HC_TERMINAL_ID;
+  process.env.TERN_PANE = PANE;
 });
 afterEach(() => {
   setSystemTime();

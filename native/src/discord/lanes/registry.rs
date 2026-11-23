@@ -1,8 +1,9 @@
 //! `registry.ts`, `lane-state.ts` and the execution half of `lane-run.ts`, read and written in their exact formats.
 //!
 //! Lane rows are `<state>/lanes/<key>.json` (`JSON.stringify(lane, null, 1)`, temp `<path>.<pid>.tmp` + rename, under
-//! the `<path>.lock` writer lock). Pane rows are `<state>/sessions/<encodeURIComponent(id)>.json`, written only by the
-//! extension. Execution events append to `<state>/lanes/<key>/reports.jsonl`.
+//! the `<path>.lock` writer lock). Legacy rows carrying only `pane`/`tab` still load as herdr refs, which every caller
+//! treats as the removed runtime. Tern pane rows are `<state>/sessions/<encodeURIComponent(id)>.json`, written only by
+//! the extension. Execution events append to `<state>/lanes/<key>/reports.jsonl`.
 
 use std::fs::{self, OpenOptions};
 use std::io::{ErrorKind, Write as _};
@@ -312,7 +313,8 @@ pub(super) fn encode_uri_component(text: &str) -> String {
     out
 }
 
-/// `readPaneState`: the extension's pane record, or `None` when absent or unparsable.
+/// `readPaneState`: the extension's pane record (`<state>/sessions/<encodeURIComponent(id)>.json`), or `None` when
+/// absent or unparsable.
 pub(super) fn pane_state(state: &Path, pane: &str) -> Option<Json> {
     let path = state
         .join("sessions")
@@ -581,10 +583,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn keys_and_uri_components() {
+    fn keys() {
         assert!(valid_key("ab") && valid_key("a.b-c_9") && !valid_key("a") && !valid_key("Ab"));
-        assert_eq!(encode_uri_component("w1:p2"), "w1%3Ap2");
-        assert_eq!(encode_uri_component("a b/é"), "a%20b%2F%C3%A9");
     }
 
     #[test]

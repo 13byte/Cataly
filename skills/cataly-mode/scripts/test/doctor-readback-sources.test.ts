@@ -3,7 +3,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { doctorCheck } from "../src/doctor.ts";
 import type { ModelReadback } from "../src/lane-state.ts";
-import { agentIn, depsFor, fakeClock, laneState, newWorld, withState } from "./fakes.ts";
+import { sessionFields } from "../src/registry.ts";
+import { agentIn, laneState, ternDeps, ternRef } from "./fake-tern-world.ts";
+import { fakeClock, newWorld, withState } from "./fakes.ts";
 
 const now = Date.parse("2026-01-01T12:00:00Z");
 const model = { provider: "openai-codex", id: "fixture-model" };
@@ -34,16 +36,15 @@ const inspect = async (
   const state = withState();
   try {
     const world = newWorld();
-    const pane = "w1:p2";
+    const pane = "5002";
     if (live) {
-      world.panes = [{ pane_id: pane, workspace_id: "w1", agent: "omp", agent_status: "idle", cwd: "/repo" }];
       agentIn(world, pane);
       laneState(state.dir, pane, {
         role: "lane",
         ...{ modelReadback: ("nativeReadback" in options ? options.nativeReadback : native) as ModelReadback },
       });
     }
-    const deps = depsFor(world, fakeClock(now), state.dir, { leadPane: "", sessionsDir: join(state.dir, "sessions") });
+    const deps = ternDeps(world, fakeClock(now), state.dir, { leadPane: "", sessionsDir: join(state.dir, "sessions") });
     await deps.registry.write({
       key: "fixture-lane",
       title: "Fixture",
@@ -51,7 +52,7 @@ const inspect = async (
       brief: "/brief",
       done: "file /done",
       openedAt: new Date(now).toISOString(),
-      pane,
+      ...sessionFields(ternRef(pane)),
       session: "01a11440-ee81-7f90-b2ed-dcc7d51a0adf",
       model: options.request ?? "openai-codex/fixture-model",
       ...{ modelReadback: receipt as ModelReadback },
@@ -60,7 +61,7 @@ const inspect = async (
     const before = readFileSync(path, "utf8");
     const result = await doctorCheck(deps);
     expect(readFileSync(path, "utf8")).toBe(before);
-    expect(world.calls.every((argv) => argv[0] === "ps" || argv[0] === "herdr")).toBe(true);
+    expect(world.calls.every((argv) => argv[0] === "ps" || argv[0] === "tern")).toBe(true);
     return result.findings;
   } finally {
     state.done();

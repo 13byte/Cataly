@@ -34,14 +34,7 @@ test.skipIf(process.platform === "win32")(
       });
       const parked = await parkLane(f.deps, initial, "fixture park");
       expect(parked.code).toBe(0);
-      const opened = await reopenLane(
-        {
-          ...f.deps,
-          run: (argv) =>
-            argv[0] === "hc" ? Promise.resolve({ code: 0, out: '{"terminals":[]}', err: "" }) : noExternal(argv),
-        },
-        parked.lane,
-      );
+      const opened = await reopenLane({ ...f.deps, run: noExternal }, parked.lane);
       const next = opened.lane;
       if (next.sessionRef) refs.push(next.sessionRef);
       expect(opened.code).toBe(0);

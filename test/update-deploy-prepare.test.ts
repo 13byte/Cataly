@@ -76,7 +76,6 @@ posix.each([
   const tools = join(f.directory, "private-tools");
   mkdirSync(tools);
   const marker = join(tools, "fail-command");
-  const native = join(tools, "native-observation");
   writeFileSync(marker, mode);
   const quote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
   const bin = (name: string, body: string): string => {
@@ -96,8 +95,9 @@ exec /usr/bin/git "$@"`,
     `if [ "$1" = install ] && [ ${quote(mode)} = install ] && [ -f ${quote(marker)} ]; then exit 75; fi
 exec ${quote(process.execPath)} "$@"`,
   );
-  const herdr = bin("herdr", `printf observed >> ${quote(native)}\nexit 1`);
-  const config = { ...f.config, bun, herdr };
+  // No native harness is registered: the first native contact holds, so it marks the end of preparation.
+  const config = { ...f.config, bun };
+  const unregistered = "no native harness is registered";
   const signals = spyOn(process, "kill");
   let clock = Date.now();
   const now = spyOn(Date, "now").mockImplementation(() => clock);
@@ -113,7 +113,7 @@ exec ${quote(process.execPath)} "$@"`,
     expect(first.stopRequestedAt).toBeUndefined();
     expect(first.launchRequestedAt).toBeUndefined();
     expect(first.oldRuntime).toBeUndefined();
-    expect(lstatSync(native, { throwIfNoEntry: false })).toBeUndefined();
+    expect(first.error).not.toContain(unregistered);
     expect(lstatSync(config.liveSource, { throwIfNoEntry: false })).toBeUndefined();
     expect(lstatSync(config.launcherPath, { throwIfNoEntry: false })).toBeUndefined();
     expect(signals).not.toHaveBeenCalled();
@@ -123,7 +123,7 @@ exec ${quote(process.execPath)} "$@"`,
     clock = Date.parse(deadline) - 1;
     const repeated = await deployRelease(config, f.input, saved, persist);
     expect(repeated).toMatchObject({ status: "held", retryableHold: true, retryDeadlineAt: deadline });
-    expect(lstatSync(native, { throwIfNoEntry: false })).toBeUndefined();
+    expect(repeated.error).not.toContain(unregistered);
     if (outcome === "expire") {
       clock++;
       const stale = structuredClone(first);
@@ -135,7 +135,7 @@ exec ${quote(process.execPath)} "$@"`,
       expect(held.error).toContain("retry deadline");
       expect(held.stopRequestedAt).toBeUndefined();
       expect(held.launchRequestedAt).toBeUndefined();
-      expect(lstatSync(native, { throwIfNoEntry: false })).toBeUndefined();
+      expect(held.error).not.toContain(unregistered);
       expect(lstatSync(config.liveSource, { throwIfNoEntry: false })).toBeUndefined();
       expect(lstatSync(config.launcherPath, { throwIfNoEntry: false })).toBeUndefined();
       expect(signals).not.toHaveBeenCalled();
@@ -150,7 +150,7 @@ exec ${quote(process.execPath)} "$@"`,
     expect(resumed).toMatchObject({ status: "held", step: "prepare" });
     expect(resumed.retryableHold).toBeUndefined();
     expect(resumed.stopRequestedAt).toBeUndefined();
-    expect(readFileSync(native, "utf8")).toContain("observed");
+    expect(resumed.error).toContain(unregistered);
     expect(signals).not.toHaveBeenCalled();
     expect(readFileSync(join(f.home, ".cataly/state/owner.json"), "utf8")).toBe('{"cursor":17}\n');
   } finally {

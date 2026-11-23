@@ -75,12 +75,6 @@ impl Json {
         }
     }
 
-    pub(super) fn remove(&mut self, key: &str) {
-        if let Self::Object(fields) = self {
-            fields.retain(|(name, _)| name != key);
-        }
-    }
-
     pub(super) fn string(text: &str) -> Self {
         Self::String(text.to_owned())
     }

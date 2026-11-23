@@ -3,11 +3,11 @@ import { join } from "node:path";
 import type { SessionRef } from "./runtime/types.ts";
 import type { QueuedMessage } from "./store-types.ts";
 
-// Inbox files: one JSONL queue per session. A herdr pane keeps the name it had before runtimes existed (`w1_p3.jsonl`),
-// so queues written by an older binary drain; every other runtime is prefixed (`hc--t7.jsonl`, `tern--42.jsonl`). A
-// queue is written aside and renamed in whole (writeQueue), so a reader that does not hold the inbox lock still reads a
-// whole queue and never half of one. Where an inbox moved is recorded beside it (inbox-forward.ts). A message sent
-// while the inbox lock is held waits in `<inbox>.spool/` for the holder (inbox-spool.ts).
+// Inbox files: one JSONL queue per session, prefixed by runtime (`headless--<uuid>.jsonl`, `tern--42.jsonl`). Legacy
+// herdr (`w1_p3.jsonl`) and hc (`hc--t7.jsonl`) queues written by an older binary still parse, so they are reported and
+// never lost. A queue is written aside and renamed in whole (writeQueue), so a reader that does not hold the inbox lock
+// still reads a whole queue and never half of one. Where an inbox moved is recorded beside it (inbox-forward.ts). A
+// message sent while the inbox lock is held waits in `<inbox>.spool/` for the holder (inbox-spool.ts).
 
 export const INBOX_SUFFIX = ".jsonl";
 export const MOVING = ".moving";

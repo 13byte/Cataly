@@ -1,6 +1,6 @@
 import { object } from "./config.ts";
 
-export const MAIN_CI_CHECKS = ["check", "e2e-herdr", "e2e-hc"] as const;
+export const MAIN_CI_CHECKS = ["check"] as const;
 export type GitHubReads = {
   api: (path: string) => Promise<unknown>;
   pages: (path: string, collection?: string) => Promise<unknown[]>;

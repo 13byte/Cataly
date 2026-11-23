@@ -12,10 +12,8 @@ import {
   resolveConsumerOmpCommand,
 } from "./release/runtime.ts";
 import { type Exec, spawnExec } from "./runtime/exec.ts";
-import { HcRuntime } from "./runtime/hc/index.ts";
 import { HeadlessRuntime, headlessArgv } from "./runtime/headless.ts";
 import type { NativeHarnessRole } from "./runtime/headless-protocol.ts";
-import { HerdrRuntime } from "./runtime/herdr/index.ts";
 import { Runtimes } from "./runtime/registry.ts";
 import { ompStateDir } from "./runtime/omp.ts";
 import { isOmpArgv } from "./runtime/omp-argv.ts";
@@ -45,7 +43,7 @@ export type Deps = {
   readonly usage: Usage;
 };
 
-const harnessConfigPath = (catalyHome: string): string => {
+export const harnessConfigPath = (catalyHome: string): string => {
   const path = process.env["CATALY_CONFIG"] ?? `${catalyHome}${sep}config.json`;
   return isAbsolute(path) ? path : `${process.cwd()}${sep}${path}`;
 };
@@ -69,11 +67,9 @@ export const defaultDeps = (): Deps => {
             CATALY_HOME: store.root,
             CATALY_CONFIG: harnessConfigPath(store.root),
           });
-          if (k === "headless") return new HeadlessRuntime(stateDir);
-          if (k === "hc") return new HcRuntime(spawnExec, { stateDir });
-          if (k === "tern") return new TernRuntime(spawnExec, { stateDir });
-          return new HerdrRuntime(spawnExec, process.env["CATALY_HERDR_SESSION"], { stateDir });
+          return k === "tern" ? new TernRuntime(spawnExec, { stateDir }) : new HeadlessRuntime(stateDir);
         },
+        harnessConfigPath(store.root),
       );
       return runtimes;
     },

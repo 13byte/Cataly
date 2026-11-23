@@ -78,12 +78,9 @@ posix.each([
 });
 
 posix("automatic update never activates a newer pre-19 controller over an OMP 19 receipt", async () => {
-  // The candidate must support this host profile so the controller hold, not the profile check, rejects it.
+  // The candidate carries the headless marker for this host, so the controller hold, not the profile check, rejects it.
   const f = portableFixture();
   const one = await installBundle(f.paths, nativeRelease(f, "one", "19.0.0"), undefined);
-  const selected = JSON.parse(readFileSync(f.paths.config, "utf8"));
-  selected.runtime = process.platform === "darwin" ? "hc" : "herdr";
-  saveJson(f.paths.config, selected);
   const later = boundRelease(f, "later").bundle;
   expect(later.manifest.requirements.omp).toBe("18.20.0");
   const candidate = { ...later, manifest: { ...later.manifest, prerelease: false } };

@@ -55,14 +55,12 @@ beforeEach(() => {
     "CATALY_CONFIG",
     "CATALY_STATE_DIR",
     "CATALY_LANE_POLICY",
-    "HERDR_PANE_ID",
-    "HC_TERMINAL_ID",
+    "CATALY_HEADLESS_ID",
     "CATALY_MANAGED_STARTUP",
   ])
     saved.set(key, process.env[key]);
   stateDir = useConfig("");
-  delete process.env["HERDR_PANE_ID"];
-  delete process.env["HC_TERMINAL_ID"];
+  delete process.env["CATALY_HEADLESS_ID"];
   delete process.env["CATALY_MANAGED_STARTUP"];
   const policy = prepareLanePolicy(stateDir, "demo", { denyBash: ["sudo"] });
   if (!policy) throw new Error("expected policy");

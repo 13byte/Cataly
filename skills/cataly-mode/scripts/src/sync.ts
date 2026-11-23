@@ -35,8 +35,8 @@ const observation = (
   unknownReason: hit.unknownReason ?? null,
 });
 
-// Share only successful read-only observations for this pass. hc group listings and all action checks stay fresh.
-const PASS_SHARED = /^(?:ps -A -o pid=,ppid=,command=|herdr (?:--session \S+ )?pane list)$/;
+// Share only successful read-only process-table reads for this pass. Session listings and action checks stay fresh.
+const PASS_SHARED = /^ps -A -o pid=,ppid=,command=$/;
 const passRunner = (run: Runner): Runner => {
   const seen = new Map<string, Ran>();
   return async (argv, opts) => {

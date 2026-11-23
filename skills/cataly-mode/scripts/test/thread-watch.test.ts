@@ -9,7 +9,7 @@ import type { Lane } from "../src/registry.ts";
 import { Reports } from "../src/reports.ts";
 import { run } from "../src/run.ts";
 import { Worklog } from "../src/worklog.ts";
-import { depsFor, fakeClock, newWorld, type TestState, withState } from "./fakes.ts";
+import { depsFor, fakeClock, nativeLane, newWorld, type TestState, withState } from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00Z");
 const EXPIRED = T0 + 60 * 60_000;
@@ -143,10 +143,8 @@ test("a miskeyed row holds its strict group election without stopping a later un
 });
 
 test("boot recommends STOP for a legacy finished lane but not a verified claim waiting on its group", async () => {
-  const pane = "w1:first-lane";
-  const pending = { ...claimed("first-lane", "merged acme/app#1"), pane };
   const world = newWorld();
-  world.panes = [{ pane_id: pane, workspace_id: "w1", agent: "pi", agent_status: "idle" }];
+  const pending = { ...claimed("first-lane", "merged acme/app#1"), ...nativeLane(world, 1) };
   let now = EXPIRED;
   const clock = {
     now: () => now,

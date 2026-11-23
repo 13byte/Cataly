@@ -129,18 +129,14 @@ const onReleaseHost = test.skipIf(
 );
 
 onReleaseHost.each(["manual", "automatic"] as const)(
-  "%s consumer update no longer requires the old terminal tool, but rollback does",
+  "%s consumer update leaves a terminal-only release, and rollback to it is refused",
   async (mode) => {
     const f = fixture(true);
     const old = bundledRelease(f, "terminal");
     const before = await installBundle(f.paths, old.bundle, undefined);
     const candidate = bundledRelease(f, "native", undefined, "19.0.1", true);
     const saved = readFileSync(f.paths.config);
-    const runtime = process.platform === "darwin" ? "hc" : "herdr";
-    expect(JSON.parse(saved.toString()).runtime).toBe(runtime);
     const tools = "/usr/bin:/bin";
-    expect(Bun.which("hc", { PATH: tools })).toBeNull();
-    expect(Bun.which("herdr", { PATH: tools })).toBeNull();
     const cli = (...args: string[]) =>
       Bun.spawnSync([process.execPath, resolve(import.meta.dir, "../src/release/cli.ts"), ...args], {
         env: { ...process.env, PATH: tools, CATALY_RUNTIME: "" },
@@ -171,7 +167,7 @@ onReleaseHost.each(["manual", "automatic"] as const)(
     expect(retained).toBe(releasePath(f.paths, candidate.bundle.manifest));
     const rollback = cli("rollback", "--version", before.current.tag);
     expect(rollback.exitCode).toBe(2);
-    expect(rollback.stderr.toString()).toContain(`${runtime} is required`);
+    expect(rollback.stderr.toString()).toContain(`does not support ${process.platform}/${process.arch}/headless`);
     const downgrade = cli("install", "--from", old.dist);
     expect(downgrade.exitCode).toBe(2);
     expect(downgrade.stderr.toString()).toContain("cannot downgrade");

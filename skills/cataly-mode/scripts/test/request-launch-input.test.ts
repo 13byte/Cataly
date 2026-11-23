@@ -3,7 +3,7 @@ import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { QueueError } from "../src/launch-errors.ts";
 import { LaunchQueue } from "../src/launch-queue-store.ts";
-import { adoptLane, LaunchError, launchLane } from "../src/launch.ts";
+import { LaunchError, launchLane } from "../src/launch.ts";
 import { catalyOwnWords } from "../src/monitor-cataly.ts";
 import { Registry } from "../src/registry.ts";
 import { withDiscordCli } from "./discord-fakes.ts";
@@ -34,13 +34,6 @@ test.each(["", "discord:0:222222222222222222", thread, "telegram:1:", "slack:c1:
   },
 );
 
-test("adopt refuses to attach a request to an already running process", async () => {
-  const deps = depsFor(world, fakeClock(T0), state.dir);
-  const input = { key: "adopted", title: "t", brief: "/brief", done: "closed acme/app#3", pane: "w:p3", requestId };
-  await expect(adoptLane(deps, input)).rejects.toThrow("adopt cannot attach a request");
-  expect(await deps.registry.read("adopted")).toBeNull();
-});
-
 test.each(["request", "delivery"])("the monitor consumes --%s as a value, never a messenger platform", (option) => {
   expect(catalyOwnWords(["cataly", "send", `--${option}`, "slack", "discord"], 0)).toEqual([0, 1, 4]);
 });
@@ -62,7 +55,7 @@ test("a queued sourced launch keeps its request and a damaged request is refused
   expect(() => queue.read("queued-request")).toThrow(QueueError);
 });
 
-test("the CLI refuses a bare, empty or malformed --request and adopt --request, and names a real one", async () => {
+test("the CLI refuses a bare, empty or malformed --request and names a real one", async () => {
   await withDiscordCli(async (f) => {
     const dir = dirname(f.tmp);
     const brief = join(dir, "cli-brief.md");
@@ -79,26 +72,6 @@ test("the CLI refuses a bare, empty or malformed --request and adopt --request, 
     const malformed = await f.invoke([...base, "--request", "discord:0:2"]);
     expect([malformed.code, malformed.out]).toEqual([1, ""]);
     expect(malformed.err).toStartWith("request must be the original input ID");
-    const adopt = await f.invoke([
-      "adopt",
-      "cli-adopt",
-      "--pane",
-      "w:p3",
-      "--title",
-      "t",
-      "--brief",
-      brief,
-      "--done",
-      "closed acme/app#3",
-      "--request",
-      requestId,
-    ]);
-    expect([adopt.code, adopt.out, adopt.err]).toEqual([
-      1,
-      "",
-      "adopt cannot attach --request to an already running process",
-    ]);
-    expect(await new Registry(dir).read("cli-adopt")).toBeNull();
     const sourced = await f.invoke([...base, "--request", requestId]);
     expect(sourced.code).toBe(0);
     expect(sourced.out).toContain(`- Original request (metadata only): ${requestId}.`);

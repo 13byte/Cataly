@@ -9,7 +9,7 @@ import { monitorRuntimeFindings } from "../src/doctor-monitors.ts";
 import { doctorCheck } from "../src/doctor.ts";
 import type { PaneState } from "../src/lane-state.ts";
 import { doctorCommand } from "./doctor-fixture.ts";
-import { agentIn, depsFor, fakeClock, laneState, newWorld, withState } from "./fakes.ts";
+import { depsFor, fakeClock, nativeLead, newWorld, sid, withState } from "./fakes.ts";
 
 const liveSeverity = platform.supportsProcessReaders ? "OK" : "WARN";
 
@@ -21,15 +21,17 @@ test("only a fresh matching receipt and an owned live child establish monitor li
     stderr: "ignore",
   });
   try {
-    const startedAt = new Date().toISOString();
+    // The fake supervisor reports every session as started at the epoch; receipts must name that same start.
+    const startedAt = new Date(0).toISOString();
+    const updatedAt = new Date().toISOString();
     const lead: PaneState = {
-      paneId: "w1:p1",
+      paneId: sid(1),
       role: "cataly",
       sessionId: "owner",
       cwd: state.dir,
       pid: process.pid,
       startedAt,
-      updatedAt: startedAt,
+      updatedAt,
       goal: { status: "none" },
       approvalPending: false,
     };
@@ -49,7 +51,7 @@ test("only a fresh matching receipt and an owned live child establish monitor li
       sessionId: "owner",
       pid: process.pid,
       startedAt,
-      updatedAt: startedAt,
+      updatedAt,
       presetLoaded: true,
       monitors: [{ ...spec, pid: child.pid, startTicks: identity?.startTicks ?? "unavailable" }],
     };
@@ -111,11 +113,8 @@ test("only a fresh matching receipt and an owned live child establish monitor li
     });
 
     const world = newWorld();
-    world.panes = [{ pane_id: lead.paneId, workspace_id: "w1", agent: "omp", agent_status: "idle", cwd: state.dir }];
-    agentIn(world, lead.paneId, lead.pid);
-    laneState(state.dir, lead.paneId, lead);
-    const deps = depsFor(world, fakeClock(Date.parse(startedAt)), state.dir, {
-      leadPane: lead.paneId,
+    const deps = depsFor(world, fakeClock(Date.parse(updatedAt)), state.dir, {
+      leadPane: nativeLead(world, 1, { pid: lead.pid, cwd: state.dir }),
       sessionsDir: join(state.dir, "sessions"),
       agentCommand: doctorCommand(state.dir),
     });

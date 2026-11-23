@@ -7,7 +7,7 @@ import type { Lane } from "../src/registry.ts";
 import { Reports } from "../src/reports.ts";
 import type { Runner } from "../src/run.ts";
 import { readObservation } from "../src/supervision-observe.ts";
-import { depsFor, fakeClock, newWorld, withState } from "./fakes.ts";
+import { depsFor, fakeClock, nativeLane, newWorld, withState } from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00Z");
 const MIN = 60_000;
@@ -20,11 +20,16 @@ test("overlapping freshness leaves the stall and usage baseline to the same-lane
   const state = withState();
   try {
     const clock = fakeClock(T0);
+    const worldA = newWorld();
+    const worldB = newWorld();
+    // Both ticks observe the same native session, in one call that started 21 minutes before T0.
+    const session = { status: "working", activeSince: T0 - 21 * MIN } as const;
+    nativeLane(worldB, 1, session);
     const lane = {
       key: "overlap-lane",
       title: "Supervision overlap",
       thread: "none",
-      pane: "w:p1",
+      ...nativeLane(worldA, 1, session),
       brief: "/b.md",
       done: "",
       openedAt: iso(T0),
@@ -33,11 +38,6 @@ test("overlapping freshness leaves the stall and usage baseline to the same-lane
       cwd: state.dir,
     } satisfies Lane;
     const options = { nudgeAfterMin: 999, postAfterMin: 999, supervision: { usageArgv: [usageCommand] } };
-    const worldA = newWorld();
-    const worldB = newWorld();
-    for (const world of [worldA, worldB]) {
-      world.panes = [{ pane_id: lane.pane, workspace_id: "w", agent: "omo", agent_status: "working" }];
-    }
     const a = depsFor(worldA, clock, state.dir, options);
     const b = depsFor(
       worldB,
@@ -82,7 +82,6 @@ test("overlapping freshness leaves the stall and usage baseline to the same-lane
     const initialJournal = journal();
     const quietRun: Runner = async (argv, opts) =>
       argv[0] === usageCommand ? usage : isStatus(argv) ? status() : a.run(argv, opts);
-    worldA.screen = "Working 21m";
     expect(await freshnessTick({ ...a, run: quietRun }, state.dir)).toEqual([]);
     expect(snapshot()).toMatchObject({
       state: "running",
@@ -116,7 +115,6 @@ test("overlapping freshness leaves the stall and usage baseline to the same-lane
     };
 
     clock.at = T0 + 20 * MIN;
-    worldA.screen = worldB.screen = "Working 41m";
     const tickA = freshnessTick({ ...a, run: runA }, state.dir);
     let stalledJournal: string;
     try {
@@ -162,7 +160,6 @@ test("overlapping freshness leaves the stall and usage baseline to the same-lane
     expect(settled?.lastEvidenceAt).toBeNull();
 
     clock.at += MIN;
-    worldB.screen = "Working 42m";
     expect(await freshnessTick({ ...b, run: runB }, state.dir)).toEqual([]);
     expect(usageB).toBe(1);
     expect(usageTimes()).toEqual([iso(T0), iso(T0 + 20 * MIN), iso(clock.at)]);

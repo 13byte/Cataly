@@ -3,12 +3,12 @@
  * sessions with a Cataly role change behaviour; every other session runs exactly as without it.
  *
  * - Role: `--cataly-role cataly|lane` is recorded in the session file on session_start and re-read from the session
- *   branch on every session change, so `--resume` and herdr restores keep it without the flag. Subagents inherit
- *   their spawning agent's role.
+ *   branch on every session change, so `--resume` keeps it without the flag. Subagents inherit their spawning agent's
+ *   role.
  * - A nonempty config `ompUlwPath` applies omp-ulw through a gated API: its event, command and tool handlers run
  *   only in role sessions; load-time registrations stay visible everywhere. Source installs leave it empty for OMP loading.
  * - Pane state (`{stateDir}/sessions/<pane>.json`, read by the `cataly` CLI): session id, goal status and open tool
- *   approvals of the Cataly/lane session running in HERDR_PANE_ID, HC_TERMINAL_ID or TERN_PANE.
+ *   approvals of the Cataly/lane session running in a Tern block (TERN_PANE).
  *   Native jobs and approval observations use the existing process-bound record.
  * - Lanes without a goal get omp's `goal` tool so the agent can create its goal from the lane brief.
  * - The Cataly session gets the `monitor` tool (monitor.ts).
@@ -534,7 +534,6 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
       readPaneState(stateDir, paneWritten)?.pid === process.pid
     ) {
       rmSync(paneStatePath(stateDir, paneWritten), { force: true });
-      if (process.env.HC_TERMINAL_ID) process.stdout.write("\x1b]7501;state=unknown:app=omp\x1b\\");
     }
     paneWritten = undefined;
   };
@@ -553,14 +552,13 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
         approvalPending: false,
         updatedAt: new Date().toISOString(),
       });
-      if (process.env.HC_TERMINAL_ID) process.stdout.write("\x1b]7501;state=unknown:app=omp\x1b\\");
     }
     paneWritten = undefined;
   };
 
   /**
-   * Only the process that owns the pane reports it. `HERDR_PANE_ID`, `HC_TERMINAL_ID` and `TERN_PANE` are inherited by
-   * every child, so a nested `omp` run (a `-p` check, a subagent's own session) would otherwise take the pane record of
+   * Only the process that owns the pane reports it. `TERN_PANE` is inherited by every child, so a nested `omp` run (a
+   * `-p` check, a subagent's own session) would otherwise take the pane record of
    * the live session above it and delete that record on its own shutdown — which reads to the watchdog as a dead
    * lead, so it restarts the lead every tick. An incumbent that is still alive, and not a newer process reusing its
    * pid, keeps its record.
@@ -635,7 +633,7 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
       } else runtimeHealth.stop();
       return;
     }
-    const paneId = process.env.HC_TERMINAL_ID || process.env.HERDR_PANE_ID || process.env.TERN_PANE;
+    const paneId = process.env.TERN_PANE;
     if (!paneId || stateDir === undefined || !session) return;
     // Only an interactive session taking over the pane clears an inactive resume pointer. Print/RPC children
     // inherit pane ids too, but do not own the terminal. A record another live process owns stays untouched.
@@ -691,10 +689,6 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
       });
     else runtimeHealth.stop();
     paneWritten = paneId;
-    if (process.env.HC_TERMINAL_ID) {
-      const status = approvals.size > 0 ? "blocked" : agentStatus;
-      process.stdout.write(`\x1b]7501;state=${status}:app=omp\x1b\\`);
-    }
   };
 
   // Cache desired intent for /new; boot reads the same mirror without opening private session transcripts.
@@ -929,7 +923,7 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
     const root = stateDir;
     const owner = session;
     const ownerRole = role;
-    const paneId = process.env.HC_TERMINAL_ID || process.env.HERDR_PANE_ID;
+    const paneId = process.env.TERN_PANE;
     const headless = headlessRemoteId(ctx, ownerRole);
     if (
       !root ||
@@ -1197,7 +1191,7 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
         )
           appendRole(role);
         if (ctx.agent.kind === "main") {
-          const pane = process.env.HC_TERMINAL_ID || process.env.HERDR_PANE_ID;
+          const pane = process.env.TERN_PANE;
           const nativeId = nativeHeadlessId(ctx);
           const nativeRole = role === "cataly" && nativeId ? nativeHarnessRole() : undefined;
           const harness = nativeRole === "lead" && !isLead() ? undefined : nativeRole;

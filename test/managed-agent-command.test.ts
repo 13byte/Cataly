@@ -2,13 +2,9 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fill, loadConfig } from "../skills/cataly-mode/scripts/src/config.ts";
-import { up } from "../src/cli-up.ts";
 import { shq } from "../src/delivery.ts";
 import { agentCommand, defaultDeps } from "../src/harness.ts";
-import { startLane } from "../src/lanes.ts";
 import { consumerPaths, initialize } from "../src/release/files.ts";
-import { World } from "./fake.ts";
-import { captureIo } from "./inbox-setup.ts";
 import { setup } from "./install-setup.ts";
 import { argvOutput, environment, executable, managedCommand, shell } from "./managed-command-setup.ts";
 
@@ -96,47 +92,6 @@ posix("independent external omp commands and unmarked wrapper paths retain their
   initialize(consumerPaths(f.config.home));
   writeFileSync(f.config.catalyConfig, JSON.stringify({ agentCommand: [external, "{prompt}"] }));
   expect(await runConfig(f.config.catalyConfig, f.config.home, f.root, f.env)).toEqual([external, "{prompt}"]);
-});
-
-posix("harness lead, duty and lane consumers execute the complete managed argv with literal arguments", async () => {
-  const f = managedCommand();
-  environment({ CATALY_AGENT_CMD: "false; touch override-ran" });
-  const world = new World();
-  const original = world.exec;
-  const ran: string[][] = [];
-  world.exec = async (cmd, argv, options) => {
-    if (cmd === "herdr" && argv[0] === "pane" && argv[1] === "run") {
-      const result = shell(argv[3]!, f.root, f.env);
-      expect(result.exitCode).toBe(0);
-      if (result.stdout.length) ran.push(argvOutput(result.stdout));
-    }
-    return original(cmd, argv, options);
-  };
-  const deps = { ...world.deps(), agentCmd: defaultDeps().agentCmd, catalyCmd: ":" };
-  await captureIo(async () => {
-    await up(deps, f.root);
-    return 0;
-  });
-  const brief = join(f.root, "brief.txt");
-  writeFileSync(brief, "Execute the command boundary fixture.\n");
-  await startLane(deps, "managed-command", brief, { cwd: f.root, group: "w1" });
-  expect(ran).toHaveLength(3);
-  for (const [at, name] of ["lead.md", "duty.md"].entries())
-    expect(ran[at]).toEqual([
-      ...f.argv,
-      "--cataly-role",
-      "cataly",
-      "--append-system-prompt",
-      join(deps.store.root, "prompts", name),
-    ]);
-  expect(ran[2]).toEqual([
-    ...f.argv,
-    "--cataly-role",
-    "lane",
-    `Read your brief at ${deps.store.briefPath("managed-command")} and execute it. Your lane key is managed-command.`,
-  ]);
-  for (const name of ["substitution-ran", "suffix-ran", "override-ran"])
-    expect(existsSync(join(f.root, name))).toBe(false);
 });
 
 posix.each([false, true])("a selected pathname present=%s never executes shell suffixes", (blocked) => {

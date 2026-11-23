@@ -130,13 +130,8 @@ test("source recovery distinguishes completed pre-effect holds from effectful or
     expect(sourceRecoveryPending({ ...f.job, deployment: { ...record, status, step: "done" } })).toBe(false);
   for (const step of ["prepare", "stop"] as const) {
     expect(sourceRecoveryPending({ ...f.job, deployment: { ...record, status: "held", step } })).toBe(false);
-    expect(
-      sourceRecoveryPending({
-        ...f.job,
-        deployment: { ...record, status: "held", step, stopRequestedAt: record.createdAt },
-      }),
-    ).toBe(false);
-    for (const receipt of ["nativeUiExitRequestedAt", "nativeExitObservedAt"] as const)
+    // A stop receipt is the headless forward-stop effect; a UI exit receipt marks a terminal-era journal.
+    for (const receipt of ["stopRequestedAt", "nativeExitObservedAt", "nativeUiExitRequestedAt"] as const)
       expect(
         sourceRecoveryPending({
           ...f.job,
@@ -152,10 +147,9 @@ posixJournal("source recovery consults the identity-bound inner journal before s
   const f = stateFixture();
   f.deployment.status = "held";
   f.deployment.step = "stop";
-  f.deployment.stopRequestedAt = f.deployment.createdAt;
   expect(sourceRecoveryPending(f.job)).toBe(false);
   const path = join(f.deployment.directory, "deployment.json");
-  saveDeploymentJson(path, { ...f.deployment, nativeUiExitRequestedAt: f.deployment.createdAt });
+  saveDeploymentJson(path, { ...f.deployment, stopRequestedAt: f.deployment.createdAt });
   expect(sourceRecoveryPending(f.job)).toBe(true);
   saveDeploymentJson(path, { ...f.deployment, id: "different-transaction" });
   expect(() => sourceRecoveryPending(f.job)).toThrow("identity differs");

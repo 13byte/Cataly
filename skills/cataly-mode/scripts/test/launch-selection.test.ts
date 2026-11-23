@@ -4,20 +4,10 @@ import { join } from "node:path";
 
 import { defaultConfig, loadConfig } from "../src/config.ts";
 import type { FlowDeps } from "../src/done-flow.ts";
-import { adoptLane, launchLane, prepareLaunch } from "../src/launch.ts";
-import { footer, quoteForPane } from "../src/launch-footer.ts";
+import { launchLane, prepareLaunch } from "../src/launch.ts";
+import { footer } from "../src/launch-footer.ts";
 import { ChosenRuntimes } from "../src/run.ts";
-import {
-  agentIn,
-  depsFor,
-  fakeClock,
-  laneState,
-  newWorld,
-  sent,
-  type TestState,
-  withState,
-  type World,
-} from "./fakes.ts";
+import { depsFor, fakeClock, newWorld, type TestState, withState, type World } from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00.000Z");
 const DEFAULT = "ulw set goal and work";
@@ -48,7 +38,7 @@ const input = () => ({
 });
 const configured = async (raw: Record<string, unknown> = {}): Promise<FlowDeps> => {
   const path = join(state.dir, "config.json");
-  writeFileSync(path, JSON.stringify({ sessionRuntime: "herdr", defaultCwd: "/repo", startupWaitSeconds: 0, ...raw }));
+  writeFileSync(path, JSON.stringify({ defaultCwd: state.dir, startupWaitSeconds: 0, ...raw }));
   return { ...depsFor(world, fakeClock(T0), state.dir), config: await loadConfig(path, state.dir) };
 };
 
@@ -148,55 +138,17 @@ test.each(["default", "config"] as const)(
   },
 );
 
-test("launch persists requested metadata but keeps the exact prompt and refuses to infer an active goal", async () => {
-  const base = await configured();
-  world.panes = [{ pane_id: "w:p9", workspace_id: "w", agent: "omp", agent_status: "idle" }];
-  world.onEnterStatus = "working";
-  agentIn(world, "w:p9");
-  const [provider = "", id = ""] = base.config.defaultModel.split("/", 2);
-  const model = { provider, id };
-  const goal = { status: "paused", objective: "waiting for explicit resume" } as const;
-  laneState(state.dir, "w:p9", {
-    agentStatus: "idle",
-    goal,
-    modelReadback: {
-      requested: model,
-      observed: model,
-      status: "matched",
-      billing: "unknown",
-      checkedAt: new Date(T0).toISOString(),
-      source: "native-extension",
-    },
-  });
-  const deps: FlowDeps = {
-    ...base,
-    run: async (argv, options) => {
-      if (argv[0] === "herdr" && argv[1] === "tab" && argv[2] === "create")
-        return {
-          code: 0,
-          out: JSON.stringify({ result: { root_pane: { pane_id: "w:p9" }, tab_id: "w:t9" } }),
-          err: "",
-        };
-      const response = await base.run(argv, options);
-      if (argv[0] === "herdr" && argv[2] === "send-keys" && argv[4] === "enter" && response.code === 0)
-        laneState(state.dir, "w:p9", { agentStatus: "working", goal });
-      return response;
-    },
-  };
+test("launch persists requested metadata without sending the launch keywords as a prompt", async () => {
+  const deps = await configured();
   const result = await launchLane(deps, input());
-  const prompt = `${DEFAULT}. Read and execute the lane brief at ${input().brief} in full. You are the selection-lane lane; report as the brief's footer says.`;
-  expect(world.calls.find((argv) => argv[0] === "herdr" && argv[2] === "run")?.at(-1)).toBe(
-    [
-      "omp",
-      `--cataly-launch-model=${deps.config.defaultModel}`,
-      "--cataly-role=lane",
-      `--model=${deps.config.defaultModel}`,
-    ]
-      .map(quoteForPane)
-      .join(" "),
-  );
-  expect(sent(world)).toEqual([prompt]);
-  expect(result.startup).toStartWith("STARTUP_NO_GOAL selection-lane w:p9:");
+  expect(result.startup).toStartWith("STARTUP_OK selection-lane headless:");
+  const starts = world.calls.filter((call) => call[0] === "headless" && call[1] === "start");
+  expect(starts).toHaveLength(1);
+  expect(starts[0]?.join(" ")).not.toContain(DEFAULT);
+  expect(world.calls.filter((call) => call[0] === "headless" && call[1] === "deliver")).toEqual([]);
+  const goals = world.calls.filter((call) => call[0] === "headless" && call[1] === "begin").map((call) => call[3]);
+  expect(goals).toEqual([expect.stringContaining(`Read and execute the lane brief at ${input().brief} in full.`)]);
+  expect(goals[0]).not.toContain(DEFAULT);
   expect(result.lane.launchSelection?.selectedBy).toBe("default");
   expect((await deps.registry.read("selection-lane"))?.launchSelection).toEqual(result.lane.launchSelection);
   expect(readFileSync(input().brief, "utf8")).toContain(JSON.stringify(result.lane.launchSelection));
@@ -211,10 +163,10 @@ test("rebuilding a failed-launch brief keeps exactly one metadata line", async (
   expect(second.preamble.split("Launch selection request (metadata only):")).toHaveLength(2);
 });
 
-test("adoption and old registry records do not fabricate historical selection", async () => {
+test("old registry records do not fabricate historical selection", async () => {
   const deps = await configured();
-  const adopted = await adoptLane(deps, { ...input(), pane: "w:p9" });
-  expect(adopted.launchSelection).toBeUndefined();
-  expect((await deps.registry.read(adopted.key))?.launchSelection).toBeUndefined();
-  expect(footer(adopted, "")).not.toContain("Launch selection request");
+  const old = { ...input(), thread: "none", openedAt: new Date(T0).toISOString() };
+  await deps.registry.write(old);
+  expect((await deps.registry.read(old.key))?.launchSelection).toBeUndefined();
+  expect(footer(old, "")).not.toContain("Launch selection request");
 });

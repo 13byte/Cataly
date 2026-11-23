@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { prepareLaunch } from "../src/launch.ts";
 import { footer, laneFooterFor, originalBrief } from "../src/launch-footer.ts";
 import type { Lane } from "../src/registry.ts";
-import { agentIn, depsFor, fakeClock, laneState, newWorld, type TestState, withState } from "./fakes.ts";
+import { depsFor, fakeClock, newWorld, sid, type TestState, withState } from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00.000Z");
 let state: TestState;
@@ -21,17 +21,21 @@ test("retrying a v0.1.3 generated brief drops its old instructions but not an ow
   expect(originalBrief(quoted)).toBe(quoted);
 });
 
-test("new native lanes report to the attested terminal lead, but not to a reused pane", async () => {
+test("new native lanes report to the attested native lead, but not to a session that lost the lead role", async () => {
   const world = newWorld();
-  const id = "w1:p1";
-  world.panes = [{ pane_id: id, workspace_id: "w1", agent: "omp", agent_status: "idle", foreground: "omp" }];
-  agentIn(world, id);
-  laneState(state.dir, id, { role: "cataly" });
-  writeFileSync(join(state.dir, "roles.json"), JSON.stringify({ lead: id }));
-  const deps = {
-    ...depsFor(world, fakeClock(T0), state.dir, { sessionRuntime: "headless", leadPane: "" }),
-    env: { CATALY_HOME: state.dir },
+  const id = sid(1);
+  world.sessions[id] = {
+    status: "idle",
+    role: "cataly",
+    harnessRole: "lead",
+    sessionId: "lead-session",
+    sessionFile: "/sessions/lead-session.jsonl",
+    pid: 4001,
+    goal: { status: "none" },
+    held: false,
   };
+  writeFileSync(join(state.dir, "roles.json"), JSON.stringify({ lead: `headless:${id}` }));
+  const deps = { ...depsFor(world, fakeClock(T0), state.dir), env: { CATALY_HOME: state.dir } };
   const lane: Lane = {
     key: "new-lane",
     title: "title",
@@ -40,9 +44,9 @@ test("new native lanes report to the attested terminal lead, but not to a reused
     done: "file /result",
     openedAt: new Date(T0).toISOString(),
   };
-  expect(await laneFooterFor(deps, lane)).toContain(`herdr pane run ${id} "$line"`);
-  laneState(state.dir, id, { role: "lane" });
-  expect(await laneFooterFor(deps, lane)).not.toContain("herdr pane run");
+  expect(await laneFooterFor(deps, lane)).toContain(`harness send headless:${id} --text "$line"`);
+  world.sessions[id] = { ...world.sessions[id]!, role: "lane" };
+  expect(await laneFooterFor(deps, lane)).not.toContain("harness send");
 });
 
 test.each(["alpha", "beta"] as const)("%s context survives a reload under another repository default", async (name) => {
@@ -76,7 +80,7 @@ test.each(["alpha", "beta"] as const)("%s context survives a reload under anothe
   const restarted = depsFor(world, fakeClock(T0 + 1000), state.dir, { defaultCwd: other });
   const restored = await restarted.registry.read(`lane-${name}`);
   if (!restored) throw new Error("the persisted lane was lost");
-  const text = footer(restored, restarted.config.leadPane, {}, "herdr");
+  const text = footer(restored, restarted.config.leadPane, {}, "headless");
   expect(text).toContain(`- Key: lane-${name}. Work thread: ${thread}.`);
   expect(text).toContain(`- Done = ${done}.`);
   expect(text).toContain(`- Recorded working directory: ${JSON.stringify(cwd)}.`);

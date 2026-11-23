@@ -1,12 +1,11 @@
 import { createHash } from "node:crypto";
 import { realpathSync, statSync } from "node:fs";
 import { basename, isAbsolute, relative } from "node:path";
-import { liveSessions, nativeRequest, object, type Request, type Session } from "../../../../src/remote/client.ts";
-import { hcCall } from "../../../../src/runtime/hc/exec.ts";
-import { createArgv, slugName } from "../../../../src/runtime/hc/sessions.ts";
+import { liveSessions, object, type Request, type Session } from "../../../../src/remote/client.ts";
+import { type HeadlessObservation, headlessArgv, HeadlessRuntime } from "../../../../src/runtime/headless.ts";
 import { isOmpArgv } from "../../../../src/runtime/omp-argv.ts";
-import type { SessionRef } from "../../../../src/runtime/types.ts";
-import { configPath, expandHome, fill } from "./config.ts";
+import { formatRef, type SessionRef } from "../../../../src/runtime/types.ts";
+import { configPath, expandHome } from "./config.ts";
 import type { FlowDeps } from "./done-flow.ts";
 import { resumeFile } from "./lifecycle-session.ts";
 import { statusOf } from "./registry.ts";
@@ -45,54 +44,50 @@ function directory(path: string): string {
   return real;
 }
 
-async function waitForSession(deps: FlowDeps, ref: SessionRef, cwd: string, expected?: string): Promise<Session> {
-  const runtime = runtimesOf(deps).for(ref);
+/** The endpoint the started OMP publishes itself, bound to the supervisor's observed process, session and cwd. */
+async function waitForSession(deps: FlowDeps, runtime: HeadlessRuntime, seen: HeadlessObservation): Promise<Session> {
+  const { ref } = seen;
+  const pane = formatRef(ref);
+  const cwd = realpathSync(seen.cwd);
   const end = deps.clock.now() + 20_000;
   let identity = "no live OMP endpoint";
   do {
-    const probe = await runtime.probe(ref, { foregroundOnly: true });
-    if (probe.status === "gone") break;
-    const live = (await liveSessions(deps.config.stateDir)).find((row) => row.pane === ref.id);
-    if (live?.pid) {
-      // A role-scoped private endpoint comes from the agent itself, not text printed in a pane. Bind it to the actual
-      // foreground PID from hc; attestation for legacy terminal typing remains separate and unchanged.
-      const foreground = probe.foreground?.some((proc) => proc.pid === live.pid);
-      identity = `pane=${probe.status}, foreground=${Boolean(foreground)}, shell=${probe.shellInFront}`;
-      if (
-        foreground &&
-        !probe.shellInFront &&
-        (!expected || live.session === expected) &&
-        realpathSync(live.cwd) === cwd
-      )
-        return live;
+    const live = (await liveSessions(deps.config.stateDir)).find((row) => row.pane === pane);
+    if (live) {
+      identity = `session=${live.session === seen.sessionId}, pid=${live.pid === seen.pid}`;
+      if (live.session === seen.sessionId && live.pid === seen.pid && realpathSync(live.cwd) === cwd) return live;
     }
+    if ((await runtime.observe(ref)).status === "gone") break;
     await deps.clock.sleep(200);
   } while (deps.clock.now() < end);
-  throw new Error(`OMP startup unconfirmed in ${ref.id} (${identity}); inspect it before attempting another launch`);
+  throw new Error(`OMP startup unconfirmed in ${pane} (${identity}); inspect it before attempting another launch`);
 }
 
-async function start(deps: FlowDeps, cwd: string, name: string, argv: readonly string[], expected?: string) {
-  const argv0 = argv[0];
-  if (!argv0) throw new Error("Missing native OMP executable");
-  const create = createArgv(
-    { name, cwd, env: laneLaunchEnv(process.env, configPath(), deps.config), role: "lane", container: "tab" },
-    argv0,
-    slugName(name),
-    process.env["CATALY_HC_SPACE"],
-  );
-  // A standalone session has no shell flow to preserve. Let hc exec the OMP argv directly.
-  const result = await hcCall(
-    async (cmd, args) => {
-      const child = await deps.run([cmd, ...args], { timeoutMs: 10_000 });
-      return { code: child.code, stdout: child.out, stderr: child.err };
-    },
-    [...create, ...argv.slice(1), `--cwd=${cwd}`],
-  );
-  const address = result["address"];
-  if (typeof address !== "string" || !/^t[0-9a-z]+$/.test(address))
-    throw new Error("hc did not confirm a new local terminal");
-  const target = { runtime: "hc", id: address } as const;
-  return await waitForSession(deps, target, cwd, expected);
+/** A standalone headless session: a launched lane's native reservation and supervisor, with no registry row. */
+async function start(
+  deps: FlowDeps,
+  launch: { readonly cwd: string; readonly name: string; readonly argv: readonly string[] },
+  reserved: (ref: SessionRef) => void,
+  resume?: { readonly file: string; readonly sessionId: string },
+): Promise<{ readonly session: Session; readonly runtime: HeadlessRuntime; readonly ref: SessionRef }> {
+  const runtime = runtimesOf(deps).default;
+  if (!(runtime instanceof HeadlessRuntime)) throw new Error("Headless supervisor unavailable");
+  const callerEnv = deps.env ?? process.env;
+  const env = laneLaunchEnv(callerEnv, callerEnv["CATALY_CONFIG"] ?? configPath(), deps.config);
+  const ref = await runtime.create({ name: launch.name, cwd: launch.cwd, env, role: "lane" });
+  reserved(ref);
+  const seen = await runtime.startNative(ref, launch.argv, env, resume);
+  if (
+    seen.ref.runtime !== ref.runtime ||
+    seen.ref.id !== ref.id ||
+    seen.role !== "lane" ||
+    !seen.sessionId ||
+    seen.pid === undefined ||
+    (resume !== undefined && seen.sessionId !== resume.sessionId) ||
+    realpathSync(seen.cwd) !== launch.cwd
+  )
+    throw new Error(`OMP startup unconfirmed in ${formatRef(ref)}; inspect it before attempting another launch`);
+  return { session: await waitForSession(deps, runtime, seen), runtime, ref };
 }
 
 export async function openRemoteSession(deps: FlowDeps, request: Request): Promise<unknown> {
@@ -128,11 +123,11 @@ export async function openRemoteSession(deps: FlowDeps, request: Request): Promi
     if (!model || model.startsWith("-") || model.includes("\0")) throw new Error("Invalid OMP model");
     if (request.thinking && !/^(off|minimal|low|medium|high|xhigh|max|auto)$/.test(request.thinking))
       throw new Error("Invalid OMP thinking level");
+    executable(deps);
     const argv = [
-      ...fill(deps.config.agentCommand, { model }).slice(0, -1),
+      ...headlessArgv(deps.config.agentCommand, model),
       ...(request.thinking ? [`--thinking=${request.thinking}`] : []),
     ];
-    executable(deps);
     if (!request.worktree && (request.branch || request.base))
       throw new Error("--branch and --base require --worktree");
     if (request.worktree && !isAbsolute(expandHome(request.worktree))) throw new Error("Use an absolute worktree path");
@@ -150,7 +145,12 @@ export async function openRemoteSession(deps: FlowDeps, request: Request): Promi
         ...(request.base ? [request.base] : []),
       ]);
     const actualCwd = worktree ? directory(worktree) : cwd;
-    const session = await start(deps, actualCwd, request.name ?? `remote-${id.slice(0, 8)}`, argv);
+    // The pending receipt names the reservation as soon as it exists, so an unconfirmed start can be inspected.
+    const { session, runtime, ref } = await start(
+      deps,
+      { cwd: actualCwd, name: request.name ?? `remote-${id.slice(0, 8)}`, argv },
+      (reserved) => records.store(receipt, { status: "pending", fingerprint, ref: formatRef(reserved) }),
+    );
     records.store(records.path("session", session.session), {
       cwd: actualCwd,
       sessionFile: session.sessionFile,
@@ -164,13 +164,8 @@ export async function openRemoteSession(deps: FlowDeps, request: Request): Promi
     });
     if (!request.text) return opened;
     try {
-      const delivery = await nativeRequest(deps.config.stateDir, {
-        op: "send",
-        session: session.session,
-        generation: session.generation,
-        id,
-        text: request.text,
-      });
+      // Headless mutations go through the native command supervisor, never the session's own endpoint.
+      const delivery = await runtime.remoteSend(ref, session.session, { id, text: request.text, delivery: "prompt" });
       const result = { ...opened, delivery };
       records.store(receipt, { ...result, fingerprint });
       return result;
@@ -212,12 +207,16 @@ export async function wakeRemoteSession(deps: FlowDeps, id: string): Promise<Ses
       lease["unknown"].length
     )
       throw new Error("OMP cannot confirm that the saved session is unowned");
-    return await start(
+    const { session } = await start(
       deps,
-      directory(cwd),
-      `remote-${id.slice(0, 8)}`,
-      [...executable(deps), "--cataly-role", "lane", `--resume=${exact}`],
-      id,
+      {
+        cwd: directory(cwd),
+        name: `remote-${id.slice(0, 8)}`,
+        argv: [...executable(deps), "--cataly-role", "lane"],
+      },
+      () => {},
+      { file: exact, sessionId: id },
     );
+    return session;
   });
 }

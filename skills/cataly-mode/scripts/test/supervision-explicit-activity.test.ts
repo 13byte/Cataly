@@ -16,7 +16,7 @@ import { freshnessTick } from "../src/freshness.ts";
 import { Reports } from "../src/reports.ts";
 import { run, type Runner } from "../src/run.ts";
 import { readObservation, type SupervisedLane } from "../src/supervision-observe.ts";
-import { depsFor, fakeClock, newWorld, withState } from "./fakes.ts";
+import { depsFor, fakeClock, nativeLane, newWorld, withState } from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00Z");
 const MIN = 60_000;
@@ -85,11 +85,13 @@ for (const scenario of ["without-git", "worktree-edit", "stage-through-alias", "
         expect(await porcelain()).toBe(`${beforeStage}\0`);
       }
 
+      const world = newWorld();
       const lane = {
         key: "explicit-activity-lane",
         title: "Explicit activity",
         thread: "none",
-        pane: "w:p1",
+        // One continuing native call that started 21 minutes before T0.
+        ...nativeLane(world, 1, { status: "working", activeSince: T0 - 21 * MIN }),
         brief: "/b.md",
         done: "",
         openedAt: iso(T0),
@@ -99,8 +101,6 @@ for (const scenario of ["without-git", "worktree-edit", "stage-through-alias", "
       } satisfies SupervisedLane;
       const scope = { generation: lane.lifecycleEpoch };
       const clock = fakeClock(T0);
-      const world = newWorld();
-      world.panes = [{ pane_id: lane.pane, workspace_id: "w", agent: "omo", agent_status: "working" }];
       const deps = depsFor(world, clock, stateDir, {
         nudgeAfterMin: 999,
         postAfterMin: 999,
@@ -145,7 +145,6 @@ for (const scenario of ["without-git", "worktree-edit", "stage-through-alias", "
       const wall = Date.now();
       const tick = async (minutes: number) => {
         clock.at = T0 + minutes * MIN;
-        world.screen = `Working ${21 + minutes}m`;
         const now = spyOn(Date, "now").mockImplementation(() => wall + minutes * MIN);
         try {
           return await freshnessTick({ ...deps, run: observer }, fixture.dir);

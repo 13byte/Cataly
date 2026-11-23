@@ -130,16 +130,12 @@ export function linuxAdapter(root = PROC, libc: () => PidfdLibc = libcPidfd): Pl
     posixOwnership: true,
     directoryFsync: true,
     preservesHardLinks: false,
-    supportsHerdrNativeUi: true,
     // /proc carries each task's stat, CapEff, environ and cwd; the adapter's readers take the root from the fixture.
     procfs: true,
     flockLibrary: () => "libc.so.6",
     syncDirectory,
 
-    legacyReleaseRuntime: () => "herdr",
-
-    supportsReleaseProfile: (platform, arch, runtime) =>
-      platform === "linux" && arch === "x64" && (runtime === "headless" || runtime === "herdr"),
+    supportsHeadlessRelease: (platform, arch) => platform === "linux" && arch === "x64",
 
     nativeCacheLabel: () => `native-linux-${process.arch}`,
     programName: (word) => word.split("/").at(-1) ?? "",

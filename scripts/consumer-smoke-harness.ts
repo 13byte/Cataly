@@ -41,7 +41,7 @@ const cwd = join(context.out, "workspace");
 const sentinels = ["injected", "inherited-command-ran", "selected-command-ran", "substitution-ran", "suffix-ran"];
 for (const name of sentinels) assert(!existsSync(join(cwd, name)), `Injection sentinel exists: ${name}`);
 const forwarded = ["--consumer-smoke-boundary", "literal 'quote';$(touch injected)", ""];
-const explicitRuntime = process.platform === "darwin" ? "hc" : "herdr";
+const explicitRuntime = "headless";
 
 if (!values["exec-boundary"]) {
   assert.equal(positionals.length, 0, "Observer accepts no implicit arguments");
@@ -79,18 +79,9 @@ source "$observer_side/bin/cataly-harness" "$@"
         CATALY_AGENT_ARGV: '["touch","selected-command-ran"]',
         CATALY_STATE_DIR: "foreign-state",
         CATALY_RUNTIME: explicitRuntime,
-        CATALY_LEAD_PANE: "foreign-lead",
-        CATALY_HC_SPACE: "foreign-space",
         CATALY_PROMPTS_DIR: "foreign-prompts",
         CATALY_OMP_ULW_PATH: "/foreign/ulw/index.ts",
         CATALY_MANAGED_STARTUP: "1",
-        HC_SESSION: "foreign-session",
-        HC_TERMINAL_ID: "foreign-terminal",
-        HC_TERMINAL_SOCKET: "foreign-terminal-socket",
-        HC_SOCKET: "foreign-socket",
-        CATALY_HERDR_SESSION: "foreign-session",
-        HERDR_PANE_ID: "foreign-pane",
-        HERDR_WORKSPACE_ID: "foreign-workspace",
       },
       stdin: "ignore",
       stdout: "pipe",
@@ -126,21 +117,11 @@ source "$observer_side/bin/cataly-harness" "$@"
   const cleared = [
     "CATALY_AGENT_ARGV",
     "CATALY_STATE_DIR",
-    "CATALY_LEAD_PANE",
-    "CATALY_HC_SPACE",
     "CATALY_PROMPTS_DIR",
     "CATALY_OMP_ULW_PATH",
     "CATALY_MANAGED_STARTUP",
-    "HC_TERMINAL_ID",
-    "HC_TERMINAL_SOCKET",
-    "HC_SOCKET",
-    "HERDR_PANE_ID",
-    "HERDR_WORKSPACE_ID",
   ];
   for (const key of cleared) assert.equal(process.env[key], undefined, `Foreign ${key} crossed the wrapper`);
-  const namespace = `omp-dori-${digest(side).slice(0, 12)}`;
-  assert.equal(process.env["HC_SESSION"], namespace);
-  assert.equal(process.env["CATALY_HERDR_SESSION"], namespace);
   const discovery = join(side, "releases/consumer-discovery", basename(source), "omp.yml");
   assert(lstatSync(discovery).isFile(), "The admitted physical release's discovery config is missing");
   const expected = [
@@ -213,7 +194,5 @@ source "$observer_side/bin/cataly-harness" "$@"
     roles[role] = { command, argv };
   }
   for (const name of sentinels) assert(!existsSync(join(cwd, name)), `Injection sentinel exists: ${name}`);
-  console.log(
-    JSON.stringify({ source, expected, roles, home, config: process.env["CATALY_CONFIG"], cleared, namespace }),
-  );
+  console.log(JSON.stringify({ source, expected, roles, home, config: process.env["CATALY_CONFIG"], cleared }));
 }

@@ -32,7 +32,7 @@ const run = async (
   const token = options.token ?? "synthetic-telegram-epoch";
   const config = join(dir, "config.json");
   const journal = join(dir, "telegram-requests.jsonl");
-  writeFileSync(config, JSON.stringify({ stateDir: dir, runtime: "herdr", hooks: {} }));
+  writeFileSync(config, JSON.stringify({ stateDir: dir, hooks: {} }));
   writeFileSync(journal, "", { mode: 0o600 });
   const child = Bun.spawn(
     [

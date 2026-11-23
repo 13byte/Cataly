@@ -1,163 +1,191 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 
+import { ENTER_ATTEMPTS } from "../../../../src/runtime/terminal/deliver.ts";
 import type { SessionRef } from "../../../../src/runtime/types.ts";
+import { block, ZSH } from "../../../../test/fake-tern.ts";
 import type { FlowDeps } from "../src/done-flow.ts";
-import { runtimesFor, runtimesOf } from "../src/run.ts";
+import type { PaneState } from "../src/lane-state.ts";
+import { type Ran, runtimesOf } from "../src/run.ts";
 import { listSessions, sendVerified, shellInFront, UnsafeTextError } from "../src/sessions.ts";
-import { depsFor, fakeClock, hcSent, newWorld, sent, withState, type World } from "./fakes.ts";
-import { hcTerm } from "./hc-runner.ts";
+import { agentIn, laneState, ternDeps, ternOf, ternRef, ternSent } from "./fake-tern-world.ts";
+import { fakeClock, newWorld, withState, type TestState, type World } from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00.000Z");
-const P1: SessionRef = { runtime: "herdr", id: "w:p1" };
-const T1: SessionRef = { runtime: "hc", id: "t1" };
+const ID = "5001";
+const B1 = ternRef(ID);
+const HERDR: SessionRef = { runtime: "herdr", id: "w:p1" };
 
-let state: ReturnType<typeof withState>;
+let state: TestState;
 let world: World;
-const at = (ms: number, patch: Partial<FlowDeps["config"]> = {}) => depsFor(world, fakeClock(ms), state.dir, patch);
-const send = (text: string, ref: SessionRef = P1) => sendVerified(runtimesOf(at(T0)), at(T0).clock, ref, text);
-const typedKeys = () => world.calls.filter((c) => c[2] === "send-text" || c[2] === "send-keys");
+let deps: FlowDeps;
+
+/** A live OMP agent in block ID with the extension's record beside it; `working` is Tern's busy flag. */
+const agent = (opts: { readonly working?: boolean } = {}, record: Partial<PaneState> = {}): SessionRef => {
+  agentIn(world, ID, opts);
+  laneState(state.dir, ID, record);
+  return B1;
+};
+const blockOf = () => {
+  const b = ternOf(world).blocks.get(ID);
+  if (b === undefined) throw new Error(`no block ${ID}`);
+  return b;
+};
+/** Deps whose runner first offers each argv to `over`; an undefined answer falls through to the fake world. */
+const wrapped = (over: (argv: readonly string[]) => Promise<Ran> | undefined): FlowDeps => {
+  const base = ternDeps(world, fakeClock(T0), state.dir);
+  return { ...base, run: (argv) => over(argv) ?? base.run(argv) };
+};
+const send = (text: string, ref: SessionRef = B1, d: FlowDeps = deps) =>
+  sendVerified(runtimesOf(d), d.clock, ref, text);
+const entered = () => ternOf(world).entered;
 
 beforeEach(() => {
   state = withState();
   world = newWorld();
+  deps = ternDeps(world, fakeClock(T0), state.dir);
 });
 afterEach(() => state.done());
 
-test("delivery is confirmed by the pane's agent status moving to working, with exactly one Enter", async () => {
-  world.panes = [{ pane_id: "w:p1", workspace_id: "w", agent: "pi", agent_status: "idle" }];
-  world.onEnterStatus = "working";
+test("delivery is confirmed by the block's agent turning working, with exactly one paste and one Enter", async () => {
+  agent();
   expect(await send("[LEAD] please report")).toBe("delivered");
-  expect(world.calls.filter((c) => c[2] === "send-keys")).toHaveLength(1);
-  expect(sent(world)).toEqual(["[LEAD] please report"]);
+  expect(entered()).toEqual([ID]);
+  expect(ternSent(world)).toEqual(["[LEAD] please report"]);
+  expect(ternOf(world).submitted).toEqual([{ id: ID, text: "[LEAD] please report" }]);
 });
 
-test("a screen that still shows the text never causes another Enter; no status change is unconfirmed", async () => {
-  world.panes = [{ pane_id: "w:p1", workspace_id: "w", agent: "pi", agent_status: "idle" }];
-  world.stuckReads = 10;
+test("an Enter the agent takes without turning working is unconfirmed and never pressed again", async () => {
+  agent();
+  const d = wrapped((argv) => {
+    if (argv[1] !== "send" || argv[3] !== "keys") return undefined;
+    return deps.run(argv).then((r) => {
+      blockOf().working = false;
+      return r;
+    });
+  });
+  expect(await send("[LEAD] no status change", B1, d)).toBe("unconfirmed");
+  expect(entered()).toEqual([ID]);
+  expect(ternSent(world)).toEqual(["[LEAD] no status change"]);
+});
+
+test("text left in the input is pasted once; sendVerified adds no Enter past the runtime's bounded submit", async () => {
+  agent();
+  ternOf(world).knobs.enterSwallowed = 99;
   expect(await send("[LEAD] stuck text still here")).toBe("unconfirmed");
-  expect(world.calls.filter((c) => c[2] === "send-keys")).toHaveLength(1);
+  expect(ternSent(world)).toEqual(["[LEAD] stuck text still here"]);
+  expect(entered()).toHaveLength(ENTER_ATTEMPTS);
+  expect(ternOf(world).submitted).toEqual([]);
 });
 
-test("a pane that was already working cannot show a change, so the send is unconfirmed, not delivered", async () => {
-  world.panes = [{ pane_id: "w:p1", workspace_id: "w", agent: "pi", agent_status: "working" }];
+test("a block that was already working cannot show a change, so the send is unconfirmed, not delivered", async () => {
+  agent({ working: true });
   expect(await send("[LEAD] queued while busy")).toBe("unconfirmed");
-  expect(world.calls.filter((c) => c[2] === "send-keys")).toHaveLength(1);
+  expect(entered()).toEqual([ID]);
+  expect(ternSent(world)).toEqual(["[LEAD] queued while busy"]);
 });
 
-test("a pane with no running agent is a bare shell: nothing is typed, the send fails", async () => {
-  world.panes = [{ pane_id: "w:p1", workspace_id: "w" }];
+test("the send is gated on the status read before it: an agent that turned working in between gets nothing", async () => {
+  agent({}, { agentStatus: "working" });
   expect(await send("[LEAD] please report")).toBe("failed");
-  world.panes = [];
-  expect(await send("[LEAD] please report")).toBe("failed");
-  expect(typedKeys()).toHaveLength(0);
+  expect(ternSent(world)).toEqual([]);
+  expect(entered()).toEqual([]);
 });
 
-test("an agent suspended with Ctrl+Z is still reported idle, but the shell is in front: nothing is typed", async () => {
-  world.panes = [{ pane_id: "w:p1", workspace_id: "w", agent: "opencode", agent_status: "idle", foreground: "-zsh" }];
-  expect(await shellInFront(runtimesOf(at(T0)), P1)).toBe(true);
+test("a block with no running agent is a bare shell: nothing is typed, the send fails", async () => {
+  ternOf(world).blocks.set(ID, block({ foreground: ZSH, group: ZSH.pid, draft: undefined, body: "$ " }));
   expect(await send("[LEAD] please report")).toBe("failed");
-  expect(typedKeys()).toHaveLength(0);
+  ternOf(world).blocks.delete(ID);
+  expect(await send("[LEAD] please report")).toBe("failed");
+  expect(ternSent(world)).toEqual([]);
+  expect(entered()).toEqual([]);
 });
 
-test("an agent with a non-interactive sh -c child in front is delivered to; an empty foreground group is doubt", async () => {
-  const pi = { pane_id: "w:p1", workspace_id: "w", agent: "pi", agent_status: "idle" };
-  world.panes = [
-    {
-      ...pi,
-      foreground: [
-        { name: "pi", argv: ["pi"] },
-        { name: "sh", argv: ["sh", "-c", "true"] },
-      ],
-    },
-  ];
-  world.onEnterStatus = "working";
-  expect(await shellInFront(runtimesOf(at(T0)), P1)).toBe(false);
-  expect(await send("[LEAD] one")).toBe("delivered");
-  world.panes = [{ ...pi, foreground: [] }];
-  const before = sent(world).length;
+test("an agent suspended with Ctrl+Z still has an idle record, but the shell is in front: nothing is typed", async () => {
+  agent({}, { agentStatus: "idle" });
+  const shell = blockOf().child;
+  Object.assign(blockOf(), { foreground: { ...shell, argv: ["-zsh"] }, group: shell.pid });
+  expect(await shellInFront(runtimesOf(deps), B1)).toBe(true);
+  expect(await send("[LEAD] please report")).toBe("failed");
+  expect(ternSent(world)).toEqual([]);
+  expect(entered()).toEqual([]);
+});
+
+test("a non-interactive sh -c in front is no shell but no agent Tern can read; an empty foreground is doubt", async () => {
+  agent();
+  blockOf().foreground = { pid: 4300, name: "sh", argv: ["sh", "-c", "true"] };
+  expect(await shellInFront(runtimesOf(deps), B1)).toBe(false);
+  expect(await send("[LEAD] one")).toBe("failed");
+  blockOf().foreground = null;
+  expect(await shellInFront(runtimesOf(deps), B1)).toBe(true);
   expect(await send("[LEAD] two")).toBe("failed");
-  expect(sent(world).length).toBe(before);
+  expect(ternSent(world)).toEqual([]);
+  expect(entered()).toEqual([]);
+  // The agent back in front is delivered to again.
+  agent();
+  expect(await shellInFront(runtimesOf(deps), B1)).toBe(false);
+  expect(await send("[LEAD] three")).toBe("delivered");
 });
 
-test("a failed pane lookup is doubt: nothing is typed, the send fails", async () => {
-  const deps = at(T0);
+test("a failed probe is doubt: shellInFront holds the send and nothing is typed", async () => {
+  agent();
+  ternOf(world).knobs.processError = "tern down";
+  expect(await shellInFront(runtimesOf(deps), B1)).toBe(true);
+  expect(await send("[LEAD] please report")).toBe("failed");
+  expect(ternSent(world)).toEqual([]);
+  expect(entered()).toEqual([]);
+});
+
+test("a failed block lookup is doubt: nothing is typed, the send fails", async () => {
+  agent();
   const typed: (readonly string[])[] = [];
-  const run = async (argv: readonly string[]) => {
-    if (argv[1] === "pane" && argv[2] === "list") return { code: 1, out: "", err: "herdr down" };
-    if (argv[2] === "send-text" || argv[2] === "send-keys") typed.push(argv);
-    return deps.run(argv);
-  };
-  const rts = runtimesFor(deps.config, {}, run, deps.clock);
-  expect(await sendVerified(rts, deps.clock, P1, "[LEAD] please report")).toBe("failed");
-  expect(typed).toHaveLength(0);
+  const d = wrapped((argv) => {
+    if (argv[0] !== "tern") return undefined;
+    if (argv[1] === "inspect") return Promise.resolve({ code: 1, out: "", err: "tern inspect: not running" });
+    if (argv[1] === "send") typed.push(argv);
+    return undefined;
+  });
+  expect(await shellInFront(runtimesOf(d), B1)).toBe(true);
+  expect(await send("[LEAD] please report", B1, d)).toBe("failed");
+  expect(typed).toEqual([]);
 });
 
-test("text with a backtick never reaches a session on either runtime", async () => {
-  for (const ref of [P1, T1]) await expect(send("run `rm -rf`", ref)).rejects.toBeInstanceOf(UnsafeTextError);
-  expect(world.calls).toHaveLength(0);
+test("an agent awaiting an approval gets nothing", async () => {
+  agent({}, { approvalPending: true });
+  expect(await send("[LEAD] please report")).toBe("failed");
+  expect(ternSent(world)).toEqual([]);
+  expect(entered()).toEqual([]);
 });
 
-test("on hc a send is delivered once the agent's status flips to working, gated on the status read before it", async () => {
-  world.terminals = { t1: hcTerm() };
-  world.onEnterStatus = "working";
-  expect(await send("[LEAD] please report", T1)).toBe("delivered");
-  expect(hcSent(world)).toEqual(["[LEAD] please report"]);
-  expect(world.calls.find((c) => c[2] === "send")).toEqual([
-    "hc",
-    "--json",
-    "send",
-    "t1",
-    "--if",
-    "idle",
-    "--",
-    "[LEAD] please report",
-  ]);
-});
-
-test("on hc a working agent gets the text gated on working and the send is unconfirmed", async () => {
-  world.terminals = { t1: hcTerm({ status: { state: "working", app: "omo" } }) };
-  expect(await send("[LEAD] queued while busy", T1)).toBe("unconfirmed");
-  expect(world.calls.find((c) => c[2] === "send")).toContain("working");
-});
-
-test("on hc a shell in front fails the send and types nothing, whatever the status word says", async () => {
-  world.terminals = { t1: hcTerm({ foreground: { name: "zsh", argv: ["-zsh"], pid: 9 } }) };
-  expect(await shellInFront(runtimesOf(at(T0)), T1)).toBe(true);
-  expect(await send("[LEAD] please report", T1)).toBe("failed");
-  expect(hcSent(world)).toEqual([]);
-  world.terminals = { t1: hcTerm() };
-  expect(await shellInFront(runtimesOf(at(T0)), T1)).toBe(false);
-});
-
-test("on hc a terminal that is gone or blocked gets nothing", async () => {
-  expect(await send("[LEAD] please report", T1)).toBe("failed");
-  world.terminals = { t1: hcTerm({ status: { state: "blocked", app: "omo" } }) };
-  expect(await send("[LEAD] please report", T1)).toBe("failed");
-  expect(hcSent(world)).toEqual([]);
-});
-
-test("a mixed registry lists the herdr lane and the hc lane together, whichever runtime is selected", async () => {
-  world.panes = [{ pane_id: "w:p1", workspace_id: "w", agent: "pi", agent_status: "idle", title: "pane lane" }];
-  world.terminals = { t1: hcTerm() };
-  const lanes = [{ sessionRef: P1 }, { sessionRef: T1 }];
-  for (const runtime of ["herdr", "hc"] as const) {
-    const listed = await listSessions(runtimesOf(at(T0, { runtime })), { lanes });
-    expect(listed.map((s) => `${s.ref.runtime}:${s.ref.id}:${s.status}`).sort()).toEqual([
-      "hc:t1:idle",
-      "herdr:w:p1:idle",
-    ]);
-  }
-  // Without a lane on hc only the selected runtime is asked.
+test("text with a backtick or $( never reaches a block", async () => {
+  agent();
   world.calls = [];
-  expect((await listSessions(runtimesOf(at(T0)))).map((s) => s.ref.id)).toEqual(["w:p1"]);
-  expect(world.calls.some((c) => c[0] === "hc")).toBe(false);
+  for (const text of ["run `rm -rf`", "run $(rm -rf)"])
+    await expect(send(text)).rejects.toBeInstanceOf(UnsafeTextError);
+  expect(world.calls).toHaveLength(0);
+  expect(ternSent(world)).toEqual([]);
 });
 
-test("a failed runtime choice still lists a stored herdr lane; with no lane the failure is thrown", async () => {
-  world.panes = [{ pane_id: "w:p1", workspace_id: "w", agent: "pi", agent_status: "idle" }];
-  const deps = { ...at(T0), env: { CATALY_RUNTIME: "tmux" } };
-  const listed = await listSessions(runtimesOf(deps), { lanes: [{ sessionRef: P1 }] });
-  expect(listed.map((s) => `${s.ref.runtime}:${s.ref.id}`)).toEqual(["herdr:w:p1"]);
-  expect(world.calls.some((c) => c[0] === "hc")).toBe(false);
-  await expect(listSessions(runtimesOf({ ...at(T0), env: { CATALY_RUNTIME: "tmux" } }))).rejects.toThrow();
+test("listing names each live block's status; a lane left on the removed herdr runtime reads as gone", async () => {
+  agent({}, { agentStatus: "idle" });
+  ternOf(world).blocks.set("5002", block({ foreground: ZSH, group: ZSH.pid, draft: undefined, body: "$ " }));
+  ternOf(world).blocks.set("5003", block({ live: false }));
+  const lanes = [{ sessionRef: B1 }, { sessionRef: HERDR }, {}];
+  const listed = await listSessions(runtimesOf(deps), { lanes });
+  expect(listed.map((s) => `${s.ref.runtime}:${s.ref.id}:${s.status}`).sort()).toEqual([
+    "tern:5001:idle",
+    "tern:5002:shell",
+  ]);
+  expect(listed.find((s) => s.ref.id === ID)?.agent).toBe("omp");
+  expect(await listSessions(runtimesOf(deps), { group: "elsewhere" })).toEqual([]);
+});
+
+test("a failed runtime choice still lists a stored Tern lane; with no lane the failure is thrown", async () => {
+  agent();
+  for (const choice of ["tmux", "herdr"]) {
+    const failing = (): FlowDeps => ({ ...ternDeps(world, fakeClock(T0), state.dir), env: { CATALY_RUNTIME: choice } });
+    const listed = await listSessions(runtimesOf(failing()), { lanes: [{ sessionRef: B1 }, { sessionRef: HERDR }] });
+    expect(listed.map((s) => `${s.ref.runtime}:${s.ref.id}`)).toEqual(["tern:5001"]);
+    await expect(listSessions(runtimesOf(failing()), { lanes: [{ sessionRef: HERDR }] })).rejects.toThrow();
+    await expect(listSessions(runtimesOf(failing()))).rejects.toThrow();
+  }
 });

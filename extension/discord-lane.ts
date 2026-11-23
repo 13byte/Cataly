@@ -96,9 +96,8 @@ export class DiscordLane {
   ): void {
     this.stop();
     if (!headless && ctx.mode !== "tui") return;
-    const paneId = process.env.HC_TERMINAL_ID || process.env.HERDR_PANE_ID;
-    const ref: SessionRef | undefined =
-      headless ?? (paneId ? { id: paneId, runtime: process.env.HC_TERMINAL_ID ? "hc" : "herdr" } : undefined);
+    const paneId = process.env.TERN_PANE;
+    const ref: SessionRef | undefined = headless ?? (paneId ? { id: paneId, runtime: "tern" } : undefined);
     if (!ref) return;
     const session = ctx.sessionManager.getSessionId();
     const file = ctx.sessionManager.getSessionFile();

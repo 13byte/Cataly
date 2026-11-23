@@ -29,7 +29,6 @@ function fixture() {
   const config = {
     version: 1,
     target: "cataly",
-    runtime: "herdr",
     root: join(directory, "updates"),
     remote,
     ref: "refs/heads/main",

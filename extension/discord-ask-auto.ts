@@ -6,7 +6,7 @@ import { discordAskReceivers } from "../skills/cataly-mode/scripts/src/messenger
 import { isDiscordSnowflake } from "../skills/cataly-mode/scripts/src/messenger/discord-inbound-state.ts";
 import { LANE_KEY, Registry, RESERVED_LANE_KEY, statusOf } from "../skills/cataly-mode/scripts/src/registry.ts";
 import { isCatalyEntry, SESSION_WIRE } from "../skills/cataly-mode/scripts/src/session-compat.ts";
-import { parseRef } from "../src/runtime/types.ts";
+import { selfSession } from "../src/runtime/registry.ts";
 import type { DiscordAskRoute } from "./discord-ask.ts";
 
 const LANE_ENTRY = "omp-cataly:discord-ask-lane";
@@ -33,13 +33,20 @@ export function bindAskLane(
     : undefined;
 }
 
-export async function laneChannel(stateDir: string, sessionId: string, binding: AskLane | undefined) {
-  const pane = process.env["HC_TERMINAL_ID"]
-    ? parseRef(`hc:${process.env["HC_TERMINAL_ID"]}`)
-    : parseRef(process.env["HERDR_PANE_ID"] ?? "");
+/** The Discord channel of the open lane registered to this process's own session: headless, else its Tern block. */
+export async function laneChannel(
+  stateDir: string,
+  sessionId: string,
+  binding: AskLane | undefined,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+) {
+  const pane = selfSession(env);
   if (!pane) return undefined;
-  const current = readPaneState(stateDir, pane.id);
-  if (current?.pid !== process.pid || current.role !== "lane" || current.sessionId !== sessionId) return undefined;
+  // A Tern block is inherited by nested runs: only the process whose pane record names this session owns it.
+  if (pane.runtime !== "headless") {
+    const current = readPaneState(stateDir, pane.id);
+    if (current?.pid !== process.pid || current.role !== "lane" || current.sessionId !== sessionId) return undefined;
+  }
   const matching = (await new Registry(stateDir).scan()).lanes.filter(
     (lane) =>
       lane.key !== RESERVED_LANE_KEY &&
@@ -76,7 +83,7 @@ export async function automaticDiscordAskRoute(
   const fileToken = readPrivateAskFile(tokenFile, 16_384);
   const token = (fileToken ?? (role === "cataly" ? env["CATALY_DISCORD_TOKEN"] : undefined))?.trim();
   if (!token || !/^[\w.-]+$/.test(token)) return undefined;
-  const target = role === "lane" ? await laneChannel(stateDir, sessionId, binding) : undefined;
+  const target = role === "lane" ? await laneChannel(stateDir, sessionId, binding, env) : undefined;
   if (role === "lane" && !target) return undefined;
   const receivers = discordAskReceivers(stateDir, token, env["CATALY_DISCORD_API_BASE"] ?? "");
   // A registered lane names its own destination; never fall back to the lead's channel.

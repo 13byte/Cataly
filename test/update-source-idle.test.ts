@@ -1,22 +1,22 @@
 import { expect, test as bunTest } from "bun:test";
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { writePaneState } from "../skills/cataly-mode/scripts/src/lane-state.ts";
 import { platform } from "../src/platform/index.ts";
 import { saveDeploymentJson } from "../src/update/deployment-files.ts";
 import { DeploymentHeld, sameProcess } from "../src/update/deployment-process.ts";
 import { sourceIdleNow } from "../src/update/source-update-idle.ts";
 import { idleFixture } from "./update-source-idle-setup.ts";
 
-const test = bunTest.skipIf(!platform.supportsProcessReaders);
+// A real headless lead needs process readers and a Unix socket.
+const test = bunTest.skipIf(!platform.supportsProcessReaders || process.platform === "win32");
 
 test("source idle uses live process-owned receipts without opening the private session", async () => {
   const f = await idleFixture();
   try {
-    expect(sourceIdleNow(f.config, f.runtime)).toMatchObject({ receivers: 1, runtime: f.runtime });
-    expect(sourceIdleNow(f.config, f.runtime).quietMs).toBeGreaterThanOrEqual(1_800_000);
+    expect(await sourceIdleNow(f.config, f.runtime)).toMatchObject({ receivers: 1, runtime: f.runtime });
+    expect((await sourceIdleNow(f.config, f.runtime)).quietMs).toBeGreaterThanOrEqual(1_800_000);
     await f.send("received");
-    expect(() => sourceIdleNow(f.config, f.runtime)).toThrow("quiet period");
+    await expect(sourceIdleNow(f.config, f.runtime)).rejects.toThrow("quiet period");
   } finally {
     await f.close();
   }
@@ -27,7 +27,7 @@ for (const event of ["unavailable", "stale", "future"] as const)
     const f = await idleFixture();
     try {
       await f.send(event);
-      expect(() => sourceIdleNow(f.config, f.runtime)).toThrow(DeploymentHeld);
+      await expect(sourceIdleNow(f.config, f.runtime)).rejects.toThrow(DeploymentHeld);
     } finally {
       await f.close();
     }
@@ -38,9 +38,9 @@ test("source idle requires a new quiet interval after receiver recovery", async 
   try {
     await f.send("unavailable");
     await f.send("healthy");
-    expect(() => sourceIdleNow(f.config, f.runtime)).toThrow("quiet period");
+    await expect(sourceIdleNow(f.config, f.runtime)).rejects.toThrow("quiet period");
     await f.send("received");
-    expect(() => sourceIdleNow(f.config, f.runtime)).toThrow("quiet period");
+    await expect(sourceIdleNow(f.config, f.runtime)).rejects.toThrow("quiet period");
   } finally {
     await f.close();
   }
@@ -51,12 +51,12 @@ for (const status of ["working", "paused", "done-claimed", "legacy"])
     const f = await idleFixture();
     try {
       const lanes = join(f.config.deployment.stateDir, "lanes");
-      mkdirSync(lanes);
+      mkdirSync(lanes, { recursive: true });
       writeFileSync(
         join(lanes, "open.json"),
         JSON.stringify({ key: "open", ...(status === "legacy" ? {} : { status }) }),
       );
-      expect(() => sourceIdleNow(f.config, f.runtime)).toThrow("open lanes");
+      await expect(sourceIdleNow(f.config, f.runtime)).rejects.toThrow("open lanes");
     } finally {
       await f.close();
     }
@@ -66,27 +66,25 @@ test("source idle ignores closed history and the reserved lead, but holds unread
   const f = await idleFixture();
   try {
     const lanes = join(f.config.deployment.stateDir, "lanes");
-    mkdirSync(lanes);
+    mkdirSync(lanes, { recursive: true });
     writeFileSync(join(lanes, "old.json"), JSON.stringify({ key: "old", status: "closed" }));
     writeFileSync(join(lanes, "lead.json"), JSON.stringify({ key: "lead", status: "working" }));
-    expect(sourceIdleNow(f.config, f.runtime).receivers).toBe(1);
+    expect((await sourceIdleNow(f.config, f.runtime)).receivers).toBe(1);
     writeFileSync(join(lanes, "broken.json"), "{");
-    expect(() => sourceIdleNow(f.config, f.runtime)).toThrow("unreadable lane");
+    await expect(sourceIdleNow(f.config, f.runtime)).rejects.toThrow("unreadable lane");
   } finally {
     await f.close();
   }
 });
 
-for (const change of [
-  { approvalPending: true },
-  { agentStatus: "working" as const },
-  { sessionFile: "/different-session" },
-])
-  test(`source idle rechecks current native admission ${JSON.stringify(change)}`, async () => {
+for (const change of ["approval", "working", "session"] as const)
+  test(`source idle rechecks the lead's current headless admission: ${change}`, async () => {
     const f = await idleFixture();
     try {
-      writePaneState(f.config.deployment.stateDir, { ...f.state, ...change });
-      expect(() => sourceIdleNow(f.config, f.runtime)).toThrow("no longer idle");
+      if (change === "approval") await f.lead.deliver("request approval");
+      if (change === "working") await f.lead.deliver("background job");
+      const expected = change === "session" ? { ...f.runtime, sessionFile: "/different-session" } : f.runtime;
+      await expect(sourceIdleNow(f.config, expected)).rejects.toThrow("no longer idle");
     } finally {
       await f.close();
     }
@@ -104,7 +102,7 @@ for (const corruption of ["missing", "owner", "malformed"])
         record.process.startTicks += "0";
         saveDeploymentJson(f.activity, record);
       }
-      expect(() => sourceIdleNow(f.config, f.runtime)).toThrow(DeploymentHeld);
+      await expect(sourceIdleNow(f.config, f.runtime)).rejects.toThrow(DeploymentHeld);
     } finally {
       await f.close();
     }
@@ -115,7 +113,7 @@ test("source idle rejects a dead receiver even while its lead and recent heartbe
   try {
     await f.send("stop-receiver");
     expect(sameProcess(f.runtime)).toBe(true);
-    expect(() => sourceIdleNow(f.config, f.runtime)).toThrow(DeploymentHeld);
+    await expect(sourceIdleNow(f.config, f.runtime)).rejects.toThrow(DeploymentHeld);
   } finally {
     await f.close();
   }
@@ -128,7 +126,7 @@ for (const corruption of ["missing", "malformed", "session"])
       if (corruption === "missing") unlinkSync(f.desired);
       else if (corruption === "malformed") writeFileSync(f.desired, "{");
       else saveDeploymentJson(f.desired, { ...f.manifest, sessionId: "different-session" });
-      expect(() => sourceIdleNow(f.config, f.runtime)).toThrow(DeploymentHeld);
+      await expect(sourceIdleNow(f.config, f.runtime)).rejects.toThrow(DeploymentHeld);
     } finally {
       await f.close();
     }
@@ -141,7 +139,7 @@ test("source idle requires the managed intake heartbeat to be one of its actual 
       ...f.manifest,
       intake: { ...f.manifest.intake, path: join(f.root, "unrelated-heartbeat") },
     });
-    expect(() => sourceIdleNow(f.config, f.runtime)).toThrow("configured activity receiver");
+    await expect(sourceIdleNow(f.config, f.runtime)).rejects.toThrow("configured activity receiver");
   } finally {
     await f.close();
   }

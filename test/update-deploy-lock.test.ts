@@ -76,8 +76,8 @@ posix.each(["wait", "acquire-race"])(
       const oldRuntime = {
         ...processIdentity(process.pid)!,
         role: "cataly" as const,
-        pane: config.pane,
-        sessionId: config.sessionId,
+        ref: "00000000-0000-4000-8000-000000000001",
+        sessionId: "same-session",
         sessionFile: join(root, "session.jsonl"),
         startedAt: held.createdAt,
         cwd: root,

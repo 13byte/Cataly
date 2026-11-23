@@ -5,8 +5,7 @@ import { dutyTick } from "../src/duty.ts";
 import type { Deps } from "../src/harness.ts";
 import { startLane } from "../src/lanes.ts";
 import type { SessionRef } from "../src/runtime/types.ts";
-import { href } from "./fake.ts";
-import { setup } from "./harness-setup.ts";
+import { LEAD_REF, setup } from "./harness-setup.ts";
 
 async function quietLane() {
   const s = setup();
@@ -47,12 +46,12 @@ describe("a duty notice written while another process rewrites the queue it goes
     await dutyTick(d);
     const owed = join(d.store.root, "duty", "lead.jsonl");
     const kept = readFileSync(owed, "utf8");
-    d.store.setRole("lead", href("w1:p1"));
-    const finish = flushInFlight(d, href("w1:p1"));
+    d.store.setRole("lead", LEAD_REF);
+    const finish = flushInFlight(d, LEAD_REF);
     await dutyTick(d);
     const held = {
       source: existsSync(owed) ? readFileSync(owed, "utf8") : undefined,
-      queued: d.store.queued(href("w1:p1")),
+      queued: d.store.queued(LEAD_REF),
       delivered: told("LOST"),
     };
     finish();
@@ -61,14 +60,14 @@ describe("a duty notice written while another process rewrites the queue it goes
     expect(held).toEqual({ source: kept, queued: [], delivered: 0 });
     expect(existsSync(owed)).toBe(false);
     expect(existsSync(`${owed}.merging`)).toBe(false);
-    expect(d.store.queued(href("w1:p1"))).toEqual([]);
+    expect(d.store.queued(LEAD_REF)).toEqual([]);
     await dutyTick(d);
     expect(told("LOST")).toBe(1);
   });
 
   test("a LOST notice for a registered lead during a flush of its inbox: the lane is lost and the lead hears of it once", async () => {
     const { w, d, lane, told } = await quietLane();
-    const finish = flushInFlight(d, href("w1:p1"));
+    const finish = flushInFlight(d, LEAD_REF);
     w.panes.delete(lane.paneId);
     expect(await dutyTick(d)).toContainEqual({ lane: "talker", action: "lost" });
     expect(d.store.lane("talker")!.status).toBe("lost");
@@ -80,7 +79,7 @@ describe("a duty notice written while another process rewrites the queue it goes
 
   test("an escalation due during a flush of the lead's inbox is not marked told; the next pass tells the lead once", async () => {
     const { d, at, told } = await quietLane();
-    const finish = flushInFlight(d, href("w1:p1"));
+    const finish = flushInFlight(d, LEAD_REF);
     const first = await at(40);
     const marked = d.store.lane("talker")!.escalatedAt;
     finish();

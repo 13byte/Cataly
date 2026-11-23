@@ -77,7 +77,7 @@ const readback = () => setupReadback(captureSetupFile(config), "consumer-updater
 const mode = process.argv[4];
 if (mode === "recovery") {
   delete process.env.CATALY_AGENT_CMD;
-  writeFileSync(config, JSON.stringify({ runtime: "herdr", agentCommand: ["omp", ...suffix] }));
+  writeFileSync(config, JSON.stringify({ agentCommand: ["omp", ...suffix] }));
   const dependency = dirname((await loadConfig(config, home)).ompUlwPath);
   renameSync(dependency, dependency + ".held-by-fixture");
   const { consumerPaths } = await import(join(release, "src/release/files.ts"));

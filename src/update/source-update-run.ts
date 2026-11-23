@@ -1,12 +1,13 @@
 import { join } from "node:path";
-import { readPaneState } from "../../skills/cataly-mode/scripts/src/lane-state.ts";
+import type { HeadlessObservation } from "../runtime/headless.ts";
 import { matchesDeploymentConfigHash } from "./deployment-config.ts";
 import { ownReleaseRoot } from "./deployment-files.ts";
-import { forwardStopStarted } from "./deployment-native-ui.ts";
+import { observeLead } from "./deployment-harness.ts";
 import { acquireRestartLock, DeploymentHeld, sameProcess, underProcess } from "./deployment-process.ts";
 import { restartDeployment } from "./deployment-restart.ts";
 import { readRestartIntent } from "./deployment-restart-state.ts";
 import { deployRelease } from "./deployment-run.ts";
+import { forwardStopStarted } from "./deployment-stop.ts";
 import type { DeploymentRecord, DeploymentStatus } from "./deployment-types.ts";
 import { digest } from "./source.ts";
 import { sourceCandidate } from "./source-update-candidate.ts";
@@ -25,9 +26,7 @@ export type SourceResult = {
   recovery?: "lead-restart";
 };
 const outcome = (record: DeploymentRecord): SourceResult["status"] =>
-  record.status === "held" && (record.nativeUiExitRequestedAt || record.nativeExitObservedAt)
-    ? "recovery-pending"
-    : record.status;
+  record.status === "held" && forwardStopStarted(record) ? "recovery-pending" : record.status;
 
 async function assertRetryAllowed(
   config: SourceUpdateConfig,
@@ -52,25 +51,25 @@ async function assertRetryAllowed(
   }
 }
 
-function outside(config: SourceUpdateConfig, record?: DeploymentRecord): void {
-  const pane = readPaneState(config.deployment.stateDir, config.deployment.pane);
-  if (pane?.role === "cataly" && pane.sessionId === config.deployment.sessionId && underProcess(process.pid, pane.pid))
+async function outside(config: SourceUpdateConfig, record?: DeploymentRecord): Promise<void> {
+  let lead: HeadlessObservation | undefined;
+  try {
+    lead = await observeLead(config.deployment);
+  } catch (error) {
+    // No registered lead (for example mid-recovery) leaves only the recorded actors to check.
+    if (!(error instanceof DeploymentHeld)) throw error;
+  }
+  if (lead?.role === "cataly" && lead.pid !== undefined && underProcess(process.pid, lead.pid))
     throw new DeploymentHeld("source controller must run outside the lead process tree");
-  for (const identity of [
-    record?.oldRuntime,
-    record?.runtime,
-    record?.rollbackRuntime,
-    record?.launchProcess,
-    record?.rollbackProcess,
-  ]) {
+  for (const identity of [record?.oldRuntime, record?.runtime, record?.rollbackRuntime]) {
     if (identity && sameProcess(identity) && underProcess(process.pid, identity.pid))
       throw new DeploymentHeld("source recovery controller must run outside every recorded actor");
   }
 }
 async function idleAdmission(config: SourceUpdateConfig, record: DeploymentRecord, signal?: AbortSignal) {
   const observed = await sourceIdle(config, signal, record.oldRuntime);
-  return () => {
-    sourceIdleNow(config, observed.runtime);
+  return async () => {
+    await sourceIdleNow(config, observed.runtime);
   };
 }
 
@@ -78,7 +77,7 @@ async function idleAdmission(config: SourceUpdateConfig, record: DeploymentRecor
 export async function checkSourceUpdate(config: SourceUpdateConfig, signal?: AbortSignal): Promise<SourceResult> {
   const { job } = readSourceState(config);
   const restart = readRestartIntent(config.deployment);
-  if (restart && forwardStopStarted(config.deployment, restart))
+  if (restart && forwardStopStarted(restart))
     return {
       status: restart.status === "failed" ? "failed" : "recovery-pending",
       deployment: restart,
@@ -119,10 +118,10 @@ export async function applySourceUpdate(
   try {
     const state = readSourceState(config);
     let job = state.job;
-    outside(config, job?.deployment);
+    await outside(config, job?.deployment);
     const pending = readRestartIntent(config.deployment);
-    if (pending && forwardStopStarted(config.deployment, pending)) {
-      outside(config, pending);
+    if (pending && forwardStopStarted(pending)) {
+      await outside(config, pending);
       const recovered = await restartDeployment(config.deployment, signal, (intent) =>
         idleAdmission(config, intent, signal),
       );
@@ -206,7 +205,7 @@ export async function restartSourceLead(
     const { job } = readSourceState(config);
     if (job && sourceRecoveryPending(job))
       throw new DeploymentHeld("finish source update recovery before a separate lead restart");
-    outside(config, readRestartIntent(config.deployment));
+    await outside(config, readRestartIntent(config.deployment));
     const record = await restartDeployment(config.deployment, options.signal, (intent) =>
       idleAdmission(config, intent, options.signal),
     );

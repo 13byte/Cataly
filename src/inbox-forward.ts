@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 import {
   appendAll,
@@ -15,15 +15,14 @@ import {
   spooled,
   spoolKey,
 } from "./inbox-files.ts";
-import { refFromText, refText, sameSession } from "./refs.ts";
+import { refFromText, sameSession } from "./refs.ts";
 import type { SessionRef } from "./runtime/types.ts";
 import type { QueuedMessage } from "./store-types.ts";
 
-// Where an inbox went while a migration runs: `<inbox>.jsonl.forward` names the replacement from step 6 until the
-// final drain removes it, so it is a live redirect (a send holds the route from reading it to writing its message,
-// inbox-spool.ts). Nothing names the replacement after that: herdr pane ids and hc terminal ids are used again for new
-// sessions, so a redirect kept on an id would send an unrelated session's messages to the replacement. A sender that
-// resolved a lane key or role before the migration finished resolves it again under the route instead (queueMessage).
+// Where an inbox went while a migration by an older binary ran: `<inbox>.jsonl.forward` names the replacement until
+// that migration's final drain removed it, so it is a live redirect (a send holds the route from reading it to writing
+// its message, inbox-spool.ts). This version never writes one; a marker left by an interrupted migration is still
+// followed so its messages are not lost.
 
 const MARKER = ".forward";
 
@@ -38,18 +37,6 @@ const markerRef = (marker: string): SessionRef | undefined => {
   const text = readFileSync(marker, "utf8").trim();
   return text === "" ? undefined : refFromText(text);
 };
-
-/** Writes the redirect in one rename; call it under the inbox's route. */
-export function writeForward(root: string, ref: SessionRef, to: SessionRef): void {
-  const marker = `${inboxFile(root, ref)}${MARKER}`;
-  writeFileSync(`${marker}.tmp`, `${refText(to)}\n`);
-  renameSync(`${marker}.tmp`, marker);
-}
-
-/** Removes the live redirect; call it under the inbox's route. */
-export function removeForward(root: string, ref: SessionRef): void {
-  rmSync(`${inboxFile(root, ref)}${MARKER}`, { force: true });
-}
 
 /** The old inboxes whose live redirect names `ref`. */
 function movedInto(root: string, ref: SessionRef): string[] {
@@ -87,7 +74,7 @@ const keyOf = (m: QueuedMessage): string =>
  * key (keyOf), or whose id or spool file it recorded as gone, is not added again. Different ids and different spool
  * files remain distinct even when their timestamps and text match.
  */
-export function carryOver(aside: string, from: string, into: string, map: (m: QueuedMessage) => QueuedMessage): void {
+function carryOver(aside: string, from: string, into: string, map: (m: QueuedMessage) => QueuedMessage): void {
   const done = doneIds(from);
   const known = doneIds(into);
   recordKeys(

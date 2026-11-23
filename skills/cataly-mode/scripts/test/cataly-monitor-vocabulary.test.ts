@@ -54,7 +54,7 @@ test("the cataly command vocabulary is every command the CLI dispatches", () => 
   const config = join(state.dir, "config.json");
   const lanes = join(state.dir, "state", "lanes");
   mkdirSync(lanes, { recursive: true });
-  writeFileSync(config, JSON.stringify({ runtime: "herdr", stateDir: join(state.dir, "state"), ompUlwPath: "" }));
+  writeFileSync(config, JSON.stringify({ stateDir: join(state.dir, "state"), ompUlwPath: "" }));
   const lane = {
     key: "zzz",
     status: "working",
@@ -92,7 +92,6 @@ plugin({ name: "dispatch-guard", setup(build) {
           HOME: state.dir,
           PATH: process.env["PATH"] ?? "",
           CATALY_CONFIG: config,
-          CATALY_RUNTIME: "herdr",
           CATALY_TELEMETRY: "0",
           DO_NOT_TRACK: "1",
         },

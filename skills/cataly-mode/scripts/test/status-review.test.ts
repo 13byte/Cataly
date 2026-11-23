@@ -17,7 +17,8 @@ const lane = {
   done: "file proof",
 };
 let state: ReturnType<typeof withState>;
-const deps = () => depsFor(newWorld(), fakeClock(now), state.dir, { sessionsDir: join(state.dir, "sessions") });
+const deps = (patch: { leadPane?: string } = {}) =>
+  depsFor(newWorld(), fakeClock(now), state.dir, { sessionsDir: join(state.dir, "sessions"), ...patch });
 beforeEach(async () => {
   state = withState();
   await deps().registry.write(lane);
@@ -161,7 +162,8 @@ for (const kind of ["omp", "legacy"] as const) {
           : data,
       );
     }
-    const snapshot = await laneStatus(deps());
+    // Legacy terminal metadata is read only in a terminal scope: here a Tern lead.
+    const snapshot = await laneStatus(deps(kind === "legacy" ? { leadPane: "tern:5001" } : {}));
     expect(snapshot.monitors).toEqual({ recorded: null, suspended: null, expired: null });
     const read = readMonitorManifests(deps().config.sessionsDir, [], join(state.dir, "monitors"));
     // Boot deliberately preserves legacy argv for command matching; status must still be unknown above.

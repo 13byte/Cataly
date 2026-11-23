@@ -61,7 +61,8 @@ export async function startHost(
   const { dir, reservation } = entry;
   const role = reservation.role ?? "lane";
   const isLoop = role === "duty-loop" || role === "hourly-loop";
-  if (isLoop !== (argv.length === 0) || (resume && role !== "lane"))
+  // Lanes and the harness lead may resume their own transcript; duty and the plain loops always start fresh.
+  if (isLoop !== (argv.length === 0) || (resume && role !== "lane" && role !== "lead"))
     throw new host.HeadlessError("native start role mismatch");
   if (existsSync(join(dir, "stopped.json"))) throw new host.HeadlessError("headless reservation has stopped");
   // A competing start/close gets the same exclusive file. Never retry a spawn after ambiguity.

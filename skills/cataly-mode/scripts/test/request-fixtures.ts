@@ -1,6 +1,7 @@
 import { recordExecution } from "../src/lane-run.ts";
 import { type Lane, Registry } from "../src/registry.ts";
 import type { ReportProvenance } from "../src/request-identity.ts";
+import { href, sid } from "./fakes.ts";
 
 export const REQUEST = "discord:111111111111111111:222222222222222222";
 export const OLD_RUN = "00000000-0000-4000-8000-000000000001";
@@ -15,8 +16,8 @@ export const provenanceOf = (
   requestId = REQUEST,
 ): ReportProvenance & { nativeRef: NonNullable<ReportProvenance["nativeRef"]> } =>
   runId === OLD_RUN
-    ? { requestId, runId, nativeRef: { sessionId: "native-original", ref: { runtime: "herdr", id: "w1:p7" } } }
-    : { requestId, runId, nativeRef: { sessionId: "native-current", ref: { runtime: "herdr", id: "w1:p8" } } };
+    ? { requestId, runId, nativeRef: { sessionId: "native-original", ref: href(sid(7)) } }
+    : { requestId, runId, nativeRef: { sessionId: "native-current", ref: href(sid(8)) } };
 export const sourcedLane = {
   key: "trace-request",
   title: "Original request",
@@ -31,15 +32,15 @@ export const sourcedLane = {
   session: "native-current",
 } as const satisfies Lane;
 
-/** Stored readback fixtures; CLI tests never probe or start an actual terminal. */
+/** Stored readback fixtures; CLI tests never probe or start a native session. */
 export async function seedRequest(stateDir: string, requestId = REQUEST) {
   const lane = { ...sourcedLane, requestId };
   const old = { ...lane, runId: OLD_RUN, lifecycleEpoch: "original-generation", session: "native-original" };
-  for (const [entry, id] of [
-    [old, "w1:p7"],
-    [lane, "w1:p8"],
+  for (const [entry, n] of [
+    [old, 7],
+    [lane, 8],
   ] as const) {
-    const bound = { ...entry, sessionRef: { runtime: "herdr", id } as const };
+    const bound = { ...entry, sessionRef: href(sid(n)) };
     recordExecution(stateDir, bound, T0);
     recordExecution(stateDir, bound, T0, bound.session);
   }

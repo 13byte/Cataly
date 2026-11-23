@@ -60,7 +60,7 @@ it("published ancestor remains published while advanced owner main holds stale d
     const stateDir = join(catalyHome, "state");
     const catalyConfig = join(catalyHome, "config.json");
     mkdirSync(stateDir, { recursive: true, mode: 0o700 });
-    saveJson(catalyConfig, { runtime: "herdr", stateDir, defaultCwd: paths.localSource });
+    saveJson(catalyConfig, { stateDir, defaultCwd: paths.localSource });
     return {
       promotion: {
         publish: {
@@ -78,10 +78,6 @@ it("published ancestor remains published while advanced owner main holds stale d
             stateDir,
             bun: process.execPath,
             omp: process.execPath,
-            herdr: process.execPath,
-            pane: "fixture:p1",
-            sessionId: "00000000-0000-4000-8000-000000000001",
-            model: "openai-codex/gpt-6.1-sol",
             restartLock: join(catalyHome, "deployment.lock"),
             launcherPath: join(paths.directory, "bin", "managed-restart"),
             healthTimeoutMs: 100,

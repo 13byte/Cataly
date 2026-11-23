@@ -6,11 +6,11 @@ import { MainCiNotReady } from "./github-ci.ts";
 import { loadSourceUpdateConfig, sourceRequiredCi } from "./source-update-config.ts";
 
 const USAGE = `Usage: cataly update source <check|status|apply> [--config FILE]
-  apply --when idle [--owner-quiet 30m] [--require-ci check,e2e-herdr,e2e-hc] [--dry-run] [--retry-failed]
+  apply --when idle [--owner-quiet 30m] [--require-ci check] [--dry-run] [--retry-failed]
   cataly idle-check [--owner-quiet 30m] [--config FILE]
   cataly lead restart --when idle [--owner-quiet 30m] [--dry-run] [--config FILE]
 Source mode follows CI-passing main, not consumer releases or model-porting upstream.
-Apply/restart must run outside the lead. They preserve its session and use managed health checks and rollback.
+Apply/restart must run outside the lead. They replace the native harness with managed health checks and rollback.
 Configuration is opt-in: CATALY_HOME/source-update.json (default ~/.cataly/source-update.json).
 --retry-failed retries a previously verified rollback once; the supervisor never adds it.
 Exit 4 is held/rolled back, 6 is durable recovery pending, 2 needs operator review. Nothing enables a service.`;

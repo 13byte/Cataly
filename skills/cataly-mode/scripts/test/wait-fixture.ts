@@ -3,9 +3,10 @@ import type { NativeObservation } from "../../../../src/native-observation.ts";
 import { makeCli } from "../src/cli-context.ts";
 import { journalCommands } from "../src/cli-journal.ts";
 import type { FlowDeps } from "../src/done-flow.ts";
-import type { Lane } from "../src/registry.ts";
+import { type Lane, sessionFields } from "../src/registry.ts";
 import { Reports } from "../src/reports.ts";
-import { agentIn, depsFor, fakeClock, laneState, newWorld, withState } from "./fakes.ts";
+import { agentIn, laneState, ternDeps } from "./fake-tern-world.ts";
+import { fakeClock, newWorld, withState } from "./fakes.ts";
 
 export const T0 = Date.parse("2026-01-01T12:00:00Z");
 export const SESSION = "01a11440-ee81-7f90-b2ed-dcc7d51a0adf";
@@ -15,10 +16,9 @@ export async function waitFixture() {
   const clock = fakeClock(T0 + 1_000);
   setSystemTime(new Date(clock.at));
   const world = newWorld();
-  const pane = "w:p7";
-  world.panes = [{ pane_id: pane, workspace_id: "w", agent: "omp", agent_status: "idle" }];
-  agentIn(world, pane);
-  const base = depsFor(world, clock, state.dir);
+  const pane = "5007";
+  const ref = agentIn(world, pane);
+  const base = ternDeps(world, clock, state.dir);
   const control: { onProbe?: () => Promise<void>; api?: (endpoint: string) => unknown } = {};
   const deps: FlowDeps = {
     ...base,
@@ -41,7 +41,7 @@ export async function waitFixture() {
     key: "waiting-lane",
     title: "waiting",
     thread: "none",
-    pane,
+    ...sessionFields(ref),
     brief: "/b.md",
     done: "file /done.md",
     openedAt: new Date(T0).toISOString(),

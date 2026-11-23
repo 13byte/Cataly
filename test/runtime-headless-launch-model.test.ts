@@ -13,7 +13,6 @@ test.skipIf(process.platform === "win32")("a live host without a bound launch mo
     role: "lane",
     cwd: f.deps.config.defaultCwd,
     env: f.env,
-    container: "tab",
   });
   try {
     const argv = headlessArgv(f.deps.config.agentCommand, f.deps.config.defaultModel);

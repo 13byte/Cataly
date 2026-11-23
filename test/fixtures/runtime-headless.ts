@@ -41,7 +41,6 @@ export function headlessFixture() {
     stateDir,
     defaultCwd: cwd,
     laneRuntime: "headless" as const,
-    runtime: "hc" as const,
     defaultModel: "fixture/initial",
     agentCommand: [omp, "--model", "{model}", "{prompt}"],
     nudgeAfterMin: 1,

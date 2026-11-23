@@ -87,7 +87,8 @@ export function nativeRelease(
 
 /** An authenticated pre-19 release whose launch admission, receipt validation and renderer are the frozen bytes. */
 export function frozenRelease(f: ConsumerFixture, oldVersion: string): VerifiedBundle {
-  if (oldVersion === "18.20.0") return boundRelease(f, "prior", undefined, { populateSource: historicalSource }).bundle;
+  if (oldVersion === "18.20.0")
+    return boundRelease(f, "prior", undefined, { populateSource: historicalSource, headless: false }).bundle;
   const { bundle } = f.release("legacy");
   const source = join(f.root, "legacy");
   extractArchive(bundle.files, bundle.manifest, source);

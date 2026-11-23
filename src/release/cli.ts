@@ -10,30 +10,27 @@ import { type ReleaseAttempt, referenceRefresh, releaseFailure } from "./complet
 import { acquireConsumerLock, consumerPaths, initialize, pointer, realDirectory } from "./files.ts";
 import { installBundle, preflightInstallation, rollbackRelease } from "./install.ts";
 import { runCacheCommand } from "./native-cache-cli.ts";
+import { assertNoLegacyRuntime } from "./legacy-runtime.ts";
 import { prerequisites } from "./provision.ts";
-import { assertUpdateProtocol, releaseTargetRuntime, requestedReleaseRuntime } from "./profile.ts";
-import { runRetireLegacyCommand } from "./retire-legacy.ts";
+import { assertReleaseTarget, assertUpdateProtocol } from "./profile.ts";
 import { previewConsumerSetup } from "./setup.ts";
 import { consumerReleaseHome } from "./runtime.ts";
 import { hasConsumerState, loadInstalled, recoverInstalled, verifyRelease } from "./state.ts";
 import type { ReleaseManifest } from "./types.ts";
 
-const USAGE = `cataly update <check|install|status|rollback|cache|retire-legacy-roles> [--version vX.Y.Z] [--from DIST] [--home PATH] [--runtime headless|hc|herdr]
+const USAGE = `cataly update <check|install|status|rollback|cache> [--version vX.Y.Z] [--from DIST] [--home PATH]
   auto <status|enable|disable>  manage daily stable-release checks at consumer OMP launch
   check       verify an available public release without activating it
   install     verify and install a fixed release; no messenger, watcher, model or service is started
               --preview verifies a configuration plan in disposable storage, without installation or dependency changes
   status      print verified installed and retained previous release identities
   rollback    verify and restore the retained previous release (--version may assert its tag)
-  retire-legacy-roles --home PATH [--legacy-session NAME] [--legacy-migrated-session NAME]
-              retire proven-gone v0.1.3 role registrations; never stop terminals or activate a release
-              For primary homes, name each used backend's original session; side homes derive both namespaces
   cache       report native identities, users and sizes (read-only); --reference DIR adds scan roots (repeatable)
               --prune quarantines unused identities and restores used ones; --delete-quarantined deletes after --grace MINUTES (default 10)
               Deletion rechecks usage but can race unleased writers or later publication.
               --trust-process PID@START (repeatable) excludes listed unreadable PIDs; --trust-root-cwd treats unreadable root cwd as outside cache
 Default check/install selects the latest stable GitHub release. Explicit tags also allow previews.
-Current releases default to headless. --runtime checks a specific profile without changing saved config.
+Releases run on headless OMP. A home that still uses herdr/hc stops with upgrade instructions.
 --from reads local release assets; first installation may still fetch the exact public omp-ulw pin.
 Activation holds while Cataly is live. Stop Cataly yourself before installing or rolling back.`;
 
@@ -45,12 +42,11 @@ const identity = (manifest: ReleaseManifest) => ({
 });
 
 export async function runConsumerUpdate(argv: string[]): Promise<number> {
-  if (argv[0] !== "retire-legacy-roles") importLegacyEnvironment();
+  importLegacyEnvironment();
   if (argv[0] === "auto") return runAutomaticCommand(argv.slice(1));
   let releaseLock: (() => void) | undefined;
   let attempt: ReleaseAttempt | undefined;
   try {
-    if (argv[0] === "retire-legacy-roles") return await runRetireLegacyCommand(argv.slice(1));
     const args = parseArgs({
       args: argv,
       allowPositionals: true,
@@ -59,7 +55,6 @@ export async function runConsumerUpdate(argv: string[]): Promise<number> {
         version: { type: "string" },
         from: { type: "string" },
         home: { type: "string" },
-        runtime: { type: "string" },
         preview: { type: "boolean" },
         prune: { type: "boolean" },
         reference: { type: "string", multiple: true },
@@ -87,8 +82,7 @@ export async function runConsumerUpdate(argv: string[]): Promise<number> {
     )
       throw new Error("--from applies to check/install; status takes no selection");
     if (
-      (command === "cache" &&
-        (args.values.from !== undefined || args.values.version !== undefined || args.values.runtime !== undefined)) ||
+      (command === "cache" && (args.values.from !== undefined || args.values.version !== undefined)) ||
       (command !== "cache" &&
         (args.values.reference ||
           args.values.prune ||
@@ -111,37 +105,35 @@ export async function runConsumerUpdate(argv: string[]): Promise<number> {
       [".omp-cataly", ".omp-dori"].some((name) => lstatSync(join(paths.cataly, name), { throwIfNoEntry: false }))
     )
       throw new Error("Unmanaged source installation; use a separate release home or the documented stopped migration");
-    const requested =
-      command === "status" && args.values.runtime === undefined
-        ? undefined
-        : requestedReleaseRuntime(args.values.runtime);
-    prerequisites(requested ?? "headless", false);
+    if (command !== "status")
+      assertNoLegacyRuntime({ stateDir: join(paths.cataly, "state"), configPath: paths.config, home: paths.home });
+    prerequisites(false);
     const config = command === "status" ? undefined : captureSetupFile(paths.config);
     const checkBundle = (bundle: Awaited<ReturnType<typeof acquireBundle>>, tools: boolean): void => {
       if (!config) throw new Error("A release selection requires a configuration snapshot");
       const { manifest, files } = bundle;
-      const runtime = releaseTargetRuntime(
+      assertReleaseTarget(
         paths,
         { manifest, bytes: (path) => files.find((file) => file.path === path)?.bytes },
-        { snapshot: config, ...(requested === undefined ? {} : { requested }) },
+        config,
       );
-      prerequisites(runtime, tools, manifest.requirements.omp === "18.18.8", paths);
+      prerequisites(tools);
     };
     const checkRollback = (previous: ReleaseManifest | undefined): void => {
       if (!previous || !config) throw new Error("No retained previous release is available for rollback");
       if (args.values.version && args.values.version !== previous.tag)
         throw new Error("--version differs from the retained previous release");
       const source = verifyRelease(paths, previous);
-      const runtime = releaseTargetRuntime(
+      assertReleaseTarget(
         paths,
         {
           manifest: previous,
           bytes: (path) =>
             previous.source.files.some((entry) => entry.path === path) ? readFileSync(join(source, path)) : undefined,
         },
-        { snapshot: config, ...(requested === undefined ? {} : { requested }) },
+        config,
       );
-      prerequisites(runtime, true, previous.requirements.omp === "18.18.8", paths);
+      prerequisites();
     };
     if (command === "check") {
       const bundle = await acquireBundle({

@@ -88,7 +88,6 @@ try {
         sessionsDir: join(dir, "sessions"),
         defaultCwd: root,
         leadPane: "",
-        runtime: "herdr",
         agentCommand,
         ompUlwPath: compatibility,
         doctor: { ignore: ["runtime"] },
@@ -103,7 +102,7 @@ try {
           CATALY_CONFIG: config,
           CATALY_STATE_DIR: stateDir,
           CATALY_LEAD_PANE: "",
-          CATALY_RUNTIME: "herdr",
+          CATALY_RUNTIME: "headless",
         },
         20_000,
       );

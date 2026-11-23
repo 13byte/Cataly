@@ -116,7 +116,7 @@ test("cataly boot reads the current session's terminal metadata from PI_SESSION_
     join(fileDir, "b.json"),
     JSON.stringify(manifest([{ command: "cataly watch closed", monitorId: "mon_SESSIONFILE" }]).data),
   );
-  // When the real CLI runs boot with no Slack token and no herdr on PATH.
+  // When the real CLI runs boot with no Slack token, a Tern lead and no tern on PATH.
   const proc = Bun.spawn([process.execPath, join(import.meta.dir, "..", "src", "cli.ts"), "boot"], {
     env: {
       HOME: home,
@@ -125,7 +125,7 @@ test("cataly boot reads the current session's terminal metadata from PI_SESSION_
       CATALY_TELEMETRY: "0",
       CATALY_CONFIG: join(home, "none.json"),
       CATALY_STATE_DIR: stateDir,
-      CATALY_LEAD_PANE: "w9:p1",
+      CATALY_LEAD_PANE: "tern:5091",
       PI_SESSION_DIR: join(state.dir, "current"),
       PI_SESSION_FILE: join(state.dir, "other", "session.jsonl"),
     },

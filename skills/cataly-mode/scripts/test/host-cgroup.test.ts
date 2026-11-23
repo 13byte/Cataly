@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import { alertReasons, guardTick, sampleHost } from "../src/host-guard.ts";
 import { canLaunch } from "../src/routing.ts";
-import { type Runner, runtimesFor } from "../src/run.ts";
+import type { Runner } from "../src/run.ts";
+import { fakeRuntimes, newWorld } from "./fakes.ts";
 
 const thresholds = { loadAlert: 150, loadOk: 80, memFreeMinPct: 20, diskFreeMinGb: 0, panesMax: 20 };
 const runner: Runner = async (argv) => {
@@ -9,7 +10,6 @@ const runner: Runner = async (argv) => {
   if (argv[0] === "cat")
     out = argv[1] === "/proc/meminfo" ? "MemTotal: 1000 kB\nMemAvailable: 800 kB\n" : "0.5 0.4 0.3 1/200 999";
   else if (argv[0] === "df") out = "Filesystem 1K-blocks Used Available Use% Mounted\n/dev/x 1000 500 524288 50% /";
-  else if (argv[0] === "herdr") out = '{"result":{"panes":[]}}';
   else return { code: 127, out: "", err: "not found" };
   return { code: 0, out, err: "" };
 };
@@ -29,8 +29,9 @@ const files = (parent: Record<string, string> = {}) => ({
   "/sys/fs/cgroup/account/worker/memory.stat": noCache,
   ...parent,
 });
+const rts = fakeRuntimes(newWorld(), "/state");
 const sample = (data: Record<string, string>, platform: NodeJS.Platform = "linux") =>
-  sampleHost(runner, "/", runtimesFor({ runtime: "herdr" }, {}, runner), {
+  sampleHost(runner, "/", rts, {
     platform,
     readFile: (path) => {
       const text = data[path];
@@ -174,7 +175,7 @@ test.each([undefined, "file 800\n", "file -1\nshmem 0\nfile_mapped 0\nfile_dirty
 );
 
 test("macOS does not read Linux cgroups", async () => {
-  const s = await sampleHost(runner, "/", runtimesFor({ runtime: "herdr" }, {}, runner), {
+  const s = await sampleHost(runner, "/", rts, {
     platform: "darwin",
     readFile: () => {
       throw new Error("must not read Linux files");

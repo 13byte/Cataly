@@ -134,7 +134,11 @@ pub(super) async fn classify(state: &Path, channel: &str) -> Result<Option<Route
         }
         return Ok(Some(Route::NativeUnavailable(key)));
     }
+    // herdr/hc lanes (and legacy pane rows upgraded to herdr refs) ran on a removed runtime.
     let inactive = Ok(Some(Route::Inactive(key.clone())));
+    if reference.as_ref().and_then(SessionRef::runtime) != Some("tern") {
+        return inactive;
+    }
     let Some(pane) = reference
         .as_ref()
         .and_then(SessionRef::id)
@@ -277,17 +281,11 @@ mod tests {
                 .mode(0o700)
                 .create(dir.join("lanes"))
                 .unwrap();
-            fs::create_dir_all(dir.join("sessions")).unwrap();
             Self(dir)
         }
 
         fn lane(&self, key: &str, body: &str) {
             fs::write(self.0.join("lanes").join(format!("{key}.json")), body).unwrap();
-        }
-
-        fn pane(&self, id: &str, body: &str) {
-            let name = super::super::registry::encode_uri_component(id);
-            fs::write(self.0.join("sessions").join(format!("{name}.json")), body).unwrap();
         }
     }
 
@@ -303,21 +301,8 @@ mod tests {
         )
     }
 
-    fn pane(id: &str, session: &str, pid: i64) -> String {
-        format!(
-            r#"{{"paneId":"{id}","role":"lane","sessionId":"{session}","discordLaneInbox":true,"cwd":"/","pid":{pid},"startedAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z","goal":{{"status":"active"}},"approvalPending":false}}"#
-        )
-    }
-
     async fn route(state: &State, channel: &str) -> Option<Route> {
         classify(&state.0, channel).await.unwrap()
-    }
-
-    fn live(key: &str, session: &str) -> Route {
-        Route::Live {
-            key: key.into(),
-            session: Some(session.into()),
-        }
     }
 
     #[tokio::test]
@@ -364,7 +349,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn closing_inactive_and_live_terminal_panes() {
+    async fn closing_and_removed_runtime_lanes() {
         let state = State::new();
         state.lane(
             "aa",
@@ -376,59 +361,50 @@ mod tests {
         assert_eq!(
             route(&state, "1").await,
             Some(Route::Inactive("aa".into())),
-            "no pane record"
+            "herdr runtime is removed"
         );
-        state.pane("w1:p1", &pane("w1:p1", "s1", 0));
-        assert_eq!(
-            route(&state, "1").await,
-            Some(live("aa", "s1")),
-            "clean retirement"
-        );
-        state.pane("w1:p1", &pane("w1:p1", "s1", i64::from(std::process::id())));
-        assert_eq!(
-            route(&state, "1").await,
-            Some(live("aa", "s1")),
-            "live writer"
-        );
-        state.pane("w1:p1", &pane("w1:p1", "s1", 2_147_483_646));
-        assert_eq!(
-            route(&state, "1").await,
-            Some(Route::Inactive("aa".into())),
-            "dead writer"
-        );
-        state.pane(
-            "w1:p1",
-            &pane("w1:p1", "other", i64::from(std::process::id())),
+        state.lane(
+            "aa",
+            r#"{"key":"aa","thread":"discord:1","pane":"w1:p1","tab":"t","session":"s1","openedAt":"2026-01-01T00:00:00.000Z"}"#,
         );
         assert_eq!(
             route(&state, "1").await,
             Some(Route::Inactive("aa".into())),
-            "other session"
-        );
-        state.pane(
-            "w1:p1",
-            &pane("w1:p1", "s1", 0).replace(r#""discordLaneInbox":true,"#, ""),
-        );
-        assert_eq!(
-            route(&state, "1").await,
-            Some(Route::Inactive("aa".into())),
-            "no inbox opt-in"
+            "legacy pane row"
         );
     }
 
     #[tokio::test]
-    async fn an_unbound_lane_routes_through_its_announced_key() {
+    async fn tern_lanes_route_through_their_pane_record() {
         let state = State::new();
+        fs::create_dir_all(state.0.join("sessions")).unwrap();
+        let pane = |id: &str| {
+            let name = super::super::registry::encode_uri_component(id);
+            let body = format!(
+                r#"{{"paneId":"{id}","role":"lane","sessionId":"s1","discordLaneInbox":true,"cwd":"/","pid":{},"startedAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z","goal":{{"status":"active"}},"approvalPending":false}}"#,
+                std::process::id()
+            );
+            fs::write(state.0.join("sessions").join(format!("{name}.json")), body).unwrap();
+        };
+        pane("w1:p1");
+        state.lane("aa", &herdr("aa", "1", "w1:p1", "s1"));
+        assert_eq!(
+            route(&state, "1").await,
+            Some(Route::Inactive("aa".into())),
+            "herdr stays inactive even with a pane record"
+        );
         state.lane(
             "aa",
-            r#"{"key":"aa","thread":"discord:1","sessionRef":{"runtime":"herdr","id":"w1:p1"},"openedAt":"2026-01-01T00:00:00.000Z"}"#,
+            &herdr("aa", "1", "w1:p1", "s1").replace(r#""runtime":"herdr""#, r#""runtime":"tern""#),
         );
-        let mut record = pane("w1:p1", "s7", i64::from(std::process::id()));
-        state.pane("w1:p1", &record);
-        assert_eq!(route(&state, "1").await, Some(Route::Inactive("aa".into())));
-        record = record.replace(r#""cwd""#, r#""discordLaneKey":"aa","cwd""#);
-        state.pane("w1:p1", &record);
-        assert_eq!(route(&state, "1").await, Some(live("aa", "s7")));
+        assert_eq!(
+            route(&state, "1").await,
+            Some(Route::Live {
+                key: "aa".into(),
+                session: Some("s1".into()),
+            }),
+            "live tern writer"
+        );
     }
 
     #[tokio::test]
@@ -469,8 +445,6 @@ mod tests {
             None,
             "inactive goes to the head"
         );
-        state.pane("w1:p1", &pane("w1:p1", "s1", 0));
-        assert_eq!(queue(&state, false).await.unwrap().as_deref(), Some("s1"));
         let lock = delivery_lock(&state.0, "aa", Duration::ZERO)
             .await
             .unwrap()

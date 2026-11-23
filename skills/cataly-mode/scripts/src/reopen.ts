@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { HeadlessRuntime, headlessArgv } from "../../../../src/runtime/headless.ts";
 import { mayRunOmpArgv } from "../../../../src/runtime/omp-argv.ts";
-import type { SessionRef } from "../../../../src/runtime/types.ts";
+import { isLegacyRuntime, type RuntimeKind, type SessionRef } from "../../../../src/runtime/types.ts";
 import { configPath, fill } from "./config.ts";
 import { withDeliveryLock } from "./delivery-lock.ts";
 import { type FlowDeps, movedOn } from "./done-flow.ts";
@@ -33,9 +33,13 @@ export const reopenLane = async (deps: FlowDeps, seen: Lane, note?: string): Pro
       return fail(`REFUSED ${lane.key}: not closed; use resume for a paused lane`);
     runContext(new Reports(deps.config.stateDir), lane, lane.runId);
     const oldRef = sessionOf(lane);
-    const headless = oldRef?.runtime === "headless";
     const rts = runtimesOf(deps);
-    const kind = oldRef?.runtime ?? rts.choice?.kind;
+    // A lane recorded on the removed herdr/hc runtime reopens on headless: its saved OMP session is resumed either way.
+    const prior = oldRef?.runtime;
+    const legacy = prior !== undefined && isLegacyRuntime(prior);
+    const kind: RuntimeKind | undefined =
+      prior === undefined ? rts.choice?.kind : isLegacyRuntime(prior) ? "headless" : prior;
+    const headless = kind === "headless";
     if (kind === undefined || (!oldRef && (preparedPark || kind === "headless")))
       return fail(`REOPEN_UNVERIFIED ${lane.key}: previous session identity missing`);
     if (!mayRunOmpArgv(deps.config.agentCommand)) throw new LaunchError("reopen requires an OMP agentCommand");
@@ -76,9 +80,9 @@ export const reopenLane = async (deps: FlowDeps, seen: Lane, note?: string): Pro
       const callerEnv = headless ? (deps.env ?? process.env) : process.env;
       const env = laneLaunchEnv(callerEnv, callerEnv["CATALY_CONFIG"] ?? configPath(), deps.config);
       if (!headless && lane.requestId !== undefined) env["CATALY_LANE_RUN"] = "";
-      const oldGroup = oldRef?.group;
+      const oldGroup = legacy ? undefined : oldRef?.group;
       const group = headless ? oldGroup : (oldGroup ?? deps.config.laneWorkspace);
-      const ref = await rts.for(oldRef ?? { runtime: kind, id: "" }).create({
+      const ref = await rts.for(oldRef && !legacy ? oldRef : { runtime: kind, id: "" }).create({
         name: lane.key,
         role: "lane",
         container: "tab",

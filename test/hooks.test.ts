@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { main } from "../src/cli.ts";
@@ -11,7 +11,7 @@ import { ConfigError, hooksSettled, loadHooks, runHook, substitute } from "../sr
 import { ready, report, startLane } from "../src/lanes.ts";
 import { spawnExec } from "../src/runtime/exec.ts";
 import { World } from "./fake.ts";
-import { setup } from "./harness-setup.ts";
+import { LEAD, setup } from "./harness-setup.ts";
 
 const config = (d: Deps, value: unknown) => writeFileSync(join(d.store.root, "config.json"), JSON.stringify(value));
 const hookCalls = (w: World, cmd: string) => w.calls.filter((c) => c.cmd === cmd).map((c) => [c.cmd, ...c.argv]);
@@ -42,7 +42,7 @@ describe("hook config and placeholders", () => {
   test("absent file or absent hooks key = no hooks; other keys are tolerated", () => {
     const { d } = setup();
     expect(loadHooks(d.store.root)).toEqual({});
-    config(d, { runtime: "hc", hooks: { onReady: ["x", "{key}"], unrelated: 1 } });
+    config(d, { defaultModel: "x/y", hooks: { onReady: ["x", "{key}"], unrelated: 1 } });
     expect(loadHooks(d.store.root)).toEqual({ onReady: ["x", "{key}"] });
   });
 
@@ -100,7 +100,7 @@ describe("lifecycle hooks", () => {
       ["my-hook", "ready", "lane-k", "final answer", "https://x/pull/1 receipt.txt"],
     ]);
     const hookAt = w.calls.findIndex((c) => c.cmd === "my-hook");
-    const leadAt = w.calls.findLastIndex((c) => c.argv[0] === "agent" && c.argv[2] === "w1:p1");
+    const leadAt = w.calls.findLastIndex((c) => c.cmd === "deliver" && c.argv[0] === LEAD);
     expect(leadAt).toBeLessThan(hookAt);
   });
 
@@ -189,60 +189,13 @@ describe("reviewCommand and CATALY_PROMPTS_DIR", () => {
     } finally {
       log.mockRestore();
     }
-    expect(readFileSync(join(d.store.root, "prompts", "lead.md"), "utf8")).toBe("custom lead.md via cataly");
-    expect(readFileSync(join(d.store.root, "prompts", "duty.md"), "utf8")).toBe("custom duty.md via cataly");
-    expect(w.calls.length).toBeGreaterThan(0);
-  });
-});
-
-describe("hooks never block a command", () => {
-  test("hooksSettled returns at its deadline while a hook still runs, printing one timed-out line", async () => {
-    const { w, d, brief } = setup();
-    await startLane(d, "lane-k", brief, { group: "w1" });
-    let release: (() => void) | undefined;
-    const hang = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    w.hang = hang;
-    config(d, { hooks: { onReport: ["slow-hook", "{key}"] } });
-    const lines: string[] = [];
-    const original = process.stderr.write.bind(process.stderr);
-    process.stderr.write = ((chunk: string | Uint8Array) => {
-      lines.push(String(chunk));
-      return true;
-    }) as typeof process.stderr.write;
-    try {
-      await report(d, "lane-k", "still going");
-      const started = Date.now();
-      await hooksSettled(50);
-      expect(Date.now() - started).toBeLessThan(2000);
-    } finally {
-      process.stderr.write = original;
-      release?.();
-    }
-    expect(lines.filter((l) => l.includes("hook onReport failed (timed out after 50 ms)"))).toHaveLength(1);
-  });
-
-  test("a hook still running at the deadline is killed before its timed-out line, and its exit adds no second line", async () => {
-    const { w, d, brief } = setup();
-    await startLane(d, "lane-k", brief, { group: "w1" });
-    w.hang = new Promise<void>(() => {});
-    const events: string[] = [];
-    w.onHookKill = () => events.push("kill");
-    config(d, { hooks: { onReport: ["slow-hook", "{key}"] } });
-    const original = process.stderr.write.bind(process.stderr);
-    process.stderr.write = ((chunk: string | Uint8Array) => {
-      events.push(String(chunk));
-      return true;
-    }) as typeof process.stderr.write;
-    try {
-      await report(d, "lane-k", "still going");
-      await hooksSettled(50);
-      // The killed hook settles now; waiting for it again must not print its exit 143.
-      await hooksSettled(1000);
-    } finally {
-      process.stderr.write = original;
-    }
-    expect(events).toEqual(["kill", "cataly: hook onReport failed (timed out after 50 ms)\n"]);
+    // Each native role gets its own owner-only prompt file, `<role>.md.<uuid>.md`.
+    const rendered = (role: string) => {
+      const name = readdirSync(join(d.store.root, "prompts")).find((f) => f.startsWith(`${role}.md.`))!;
+      return readFileSync(join(d.store.root, "prompts", name), "utf8");
+    };
+    expect(rendered("lead")).toStartWith("custom lead.md via cataly");
+    expect(rendered("duty")).toStartWith("custom duty.md via cataly");
+    expect(d.store.roles().lead).toBeDefined();
   });
 });

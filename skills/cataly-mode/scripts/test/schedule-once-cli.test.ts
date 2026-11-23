@@ -8,7 +8,7 @@ let dir: string;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "cataly-schedule-once-cli-"));
   mkdirSync(join(dir, "state"));
-  writeFileSync(join(dir, "config.json"), JSON.stringify({ runtime: "herdr", stateDir: join(dir, "state") }));
+  writeFileSync(join(dir, "config.json"), JSON.stringify({ stateDir: join(dir, "state") }));
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 function invoke(...args: string[]) {

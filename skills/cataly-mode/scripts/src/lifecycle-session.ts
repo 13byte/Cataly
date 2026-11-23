@@ -1,7 +1,7 @@
 import { readdirSync, realpathSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { join } from "node:path";
-import { SHELLS } from "../../../../src/runtime/foreground.ts";
+import { SHELLS } from "../../../../src/runtime/terminal/foreground.ts";
 import type { Probe, SessionRef } from "../../../../src/runtime/types.ts";
 import type { FlowDeps } from "./done-flow.ts";
 import type { GoalStatus, PaneState } from "./lane-state.ts";

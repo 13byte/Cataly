@@ -1,44 +1,45 @@
-import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Checkpoints } from "../src/checkpoints.ts";
 import { Decisions } from "../src/decisions.ts";
-import { paneStatePath } from "../src/lane-state.ts";
 import { type Lane, Registry } from "../src/registry.ts";
 import { Reports } from "../src/reports.ts";
-import { runtimesOf } from "../src/run.ts";
 import { laneEta, laneStatus } from "../src/status.ts";
 import { renderBoard, renderStatus } from "../src/status-render.ts";
 import { withDiscordCli } from "./discord-fakes.ts";
-import { agentIn, depsFor, fakeClock, laneState, newWorld, withState } from "./fakes.ts";
+import { depsFor, fakeClock, type FakeSession, nativeLane, newWorld, sent, sid, withState } from "./fakes.ts";
 
 const now = Date.parse("2026-01-01T13:00:00.000Z");
 let state: ReturnType<typeof withState>;
 let world: ReturnType<typeof newWorld>;
-const lane: Lane = {
-  key: "status-demo",
-  title: "Status",
-  thread: "discord:40",
-  pane: "w:p7",
-  session: "01a11440-ee81-7f90-b2ed-dcc7d51a0adf",
-  openedAt: "2026-01-01T12:00:00.000Z",
-  brief: "/brief",
-  done: "file /done",
-  reportProtocol: "jsonl-v1",
-};
+let lane: Lane;
 const deps = () => depsFor(world, fakeClock(now), state.dir, { sessionsDir: join(state.dir, "sessions-root") });
 const contents = () =>
   readdirSync(state.dir, { recursive: true, withFileTypes: true })
     .filter((f) => f.isFile())
     .map((f) => [join(f.parentPath, f.name), readFileSync(join(f.parentPath, f.name), "utf8")])
     .sort();
+/** The fake supervisor's view of the lane's native session. */
+const native = (): FakeSession => {
+  const session = world.sessions[sid(7)];
+  if (!session) throw new Error("missing fixture session");
+  return session;
+};
 
 beforeEach(async () => {
   state = withState();
   world = newWorld();
-  world.panes = [{ pane_id: "w:p7", workspace_id: "w", agent: "omp", agent_status: "working" }];
-  agentIn(world, "w:p7");
-  laneState(state.dir, "w:p7", { agentStatus: "working" });
+  lane = {
+    key: "status-demo",
+    title: "Status",
+    thread: "discord:40",
+    ...nativeLane(world, 7, { status: "working" }),
+    openedAt: "2026-01-01T12:00:00.000Z",
+    brief: "/brief",
+    done: "file /done",
+    reportProtocol: "jsonl-v1",
+  };
   await deps().registry.write(lane);
 });
 afterEach(() => state.done());
@@ -70,30 +71,21 @@ test("status joins live identity, journals, decisions and monitor metadata witho
   expect(renderStatus(snapshot)).toContain("agent=working goal=active approval=false decisions=1");
   expect(renderStatus(snapshot)).toContain("question: Which option?");
   expect(contents()).toEqual(before);
-  expect(
-    world.calls.every(
-      (c) => c[0] === "ps" || (c[0] === "herdr" && ["get", "list", "process-info", "read"].includes(c[2] ?? "")),
-    ),
-  ).toBe(true);
+  expect(sent(world)).toEqual([]);
 });
 
-test("untrusted or reused pane identity is unknown, never a stale goal or approval", async () => {
-  for (const patch of [{ pid: 77 }, { sessionId: "other" }]) {
-    await deps().registry.write({ ...lane, session: "01a11440-ee81-7f90-b2ed-dcc7d51a0adf" });
-    laneState(state.dir, "w:p7", { ...patch, approvalPending: true });
+test("an unattested or replaced native session is unknown, never a stale goal or approval", async () => {
+  for (const patch of [{ sessionId: "other" }, { status: "unknown" }] as const) {
+    Object.assign(native(), patch, { held: true });
     expect((await laneStatus(deps(), lane.key)).lanes[0]?.runtime).toBeNull();
   }
 });
 
 test.each([
-  ["missing goal", { goal: undefined }],
-  ["invalid goal object", { goal: null }],
   ["invalid goal enum", { goal: { status: "invalid" } }],
   ["invalid goal objective", { goal: { status: "active", objective: 12 } }],
-  ["invalid agent enum", { agentStatus: "invalid" }],
-  ["invalid approval flag", { approvalPending: "false" }],
-  ["invalid observation timestamp", { updatedAt: "invalid" }],
-] as const)("status degrades a trusted pane with %s without losing another lane", async (_label, patch) => {
+  ["invalid approval flag", { held: "false" }],
+] as const)("status degrades a trusted session with %s without losing another lane", async (_label, patch) => {
   const flow = deps();
   await flow.registry.write({
     key: "healthy",
@@ -103,44 +95,31 @@ test.each([
     brief: lane.brief,
     done: lane.done,
   });
-  const path = paneStatePath(state.dir, lane.pane!);
-  const original = JSON.parse(readFileSync(path, "utf8"));
-  const ref = { runtime: "herdr", id: lane.pane! } as const;
-  const runtime = runtimesOf(flow).for(ref);
-  const identity = await runtime.probe(ref);
-  expect(identity.sessionId).toBe(lane.session!);
-  // The runtime attests identity before the status reader observes the state file.
-  const probe = spyOn(runtime, "probe").mockImplementation(async () => {
-    writeFileSync(path, JSON.stringify({ ...original, ...patch }));
-    return identity;
+  // The supervisor still attests the session; only the projected fields are malformed.
+  Object.assign(native(), patch);
+  const snapshot = await laneStatus(flow);
+  expect(renderStatus(snapshot)).toContain("agent=unknown goal=unknown approval=unknown");
+  expect(renderBoard(snapshot, "/home/test", 1960)).toContain(`${lane.key} | working | agent unknown`);
+  expect(renderBoard(snapshot, "/home/test", 1960)).toContain("WARN incomplete observations");
+  expect(JSON.parse(JSON.stringify(snapshot))).toMatchObject({
+    registryIncomplete: false,
+    lanes: [{ key: "healthy" }, { key: lane.key, runtime: null, errors: ["runtime observation invalid"] }],
   });
-  try {
-    const snapshot = await laneStatus(flow);
-    expect(renderStatus(snapshot)).toContain("agent=unknown goal=unknown approval=unknown");
-    expect(renderBoard(snapshot, "/home/test", 1960)).toContain(`${lane.key} | working | agent unknown`);
-    expect(renderBoard(snapshot, "/home/test", 1960)).toContain("WARN incomplete observations");
-    expect(JSON.parse(JSON.stringify(snapshot))).toMatchObject({
-      registryIncomplete: false,
-      lanes: [{ key: "healthy" }, { key: lane.key, runtime: null, errors: ["runtime observation invalid"] }],
-    });
-  } finally {
-    probe.mockRestore();
-  }
 });
 
-test("status accepts an older trusted record without agent status or goal objective", async () => {
-  laneState(state.dir, lane.pane!, { goal: { status: "none" } });
+test("status accepts a blocked native session without agent status or goal objective", async () => {
+  Object.assign(native(), { status: "blocked", goal: { status: "none" } });
   const snapshot = await laneStatus(deps());
   expect(snapshot.lanes[0]?.runtime).toEqual({
     goal: { status: "none" },
     approvalPending: false,
-    updatedAt: lane.openedAt,
+    updatedAt: new Date(0).toISOString(),
   });
   expect(renderStatus(snapshot)).toContain("agent=unknown goal=none approval=false");
 });
 
 test("approval, paused registry and last recorded sweep reasons stay distinct", async () => {
-  laneState(state.dir, "w:p7", { approvalPending: true, agentStatus: "idle", goal: { status: "paused" } });
+  Object.assign(native(), { held: true, status: "idle", goal: { status: "paused" } });
   await deps().registry.write({
     ...lane,
     status: "paused",

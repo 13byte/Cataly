@@ -1,22 +1,18 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import type { DeliverOutcome } from "../../../../src/runtime/types.ts";
 import { DeliveryState } from "../src/delivery-state.ts";
 import { claimDone, objectDone, watchTick } from "../src/done-flow.ts";
 import { freshnessTick } from "../src/freshness.ts";
 import { pauseLane } from "../src/pause.ts";
 import { type Lane, statusOf } from "../src/registry.ts";
+import { runtimesOf } from "../src/run.ts";
 import { resolveTell, tellLane } from "../src/tell.ts";
-import { depsFor, fakeClock, newWorld, sent, withState, type World } from "./fakes.ts";
+import { depsFor, fakeClock, href, nativeLane, newWorld, sent, sid, withState, type World } from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00.000Z");
-const lane: Lane = {
-  key: "fenced-flow",
-  title: "tell",
-  thread: "none",
-  pane: "w:p7",
-  brief: "/b.md",
-  done: "merged acme/app#1",
-  openedAt: new Date(T0).toISOString(),
-};
+/** The supervisor took the text but its answer was lost: the delivery cannot be confirmed either way. */
+const lost: DeliverOutcome = { kind: "ambiguous", detail: "host response lost", failure: new Error("lost") };
+let lane: Lane;
 let state: ReturnType<typeof withState>;
 let world: World;
 const deps = () => depsFor(world, fakeClock(T0 + 30 * 60_000), state.dir, { postAfterMin: 999 });
@@ -24,7 +20,18 @@ const store = () => new DeliveryState(deps().registry, lane.key);
 beforeEach(async () => {
   state = withState();
   world = newWorld();
-  world.panes = [{ pane_id: "w:p7", workspace_id: "w", agent: "omo", agent_status: "working" }];
+  world.deliverOutcome = () => lost;
+  // An idle native session with an active goal: freshness may nudge it.
+  lane = {
+    key: "fenced-flow",
+    title: "tell",
+    thread: "none",
+    ...nativeLane(world, 7),
+    brief: "/b.md",
+    done: "merged acme/app#1",
+    openedAt: new Date(T0).toISOString(),
+    reportProtocol: "jsonl-v1",
+  };
   await deps().registry.write(lane);
 });
 afterEach(() => state.done());
@@ -90,48 +97,35 @@ test("an explicit pause still works and resolving a hold does not resume the lan
   await tellLane(deps(), lane, "owner request");
   const request = store().read();
   if (!request) throw new Error("missing pending request");
-  world.screens = ["input"];
-  world.screen = "Goal paused";
-  const base = deps();
-  const paused = await pauseLane(
-    { ...base, config: { ...base.config, agentCommand: ["omo", "{prompt}"] } },
-    lane,
-    "owner said wait",
-  );
+  const paused = await pauseLane(deps(), lane, "owner said wait");
   expect(paused.code).toBe(0);
   expect(store().read()).toEqual(request);
   expect((await resolveTell(deps(), lane.key, request.id, "release hold, not pause")).code).toBe(0);
   expect((await tellLane(deps(), lane, "later request")).line).toContain("the lane is paused");
-  expect(sent(world)).toEqual(["owner request", "/goal pause"]);
+  // The pause sets the native goal; it never goes through the fenced text delivery.
+  expect(world.calls).toContainEqual(["headless", "goal", sid(7), "paused"]);
+  expect(sent(world)).toEqual(["owner request"]);
 });
 
 test("resolution waits for an in-flight dispatch and never replays it", async () => {
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   const base = deps();
-  let first = true;
-  const flight = tellLane(
-    {
-      ...base,
-      run: async (argv, options) => {
-        if (first) {
-          first = false;
-          entered.resolve();
-          await release.promise;
-        }
-        return base.run(argv, options);
-      },
-    },
-    lane,
-    "owner request",
-  );
+  const runtime = runtimesOf(base).for(href(sid(7)));
+  const original = runtime.deliver.bind(runtime);
+  const deliver = spyOn(runtime, "deliver").mockImplementation(async (...args) => {
+    entered.resolve();
+    await release.promise;
+    return original(...args);
+  });
+  const flight = tellLane(base, lane, "owner request");
   await entered.promise;
   const request = store().read();
   if (!request) throw new Error("missing write-ahead request");
   const resolving = resolveTell(deps(), lane.key, request.id, "operator ends this hold");
   expect(store().read()?.status).toBe("uncertain");
   release.resolve();
-  const [sentResult, resolved] = await Promise.all([flight, resolving]);
+  const [sentResult, resolved] = await Promise.all([flight, resolving]).finally(() => deliver.mockRestore());
   expect([sentResult.code, resolved.code]).toEqual([3, 0]);
   expect(store().read()?.status).toBe("released");
   expect(sent(world)).toEqual(["owner request"]);

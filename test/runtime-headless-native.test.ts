@@ -43,11 +43,10 @@ test.skipIf(!runSmoke)(
     const evidence = join(cwd, `${marker}-evidence.txt`);
     writeFileSync(brief, "A no-side-effects localhost smoke test.");
     writeFileSync(evidence, "smoke done signal");
-    const configure = (modelArg: string, legacyRuntime?: "hc") =>
+    const configure = (modelArg: string) =>
       writeFileSync(
         config,
         JSON.stringify({
-          ...(legacyRuntime ? { runtime: legacyRuntime } : {}),
           stateDir,
           defaultCwd: cwd,
           sessionsDir: join(ompDir, "sessions"),
@@ -130,12 +129,12 @@ test.skipIf(!runSmoke)(
     try {
       expect(Bun.which("herdr", { PATH: env.PATH })).toBeNull();
       expect(Bun.which("hc", { PATH: env.PATH })).toBeNull();
+      expect(Bun.which("tern", { PATH: env.PATH })).toBeNull();
       const launch = ["launch", key, "--title", "Live test", "--brief", brief, "--done", `file ${evidence}`];
       await expect(runCli({ ...env, CATALY_LANE_RUNTIME: "terminal" }, ...launch)).rejects.toThrow(
-        "none of herdr, hc or tern is on PATH",
+        "tern is not on PATH",
       );
       expect(await registry.read(key)).toBeNull();
-      configure("{model}", "hc"); // Old installers wrote this preference even without an explicit terminal choice.
       const launched = await runCli(env, ...launch);
       expect(launched).toInclude(`STARTUP_OK ${key} headless:`);
       const lane = await registry.read(key);

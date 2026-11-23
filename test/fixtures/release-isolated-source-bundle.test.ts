@@ -23,9 +23,7 @@ if (tools !== undefined) {
     process.env["PATH"] = tools;
     expect(Bun.env["PATH"]).toBe(tools);
     expect(Bun.which("omp")).toBeNull();
-    const runtime = process.platform === "darwin" ? "hc" : "herdr";
-    expect(Bun.which(runtime)).toBe(join(tools, runtime));
-    prerequisites(runtime, true, false, f.paths);
+    prerequisites();
 
     const one = await installBundle(f.paths, first.bundle, undefined);
     const sourceOne = releasePath(f.paths, one.current);

@@ -189,16 +189,12 @@ export const darwin: PlatformAdapter = {
   directoryFsync: true,
   // link(2) follows a symlink here; rollback links the pointer's own inode through linkat instead.
   preservesHardLinks: true,
-  supportsHerdrNativeUi: false,
   // No /proc: a zombie has ended, only root can enter another user's directory, and a relative home stays unresolved.
   procfs: false,
   flockLibrary: () => "libSystem.B.dylib",
   syncDirectory,
 
-  legacyReleaseRuntime: () => "hc",
-
-  supportsReleaseProfile: (platform, arch, runtime) =>
-    platform === "darwin" && arch === "arm64" && (runtime === "headless" || runtime === "hc"),
+  supportsHeadlessRelease: (platform, arch) => platform === "darwin" && arch === "arm64",
 
   nativeCacheLabel: () => `native-darwin-${process.arch}`,
   programName: (word) => word.split("/").at(-1) ?? "",

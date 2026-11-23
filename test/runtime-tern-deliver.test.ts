@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Exec } from "../src/runtime/exec.ts";
-import { ENTER_ATTEMPTS, PASTE_SETTLE_MS } from "../src/runtime/herdr/deliver.ts";
+import { ENTER_ATTEMPTS, PASTE_SETTLE_MS } from "../src/runtime/terminal/deliver.ts";
 import { SUBMIT_CHECK_MS } from "../src/runtime/tern/deliver.ts";
 import { TernRuntime } from "../src/runtime/tern/index.ts";
 import { block, type FakeBlock, FakeTern, ZSH } from "./fake-tern.ts";
@@ -138,7 +138,7 @@ describe("deliver", () => {
 });
 
 describe("deliver into an input the screen does not show", () => {
-  test("a composer the adapter does not know: paste, settle, the same agent, one Enter (herdr's rule)", async () => {
+  test("a composer the adapter does not know: paste, settle, the same agent, one Enter", async () => {
     const { fake, rt, sleeps } = rig({ "5001": block({ composer: "other" }) });
     expect(await rt.deliver(B1, "hello")).toEqual({ kind: "delivered" });
     expect(typedCalls(fake)).toEqual([

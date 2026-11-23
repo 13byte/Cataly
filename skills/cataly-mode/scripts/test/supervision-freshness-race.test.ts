@@ -4,8 +4,8 @@ import { fileEvidence } from "../src/evidence.ts";
 import { freshnessTick } from "../src/freshness.ts";
 import type { Clock, Runner } from "../src/run.ts";
 import { type Observation, writeObservation } from "../src/supervision-evidence-state.ts";
-import { depsFor, newWorld, type TestState, withState } from "./fakes.ts";
-import { integrationFixture, options } from "./supervision-integration.fixture.ts";
+import { depsFor, nativeLane, newWorld, type TestState, withState } from "./fakes.ts";
+import { integrationFixture, options, start } from "./supervision-integration.fixture.ts";
 
 let state: TestState;
 let restore = () => {};
@@ -19,12 +19,13 @@ afterEach(() => {
 });
 
 for (const heldHung of [true, false]) {
-  test(`a discarded freshness sweep cannot ${heldHung ? "resume held hung" : "stall fresh evidence"} or deliver its stale screen`, async () => {
+  test(`a discarded freshness sweep cannot ${heldHung ? "resume held hung" : "stall fresh evidence"} or deliver its stale observation`, async () => {
     const f = await integrationFixture(state);
     restore = f.restore;
     const world = newWorld();
-    const lane = { ...f.lane, pane: "w:p7", thread: "test-thread" };
-    world.panes.push({ pane_id: lane.pane, workspace_id: "w", agent: "omp", agent_status: "working" });
+    // One continuing native call that started 21 minutes before the first sweep, as freshness observes it.
+    const activeSince = start - 21 * 60_000;
+    const lane = { ...f.lane, ...nativeLane(world, 7, { status: "working", activeSince }), thread: "test-thread" };
     const deps = depsFor(world, f.clock, state.dir, {
       nudgeAfterMin: 1,
       postAfterMin: 0,
@@ -34,14 +35,12 @@ for (const heldHung of [true, false]) {
     const run: Runner = (argv, args) =>
       argv[0] === "git" || argv[0] === "usage" ? f.run(argv, args) : deps.run(argv, args);
     await f.registry.write(lane);
-    expect((await f.supervisor().sweep(lane, "Working 21m")).hung).toBe(false);
+    expect((await f.supervisor().sweep(lane, "", activeSince)).hung).toBe(false);
     if (heldHung) {
       f.clock.at += 60_000;
-      expect((await f.supervisor().sweep(lane, "Working 22m")).heldHung).toBe(true);
+      expect((await f.supervisor().sweep(lane, "", activeSince)).heldHung).toBe(true);
     }
     f.clock.at += 60_000;
-    const timer = heldHung ? "Working 23m" : "Working 22m";
-    world.screen = heldHung ? timer : "compaction failed";
     // Changed metadata forces a hash, but these are the same bytes and must not release a held evidence stall.
     writeFileSync(f.source, "first");
     const releasePeer = Promise.withResolvers<void>();

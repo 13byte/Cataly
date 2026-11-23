@@ -11,7 +11,7 @@ for (const page of ["has_more", "cursor"])
     try {
       const config = join(state.dir, "config.json");
       const activity = join(state.dir, "activity.json");
-      writeFileSync(config, JSON.stringify({ stateDir: state.dir, runtime: "herdr", hooks: {} }));
+      writeFileSync(config, JSON.stringify({ stateDir: state.dir, hooks: {} }));
       const child = Bun.spawn(
         [
           process.execPath,

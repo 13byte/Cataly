@@ -21,7 +21,7 @@ test("real CLI emits JSON diagnostics and presets with isolated state and no sid
         agentCommand,
         sessionsDir: join(state.dir, "sessions"),
         leadPane: "",
-        runtime: "herdr",
+        runtime: "tern",
       }),
     );
     const before = readFileSync(config, "utf8");
@@ -33,7 +33,7 @@ test("real CLI emits JSON diagnostics and presets with isolated state and no sid
           CATALY_CONFIG: config,
           CATALY_STATE_DIR: stateDir,
           CATALY_LEAD_PANE: "",
-          CATALY_RUNTIME: "herdr",
+          CATALY_RUNTIME: "tern",
         },
         stdout: "pipe",
         stderr: "pipe",
@@ -98,7 +98,7 @@ const withHealthyCli = () => {
       agentCommand: doctorCommand(mkdtempSync(join(tmpdir(), "cataly-doctor-cmd-"))),
       sessionsDir,
       leadPane: "",
-      runtime: "herdr",
+      runtime: "tern",
       // No live lead is needed for these local diagnostics; every other check stays enabled.
       doctor: { ignore: ["runtime"] },
     }),
@@ -114,7 +114,7 @@ const withHealthyCli = () => {
         CATALY_CONFIG: config,
         CATALY_STATE_DIR: stateDir,
         CATALY_LEAD_PANE: "",
-        CATALY_RUNTIME: "herdr",
+        CATALY_RUNTIME: "tern",
         ...env,
       },
       stdout: "pipe",

@@ -1,11 +1,9 @@
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { platform } from "../platform/index.ts";
 import { assertSetupFile, readSetupFile, setupPreview, type SetupSnapshot } from "../setup-files.ts";
 import { extractArchive } from "./archive.ts";
 import type { VerifiedBundle } from "./bundle.ts";
-import { nativeMetadata } from "./capabilities.ts";
 import { type ConsumerPaths, isPrimaryConsumer } from "./files.ts";
 import { assertLock, dependencyPlan } from "./provision.ts";
 
@@ -27,13 +25,8 @@ export function consumerConfigPlan(
   const example = JSON.parse(readFileSync(join(source, "skills", skill, "references/config.example.json"), "utf8"));
   example.ompUlwPath = dependency;
   const keys = ["ompUlwPath"];
-  if (manifest.source.files.some((file) => file.path === nativeMetadata)) {
-    delete example.runtime;
-    delete example.sessionRuntime;
-  } else {
-    example.runtime = platform.legacyReleaseRuntime();
-    keys.push("runtime");
-  }
+  delete example.runtime;
+  delete example.sessionRuntime;
   if (!isPrimaryConsumer(paths) || (paths.layout === "legacy" && skill === "cataly-mode")) {
     example.stateDir = join(paths.cataly, "state");
     keys.push("stateDir");

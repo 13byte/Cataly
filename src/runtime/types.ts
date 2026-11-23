@@ -1,13 +1,15 @@
 import type { ProbedNativeObservation } from "../native-observation.ts";
 
-export type TerminalRuntimeKind = "herdr" | "hc" | "tern";
+export type TerminalRuntimeKind = "tern";
 export type RuntimeKind = TerminalRuntimeKind | "headless";
+/** Removed terminal runtimes. Only persisted refs (lanes, roles, inbox names, settings) still carry them. */
+export type LegacyRuntimeKind = "herdr" | "hc";
 /**
- * One session as its runtime addresses it. `group`: the herdr workspace id, the hc cataly.group label or the Tern session
- * id. `container`: the herdr or Tern tab id (absent on hc).
+ * One session as its runtime addresses it. `group`: the headless group label or the Tern session id. `container`: the
+ * Tern tab id (or a legacy herdr tab id read from an old file). A legacy runtime appears only in parsed stored data.
  */
 export type SessionRef = {
-  readonly runtime: RuntimeKind;
+  readonly runtime: RuntimeKind | LegacyRuntimeKind;
   readonly id: string;
   readonly group?: string;
   readonly container?: string;
@@ -27,7 +29,7 @@ export type ForegroundProcess = {
   /** True when argv contains only legacy partial/name hints, not a complete observation. */
   readonly argvIncomplete?: boolean;
 };
-/** One snapshot: status, identity, foreground and discovery data together (submitTyped compares all of them; deliver re-reads them). `rootPid`: the session's root process (herdr process_info.shell_pid, hc terminal pid). */
+/** One snapshot: status, identity, foreground and discovery data together (submitTyped compares all of them; deliver re-reads them). `rootPid`: the session's root process (the Tern block's child pid, the headless OMP pid). */
 export type Probe = {
   readonly status: AgentStatus;
   readonly agent?: string;
@@ -54,24 +56,22 @@ export type SessionInfo = {
 };
 export type SessionRole = "lead" | "duty" | "duty-loop" | "hourly-loop" | "lane";
 /**
- * Where the session is created. herdr: "workspace-root" = `workspace create` (the root pane is the session; the new workspace id
- * becomes the ref's group); "tab" = `tab create` in `group` (no --workspace when group is absent); "split-below" = `pane split`
- * below `near`. hc ignores the container kind: one labelled terminal running the user's shell with `env` set. tern:
- * "workspace-root" = `new session`, "tab" = `new tab` in the `group` session (else the caller's own), "split-below" =
- * `split <near> down`.
+ * Where the session is created. tern: "workspace-root" = `new session`, "tab" (also when absent) = `new tab` in the
+ * `group` session (else the caller's own), "split-below" = `split <near> down`. headless ignores the container kind and
+ * records `group`.
  */
 export type CreateSpec = {
   readonly name: string;
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
   readonly role: SessionRole;
-  readonly container: "workspace-root" | "tab" | "split-below";
+  readonly container?: "workspace-root" | "tab" | "split-below";
   readonly group?: string;
   readonly near?: SessionRef;
 };
 export type DeliverWhen = "idle" | "working" | "any";
-/** `when`: hc uses --if idle / --if working / no gate for "any"; unknown and shell never receive agent delivery.
- * `force`: hc may type into a blocked agent, but OMP tool approvals always hold delivery. */
+/** `when`: the status the session must show; unknown and shell never receive agent delivery.
+ * `force`: kept for callers that allow a blocked agent; Tern reports no blocked state and OMP tool approvals always hold delivery. */
 export type DeliverOptions = {
   readonly when?: DeliverWhen;
   readonly force?: boolean;
@@ -91,11 +91,11 @@ export type Key = "enter" | "escape";
 export type CloseScope = "session" | "container";
 /** `unwrapped`: a line the terminal wrapped over several rows comes back as one line, not one line per row. */
 export type ReadOptions = { readonly unwrapped?: boolean };
-/** `foregroundOnly`: hc skips the observational screen check; herdr already samples foreground after its screen check. */
+/** `foregroundOnly`: skip any observational screen check; Tern and headless never make one, so they ignore it. */
 export type ProbeOptions = { readonly foregroundOnly?: boolean };
 interface SessionOperations {
   readonly kind: RuntimeKind;
-  /** The caller's own session from the runtime's env (HERDR_PANE_ID + HERDR_WORKSPACE_ID / HC_TERMINAL_ID / TERN_PANE), or undefined. */
+  /** The caller's own session from the runtime's env (CATALY_HEADLESS_ID / TERN_PANE), or undefined. */
   self(): SessionRef | undefined;
   /** Allocates a session address before its agent starts: an idle shell for a terminal or a native lane reservation. */
   create(spec: CreateSpec): Promise<SessionRef>;
@@ -111,9 +111,9 @@ interface SessionOperations {
 
 export interface TerminalRuntime extends SessionOperations {
   readonly kind: TerminalRuntimeKind;
-  /** herdr creates an unfocused workspace and returns its id; hc returns the group label unchanged. */
+  /** Tern: the caller's own Tern session, else one named `label` (nothing is created until a block opens in it). */
   createGroup(label: string, cwd: string): Promise<string>;
-  /** herdr: `pane run <id> <command>`. hc: `send <id> <command>` into the shell (no --if: a shell reports no status). */
+  /** Tern: types `command` into the new block's shell and submits it. */
   start(ref: SessionRef, command: string): Promise<void>;
   submitTyped(ref: SessionRef, into: AgentIdentity): Promise<SubmitResult>;
   typeIntoShell(ref: SessionRef, text: string): Promise<boolean>;
@@ -126,25 +126,29 @@ export interface NativeSessionRuntime extends SessionOperations {
 
 export type SessionRuntime = TerminalRuntime | NativeSessionRuntime;
 
-/** Id shape of a bare ref: only a herdr pane `w<ws>:p<pane>` may appear without its prefix. */
+/** Id shape of a bare ref: only a legacy herdr pane `w<ws>:p<pane>` may appear without its prefix. */
 const BARE_HERDR = /^w[0-9A-Za-z]+:p[0-9A-Za-z]+$/;
 /**
- * Id shape after each prefix: a herdr pane, or a local hc terminal address. hc numbers terminals in base 36 (`t7`,
- * `t1b`, `t2h`); Tern numbers blocks in decimal. Another machine's `<machine>/<address>` is not a ref: the id names the
- * session's inbox file.
+ * Id shape after each prefix: Tern numbers blocks in decimal; a legacy hc terminal address is base 36 (`t7`, `t1b`).
+ * Another machine's `<machine>/<address>` is not a ref: the id names the session's inbox file.
  */
 const HC_ADDRESS = /^t[0-9a-z]+$/;
 export const HEADLESS_ADDRESS = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;
 const TERN_BLOCK = /^[0-9]+$/;
-const ID_SHAPES: Readonly<Record<RuntimeKind, RegExp>> = {
+const ID_SHAPES: Readonly<Record<RuntimeKind | LegacyRuntimeKind, RegExp>> = {
   herdr: BARE_HERDR,
   hc: HC_ADDRESS,
   tern: TERN_BLOCK,
   headless: HEADLESS_ADDRESS,
 };
-const KINDS = Object.keys(ID_SHAPES) as RuntimeKind[];
+const KINDS = Object.keys(ID_SHAPES) as (RuntimeKind | LegacyRuntimeKind)[];
 
-/** "herdr:w1:p3", "hc:t7", "tern:42", bare "w1:p3" (herdr). A bare "t7" or "42" is NOT a ref (both are legal lane keys); undefined otherwise. */
+export const isLegacyRuntime = (kind: string): kind is LegacyRuntimeKind => kind === "herdr" || kind === "hc";
+
+/**
+ * "headless:<uuid>", "tern:42", and the legacy "herdr:w1:p3", "hc:t7" and bare "w1:p3" (herdr) so old files still load.
+ * A bare "t7" or "42" is NOT a ref (both are legal lane keys); undefined otherwise.
+ */
 export const parseRef: (text: string) => SessionRef | undefined = (text) => {
   for (const runtime of KINDS) {
     if (!text.startsWith(`${runtime}:`)) continue;

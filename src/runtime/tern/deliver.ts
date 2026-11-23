@@ -1,7 +1,7 @@
 import type { Exec } from "../exec.ts";
-import { joinWrapped } from "../hc/deliver.ts";
-import { ENTER_ATTEMPTS, identity, PASTE_SETTLE_MS, type Sleep, sameAgent } from "../herdr/deliver.ts";
+import { ENTER_ATTEMPTS, identity, PASTE_SETTLE_MS, type Sleep, sameAgent } from "../terminal/deliver.ts";
 import type { AgentIdentity, DeliverOptions, DeliverOutcome, Key, Probe, SubmitResult } from "../types.ts";
+import { joinWrapped } from "../terminal/screen.ts";
 import { layout } from "./blocks.ts";
 import { isMissing, TernError, ternCall } from "./exec.ts";
 import { ompDraft, probe } from "./probe.ts";
@@ -92,7 +92,7 @@ export async function deliver(
  * Presses Enter on text already in the input; returns the failure when it was not submitted. Before each press the
  * same agent must still be there with nothing in front of it, so an Enter never lands in a shell or another agent.
  * `watched`: the input was readable, so Enter is pressed only on a draft that is seen there and again until the input
- * reads empty. Otherwise (a composer `ompDraft` does not know) one Enter the tool accepts is the submit, as on herdr.
+ * reads empty. Otherwise (a composer `ompDraft` does not know) one Enter the tool accepts is the submit.
  */
 async function submit(
   exec: Exec,
@@ -168,7 +168,7 @@ export async function keys(exec: Exec, id: string, names: readonly Key[]): Promi
 
 /**
  * The last `lines` rows of the block (screen plus scrollback), trailing blank rows dropped. `unwrapped` joins rows as
- * wide as the block (hc's rule: Tern says nothing about soft wraps either).
+ * wide as the block (joinWrapped: Tern says nothing about soft wraps).
  */
 export async function read(exec: Exec, id: string, lines: number, unwrapped = false): Promise<string> {
   const result = await ternCall(exec, ["capture", id, "--scrollback"]);

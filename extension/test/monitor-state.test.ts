@@ -5,10 +5,8 @@ import { type FakePi, load, useConfig } from "./fake-pi";
 
 test("boot metadata survives shutdown and restoration, then forgets an explicitly stopped monitor", async () => {
   const stateDir = useConfig(join(import.meta.dir, "fake-ulw.ts"));
-  const previousPane = process.env.HERDR_PANE_ID;
-  const previousTerminal = process.env.HC_TERMINAL_ID;
-  process.env.HERDR_PANE_ID = "w1:p9";
-  delete process.env.HC_TERMINAL_ID;
+  const previousHeadless = process.env.CATALY_HEADLESS_ID;
+  delete process.env.CATALY_HEADLESS_ID;
   const session = { id: "monitor-owner", file: "/sessions/monitor-owner.jsonl", entries: [] };
   const path = join(stateDir, "monitors", "monitor-owner.json");
   const argv = ["sh", "-c", "exec sleep 30"];
@@ -36,9 +34,6 @@ test("boot metadata survives shutdown and restoration, then forgets an explicitl
   } finally {
     await resumed?.emit("session_shutdown");
     await first.emit("session_shutdown");
-    if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
-    else process.env.HERDR_PANE_ID = previousPane;
-    if (previousTerminal === undefined) delete process.env.HC_TERMINAL_ID;
-    else process.env.HC_TERMINAL_ID = previousTerminal;
+    if (previousHeadless !== undefined) process.env.CATALY_HEADLESS_ID = previousHeadless;
   }
 });

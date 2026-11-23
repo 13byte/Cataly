@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isOmpAgentCommand } from "../src/harness.ts";
 import { classifyOmpArgv, mayRunOmpArgv } from "../src/runtime/omp-argv.ts";
-import { nativeAgent } from "../src/update/load.ts";
+import { nativeAgent } from "../src/update/native-agent.ts";
 import { runCommand } from "../src/update/process.ts";
 import type { UpdateConfig, UpdateJob } from "../src/update/types.ts";
 
@@ -29,7 +29,6 @@ function fixture() {
   const config: UpdateConfig = {
     version: 1,
     target: "cataly",
-    runtime: "herdr",
     root: join(directory, "updates"),
     remote: join(directory, "remote"),
     ref: "refs/heads/main",

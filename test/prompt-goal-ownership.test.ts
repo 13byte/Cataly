@@ -47,7 +47,7 @@ test("an external wait preserves ownership instead of creating an availability l
   expect(skill).toContain("Waiting for CI, review or a monitor does not create a fresh objective");
   expect(skill).toContain("Keep the existing owner intact and use its event/wait protocol");
   expect(skill).toContain("idle without a standing availability goal");
-  expect(skill).toContain("watch`, `freshness`, `dead-panes`, `guard`");
+  expect(skill).toContain("watch`, `freshness`, `dead-panes` on Tern, `guard`");
   expect(skill).toContain(
     "restore a stopped session within the scope of the owner's still-open request for that lane's work, but they do not unpause its goal or authorize a new objective by themselves",
   );

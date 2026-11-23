@@ -8,50 +8,23 @@ import { flushInbox } from "../src/inbox.ts";
 import { lockInboxFiles, lockRoute, spoolMessage } from "../src/inbox-spool.ts";
 import { HeadlessRuntime, headlessArgv } from "../src/runtime/headless.ts";
 import { writePrivate } from "../src/runtime/headless-record.ts";
-import { Runtimes } from "../src/runtime/registry.ts";
+import { LegacyRuntimeError, Runtimes } from "../src/runtime/registry.ts";
 import { World } from "./fake.ts";
-import { terminal } from "./fake-hc.ts";
 import { captureIo } from "./inbox-setup.ts";
 
-test("legacy stop is all-or-nothing and never mutates live terminals", async () => {
+test("up and stop leave a home with historical herdr/hc roles untouched; up names the upgrade steps", async () => {
   const w = new World();
   const d = w.deps();
   const lead = { runtime: "hc", id: "t1" } as const;
-  const duty = { runtime: "hc", id: "t2" } as const;
+  const duty = { runtime: "herdr", id: "w1:p2" } as const;
   d.store.setRole("lead", lead);
   d.store.setRole("duty", duty);
   try {
-    w.hc.terminals.set("t2", terminal());
-    await expect(up(d, d.store.root)).rejects.toThrow("already has registered roles");
-    expect(w.calls).toEqual([]);
-    await expect(main(["stop"], d)).rejects.toThrow("still present");
+    await expect(up(d, d.store.root)).rejects.toThrow(LegacyRuntimeError);
+    await expect(up(d, d.store.root)).rejects.toThrow("cataly update --retire-legacy-roles");
+    expect(w.created).toEqual([]);
+    expect((await captureIo(() => main(["stop"], d))).out).toInclude("STOPPED no owned native harness");
     expect(d.store.roles()).toEqual({ lead, duty });
-    expect(w.hc.terminals.get("t2")?.state).toBe("live");
-
-    w.hc.terminals.set("t2", terminal({ state: "finished" }));
-    w.hc.knobs.getError = "unavailable";
-    await expect(main(["stop"], d)).rejects.toThrow("Legacy roles left unchanged");
-    expect(d.store.roles()).toEqual({ lead, duty });
-
-    delete w.hc.knobs.getError;
-    expect((await captureIo(() => main(["stop"], d))).out).toInclude("retired 2 already-gone");
-    expect(d.store.roles()).toEqual({});
-    expect(w.hc.terminals.get("t2")?.state).toBe("finished");
-    expect(w.hc.calls.every(([op]) => op === "ls" || op === "get")).toBe(true);
-  } finally {
-    rmSync(d.store.root, { recursive: true, force: true });
-  }
-});
-
-test("legacy stop does not infer absence from an unavailable daemon", async () => {
-  const w = new World();
-  w.exec = async () => ({ code: 127, stdout: "", stderr: "binary missing", spawnFailed: true });
-  const d = w.deps();
-  const lead = { runtime: "herdr", id: "w1:p2" } as const;
-  d.store.setRole("lead", lead);
-  try {
-    await expect(main(["stop"], d)).rejects.toThrow("binary missing");
-    expect(d.store.roles()).toEqual({ lead });
   } finally {
     rmSync(d.store.root, { recursive: true, force: true });
   }
@@ -65,7 +38,7 @@ test.skipIf(process.platform === "win32")(
     const rt = new HeadlessRuntime(stateDir);
     const inventory = join(d.store.root, "harness-native.json");
     try {
-      const ref = await rt.create({ name: "lead", role: "lead", cwd: d.store.root, env: {}, container: "tab" });
+      const ref = await rt.create({ name: "lead", role: "lead", cwd: d.store.root, env: {} });
       const dir = join(stateDir, "headless", ref.id);
       writePrivate(inventory, { version: 1, stateDir, roles: { lead: { ref } } });
       await expect(up(d, d.store.root)).rejects.toThrow("already registered or held");
@@ -106,8 +79,8 @@ test.skipIf(process.platform === "win32").each([
   const rt = new HeadlessRuntime(stateDir);
   let unlock: (() => void) | undefined;
   try {
-    const lead = await rt.create({ name: "lead", role: "lead", cwd: root, env: {}, container: "tab" });
-    const loop = await rt.create({ name: "duty-loop", role: "duty-loop", cwd: root, env: {}, container: "tab" });
+    const lead = await rt.create({ name: "lead", role: "lead", cwd: root, env: {} });
+    const loop = await rt.create({ name: "duty-loop", role: "duty-loop", cwd: root, env: {} });
     d.store.setRole("lead", lead);
     d.store.setRole("duty-loop", loop);
     writePrivate(join(root, "harness-native.json"), {
@@ -162,12 +135,12 @@ test.skipIf(process.platform === "win32")("native stop and send refuse unowned r
   const rt = new HeadlessRuntime(stateDir);
   const d = {
     ...base,
-    runtimes: new Runtimes("headless", (kind) => (kind === "headless" ? rt : base.runtimes.terminal(kind))),
+    runtimes: new Runtimes("headless", () => rt),
   };
   try {
-    const lead = await rt.create({ name: "lead", role: "lead", cwd: root, env: {}, container: "tab" });
-    const duty = await rt.create({ name: "duty", role: "duty", cwd: root, env: {}, container: "tab" });
-    const ghost = await rt.create({ name: "lead", role: "lead", cwd: root, env: {}, container: "tab" });
+    const lead = await rt.create({ name: "lead", role: "lead", cwd: root, env: {} });
+    const duty = await rt.create({ name: "duty", role: "duty", cwd: root, env: {} });
+    const ghost = await rt.create({ name: "lead", role: "lead", cwd: root, env: {} });
     const terminal = { runtime: "hc", id: "t7" } as const;
     d.store.setRole("lead", lead);
     d.store.setRole("duty", duty);

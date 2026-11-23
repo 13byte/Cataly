@@ -1,38 +1,50 @@
 import { afterEach, expect, test } from "bun:test";
-import { lstatSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readPaneState } from "../../skills/cataly-mode/scripts/src/lane-state.ts";
 import { processIdentity } from "../../src/update/deployment-process.ts";
 import type { RuntimeHealth } from "../../src/update/deployment-types.ts";
-import { type FakePi, load, until, useConfig } from "./fake-pi.ts";
+import { type FakeOptions, type FakePi, load as loadPi, until, useConfig } from "./fake-pi.ts";
 
 // The kernels whose process identity deployment can bind.
 const posix = test.skipIf(process.platform !== "linux" && process.platform !== "darwin");
 
-const previousPane = process.env.HERDR_PANE_ID;
-const previousTerminal = process.env.HC_TERMINAL_ID;
-const previousManagedStartup = process.env.CATALY_MANAGED_STARTUP;
+/** The native harness lead's headless reservation: only it publishes runtime health. */
+const HEADLESS = "00000000-0000-4000-8000-000000000007";
+const ENV = ["CATALY_HEADLESS_ID", "CATALY_HARNESS_ROLE", "CATALY_MANAGED_STARTUP"] as const;
+const previous = new Map(ENV.map((name) => [name, process.env[name]]));
 const sessions: FakePi[] = [];
+const load = (options: FakeOptions) => loadPi({ mode: "rpc", hasUI: true, ...options });
 afterEach(async () => {
   for (const session of sessions.splice(0)) await session.emit("session_shutdown");
-  if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
-  else process.env.HERDR_PANE_ID = previousPane;
-  if (previousTerminal === undefined) delete process.env.HC_TERMINAL_ID;
-  else process.env.HC_TERMINAL_ID = previousTerminal;
-  if (previousManagedStartup === undefined) delete process.env.CATALY_MANAGED_STARTUP;
-  else process.env.CATALY_MANAGED_STARTUP = previousManagedStartup;
+  for (const [name, value] of previous) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
 });
 function fixture(sessionId = "legacy-session") {
   const stateDir = useConfig(join(import.meta.dir, "fake-ulw.ts"));
-  process.env.HERDR_PANE_ID = "w1:p7";
-  delete process.env.HC_TERMINAL_ID;
+  process.env.CATALY_HEADLESS_ID = HEADLESS;
+  process.env.CATALY_HARNESS_ROLE = "lead";
+  const reservation = join(stateDir, "headless", HEADLESS);
+  mkdirSync(reservation, { recursive: true, mode: 0o700 });
+  writeFileSync(
+    join(reservation, "reservation.json"),
+    JSON.stringify({
+      ref: { runtime: "headless", id: HEADLESS },
+      name: "lead",
+      cwd: tmpdir(),
+      startedAt: new Date().toISOString(),
+      role: "lead",
+    }),
+    { mode: 0o600 },
+  );
   const bootstrap = join(stateDir, "..", "trusted-bootstrap.json");
   const intake = { path: join(stateDir, "heartbeat"), monitor: "inbound", maxAgeMs: 120_000 };
   // The real child is portable; only deployment health's kernel start-tick attestation requires Linux.
   const monitor = { name: "inbound", argv: ["sleep", "60"], filter: "^INBOUND", cwd: tmpdir() };
   writeFileSync(bootstrap, JSON.stringify({ version: 1, sessionId, monitors: [monitor], intake }), { mode: 0o600 });
-  return { stateDir, bootstrap, monitor, intake, healthPath: join(stateDir, "runtime", "w1%3Ap7.json") };
+  return { stateDir, bootstrap, monitor, intake, healthPath: join(stateDir, "runtime", `${HEADLESS}.json`) };
 }
 
 const run = (pi: FakePi, params: Record<string, unknown>) =>
@@ -72,7 +84,7 @@ posix(
     await first.emit("session_start");
     await until(() => JSON.parse(readFileSync(f.healthPath, "utf8")).monitors.length === 1);
     const health = JSON.parse(readFileSync(f.healthPath, "utf8")) as RuntimeHealth;
-    expect(health).toMatchObject({ role: "cataly", paneId: "w1:p7", pid: process.pid, sessionId: session.id });
+    expect(health).toMatchObject({ role: "cataly", paneId: HEADLESS, pid: process.pid, sessionId: session.id });
     expect(health.presetLoaded).toBe(true);
     expect(health.monitors[0]).toMatchObject(f.monitor);
     expect(processIdentity(health.monitors[0]!.pid)?.startTicks).toBe(health.monitors[0]!.startTicks);
@@ -118,7 +130,7 @@ posix("ordinary bootstrap replaces legacy monitors and restores real children wi
   const metadata = join(f.stateDir, "monitors", `${session.id}.json`);
   expect(JSON.parse(readFileSync(metadata, "utf8"))).toMatchObject({ monitors: [f.monitor], intake: f.intake });
   const health = JSON.parse(readFileSync(f.healthPath, "utf8")) as RuntimeHealth;
-  expect(health).toMatchObject({ role: "cataly", paneId: "w1:p7", pid: process.pid, sessionId: session.id });
+  expect(health).toMatchObject({ role: "cataly", paneId: HEADLESS, pid: process.pid, sessionId: session.id });
   expect(health.presetLoaded).toBe(true);
   expect(health.monitors.map(({ name, pid }) => [name, pid])).toEqual([[f.monitor.name, oldPid]]);
   await first.emit("session_shutdown");
@@ -165,7 +177,7 @@ posix("a bootstrap bound to another native session launches nothing", async () =
 });
 
 // POSIX-only: the rejected bootstrap is read through the product's mode and owner-uid check.
-posix("a rejected bootstrap leaves no half-initialized role session publishing pane state", async () => {
+posix("a rejected bootstrap leaves no half-initialized role session publishing runtime health", async () => {
   const f = fixture("different-session");
   const cataly = await load({
     session: { id: "legacy-session", entries: [] },
@@ -182,16 +194,15 @@ posix("a rejected bootstrap leaves no half-initialized role session publishing p
     toolCallId: "pending",
   });
   await cataly.emit("goal_updated", { goal: { objective: "work", status: "active" } });
-  expect(readPaneState(f.stateDir, "w1:p7")).toBeNull();
+  expect(lstatSync(f.healthPath, { throwIfNoEntry: false })).toBeUndefined();
   // A tree or branch move in the rejected session finds no recorded role to restore.
   await cataly.emit("session_tree");
   await cataly.emit("session_branch");
   await cataly.emit("agent_start");
-  expect(readPaneState(f.stateDir, "w1:p7")).toBeNull();
+  expect(lstatSync(f.healthPath, { throwIfNoEntry: false })).toBeUndefined();
   expect(cataly.session.entries).toEqual([]);
   expect(cataly.handlers.get("session_shutdown")?.length ?? 0).toBeGreaterThan(0);
   await cataly.emit("session_shutdown");
-  expect(readPaneState(f.stateDir, "w1:p7")).toBeNull();
   expect(lstatSync(f.healthPath, { throwIfNoEntry: false })).toBeUndefined();
 });
 
@@ -216,7 +227,7 @@ posix(
       toolName: "bash",
       approvalMode: "always-ask",
     });
-    expect(readPaneState(f.stateDir, "w1:p7")).toBeNull();
+    expect(lstatSync(f.healthPath, { throwIfNoEntry: false })).toBeUndefined();
   },
 );
 

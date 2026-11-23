@@ -27,116 +27,85 @@ const pathWith = (...bins: string[]): string => {
 };
 
 describe("default native execution", () => {
-  posix("legacy installer preferences, pane IDs and installed binaries never opt into terminal execution", () => {
-    for (const saved of ["{}", '{"runtime":"hc"}', '{"runtime":"herdr"}']) {
+  posix("nothing set, a tern preference, a Tern block and an installed tern all choose headless by default", () => {
+    for (const saved of ["{}", '{"runtime":"tern"}'])
       expect(
         readRuntimeChoice({
-          env: { HC_TERMINAL_ID: "t1", HERDR_PANE_ID: "w3:p1", PATH: pathWith("hc", "herdr") },
+          env: { TERN_PANE: "42", PATH: pathWith("tern"), CATALY_RUNTIME: "" },
           configPath: config(saved),
           exists: () => {
             throw new Error("native selection should not scan PATH");
           },
         }),
       ).toEqual({ kind: "headless", source: "default" });
-    }
+    expect(readRuntimeChoice({ env: {}, configPath: NO_CONFIG })).toEqual({ kind: "headless", source: "default" });
   });
-  test("the new session setting and environment can explicitly select either execution mode", () => {
-    const configPath = config('{"runtime":"hc","sessionRuntime":"herdr"}');
-    expect(readRuntimeChoice({ configPath, env: {} })).toEqual({ kind: "herdr", source: "config" });
-    expect(readRuntimeChoice({ configPath, env: { CATALY_RUNTIME: "headless" } })).toEqual({
+
+  posix("CATALY_RUNTIME and sessionRuntime may name headless explicitly", () => {
+    expect(readRuntimeChoice({ env: { CATALY_RUNTIME: "headless" }, configPath: NO_CONFIG })).toEqual({
       kind: "headless",
       source: "env",
     });
-    expect(() => readRuntimeChoice({ configPath: config('{"sessionRuntime":"tmux"}'), env: {} })).toThrow(ConfigError);
+    expect(readRuntimeChoice({ env: {}, configPath: config('{"sessionRuntime":"headless"}') })).toEqual({
+      kind: "headless",
+      source: "config",
+    });
+  });
+
+  test("CATALY_RUNTIME and sessionRuntime may name tern explicitly", () => {
+    expect(readRuntimeChoice({ env: { CATALY_RUNTIME: "tern" }, configPath: NO_CONFIG })).toEqual({
+      kind: "tern",
+      source: "env",
+    });
+    expect(readRuntimeChoice({ env: {}, configPath: config('{"sessionRuntime":"tern"}') })).toEqual({
+      kind: "tern",
+      source: "config",
+    });
+  });
+
+  test.skipIf(process.platform !== "win32")("Windows looks for Tern instead of the native socket host", () => {
+    expect(() => readRuntimeChoice({ env: { PATH: pathWith() }, configPath: NO_CONFIG })).toThrow(RuntimeChoiceError);
+    expect(readRuntimeChoice({ env: { TERN_PANE: "42" }, configPath: NO_CONFIG })).toEqual({
+      kind: "tern",
+      source: "detect:TERN_PANE",
+    });
   });
 });
 
 describe("explicit terminal selection precedence", () => {
-  const both = pathWith("herdr", "hc");
   test.each([
     [
       "CATALY_RUNTIME beats config and every detection",
-      { CATALY_RUNTIME: "hc", HERDR_PANE_ID: "w1:p1", PATH: both },
-      '{"runtime":"herdr"}',
-      "hc",
+      { CATALY_RUNTIME: "tern", PATH: pathWith() },
+      "{}",
+      "tern",
       "env",
     ],
     [
-      "CATALY_RUNTIME=herdr inside an hc terminal",
-      { CATALY_RUNTIME: "herdr", HC_TERMINAL_ID: "t3", PATH: both },
-      undefined,
-      "herdr",
-      "env",
-    ],
-    [
-      "config beats the caller's terminal",
-      { HC_TERMINAL_ID: "t3", PATH: both },
-      '{"runtime":"herdr"}',
-      "herdr",
+      "sessionRuntime beats the caller's block",
+      { TERN_PANE: "42", PATH: pathWith("tern") },
+      '{"sessionRuntime":"tern"}',
+      "tern",
       "config",
     ],
-    ["config hc with only herdr installed", { PATH: pathWith("herdr") }, '{"runtime":"hc","other":1}', "hc", "config"],
-    [
-      "HC_TERMINAL_ID beats HERDR_PANE_ID",
-      { HC_TERMINAL_ID: "t3", HERDR_PANE_ID: "w1:p1", PATH: both },
-      "{}",
-      "hc",
-      "detect:HC_TERMINAL_ID",
-    ],
-    [
-      "HERDR_PANE_ID beats PATH",
-      { HERDR_PANE_ID: "w1:p1", PATH: pathWith("hc") },
-      undefined,
-      "herdr",
-      "detect:HERDR_PANE_ID",
-    ],
-    ["only herdr on PATH", { PATH: pathWith("herdr") }, undefined, "herdr", "detect:path"],
-    ["only hc on PATH", { PATH: pathWith("hc") }, '{"other":true}', "hc", "detect:path"],
-    [
-      "both on PATH, herdr's directory first: hc is the default",
-      { PATH: pathWith("herdr", "hc") },
-      undefined,
-      "hc",
-      "detect:path",
-    ],
-    ["both on PATH, hc's directory first: still hc", { PATH: pathWith("hc", "herdr") }, "{}", "hc", "detect:path"],
+    ["config runtime with tern not installed", { PATH: pathWith() }, '{"runtime":"tern","other":1}', "tern", "config"],
+    ["TERN_PANE with tern not on PATH", { TERN_PANE: "42", PATH: pathWith() }, undefined, "tern", "detect:TERN_PANE"],
+    ["TERN_PANE beats tern on PATH", { TERN_PANE: "42", PATH: pathWith("tern") }, "{}", "tern", "detect:TERN_PANE"],
+    ["only tern on PATH", { PATH: pathWith("tern") }, undefined, "tern", "detect:path"],
     [
       "empty variables count as unset",
-      { CATALY_RUNTIME: "", HC_TERMINAL_ID: "", HERDR_PANE_ID: "", PATH: pathWith("hc") },
-      undefined,
-      "hc",
-      "detect:path",
-    ],
-    ["CATALY_RUNTIME=tern", { CATALY_RUNTIME: "tern", HC_TERMINAL_ID: "t3", PATH: both }, undefined, "tern", "env"],
-    [
-      "TERN_PANE with neither hc nor herdr installed",
-      { TERN_PANE: "42", PATH: pathWith() },
+      { CATALY_RUNTIME: "", TERN_PANE: "", PATH: pathWith("tern") },
       undefined,
       "tern",
-      "detect:TERN_PANE",
-    ],
-    [
-      "TERN_PANE beats tern on PATH but not an installed hc: hc in a Tern block stays hc",
-      { TERN_PANE: "42", PATH: pathWith("tern", "hc") },
-      undefined,
-      "hc",
       "detect:path",
     ],
     [
-      "an installed herdr also comes before TERN_PANE",
-      { TERN_PANE: "42", PATH: pathWith("herdr", "tern") },
-      "{}",
-      "herdr",
+      "a headless CATALY_RUNTIME or sessionRuntime does not stop terminal detection",
+      { CATALY_RUNTIME: "headless", PATH: pathWith("tern") },
+      '{"sessionRuntime":"headless"}',
+      "tern",
       "detect:path",
     ],
-    [
-      "HERDR_PANE_ID beats TERN_PANE",
-      { HERDR_PANE_ID: "w1:p1", TERN_PANE: "42", PATH: pathWith("tern") },
-      undefined,
-      "herdr",
-      "detect:HERDR_PANE_ID",
-    ],
-    ["only tern on PATH", { PATH: pathWith("tern") }, undefined, "tern", "detect:path"],
   ] as const)("%s", (_, env, configText, kind, source) => {
     const configPath = configText === undefined ? NO_CONFIG : config(configText);
     expect(readRuntimeChoice({ env, configPath, terminalOnly: true })).toEqual({ kind, source });
@@ -144,7 +113,7 @@ describe("explicit terminal selection precedence", () => {
 });
 
 describe("readRuntimeChoice refusals", () => {
-  test("no binary and nothing set: RuntimeChoiceError whose message names the config path and the fix", () => {
+  test("no tern and nothing set: RuntimeChoiceError whose message names the config path and the fix", () => {
     const configPath = config("{}");
     let caught: unknown;
     try {
@@ -154,66 +123,55 @@ describe("readRuntimeChoice refusals", () => {
     }
     expect(caught).toBeInstanceOf(RuntimeChoiceError);
     const message = (caught as Error).message;
-    expect(message).toContain("none of herdr, hc or tern is on PATH");
+    expect(message).toContain("tern is not on PATH");
     expect(message).toContain(configPath);
-    expect(message).toContain('"runtime": "herdr", "hc" or "tern"');
+    expect(message).toContain('"runtime": "tern"');
     expect(message).toContain("CATALY_RUNTIME");
     expect(() => readRuntimeChoice({ env: {}, configPath: NO_CONFIG, terminalOnly: true })).toThrow(RuntimeChoiceError);
   });
 
   // POSIX-only: the executable bit decides install here, and Windows has no mode bits.
-  posix("a non-executable file named hc is not an install", () => {
+  posix("a non-executable file named tern is not an install", () => {
     const dir = scratch();
-    writeFileSync(join(dir, "hc"), "");
-    chmodSync(join(dir, "hc"), 0o644);
-    mkdirSync(join(dir, "herdr"));
+    writeFileSync(join(dir, "tern"), "");
+    chmodSync(join(dir, "tern"), 0o644);
     expect(() => readRuntimeChoice({ env: { PATH: dir }, configPath: NO_CONFIG, terminalOnly: true })).toThrow(
       RuntimeChoiceError,
     );
   });
 
-  test('config value "tmux": ConfigError naming the file and the value', () => {
-    const configPath = config('{"runtime":"tmux"}');
-    expect(() => readRuntimeChoice({ env: { CATALY_RUNTIME: "" }, configPath })).toThrow(ConfigError);
-    expect(() => readRuntimeChoice({ env: {}, configPath })).toThrow(
-      new RegExp(`${configPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}.*"tmux"`),
-    );
-  });
-
-  test("a non-string runtime value is a ConfigError too", () => {
-    expect(() => readRuntimeChoice({ env: {}, configPath: config('{"runtime":7}') })).toThrow(ConfigError);
-  });
-
-  test("unreadable config JSON: ConfigError naming the file", () => {
-    const configPath = config("{ runtime: herdr");
-    expect(() => readRuntimeChoice({ env: { PATH: pathWith("hc") }, configPath })).toThrow(ConfigError);
-    expect(() => readRuntimeChoice({ env: {}, configPath })).toThrow(configPath);
-  });
-
-  test("a config file that is not an object is a ConfigError", () => {
-    expect(() => readRuntimeChoice({ env: {}, configPath: config("[]") })).toThrow(ConfigError);
-  });
-
-  test("an invalid CATALY_RUNTIME is a ConfigError naming the variable and the value", () => {
+  test("an unknown runtime name is a ConfigError", () => {
+    expect(() => readRuntimeChoice({ env: { CATALY_RUNTIME: "tmux" }, configPath: NO_CONFIG })).toThrow(ConfigError);
     expect(() => readRuntimeChoice({ env: { CATALY_RUNTIME: "tmux" }, configPath: NO_CONFIG })).toThrow(
       /CATALY_RUNTIME.*"tmux"/,
     );
+    expect(() => readRuntimeChoice({ env: {}, configPath: config('{"sessionRuntime":"tmux"}') })).toThrow(ConfigError);
   });
 
-  test("CATALY_RUNTIME wins without reading a broken config", () => {
-    expect(readRuntimeChoice({ env: { CATALY_RUNTIME: "herdr" }, configPath: config("not json") })).toEqual({
-      kind: "herdr",
-      source: "env",
-    });
+  test('config runtime "tmux" or a non-string: ConfigError naming the file and the value', () => {
+    const configPath = config('{"runtime":"tmux"}');
+    expect(() => readRuntimeChoice({ env: {}, configPath })).toThrow(ConfigError);
+    expect(() => readRuntimeChoice({ env: {}, configPath })).toThrow(
+      new RegExp(`${configPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}.*"tmux"`),
+    );
+    expect(() => readRuntimeChoice({ env: {}, configPath: config('{"runtime":7}') })).toThrow(ConfigError);
+  });
+
+  test("an unreadable or non-object config is a ConfigError naming its path", () => {
+    for (const text of ["not json", "[]", "7"]) {
+      const configPath = config(text);
+      expect(() => readRuntimeChoice({ env: {}, configPath })).toThrow(ConfigError);
+      expect(() => readRuntimeChoice({ env: {}, configPath })).toThrow(configPath);
+    }
   });
 });
 
 describe("readRuntimeChoice PATH detection is injectable", () => {
-  test("exists is asked for herdr and hc in each PATH directory, in order", () => {
+  test("exists is asked for tern in each PATH directory", () => {
     const asked: string[] = [];
     const exists = (path: string): boolean => {
       asked.push(path);
-      return path === join("/b", "hc");
+      return path === join("/b", "tern");
     };
     expect(
       readRuntimeChoice({
@@ -222,12 +180,8 @@ describe("readRuntimeChoice PATH detection is injectable", () => {
         exists,
         terminalOnly: true,
       }),
-    ).toEqual({
-      kind: "hc",
-      source: "detect:path",
-    });
-    expect(asked).toContain(join("/a", "herdr"));
-    expect(asked).toContain(join("/b", "hc"));
+    ).toEqual({ kind: "tern", source: "detect:path" });
+    expect(asked).toContain(join("/a", "tern"));
   });
 
   test("an empty PATH entry is skipped, never read as the working directory", () => {

@@ -31,13 +31,7 @@ test.skipIf(process.platform === "win32")(
       const file = join(state.dir, "transcript.jsonl");
       const pi = fakePi({ mode: "rpc", hasUI: true, session: { id: session, file, entries: [] } });
       const cwd = realpathSync(pi.ctx().cwd);
-      const ref = await new HeadlessRuntime(state.dir).create({
-        name: "discord-lane",
-        cwd,
-        env: {},
-        role: "lane",
-        container: "tab",
-      });
+      const ref = await new HeadlessRuntime(state.dir).create({ name: "discord-lane", cwd, env: {}, role: "lane" });
       process.env.CATALY_HEADLESS_ID = ref.id;
       await new Registry(state.dir).create({
         key: "discord-lane",

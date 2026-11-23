@@ -9,7 +9,7 @@ import { doctorCheck } from "../src/doctor.ts";
 import { monitorFilterFindings } from "../src/doctor-monitors.ts";
 import { Reports } from "../src/reports.ts";
 import { Worklog } from "../src/worklog.ts";
-import { agentIn, depsFor, fakeClock, laneState, newWorld, withState } from "./fakes.ts";
+import { depsFor, fakeClock, nativeLead, newWorld, withState } from "./fakes.ts";
 
 const manifest = (command: string, filter: string, name = "custom-name"): Manifest => ({
   kind: "omp",
@@ -49,11 +49,8 @@ test("doctor warns when a previously complete watch filter drops all three queue
 test("doctor accepts bare readiness lines and payload-bearing monitor events", async () => {
   const state = withState();
   try {
-    const pane = "w1:p1";
     const world = newWorld();
-    world.panes = [{ pane_id: pane, workspace_id: "w1", agent: "omp", agent_status: "idle", cwd: "/repo" }];
-    agentIn(world, pane);
-    laneState(state.dir, pane, { role: "cataly", sessionId: "owner", agentStatus: "idle" });
+    const pane = nativeLead(world, 1);
     const deps = depsFor(world, fakeClock(Date.parse("2026-01-01T12:00:00Z")), state.dir, {
       leadPane: pane,
       sessionsDir: join(state.dir, "sessions"),
@@ -111,11 +108,8 @@ test.each(freshnessFilterCases)(
   async ({ config, missing }) => {
     const state = withState();
     try {
-      const pane = "w1:p1";
       const world = newWorld();
-      world.panes = [{ pane_id: pane, workspace_id: "w1", agent: "omp", agent_status: "idle", cwd: "/repo" }];
-      agentIn(world, pane);
-      laneState(state.dir, pane, { role: "cataly", sessionId: "owner", agentStatus: "idle" });
+      const pane = nativeLead(world, 1);
       const deps = depsFor(world, fakeClock(Date.parse("2026-01-01T12:00:00Z")), state.dir, {
         leadPane: pane,
         sessionsDir: join(state.dir, "sessions"),
@@ -184,11 +178,8 @@ test("old session filters stay advisory while the trusted current owner's filter
   const state = withState();
   try {
     const world = newWorld();
-    world.panes = [{ pane_id: "w1:p1", workspace_id: "w1", agent: "omp", agent_status: "idle", cwd: "/repo" }];
-    agentIn(world, "w1:p1");
-    laneState(state.dir, "w1:p1", { role: "cataly", sessionId: "owner", agentStatus: "idle" });
     const deps = depsFor(world, fakeClock(Date.parse("2026-01-01T12:00:00Z")), state.dir, {
-      leadPane: "w1:p1",
+      leadPane: nativeLead(world, 1),
       sessionsDir: join(state.dir, "sessions"),
       agentCommand: doctorCommand(state.dir),
     });

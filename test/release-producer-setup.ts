@@ -43,10 +43,7 @@ export function releaseFixture(
   };
 }
 
-export function githubFixture(
-  jobNames: readonly string[] = ["check", "e2e-herdr", "e2e-hc"],
-  repository = RELEASE_REPOSITORY,
-) {
+export function githubFixture(jobNames: readonly string[] = ["check"], repository = RELEASE_REPOSITORY) {
   const manifest = releaseFixture();
   const prefix = `repos/${repository}`;
   const run: Record<string, unknown> = {

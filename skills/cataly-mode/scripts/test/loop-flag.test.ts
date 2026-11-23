@@ -29,7 +29,7 @@ test("watch commands refuse a --loop that is not a number of minutes instead of 
       );
     const refused = [
       ["guard", "--loop", "5m"],
-      ["dead-panes", "--loop", "abc"],
+      ["freshness", "--loop", "abc"],
       ["freshness", "--loop", "-1"],
       ["guard", "--loop", "Infinity"],
       ["guard", "--loop"],

@@ -1,21 +1,16 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { readFileSync, statSync, writeFileSync } from "node:fs";
+import type { DeliverOutcome } from "../../../../src/runtime/types.ts";
 import { type DeliveryRecord, DeliveryState } from "../src/delivery-state.ts";
 import type { Lane } from "../src/registry.ts";
 import { runtimesOf } from "../src/run.ts";
 import { resolveTell, tellLane } from "../src/tell.ts";
-import { depsFor, fakeClock, newWorld, sent, withState, type World } from "./fakes.ts";
+import { depsFor, fakeClock, href, nativeLane, newWorld, sent, sid, withState, type World } from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00.000Z");
-const lane: Lane = {
-  key: "tell-fence",
-  title: "tell",
-  thread: "none",
-  pane: "w:p7",
-  brief: "/b.md",
-  done: "merged acme/app#1",
-  openedAt: new Date(T0).toISOString(),
-};
+/** The supervisor took the text but its answer was lost: the delivery cannot be confirmed either way. */
+const lost: DeliverOutcome = { kind: "ambiguous", detail: "host response lost", failure: new Error("lost") };
+let lane: Lane;
 let state: ReturnType<typeof withState>;
 let world: World;
 const deps = () => depsFor(world, fakeClock(T0), state.dir);
@@ -28,15 +23,25 @@ const pending = () => {
 beforeEach(async () => {
   state = withState();
   world = newWorld();
-  world.panes = [{ pane_id: "w:p7", workspace_id: "w", agent: "omo", agent_status: "working" }];
+  world.deliverOutcome = () => lost;
+  lane = {
+    key: "tell-fence",
+    title: "tell",
+    thread: "none",
+    ...nativeLane(world, 7),
+    brief: "/b.md",
+    done: "merged acme/app#1",
+    openedAt: new Date(T0).toISOString(),
+  };
   await deps().registry.write(lane);
 });
 afterEach(() => state.done());
 
 test("unconfirmed delivery fences the next tell across registry instances", async () => {
-  world.onSendText = () => {
-    expect(pending().session).toEqual({ runtime: "herdr", id: "w:p7" });
+  world.deliverOutcome = () => {
+    expect(pending().session).toEqual(href(sid(7)));
     expect(pending().openedAt).toBe(lane.openedAt);
+    return lost;
   };
   expect((await tellLane(deps(), lane, "first private request")).code).toBe(3);
   const next = await tellLane(deps(), lane, "second request");
@@ -112,37 +117,39 @@ test("an old resolution cannot select a newer request", async () => {
 });
 
 test("confirmed delivery and proven refusal leave no uncertain fence", async () => {
-  world.panes = [];
+  delete world.deliverOutcome;
+  const session = world.sessions[sid(7)];
+  if (!session) throw new Error("lane session missing");
+  session.status = "gone";
   expect((await tellLane(deps(), lane, "no agent")).code).toBe(2);
   expect(store().read()?.status).toBe("failed");
-  world.panes = [{ pane_id: "w:p7", workspace_id: "w", agent: "omo", agent_status: "idle" }];
-  expect((await tellLane(deps(), lane, "unsafe $(id)")).code).toBe(2);
+  Object.assign(session, { status: "idle", held: true });
+  expect((await tellLane(deps(), lane, "approval held")).code).toBe(2);
   expect(store().read()?.status).toBe("failed");
-  world.onEnterStatus = "working";
+  session.held = false;
+  world.onDeliverStatus = "working";
   expect((await tellLane(deps(), lane, "confirmed request")).code).toBe(0);
   expect(store().read()?.status).toBe("confirmed");
-  for (const pane of world.panes) pane.agent_status = "idle";
+  session.status = "idle";
   expect((await tellLane(deps(), lane, "next confirmed request")).code).toBe(0);
-  expect(sent(world)).toEqual(["confirmed request", "next confirmed request"]);
+  // The gone session was never offered text; the held one was offered and refused it.
+  expect(sent(world)).toEqual(["approval held", "confirmed request", "next confirmed request"]);
 });
 
-test("an adapter-reported ambiguous submission leaves an uncertain request across restart", async () => {
-  world.onSendText = () => {
-    throw new Error("runtime disconnected after accepting text");
-  };
-  // herdr converts send-text errors into ambiguous outcomes, not exceptions.
+test("a supervisor-reported ambiguous submission leaves an uncertain request across restart", async () => {
+  // The headless runtime turns a lost host response after the send into an ambiguous outcome, not an exception.
   const result = await tellLane(deps(), lane, "first request");
   expect(result.code).toBe(3);
   expect(result.line).toStartWith("TELL_UNCONFIRMED tell-fence");
   const id = pending().id;
-  delete world.onSendText;
+  delete world.deliverOutcome;
   expect((await tellLane(deps(), lane, "later request")).line).toContain(id);
   expect(sent(world)).toEqual(["first request"]);
 });
 
 test("an unexpected exception after adapter delivery propagates and leaves its fence", async () => {
   const base = deps();
-  const runtime = runtimesOf(base).for({ runtime: "herdr", id: "w:p7" });
+  const runtime = runtimesOf(base).for(href(sid(7)));
   const original = runtime.deliver.bind(runtime);
   const deliver = spyOn(runtime, "deliver").mockImplementation(async (...args) => {
     await original(...args);
@@ -169,10 +176,10 @@ test("corrupt durable state stops sends and cannot be silently resolved", async 
 test("replacing a registry record cannot discard an older uncertain dispatch", async () => {
   await tellLane(deps(), lane, "old registration request");
   const id = pending().id;
-  const replacement = { ...lane, openedAt: new Date(T0 + 1).toISOString(), pane: "w:p8" };
+  const replacement = { ...lane, openedAt: new Date(T0 + 1).toISOString(), ...nativeLane(world, 8) };
   await deps().registry.write(replacement);
   expect((await tellLane(deps(), replacement, "new registration request")).line).toContain(id);
-  expect(pending().session.id).toBe("w:p7");
+  expect(pending().session.id).toBe(sid(7));
   expect(sent(world)).toEqual(["old registration request"]);
 });
 
@@ -199,8 +206,8 @@ test("a write failure before submission sends nothing", async () => {
 });
 
 test("a final state write failure leaves the pre-submission fence in place", async () => {
-  for (const pane of world.panes) pane.agent_status = "idle";
-  world.onEnterStatus = "working";
+  delete world.deliverOutcome;
+  world.onDeliverStatus = "working";
   const original = DeliveryState.prototype.write;
   const write = spyOn(DeliveryState.prototype, "write").mockImplementation(function (
     this: DeliveryState,

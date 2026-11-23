@@ -6,7 +6,7 @@ import type { NativeObservation } from "../../../../src/native-observation.ts";
 /**
  * Per-pane state written by the omp-cataly extension from inside a Cataly or lane session and read by the `cataly` CLI.
  * omp exposes no session id in argv or the environment and no goal readback on screen that cataly can trust, so the
- * session reports itself here. One file per herdr pane or hc terminal; the extension is the only writer.
+ * session reports itself here. One file per Tern block (TERN_PANE); the extension is the only writer.
  */
 export type CatalyRole = "cataly" | "lane";
 export type GoalStatus = "none" | "active" | "paused" | "complete" | "dropped" | "blocked";

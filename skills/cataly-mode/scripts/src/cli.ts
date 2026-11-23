@@ -14,8 +14,7 @@ if (
 )
   process.env["CATALY_MONITOR_ADMISSION_PROTOCOL"] = LEGACY_HEAD_ADMISSION_PROTOCOL;
 const [command = "", ...rest] = process.argv.slice(2);
-// Retirement requires an explicit home and must inspect both generations' state directories.
-if (command !== "update" || rest[0] !== "retire-legacy-roles") bindCliEnvironment();
+bindCliEnvironment();
 const renderTablesUsage = "--render-tables requires cataly send discord (with or without --edit)";
 if (
   rest.includes("--render-tables") &&
@@ -70,11 +69,12 @@ if (command === "quota") process.exit(await (await import("./cli-usage-report.ts
 const { die, makeCli } = await import("./cli-context.ts");
 const { invokeCommand, validateScheduleOptions } = await import("./cli-invoke.ts");
 const { ConfigError, loadConfig } = await import("./config.ts");
+const { LegacyRuntimeError } = await import("../../../../src/runtime/registry.ts");
 const { Registry } = await import("./registry.ts");
 const { realClock, run } = await import("./run.ts");
 // Preserve config/native admission before argument parsing or any command execution.
 const config = await loadConfig().catch((e: unknown) =>
-  e instanceof ConfigError ? die(e.message) : Promise.reject(e),
+  e instanceof ConfigError || e instanceof LegacyRuntimeError ? die(e.message) : Promise.reject(e),
 );
 const flags = parseSkillFlags(rest);
 if (flags.values["activity-file"] !== undefined && command !== "inbound")

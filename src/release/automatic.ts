@@ -15,7 +15,7 @@ import { acquireConsumerLock, ConsumerLockBusy, type ConsumerPaths, consumerPath
 import { installBundle } from "./install.ts";
 import { assertNoConsumerLaunches, registerConsumerLaunch, waitLaunchGate } from "./launch-leases.ts";
 import { validateReleaseManifest } from "./manifest.ts";
-import { assertUpdateProtocol, releaseTargetRuntime, requestedReleaseRuntime } from "./profile.ts";
+import { assertReleaseTarget, assertUpdateProtocol } from "./profile.ts";
 import { prerequisites } from "./provision.ts";
 import { consumerReleaseHome } from "./runtime.ts";
 import { hasConsumerState, loadInstalled, recoverInstalled, releaseId, releasePath, verifyRelease } from "./state.ts";
@@ -111,13 +111,12 @@ export async function automaticUpdate(paths: ConsumerPaths, options: AutomaticOp
         return source;
       }
       assertUpdateProtocol(installed.current, manifest);
-      const requested = requestedReleaseRuntime();
-      const runtime = releaseTargetRuntime(
+      assertReleaseTarget(
         paths,
         { manifest, bytes: (path) => candidate.files.find((file) => file.path === path)?.bytes },
-        { snapshot, ...(requested === undefined ? {} : { requested }) },
+        snapshot,
       );
-      (options.checkTools ?? prerequisites)(runtime, true, manifest.requirements.omp === "18.18.8", paths);
+      (options.checkTools ?? prerequisites)();
       preflightAutomaticInstallation(paths);
       const after = await installBundle(paths, candidate, installed, {
         config: snapshot,

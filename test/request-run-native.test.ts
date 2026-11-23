@@ -2,11 +2,10 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { laneStartCommand } from "../skills/cataly-mode/scripts/src/launch-session.ts";
 import { quoteForPane } from "../skills/cataly-mode/scripts/src/launch-footer.ts";
 import fixture from "./fixtures/omp-native-host/package.json";
 
-// POSIX-only: launch uses the user's shell's process-scoped assignment syntax.
+// POSIX-only: the run id is a process-scoped shell assignment, as a launcher sets it for one command.
 test.skipIf(process.platform === "win32")(
   "native Bash passes the launched run to the real report CLI",
   async () => {
@@ -14,13 +13,15 @@ test.skipIf(process.platform === "win32")(
     const home = mkdtempSync(join(tmpdir(), "cataly-request-native-"));
     const runId = "00000000-0000-4000-8000-0000000000aa";
     try {
-      const command = laneStartCommand({ key: "native-request", thread: "none", runId }, [
+      const command = `CATALY_LANE_RUN=${quoteForPane(runId)} ${[
         process.execPath,
         "--no-env-file",
         join(root, "test/fixtures/omp-native-host/request-run.ts"),
         root,
         home,
-      ]);
+      ]
+        .map(quoteForPane)
+        .join(" ")}`;
       const restart = [
         process.execPath,
         "-e",

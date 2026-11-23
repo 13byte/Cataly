@@ -4,12 +4,13 @@ import { dirname } from "node:path";
 import { Registry } from "../src/registry.ts";
 import { Reports } from "../src/reports.ts";
 import { withDiscordCli } from "./discord-fakes.ts";
+import { href, sid } from "./fakes.ts";
 
 const requestId = "discord:111111111111111111:222222222222222222";
 const oldRun = "00000000-0000-4000-8000-000000000001";
 const currentRun = "00000000-0000-4000-8000-000000000002";
-const originalNative = { sessionId: "native-original", ref: { runtime: "herdr", id: "w1:p7" } };
-const currentNative = { sessionId: "native-current", ref: { runtime: "herdr", id: "w1:p8" } };
+const originalNative = { sessionId: "native-original", ref: href(sid(7)) };
+const currentNative = { sessionId: "native-current", ref: href(sid(8)) };
 const lane = {
   key: "request-origin",
   title: "One original request",

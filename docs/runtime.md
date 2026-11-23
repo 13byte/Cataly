@@ -1,22 +1,23 @@
-# Session runtimes: native OMP, herdr and hc
+# Session runtimes: headless OMP and Tern
 
-On macOS and Linux the default is native: Cataly runs the lead, duty and lanes
-as OMP sessions, and the two scheduling loops as local processes. No terminal
-server is required. Optional herdr and hc (herdr-core) stay available for
-terminal sessions, and Tern is a third terminal adapter (a source feature outside the
-consumer release path): it gives sessions, tabs and blocks and reports the program in
-front of a block. Registered sessions keep their owning backend, and
-`cataly harness migrate` can move sessions between the terminal adapters.
+On macOS and Linux the default is headless OMP: Cataly runs the lead, duty and
+lanes as native OMP sessions, and the two scheduling loops as local processes. No
+terminal server is required. Tern is the optional terminal runtime (a source
+feature outside the consumer release path): it gives sessions, tabs and blocks
+and reports the program in front of a block. Registered sessions keep their
+owning runtime. The herdr and hc runtimes were removed; a home that still uses
+them stops with the [upgrade message](releases.md#upgrading-from-a-terminal-runtime).
+The headless host needs a Unix socket, so on Windows only Tern can run sessions.
 
 The [release guide](releases.md) separates current install profiles from the
-historical Linux x64/herdr/Discord preview. Linux hc CI and macOS/Windows
-cross-OS CI do not by themselves establish live consumer support.
+historical v0.1.2 preview. Cross-OS CI does not by itself establish live
+consumer support.
 
 The primary installed `cataly` remains the skill CLI. Every root harness command here uses `cataly harness ...`; `cataly-harness ...` after root linking or `bun src/cli.ts ...` are equivalent entrypoints. For example, skill `cataly send discord` posts to a messenger, while `cataly harness send lead` sends to an agent session.
 
 Lead and duty start OMP with role `cataly`; lanes and the built-in reviewer use role `lane`. Managed deployment and source-side wrappers pass a complete JSON string array through `CATALY_AGENT_ARGV`. The harness quotes each argument for shell execution; the skill preserves the selected prefix and configured template suffix for installer-owned defaults, including their lexical and canonical installation paths. Managed commands retain their native config fence, pinned Cataly extension and role-gated ULW selection. Explicit external commands remain intact. Without a managed selection, the harness retains `CATALY_AGENT_CMD` as a user shell command, defaulting to `omp`. The skill configures its own argv template and default model separately; see the [skill configuration reference](../skills/cataly-mode/references/scripts.md#configuration). The extension, pinned public omp-ulw and full sibling source layout must be installed together; the release installer provides that layout because the skill imports these runtime adapters by sibling path.
 
-New terminal sessions receive the selected `HOME`, `CATALY_CONFIG`, `CATALY_HOME`, `CATALY_STATE_DIR`, `CATALY_AGENT_ARGV`, `CATALY_OMP_ULW_PATH` and `OMP_ULW_SCOPE_FILE` explicitly across the terminal server boundary, along with configured `CATALY_HERDR_SESSION` and `HC_SESSION`. Relative paths become absolute without collapsing symlinks or `..`; empty scope values remain unchanged. Fresh sessions clear `CATALY_MANAGED_STARTUP` and obtain their own pane identity from the server. Initial launches, reviewer children, migration and native resume keep this context without forwarding arbitrary parent variables.
+New sessions receive the selected `HOME`, `CATALY_CONFIG`, `CATALY_HOME`, `CATALY_STATE_DIR`, `CATALY_AGENT_ARGV`, `CATALY_OMP_ULW_PATH` and `OMP_ULW_SCOPE_FILE` explicitly, plus their own `CATALY_HEADLESS_ID`. Relative paths become absolute without collapsing symlinks or `..`; empty scope values remain unchanged. Fresh sessions clear `CATALY_MANAGED_STARTUP`. Initial launches, reviewer children and native resume keep this context without forwarding arbitrary parent variables.
 
 Required managed ULW imports may select a dependency directory or its `index.ts` entry. Import and factory failures in either form cancel role requests at both the session and provider boundaries. Ordinary sessions and explicitly configured external overlays retain their existing behavior.
 
@@ -34,83 +35,60 @@ Process attestation also recognizes the pinned launcher's optional `PI_TIMING=1`
 
 ## The interface
 
-`SessionRuntime` in `src/runtime/types.ts` covers session creation, observation, delivery and close. Only `TerminalRuntime` supports workspace creation, starting a shell command, submitting typed text, typing into a shell and sending keys. The following table describes the terminal adapters in `src/runtime/herdr/` and `src/runtime/hc/`. The headless host starts OMP by argv and operates its native goal and dialogs over RPC instead.
-The tern adapter lives in `src/runtime/tern/`; every terminal adapter runs its CLI through one injectable process runner (`src/runtime/exec.ts`), so tests replace the binary with a recorder.
+`SessionRuntime` in `src/runtime/types.ts` covers session creation, observation, delivery and close. The headless host takes `self()` from `CATALY_HEADLESS_ID`, starts OMP by argv and operates its native goal and dialogs over RPC. Only `TerminalRuntime` supports workspace creation, starting a shell command, submitting typed text, typing into a shell and sending keys; the following table describes the tern adapter in `src/runtime/tern/`. It runs its CLI through one injectable process runner (`src/runtime/exec.ts`), so tests replace the binary with a recorder.
 
 | Method | What it does |
 |---|---|
-| `self()` | The caller's own session, from `HERDR_PANE_ID` (+ `HERDR_WORKSPACE_ID`), `HC_TERMINAL_ID` or `TERN_PANE` |
-| `createGroup(label, cwd)` | herdr: a new workspace, returns its id. hc: returns the label, no call. tern: the caller's own Tern session id, else the label; nothing is created |
+| `self()` | The caller's own session, from `TERN_PANE` |
+| `createGroup(label, cwd)` | The caller's own Tern session id, else the label; nothing is created |
 | `create(spec)` | A session with the user's shell in it and nothing started |
 | `start(ref, command)` | Runs the command line in that shell |
 | `list(filter)` | The live sessions, all of them or one group's |
 | `probe(ref)` | One snapshot: status, agent name, foreground processes, title, cwd |
 | `read(ref, lines)` | The last lines of the screen |
 | `deliver(ref, text, opts)` | One message to the agent; never types into a shell |
-| `submitTyped(ref, into)` | Presses only Enter for text an earlier delivery typed (herdr, tern) |
+| `submitTyped(ref, into)` | Presses only Enter for text an earlier delivery typed |
 | `typeIntoShell(ref, text)` | The operator's `--to-shell`, only into a session with no agent |
 | `keys(ref, keys)` | Enter or Escape |
-| `close(ref, scope)` | Closes the session, or its herdr tab (a Tern tab closes with its last block) |
+| `close(ref, scope)` | Closes the session (a Tern tab closes with its last block) |
 
-A session is stored as a `SessionRef`: the runtime, the id (`w1:p3` on herdr, `t7` on hc, a decimal block id such as `42` on tern), and the group and tab when the runtime has them. Every stored lane and role keeps its own ref, so commands on an existing session go to the runtime that opened it, whatever runtime is selected for new sessions. Lane records written before runtimes existed have no ref and read as herdr.
+A session is stored as a `SessionRef`: the runtime (`headless` or `tern`), the id (a decimal block id such as `42` on tern), and the group and tab when the runtime has them. Every stored lane and role keeps its own ref, so commands on an existing session go to the runtime that opened it, whatever runtime is selected for new sessions. Refs written by earlier versions may name the removed `herdr` or `hc` runtimes, and lane records written before runtimes existed have no ref and read as herdr. Cataly still reads them but never writes one, and any command that would act on such a session stops with the upgrade message in the [release guide](releases.md#upgrading-from-a-terminal-runtime).
 
 ## Choosing a runtime
 
-For new sessions, `CATALY_RUNTIME` overrides the configuration field `sessionRuntime`; both accept `headless`, `hc` and `herdr`. With neither set, macOS and Linux select `headless` even inside a terminal or when both binaries are installed. `cataly harness status` reports `RUNTIME headless (from default)`. Old `runtime` fields were often generated by an installer, so they do not opt a home into terminal execution after an upgrade.
+For new sessions, `CATALY_RUNTIME` overrides the configuration field `sessionRuntime`; both accept `headless` and `tern`. With neither set, macOS and Linux select `headless` even inside a Tern block or when `tern` is installed. `cataly harness status` reports `RUNTIME headless (from default)`. Old `runtime` fields were often generated by an installer, so they do not opt a home into terminal execution after an upgrade.
 
-An explicit `launch --runtime` overrides the lane and session settings for that launch. With `"laneRuntime": "terminal"` and no explicit terminal backend selected, the skill consults the old `runtime` field, the enclosing terminal (`HC_TERMINAL_ID` then `HERDR_PANE_ID`), then `PATH` (`hc` then `herdr`). Windows retains terminal detection because the native host needs Unix sockets.
+An explicit `launch --runtime` overrides the lane and session settings for that launch. With `"laneRuntime": "terminal"`, and on Windows where the native host has no Unix socket, the terminal runtime is Tern when the `runtime` field says `"tern"`, the caller runs in a Tern block (`TERN_PANE`), or `tern` is on `PATH`. When none of these holds, commands that require a terminal refuse with a one-line fix: install Tern, or set `"runtime": "tern"` in the config file (the message prints its absolute path), or `CATALY_RUNTIME`.
 
-When neither binary is on PATH and nothing above decides, commands that require a terminal refuse and print:
-
-```
-none of herdr, hc or tern is on PATH: install hc (herdr-core), herdr or Tern, or set "runtime": "herdr", "hc" or "tern" in <CATALY_HOME>/config.json, or CATALY_RUNTIME
-```
-
-(The real message prints the absolute path of your config file.)
-
-An invalid `CATALY_RUNTIME` or config value is an error. `cataly harness status` prints the choice first, for example `RUNTIME hc (from config)`; sources are `env`, `config`, `detect:HC_TERMINAL_ID`, `detect:HERDR_PANE_ID`, `detect:TERN_PANE` and `detect:path`. With no choice it prints `RUNTIME unset:` and a fix. Skill `cataly boot` prints the same selection, or `RUNTIME unavailable:` and a failed check.
+`CATALY_RUNTIME`, `sessionRuntime` or `runtime` naming `herdr` or `hc` stops with the upgrade message; any other invalid value is an error. `cataly harness status` prints the choice first, for example `RUNTIME tern (from config)`; sources are `default`, `env`, `config`, `detect:TERN_PANE` and `detect:path`. With no choice it prints `RUNTIME unset:` and a fix. Skill `cataly boot` prints the same selection, or `RUNTIME unavailable:` and a failed check.
 
 For a registered native lead or duty session, use `cataly harness observe lead`
 or `cataly harness observe duty`. To stop the owned native harness, run
 `cataly harness stop`; busy or blocked agents hold rather than being forced
-closed. The command does not close legacy terminals. It can retire legacy
-registrations only after the original backend proves those sessions are gone.
+closed.
 
-## How herdr verbs map to hc
-
-The herdr adapter calls the left column, the hc adapter the right one. Every hc call carries `--json`.
-
-| herdr | hc | Used for |
-|---|---|---|
-| `workspace create --label L --cwd D --no-focus` | `run --bg --no-parent --no-notify --cwd D --label cataly.group=G ... -- env K=V $SHELL` | The lead on `cataly harness up` (on hc, a group is only a label) |
-| `tab create --label L --cwd D --no-focus [--workspace W]` | the same `run --bg ...` | Duty, lanes, migrated sessions |
-| `pane split <near> --direction down --ratio 0.3` | the same `run --bg ...` | The duty loop and the hourly loop |
-| `pane run <pane> <command>` | `send <t> -- <command>` | Starting the agent or loop in the new shell |
-| `pane get <pane>` | `get <t>` | The status word and the agent name |
-| `pane read <pane> --lines N --source recent` | `read <t> --lines N` | Screen reads (the migrate capture, launch checks) |
-| `pane close <pane>`, or `tab close <tab>` | `kill <t>`, then `rm <t>` | Closing a session |
-| `agent prompt <pane> <text>` | `send <t> [--if idle\|working] [--force] -- <text>` | Delivering a message |
-| `pane send-text <pane> <text>` | not needed: `send` pastes and presses Enter in one step | herdr's fallback when `agent prompt` answers `agent_not_ready` |
-| `pane send-keys <pane> enter` | `keys <t> enter` | Submitting typed text; Escape is `esc` on hc |
-| `pane process-info --pane <pane>` | `get <t>` (its `foreground` and `pid` fields) | Whether a shell is in front |
-| `--session <name>` (from `CATALY_HERDR_SESSION`) | `HC_SESSION=<name>` in the environment | An isolated server, as the end-to-end tests use |
-
-An injected skill environment controls `CATALY_HERDR_SESSION` completely: if absent, herdr calls omit `--session` rather than inheriting the ambient value. With no injected environment, the skill continues to use `process.env`.
-
-Listing is `pane list` on herdr and `ls [--label cataly.group=G]` on hc. On hc, `rm` answers `live` while the program is still dying, so Cataly retries it 5 times, 200 ms apart, and logs one line if the terminal is still running after that.
+On the headless runtime, `cataly harness stop` records the lead's OMP session and
+transcript (`harness-lead.json` in the Cataly home). The next `cataly harness up`
+resumes that lead session when the stop closed exactly that session cleanly and
+its transcript still exists, and prints `resumed=<sessionId>`; the new lead must
+prove the same session before it is registered. A lead that exited on its own,
+or a missing transcript, starts a fresh session. `cataly harness up --fresh`
+always starts a new lead session. Duty and the two loops always start fresh. A
+managed deployment uses the same resume and requires it: its restart refuses
+rather than replace the lead's session.
 
 ## Tern
 
-Tern (`tern`, checked against 0.9.28) is a terminal whose daemon keeps programs running between windows. A Tern session holds tabs and a tab holds blocks. A Dori session is one block: its ref is `tern:<block id>` (decimal, such as `tern:42`), its group the Tern session id and its container the tab id. A Tern session therefore plays the part a herdr workspace plays, and the adapter adds no config key or environment variable of its own.
+Tern (`tern`, checked against 0.9.28) is a terminal whose daemon keeps programs running between windows. A Tern session holds tabs and a tab holds blocks. A Cataly session is one block: its ref is `tern:<block id>` (decimal, such as `tern:42`), its group the Tern session id and its container the tab id. A Tern session therefore groups a home's sessions, and the adapter adds no config key or environment variable of its own.
 
 | Used for | tern call (every call carries `--json`, placed before `--` when the call has one) |
 |---|---|
-| The lead on `dori harness up` | `new session <free name> --cwd D -- env PI_TUI_NATIVE=0 K=V ... $SHELL` (`dori`, else `dori-2`, ...) |
-| Duty, lanes, migrated sessions | `new tab <session id> --cwd D -- env ...`, or `new session <name> ...` when no session has that name yet; then `rename <block> <name>` names the tab |
+| The lead on `cataly harness up` | `new session <free name> --cwd D -- env PI_TUI_NATIVE=0 K=V ... $SHELL` (`cataly`, else `cataly-2`, ...) |
+| Duty and lanes | `new tab <session id> --cwd D -- env ...`, or `new session <name> ...` when no session has that name yet; then `rename <block> <name>` names the tab |
 | The duty loop and the hourly loop | `split <near block> down --cwd D -- env ...` |
 | Starting the agent or loop, `--to-shell` | `run <block> -- <command>` (types it and Enter) |
 | Probe | `inspect` (the block, whether it is live, Tern's busy flag) and `process <block>` (foreground, process group, the block's root pid) |
-| Screen reads | `capture <block> --scrollback`, trailing blank rows dropped; unwrapped joins rows as wide as the block, as on hc |
+| Screen reads | `capture <block> --scrollback`, trailing blank rows dropped; unwrapped joins rows as wide as the block |
 | Delivering a message | `send <block> paste -- <text>`, then `send <block> keys enter` |
 | Enter, Escape | `send <block> keys enter` / `esc` |
 | Closing a session | `close <block>`; `no block is called` means it is already closed |
@@ -122,43 +100,37 @@ A tab opens in the session its spec names (a Tern session name or id), else in t
 
 ### Status and the classic UI
 
-Tern reports the foreground process and a busy flag, not agent status words. A shell in front is `shell`. An OMP process in front is `working` while Tern's busy flag is set, else `idle`. Any other program is `unknown` and never receives input. With the configured `stateDir`, the attested OMP record refines this exactly as on herdr and hc (identity, an open approval as `blocked`, its idle/working word), and an OMP in front with no record of its own reads `unknown`. The extension writes that record under `TERN_PANE` when neither `HC_TERMINAL_ID` nor `HERDR_PANE_ID` is set.
+Tern reports the foreground process and a busy flag, not agent status words. A shell in front is `shell`. An OMP process in front is `working` while Tern's busy flag is set, else `idle`. Any other program is `unknown` and never receives input. With the configured `stateDir`, the attested OMP record refines this (identity, an open approval as `blocked`, its idle/working word), and an OMP in front with no record of its own reads `unknown`. The extension writes that record under `TERN_PANE`.
 
-OMP in a Tern block normally draws its UI natively over the Tern Surface Protocol, and `tern capture` then shows neither its input nor its dialogs. Every block Dori opens sets `PI_TUI_NATIVE=0` (a spec env may override it), so OMP draws its classic terminal UI and its input can be read. Start a lead by hand the same way.
+OMP in a Tern block normally draws its UI natively over the Tern Surface Protocol, and `tern capture` then shows neither its input nor its dialogs. Every block Cataly opens sets `PI_TUI_NATIVE=0` (a spec env may override it), so OMP draws its classic terminal UI and its input can be read. Start a lead by hand the same way.
 
 ### Delivery
 
-Tern has no call that prompts an agent, so the adapter types: it pastes the text as one bracketed paste (a line break never submits early) and presses Enter. The probe gates first, as on the other runtimes: a shell or a gone block is `no-agent`, an approval is `blocked`, and an unknown status or one `when` does not accept holds the message. Then the screen decides how much the adapter can check:
+Tern has no call that prompts an agent, so the adapter types: it pastes the text as one bracketed paste (a line break never submits early) and presses Enter. The probe gates first, as on headless: a shell or a gone block is `no-agent`, an approval is `blocked`, and an unknown status or one `when` does not accept holds the message. Then the screen decides how much the adapter can check:
 
 - The classic OMP input is recognised (a row starting `╰─` right under the status row, or the older omo box) and reads empty: the text is pasted, Enter is pressed only while a draft is seen there, up to three times, and the delivery counts once the input reads empty again. Text that stays in the input is `typed`, for `submitTyped` to finish with Enter only.
-- The input is recognised and holds a draft: the message is held. Dori does not write over what a person is typing.
-- No input is recognised (a natively drawn OMP, another composer, a dialog the probe does not report): the adapter pastes, checks that the same agent is still in front, and counts one accepted Enter as the delivery, which is herdr's typed fallback. It cannot see whether that Enter submitted the text.
+- The input is recognised and holds a draft: the message is held. Cataly does not write over what a person is typing.
+- No input is recognised (a natively drawn OMP, another composer, a dialog the probe does not report): the adapter pastes, checks that the same agent is still in front, and counts one accepted Enter as the delivery. It cannot see whether that Enter submitted the text.
 
 A paste that fails may have typed part of the text and is `ambiguous`; it is never resent. `submitTyped` reports `changed` when the agent is another one or its recognised input reads empty.
 
-A delivery bound to one native session (`expectedSessionId`) is held as `unknown` unless the attested record names that session, as on herdr and hc.
+A delivery bound to one native session (`expectedSessionId`) is held as `unknown` unless the attested record names that session.
+
+The extension's Discord routes for a lane's own session (owner chat delivered to the lane and automatic ASK forms) find a lane in a Tern block through `TERN_PANE`.
 
 ## Status
 
-Cataly reads a session's status before it types anything into it. The words are `idle`, `working`, `blocked`, `done`, `error`, `unknown`, `shell` (no agent, a bare shell) and `gone`.
+Cataly reads a session's status before it delivers anything. The words are `idle`, `working`, `blocked`, `done`, `error`, `unknown`, `shell` and `gone`.
 
-On herdr, install the OMP integration with `herdr integration install omp`. The [herdr v0.9.5 integration](https://github.com/herdrdev/herdr/blob/v0.9.5/src/integration/assets/omp/herdr-agent-state.ts) reports OMP's session and agent state. The adapter retains upstream's narrow screen check for the empty omo input box when a runtime says `working` between turns with live monitors. A screen read that fails or does not match stays working; it is not a general OMP idle detector.
+For a known idle/working native state, the attested OMP lifecycle record can refine the current state independently of native goal status. Native done stays done after identity and approval checks. A status mismatch leaves the batch queued.
 
-On hc, status comes from native OSC 7501. The retained OMP extension publishes `app=omp` for role sessions: idle on session start/agent end, working on agent start, blocked while approvals are open. Removing its owned role record invalidates the owned report as unknown. This is an actual HC report in addition to the process-bound JSON record; hc's unknown status remains held and conditional `--if` gates remain intact.
-
-[OMP 18.14.2 `run-status.ts`](https://github.com/can1357/oh-my-pi/blob/v18.14.2/packages/coding-agent/src/utils/run-status.ts) also implements a general reporter for interactive TTY output when `terminal.programStatus` is enabled (the reporter starts enabled), including done/error and teardown clearing. Non-TTY or headless output does not use that built-in reporter. Custom agents need their own reporting integration. An agent that never reports stays unknown, or shell when an interactive shell is in front, and receives no queued input; an extension file alone never promotes native unknown to idle.
-
-For a known idle/working native state, the attested OMP lifecycle record can refine the current idle/working state independently of native goal status. Native done stays done after identity and approval checks. The inherited screen check also reads the last 30 lines for a working agent with no shell in front, accepting only upstream's narrow idle-box pattern. If the raw hc word is working while the probe reads idle, the inbox retains `--if working`; a raw idle word uses `--if idle`. A status mismatch leaves the batch queued. The inherited working gate does not distinguish a new turn starting between probe and send from a working word that meant background activity.
-
-Skill direct sends and migration checkpoint requests gate on the status they just read. A rejected send is failed; an ambiguous or working-turn delivery is unconfirmed and is not resent automatically. A migration checkpoint ask currently treats only a gone agent as a stop; a failed/unconfirmed ask is not surfaced separately. A done agent receives without an hc `--if` gate because hc accepts only idle or working there. Force can bypass native blocked/error status, but never a process-bound OMP approval hold. A shell in front always holds input on both runtimes.
-
-Set `notes = false` in `~/.config/herdr-core/config.toml`. With notes on, hc types notes into a parent agent on its own, and Cataly's inbox is meant to be the only thing that types into an agent. Cataly already opens every terminal with `--no-parent --no-notify`.
+Skill direct sends gate on the status they just read. A rejected send is failed; an ambiguous or working-turn delivery is unconfirmed and is not resent automatically. Force can bypass native blocked/error status, but never a process-bound OMP approval hold.
 
 ### OMP identity, goal and approval records
 
-The extension writes `<stateDir>/sessions/<encodeURIComponent(id)>.json`, preferring `HC_TERMINAL_ID` over `HERDR_PANE_ID` over `TERN_PANE`. Its schema is `paneId`, `role`, `sessionId`, optional `sessionFile`, `cwd`, `pid`, `startedAt`, `updatedAt`, `goal: {status, objective?}`, `approvalPending`, optional `agentStatus: idle|working`, and optional `native: {observedAt, jobs, approvals}`. Earlier records may omit the optional fields. `stateDir` follows `CATALY_STATE_DIR`, then the `CATALY_CONFIG` file's value, then `~/.cataly/state`. Production callers pass that configured `stateDir` explicitly to enable OMP refinement. Runtime instances without it preserve native behavior and do not read operator config or extension state.
+The extension writes `<stateDir>/sessions/<encodeURIComponent(id)>.json` for its headless session id (`CATALY_HEADLESS_ID`) or, in a Tern block, its `TERN_PANE`. Its schema is `paneId` (the session or block id; the field name is kept for older records), `role`, `sessionId`, optional `sessionFile`, `cwd`, `pid`, `startedAt`, `updatedAt`, `goal: {status, objective?}`, `approvalPending`, optional `agentStatus: idle|working`, and optional `native: {observedAt, jobs, approvals}`. Earlier records may omit the optional fields. `stateDir` follows `CATALY_STATE_DIR`, then the `CATALY_CONFIG` file's value, then `~/.cataly/state`. Production callers pass that configured `stateDir` explicitly to enable OMP refinement. Runtime instances without it preserve native behavior and do not read operator config or extension state.
 
-Both adapters attest the writer against the live terminal root, process ancestry, foreground and process start time before trusting a record. Missing, malformed, reused-pid, foreign or changing OMP identity stays unknown; an open approval becomes blocked even for force/submit-only delivery. Session IDs and files therefore come from the live OMP writer rather than an unrelated newest transcript. Linux process lookup and OMP's temp-relative, home-relative and absolute session-directory forms are preserved.
+The runtime attests the writer against the live session process, its ancestry and process start time before trusting a record. Missing, malformed, reused-pid, foreign or changing OMP identity stays unknown; an open approval becomes blocked even for forced delivery. Session IDs and files therefore come from the live OMP writer rather than an unrelated newest transcript.
 
 Native goals remain agent-owned. Skill pause/resume reads back active/paused state before committing its registry transition and reports exit 3 when unverified. Budget-limited and unknown native goal states map to blocked, never no goal. Resumed roles persist, but a resumed native goal can be paused and need `/goal resume`. The `cataly` role's recorded monitor specs can restore on that session's resume; fresh installation and default container startup do not start any messenger or watcher.
 
@@ -194,59 +166,19 @@ Duty and skill freshness can emit one advisory `wait-ended` notice when a later 
 
 ## Grouping
 
-On herdr, `cataly harness up` creates a workspace named `cataly`: the lead is its root pane, duty a tab, and the two loops are splits below duty. A lane opened from a pane in that workspace becomes a tab there.
+Each session carries the home's group label, the first 8 hex characters of the sha256 of the resolved `CATALY_HOME` path, so two homes never share one.
 
-hc has no workspaces, tabs or layout. Cataly opens one terminal per session and labels it:
-
-- `cataly.group`: the home's group, the first 8 hex characters of the sha256 of the resolved `CATALY_HOME` path, so two homes never share one;
-- `cataly.role`: `lead`, `duty`, `duty-loop`, `hourly-loop` or `lane`;
-- `cataly.name`: the session's name;
-- `cataly.lane`: the lane key, on lanes only.
-
-`hc ls --label cataly.group=<g>` lists one home's sessions. The terminal also gets the session name as its hc name when no live terminal holds it, but Cataly identifies a terminal by its address and labels, never by the name.
-
-Only one duty loop runs per home, whatever the runtime: it takes `duty/lock` under `CATALY_HOME`, and a second `cataly harness duty` does not start while it is held.
+Only one duty loop runs per home: it takes `duty/lock` under `CATALY_HOME`, and a second `cataly harness duty` does not start while it is held.
 
 ## Targets
 
 `cataly harness send`, `cataly harness role` and `cataly harness inbox` take a session in several forms:
 
-- `herdr:w1:p3`, `hc:t7` or `tern:42`, with the runtime spelled out;
-- a bare `w1:p3`, which is a herdr pane;
+- a headless ref or `tern:42`, with the runtime spelled out;
 - `lead` or `duty`;
 - a lane key.
 
-A bare `t7` or `42` is not a ref, because both are legal lane keys: a lane named `t7` is that lane. Stored roles and inbox file names keep herdr refs bare and prefix every other runtime (`hc:t7`, `tern:42`; inbox files `hc--t7.jsonl`, `tern--42.jsonl`), so files written before runtimes existed still match.
-
-## Migrating sessions
-
-```text
-cataly harness migrate [--to hc|herdr|tern] (--lane K | --role lead|duty|duty-loop|hourly-loop | --all) [--dry-run] [--wait-minutes N] [--resume]
-```
-
-`--to` defaults to the selected runtime. `--all` takes every open lane, then lead and duty, then the duty loop and the hourly loop. For each agent session the steps are:
-
-1. Hold. A journal is created at `CATALY_HOME/migrate/<name>.json` and the lane is marked as migrating, so the duty loop neither nudges it nor flushes its inbox.
-2. Checkpoint. The agent is asked to write a handoff checkpoint (goal, open todos, last state) to `briefs/<name>.handoff.md` and stop. Cataly waits until it stops working, up to `--wait-minutes` (default 10). A `blocked` agent is asked nothing.
-3. Capture. A handoff brief `briefs/<name>.migrate-<time>.md` is written: the original brief, a `## Handoff` section with the last 20 lane log entries, the checkpoint, the last 80 screen lines and the queued messages, then the lane rules.
-4. Open. The replacement opens on the target, in this home's group on hc or a new `cataly` workspace on herdr, with the agent started on the handoff brief.
-5. Verify. The replacement must report `idle` or `working` within 3 minutes.
-6. Move the inbox. A forward marker on the old inbox names the new session, and the old entries are merged into the new inbox. Queued entries stay queued, held entries stay held, and an entry that was typed but never submitted becomes held.
-7. Switch. The lane or role record points at the new session, and the lane keeps the old ref in `migratedFrom`.
-8. Close. The old session is closed, messages that late senders appended to the old inbox are moved over, the marker is removed, and the journal is deleted.
-
-Each session ends with one line:
-
-- `MIGRATED <name> <old> -> <new>`: done.
-- `MIGRATE_ROLLBACK <name> <new> <why>`: verify failed. The replacement is closed, the inbox goes back unchanged with held entries still held, the hold is lifted, and the exit code is 3.
-- `DEFERRED <name> blocked` or `DEFERRED <name> working past N min`: nothing moved, and the hold is lifted.
-- `SKIP <name> already on <runtime>`.
-
-`--dry-run` prints `PLAN <name> <old> -> <runtime>` with the queued-message count and changes nothing. An interrupted run resumes at its journal phase when started again; a second `cataly harness migrate` of the same session cannot start concurrently.
-
-`--resume` starts the replacement on the old OMP session file (`omp --cataly-role lane --resume=<path>` for a lane, role `cataly` for lead/duty) instead of a handoff brief. It requires a live idle/done old agent and a recorded session path; otherwise nothing moves. Explicit custom agent commands retain their upstream `--session <path>` form. OMP role restoration does not imply its native goal resumed: inspect the goal and preserve paused ownership until the user explicitly directs resumption. A migration or monitor recovery event is not that instruction.
-
-The two loops are plain processes with no inbox and no agent, so they skip steps 2, 3, 5 and 6. The duty loop's old session closes before the new one opens, since the lock allows one per home. The hourly loop's new session opens first, and its own lock keeps the two from running the same hour.
+A bare `42` is not a ref, because it is a legal lane key. Stored roles and inbox file names prefix the runtime (`tern:42`; inbox file `tern--42.jsonl`). A `herdr:` or `hc:` ref, or a bare herdr pane such as `w1:p3`, names a removed runtime and stops with the upgrade message.
 
 ## Hooks and prompts
 
@@ -254,7 +186,6 @@ The two loops are plain processes with no inbox and no agent, so they skip steps
 
 ```json
 {
-  "runtime": "hc",
   "hooks": {
     "onReady": ["notify-send", "READY {key}", "{text} {evidence}"],
     "onReport": ["logger", "-t", "cataly", "{key}: {text}"],
@@ -276,9 +207,7 @@ Every rewrite of an inbox queue holds the inbox's lock, and so does every append
 
 Inbox and route locks record a unique random `nonce` alongside `pid`, `host` and `at`, so a delayed release cannot remove another acquisition even when its process and timestamp are unchanged. Legacy records without a nonce keep the same stale classification: a live local pid retains its lock; a dead local pid frees it; foreign-host or unreadable records use the existing age rule. A stale lock is reclaimed under an exclusive sibling `.inbox-claim-<sha256>` whose digest covers the target basename and complete observed lock content. Every claim component stays 77 bytes through recursive crash recovery. Directory aliases of the same physical parent and basename share that claim; the lexical directory path is not part of its digest. The claim holder still checks the stale snapshot before removal, and release still checks its full owner receipt.
 
-A send holds the route lock of the inbox it names (`<inbox>.route`, stale under the inbox lock's rules) from reading the forward marker to writing its message or spool file. A migration holds the old inbox's route while it writes the marker, drains the old inbox and removes the marker (steps 6 and 8) and while it rolls back, so a message is never written to an inbox the migration has already drained. A rollback also holds the replacement's route: a send addressed to the replacement directly has written before the rollback moves the replacement's spool and queue back to the old inbox, and none writes there until that move is done. A send waits up to two seconds for a held route without blocking the process. A name is resolved again under the route before the message is written: a lane or role that switched sessions between the first resolution and the route gets the message at its new session, and a name that no longer resolves leaves the send where it first pointed. Duty notices (nudges, escalations, LOST notices and owed notices) resolve their lane or role again under the route the same way. Past a held route, a message addressed to the logical `lead` role (a report, READY, START, a loop summary or a held-delivery notice) is kept in a file of its own under `duty/lead.jsonl.spool/` and returns `QUEUED`, even if the role was replaced or disappeared after its initial resolution. That intent comes from the send target, not a later comparison with the current lead session. The next duty pass that finds the registered lead's route and inbox lock free moves it into that lead's inbox after the owed LOST notices, oldest first. An explicit session ref or pane id does not become a message for a future lead merely because it once held that role: past a held route it is refused (exit 2) with nothing queued. A duty notice is tried again on the next pass.
-
-The forward marker is the only redirect, and it lives only while a migration runs: the final drain (step 8) and a rollback remove it, and neither leaves anything behind on either id. herdr pane ids and hc terminal ids are used again for new sessions, so after a migration a session ref, a bare pane id or `--to-shell` naming the old id reaches whatever session holds that id now, never the replacement. To reach a migrated session, send to its lane key or role.
+A send holds the route lock of the inbox it names (`<inbox>.route`, stale under the inbox lock's rules) from reading any forward marker to writing its message or spool file. A send waits up to two seconds for a held route without blocking the process. A name is resolved again under the route before the message is written: a lane or role that switched sessions between the first resolution and the route gets the message at its new session, and a name that no longer resolves leaves the send where it first pointed. Duty notices (nudges, escalations, LOST notices and owed notices) resolve their lane or role again under the route the same way. Past a held route, a message addressed to the logical `lead` role (a report, READY, START, a loop summary or a held-delivery notice) is kept in a file of its own under `duty/lead.jsonl.spool/` and returns `QUEUED`, even if the role was replaced or disappeared after its initial resolution. That intent comes from the send target, not a later comparison with the current lead session. The next duty pass that finds the registered lead's route and inbox lock free moves it into that lead's inbox after the owed LOST notices, oldest first. An explicit session ref does not become a message for a future lead merely because it once held that role: past a held route it is refused (exit 2) with nothing queued. A duty notice is tried again on the next pass.
 
 ## Candidate command deadlines
 
@@ -292,31 +221,31 @@ Environment and path isolation is not an OS sandbox. Descendants can survive a d
 
 ## Remote Cataly sessions
 
-Remote commands are opt-in, target-local operations on native OMP sessions with a Cataly `cataly` or `lane` role. They use the operator's existing `hc` machine connection, not an OMP account, a published Collab link, or a new network listener. Commands do not discover ordinary OMP sessions or sessions from another installation. The underlying machine connection still grants the privileges of its configured account; Cataly's switches restrict only the Cataly interface.
+Remote commands are opt-in operations on native OMP sessions with a Cataly `cataly` or `lane` role on this machine. They use no OMP account, published Collab link or new network listener. Commands do not discover ordinary OMP sessions or sessions from another installation.
 
-On the **target** installation, run `cataly remote policy control on`. Run `cataly remote policy wake on` separately to allow cold wake. Both default off. The source addresses one configured `hc` machine per command. Use `--via` with the absolute path of the target's `cataly` wrapper when the chosen installation is not `cataly` on the remote core's PATH.
+Run `cataly remote policy wake on` to allow cold wake; it defaults off.
 
 ```sh
-cataly remote sessions --on lab --via /home/user/.omp-cataly/bin/cataly
-cataly remote read SESSION --on lab --limit 20
-cataly remote send SESSION --on lab --text 'Summarize your status' --id request-01 --no-wait
-cataly remote receipt SESSION --on lab --id request-01
-cataly remote watch SESSION --on lab --cursor 0 --until-completion
+cataly remote sessions
+cataly remote read SESSION --limit 20
+cataly remote send SESSION --text 'Summarize your status' --id request-01 --no-wait
+cataly remote receipt SESSION --id request-01
+cataly remote watch SESSION --cursor 0 --until-completion
 ```
 
 Use the exact session ID or a unique live prefix. `--generation` pins an observed activation; use it with a previously issued request ID or cursor. `send` uses OMP's admission API and preserves the message body. Headless delivery refuses slash-leading text because the pinned RPC mode may interpret it as a prompt template. A receipt confirms admission, not an assistant reply; `read` and `watch` show the session's actual output without guessing which concurrent input caused it. The optional `--steer` is explicit. Lost transport does not imply that a mutation failed. Inspect its receipt instead of resending blindly.
 
-`interrupt` requests OMP turn cancellation and reports detached jobs separately; the pinned extension API cannot cancel independently owned background jobs. `model` changes the session's model and reads it back. `close` verifies disappearance before reporting closure. Terminal sessions require `--force` if active and still hold on pending approvals. Headless sessions must settle even with `--force`: disconnect during work could cancel a native approval before the supervisor sees it. A lost close response holds cold wake until the operator checks the session. `attach` uses a process-checked `hc` terminal when there is one; otherwise it is a read-only transcript and event stream. A separately enabled OMP Collab room can still be joined with `omp join`.
+`interrupt` requests OMP turn cancellation and reports detached jobs separately; the pinned extension API cannot cancel independently owned background jobs. `model` changes the session's model and reads it back. `close` verifies disappearance before reporting closure. Headless sessions must settle even with `--force`: disconnect during work could cancel a native approval before the supervisor sees it. A lost close response holds cold wake until the operator checks the session. `attach` prints the transcript and then follows its event stream; it is read-only. A separately enabled OMP Collab room can still be joined with `omp join`.
 
-`open` starts a managed OMP session on a target `hc` core with optional `--cwd`, `--name`, `--model`, `--thinking`, `--text` and `--worktree PATH [--branch BRANCH] [--base REF]`. These are OMP and target filesystem values. The command cannot start a caller-supplied executable. It stores a target-local opening receipt and does not duplicate a launch with the same request ID. `wake` accepts an exact stored ID from `open`, verifies it is unowned with OMP's session lease, and does not submit a prompt or resume a paused goal. Explicitly closed sessions and registered held lanes are not woken; use the lane's own `reopen` workflow for registered lanes.
+`open` starts a managed OMP session with optional `--cwd`, `--name`, `--model`, `--thinking`, `--text` and `--worktree PATH [--branch BRANCH] [--base REF]`. The command cannot start a caller-supplied executable. It stores an opening receipt and does not duplicate a launch with the same request ID. `wake` accepts an exact stored ID from `open`, verifies it is unowned with OMP's session lease, and does not submit a prompt or resume a paused goal. Explicitly closed sessions and registered held lanes are not woken; use the lane's own `reopen` workflow for registered lanes.
 
 `watch` streams bounded event pages; its cursor belongs to the live activation. A `gap` means old events have fallen out of the buffer. A report observed in a tool result is not a durable journal check, and turn output is not a lane Done assertion.
 
 ## Headless OMP lanes
 
-On macOS and Linux, `cataly launch` starts a native OMP lane by default. Use the normal `cataly status`, `pause`, `resume` and `close` commands with the lane key; they address its recorded session. For a custom agent that needs a terminal, select a terminal explicitly.
+On macOS and Linux, `cataly launch` starts a native OMP lane. Use the normal `cataly status`, `pause`, `resume` and `close` commands with the lane key; they address its recorded session.
 
-Each headless lane runs one native `omp --mode rpc-ui` process owned by a local supervisor that survives CLI exits. A failed terminal launch is never retried headless. An upgrade does not kill stored terminal sessions, migrate uncertain messages, or uninstall user-owned binaries. Finish existing terminal work on its owning backend before retiring that backend. The historical `hc` cross-machine transport remains an optional feature, not a local startup requirement.
+Each headless lane runs one native `omp --mode rpc-ui` process owned by a local supervisor that survives CLI exits. An upgrade never kills sessions left over from a removed terminal runtime or deletes their state; see the [upgrade note](releases.md#upgrading-from-a-terminal-runtime).
 
 Before creating the first goal, the supervisor verifies the requested provider/model against the Cataly extension's catalog readback and OMP's current selection in that same session. If they disagree, no brief is sent. Inspect the registered lane with `cataly headless observe LANE`; the launcher does not substitute another model or retry the request.
 
@@ -324,16 +253,13 @@ Before creating the first goal, the supervisor verifies the requested provider/m
 
 ## Limits
 
-- The existing local harness, inbox and migration do not act on mirrored remote terminals. Remote commands are a separate operator entrypoint.
+- Remote commands act only on this machine's Cataly sessions; they are a separate operator entrypoint from the harness and inbox.
 - Native remote and headless sockets require macOS or Linux. Do not enable remote control on an untrusted machine or share a control link as a substitute for granting a specific operation.
-- No window layout on hc. The lead, duty and the loops are separate terminals; open them with `hc attach <t>`.
-- hc on Windows is untested here.
 - Tern: no agent prompt call and no status words. Delivery types into the block, and its submit is confirmed only for OMP's classic input; see [Delivery](#delivery). CI has no Tern binary, so the adapter is tested against a recorder and checked by hand against a real Tern.
-- Tern: the extension's Discord routes for a lane's own session (owner chat delivered to the lane and automatic ASK forms) find that session through `HC_TERMINAL_ID` or `HERDR_PANE_ID` only, so they stay off for a lane in a Tern block.
 
 ## Tests
 
-These are test entrypoints, not a claim that they passed for any particular release. `bun test ./test/runtime-omp.test.ts ./test/runtime-omp-typed.test.ts` exercises process-bound identity, approvals and typed delivery on fake herdr/hc. Skill `test/omp-session.test.ts`/`test/omp-pause.test.ts` cover OMP session/native goal contracts; extension `test/status.test.ts` asserts HC status frames and role-removal invalidation, and `test/monitor-state.test.ts` asserts the desired monitor manifest. Full `bun test ./test/` includes both adapters against recorders. Real-server fixture tests are `test/e2e.test.ts` (isolated `herdr --session`), `test/e2e-hc.test.ts` (isolated `HC_SESSION`/XDG and an OSC fixture), and `test/e2e-migrate.test.ts` (herdr to hc); each skips without its binary. Fixture tests do not establish real OMP/provider or messenger behavior.
+These are test entrypoints, not a claim that they passed for any particular release. `bun test ./test/runtime-omp.test.ts ./test/runtime-omp-typed.test.ts` exercises process-bound identity, approvals and delivery. Skill `test/omp-session.test.ts`/`test/omp-pause.test.ts` cover OMP session/native goal contracts; extension `test/monitor-state.test.ts` asserts the desired monitor manifest. Fixture tests do not establish real OMP/provider or messenger behavior.
 
 The tern adapter runs against its own recorder (`test/fake-tern.ts`) in `test/runtime-tern.test.ts`, `test/runtime-tern-deliver.test.ts` and `test/runtime-tern-screen.test.ts`; no real-Tern fixture test exists.
 

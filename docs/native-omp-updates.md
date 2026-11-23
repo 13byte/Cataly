@@ -29,7 +29,7 @@ The fresh publisher uses the exact trusted Cataly commit recorded before prepara
 
 Publication holds if `main` has advanced. An existing branch is reused only after proving its single exact source parent and complete fixed-file delta; changed branches are never overwritten. Repeated publication reuses an exact open or closed PR. New drafts dispatch `ci.yml` only after checking that the branch still names the expected head; the publisher does not repeat an already observed dispatch for that head. Explicit dispatch avoids relying on automatic `GITHUB_TOKEN` PR event behavior; [GitHub documents the workflow dispatch exception](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow).
 
-Textual application is not compatibility approval. Review `check`, `e2e-herdr`, and `e2e-hc` on the proposed head and actual combined target content, release notes, attribution, isolated installation, lane/monitor/ASK/voice behavior, and bound ULW code-mode checks before merging. Branch movement after dispatch or a later `main` change requires fresh exact-content evidence. No automatic approval, merge, tag, release, consumer pointer, or installation update is performed.
+Textual application is not compatibility approval. Review `check` on the proposed head and actual combined target content, release notes, attribution, isolated installation, lane/monitor/ASK/voice behavior, and bound ULW code-mode checks before merging. Branch movement after dispatch or a later `main` change requires fresh exact-content evidence. No automatic approval, merge, tag, release, consumer pointer, or installation update is performed.
 
 ## Conflicts and holds
 
@@ -71,7 +71,7 @@ Before changing the default, the following prerequisites are still required:
 - Upstream releases must contain the retained correctness fixes, or public extension/session hooks must reproduce them with the same native regressions. Internal eval-kernel lifecycle ordering cannot be assumed replaceable by a prompt hook.
 - Stock OMP plus the Dori extension and bound ULW must pass the real prompt/load-order, required-source denial, manager-tool, code-mode/task bridge, compaction/handoff, and provider-free SDK/RPC checks without relying on patched source.
 - An explicit stock-runtime identity and install/update/rollback protocol must replace source/addon receipts without weakening existing retained releases. Discovery must select the intended executable, extension, profile, state home, and daemon/session identity rather than any same-version binary on `PATH`.
-- Isolated installation, hc/herdr lanes and monitors, ASK, voice, messenger recovery, export, and matched startup/memory measurements must establish parity on the stock default. Provider-backed behavior needs separately authorized evidence; synthetic transport tests are not that evidence.
+- Isolated installation, headless and Tern lanes and monitors, ASK, voice, messenger recovery, export, and matched startup/memory measurements must establish parity on the stock default. Provider-backed behavior needs separately authorized evidence; synthetic transport tests are not that evidence.
 
 These are release prerequisites, not claims that the external stock path is complete. This workflow does not change the default runtime.
 

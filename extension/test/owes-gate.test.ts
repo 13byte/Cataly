@@ -19,8 +19,7 @@ const inbound = (message: string, text = "배포 왜 안 됨") =>
 let stateDir: string;
 beforeEach(() => {
   stateDir = useConfig(FAKE_ULW);
-  delete process.env.HERDR_PANE_ID;
-  delete process.env.HC_TERMINAL_ID;
+  delete process.env.CATALY_HEADLESS_ID;
 });
 afterEach(() => {
   delete process.env.CATALY_CONFIG;

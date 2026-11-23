@@ -12,7 +12,7 @@ import { type FakePi, load, until, useConfig } from "./fake-pi.ts";
 
 const posix = test.skipIf(process.platform === "win32");
 
-const pane = "w1:p2";
+const pane = "5002";
 const session = "exact-discord-wake";
 const channel = "900000000000000101";
 const legacy = "900000000000000102";
@@ -41,15 +41,15 @@ async function withWakeLane(
   const env = {
     CATALY_CONFIG: process.env.CATALY_CONFIG,
     CATALY_STATE_DIR: process.env.CATALY_STATE_DIR,
-    HERDR_PANE_ID: process.env.HERDR_PANE_ID,
-    HC_TERMINAL_ID: process.env.HC_TERMINAL_ID,
+    CATALY_HEADLESS_ID: process.env.CATALY_HEADLESS_ID,
+    TERN_PANE: process.env.TERN_PANE,
     CATALY_DISCORD_WAKE_SESSION: process.env.CATALY_DISCORD_WAKE_SESSION,
     CATALY_DISCORD_WAKE_GOAL: process.env.CATALY_DISCORD_WAKE_GOAL,
     CATALY_DISCORD_WAKE_MODEL: process.env.CATALY_DISCORD_WAKE_MODEL,
   };
   const stateDir = useConfig("");
-  process.env.HERDR_PANE_ID = pane;
-  delete process.env.HC_TERMINAL_ID;
+  process.env.TERN_PANE = pane;
+  delete process.env.CATALY_HEADLESS_ID;
   process.env.CATALY_DISCORD_WAKE_SESSION = session;
   process.env.CATALY_DISCORD_WAKE_GOAL = "active";
   process.env.CATALY_DISCORD_WAKE_MODEL = `${model.provider}/${model.id}`;
@@ -60,7 +60,7 @@ async function withWakeLane(
       key: "discord-lane",
       title: "Discord lane",
       thread: `discord:${channel}`,
-      sessionRef: { id: pane, runtime: "herdr" },
+      sessionRef: { id: pane, runtime: "tern" },
       session,
       lifecycleEpoch: scenario.pending ? discordWakePendingEpoch("launch") : "launch",
       ...(scenario.registryPaused && { status: "paused" }),

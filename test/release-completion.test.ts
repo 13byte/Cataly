@@ -1,28 +1,19 @@
 import { expect } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { readAutomaticState } from "../src/release/automatic-state.ts";
 import { installBundle } from "../src/release/install.ts";
 import { loadInstalled } from "../src/release/state.ts";
 import { fixture, posix } from "./release-consumer-setup.ts";
-import { digest } from "../src/update/source.ts";
+import { boundRelease, releaseDist } from "./release-native-recovery-setup.ts";
 
 posix.each(["manual", "automatic", "unresolved"])(
   "%s install reports committed state after journal cleanup fails",
   async (mode) => {
     const f = fixture(true);
     const before = await installBundle(f.paths, f.release("one").bundle, undefined);
-    const candidate = f.release("two");
-    const manifest = { ...candidate.bundle.manifest, prerelease: false };
-    const metadata = `${JSON.stringify(manifest, null, 2)}\n`;
-    writeFileSync(join(candidate.dist, "release-manifest.json"), metadata);
-    writeFileSync(
-      join(candidate.dist, "SHA256SUMS"),
-      `${digest(candidate.bytes)}  ${manifest.archive.name}\n${digest(metadata)}  release-manifest.json\n`,
-    );
-    const tools = join(f.root, "runtime-tools");
-    mkdirSync(tools, { mode: 0o700 });
-    for (const runtime of ["herdr", "hc"]) writeFileSync(join(tools, runtime), "#!/bin/sh\nexit 99\n", { mode: 0o755 });
+    const bound = boundRelease(f, "two").bundle;
+    const manifest = { ...bound.manifest, prerelease: false };
+    const candidate = { dist: releaseDist(join(f.root, "candidate-dist"), { ...bound, manifest }) };
     const result = Bun.spawnSync(
       [
         process.execPath,
@@ -54,7 +45,7 @@ console.log(await automaticUpdate(consumerPaths(${JSON.stringify(f.paths.home)},
 }));
 `,
       ],
-      { env: { HOME: f.paths.home, PATH: `${tools}:${process.env["PATH"]}` }, timeout: 20_000 },
+      { env: { HOME: f.paths.home, PATH: process.env["PATH"] }, timeout: 20_000 },
     );
     expect(loadInstalled(f.paths)?.current.tag).toBe(manifest.tag);
     expect(loadInstalled(f.paths)?.previous).toEqual(before.current);

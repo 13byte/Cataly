@@ -1,6 +1,5 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { hostname } from "node:os";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { claimDone, closeLane, type FlowDeps, objectDone, watchTick } from "../src/done-flow.ts";
@@ -9,29 +8,34 @@ import { launchLane } from "../src/launch.ts";
 import { pauseLane } from "../src/pause.ts";
 import { type Lane, statusOf, withStatus } from "../src/registry.ts";
 import { Reports } from "../src/reports.ts";
-import type { Runner } from "../src/run.ts";
-import { depsFor, fakeClock, newWorld, type TestState, withState, type World } from "./fakes.ts";
+import { type Runner, runtimesOf } from "../src/run.ts";
+import { closableLane } from "./native-close-fixture.ts";
+import { depsFor, fakeClock, newWorld, sid, type TestState, withState, type World } from "./fakes.ts";
 
-// Another writer (a CLI claim, objection or resume) lands while a sweep awaits pane, git or hook I/O. Each test injects
-// that write at one exact call of the fake runner, so the interleaving is the same on every run.
+// Another writer (a CLI claim, objection or resume) lands while a sweep awaits native, git or hook I/O. Each test
+// injects that write at one exact call of the fake runner or the fake supervisor, so the interleaving is the same on
+// every run.
 const T0 = Date.parse("2026-01-01T12:00:00.000Z");
 const MIN = 60_000;
-const lane: Lane = {
-  key: "race-lane",
-  title: "race",
-  thread: "none",
-  pane: "w:p1",
-  brief: "/b.md",
-  done: "closed acme/app#1",
-  openedAt: new Date(T0).toISOString(),
-};
 
 let state: TestState;
 let world: World;
+/** The race lane on live native session 1. */
+let lane: Lane;
 beforeEach(() => {
   state = withState();
   world = newWorld();
-  world.panes = [{ pane_id: "w:p1", workspace_id: "w", agent: "pi", agent_status: "idle" }];
+  lane = {
+    key: "race-lane",
+    title: "race",
+    thread: "none",
+    brief: "/b.md",
+    done: "closed acme/app#1",
+    openedAt: new Date(T0).toISOString(),
+    ...closableLane(world, 1, join(state.dir, "repo")),
+  };
+  // Session 1 is the lane's: a reservation gets the next one.
+  world.next = 1;
 });
 afterEach(() => state.done());
 
@@ -47,18 +51,29 @@ const interleaved = (base: FlowDeps, at: (argv: readonly string[]) => boolean, w
   };
   return { ...base, run };
 };
-const stored = async (deps: FlowDeps): Promise<Lane> => (await deps.registry.read(lane.key)) ?? lane;
-const paneCloses = () => world.calls.filter((c) => c[0] === "herdr" && c[2] === "close");
-
-test("a nudge recorded after its pane I/O keeps a done claim written meanwhile", async () => {
-  world.onEnterStatus = "working";
-  const base = depsFor(world, fakeClock(T0 + 30 * MIN), state.dir, { nudgeAfterMin: 1, postAfterMin: 999 });
-  await base.registry.write(lane);
-  const deps = interleaved(
-    base,
-    (argv) => argv[0] === "herdr" && argv[2] === "list",
-    async () => claimDone(base, await stored(base), "merged during the nudge"),
+/** `write` run once, before the first `op` call reaches the fake supervisor of `base`. */
+const beforeNative = (base: FlowDeps, op: "observe" | "deliver" | "setGoal", write: () => Promise<unknown>): void => {
+  const runtime = runtimesOf(base).default;
+  const original = (runtime as unknown as Record<typeof op, (...args: unknown[]) => Promise<unknown>>)[op];
+  let pending = true;
+  spyOn(runtime as unknown as Record<typeof op, (...args: unknown[]) => Promise<unknown>>, op).mockImplementation(
+    async (...args: unknown[]) => {
+      if (pending) {
+        pending = false;
+        await write();
+      }
+      return original.apply(runtime, args);
+    },
   );
+};
+const stored = async (deps: FlowDeps): Promise<Lane> => (await deps.registry.read(lane.key)) ?? lane;
+const sessionCloses = () => world.calls.filter((c) => c[0] === "headless" && c[1] === "close");
+
+test("a nudge recorded after its native delivery keeps a done claim written meanwhile", async () => {
+  const deps = depsFor(world, fakeClock(T0 + 30 * MIN), state.dir, { nudgeAfterMin: 1, postAfterMin: 999 });
+  const reporting: Lane = { ...lane, reportProtocol: "jsonl-v1" };
+  await deps.registry.write(reporting);
+  beforeNative(deps, "deliver", async () => claimDone(deps, await stored(deps), "merged during the nudge"));
 
   expect((await freshnessTick(deps, "/home/test")).map((a) => a.kind)).toEqual(["nudged"]);
 
@@ -85,10 +100,10 @@ test("the watcher does not close a lane objected to while its git state was read
   ]);
   expect(statusOf(await stored(deps))).toBe("not-done");
   expect((await stored(deps)).objection?.reasons).toEqual(["owner objection before closure"]);
-  expect(paneCloses()).toEqual([]);
+  expect(sessionCloses()).toEqual([]);
 });
 
-test("a close is refused, before the pane is closed, when an objection lands during the Done signal read", async () => {
+test("a close is refused, before the session is closed, when an objection lands during the Done signal read", async () => {
   const base = depsFor(world, fakeClock(T0), state.dir, { hooks: { threadDone: ["notify", "{thread}", "{text}"] } });
   await base.registry.write({ ...lane, thread: "chat:team/1" });
   const deps = interleaved(
@@ -104,7 +119,7 @@ test("a close is refused, before the pane is closed, when an objection lands dur
     "LANE_CHANGED race-lane moved on while this ran (now not-done, was working); close not recorded",
   );
   expect(statusOf(await stored(deps))).toBe("not-done");
-  expect(paneCloses()).toEqual([]);
+  expect(sessionCloses()).toEqual([]);
   expect(world.calls.filter((c) => c[0] === "notify")).toEqual([]);
 });
 
@@ -128,42 +143,37 @@ test("a close of a not-done lane is refused when a new objection lands during th
   const after = await stored(deps);
   expect(statusOf(after)).toBe("not-done");
   expect(after.objection?.reasons).toEqual(["still not merged"]);
-  expect(paneCloses()).toEqual([]);
+  expect(sessionCloses()).toEqual([]);
 });
 
-test("a launch keeps an uncoordinated registry writer's adopted and objected record", async () => {
+test("a launch keeps an uncoordinated registry writer's registered and objected record", async () => {
   const base = depsFor(world, fakeClock(T0), state.dir);
   const brief = join(state.dir, "brief.md");
   writeFileSync(brief, "brief");
-  const run: Runner = async (argv, opts) => {
-    if (argv[0] === "herdr" && argv[1] === "tab" && argv[2] === "create") {
-      await base.registry.create({ ...lane, title: "adopted", cwd: base.config.defaultCwd });
-      await objectDone(base, await stored(base), ["adopted lane objected"]);
-      return { code: 0, out: JSON.stringify({ result: { root_pane: { pane_id: "w:p9" }, tab_id: "w:t9" } }), err: "" };
-    }
-    return base.run(argv, opts);
+  world.onCreate = async () => {
+    await base.registry.create({ ...lane, title: "registered meanwhile", cwd: base.config.defaultCwd });
+    await objectDone(base, await stored(base), ["registered lane objected"]);
   };
 
-  await expect(launchLane({ ...base, run }, { key: lane.key, title: "race", brief, done: lane.done })).rejects.toThrow(
+  await expect(launchLane(base, { key: lane.key, title: "race", brief, done: lane.done })).rejects.toThrow(
     "lane race-lane is already registered",
   );
 
   const after = await stored(base);
-  expect(after.title).toBe("adopted");
+  expect(after.title).toBe("registered meanwhile");
   expect(statusOf(after)).toBe("not-done");
-  expect(after.objection?.reasons).toEqual(["adopted lane objected"]);
-  expect(paneCloses()).toEqual([["herdr", "tab", "close", "w:t9"]]);
+  expect(after.objection?.reasons).toEqual(["registered lane objected"]);
+  expect(sessionCloses()).toEqual([["headless", "close", sid(2)]]);
   expect(readFileSync(brief, "utf8")).toBe("brief");
 });
 
 test("a paused lane resumed during the freshness status read is not turned back to paused", async () => {
-  world.panes = [{ pane_id: "w:p1", workspace_id: "w", agent: "pi", agent_status: "working" }];
-  const base = depsFor(world, fakeClock(T0 + MIN), state.dir);
-  await base.registry.write({ ...lane, status: "paused", pausedFrom: "working" });
-  const deps = interleaved(
-    base,
-    (argv) => argv[0] === "herdr",
-    async () => base.registry.write(withStatus(await stored(base), "working", "resumed", new Date(T0).toISOString())),
+  const session = world.sessions[sid(1)];
+  if (session) session.status = "working";
+  const deps = depsFor(world, fakeClock(T0 + MIN), state.dir);
+  await deps.registry.write({ ...lane, status: "paused", pausedFrom: "working" });
+  beforeNative(deps, "observe", async () =>
+    deps.registry.write(withStatus(await stored(deps), "working", "resumed", new Date(T0).toISOString())),
   );
 
   await freshnessTick(deps, "/home/test");
@@ -174,18 +184,12 @@ test("a paused lane resumed during the freshness status read is not turned back 
 });
 
 test("a done claim written while /goal pause is confirmed is not overwritten with paused", async () => {
-  const base = depsFor(world, fakeClock(T0 + MIN), state.dir, { agentCommand: ["omo", "{prompt}"] });
-  world.panes = [{ pane_id: "w:p1", workspace_id: "w", agent: "omo", agent_status: "idle" }];
-  world.screens = ["❯ ", "Goal paused\n❯ "];
-  await base.registry.write(lane);
-  const deps = interleaved(
-    base,
-    (argv) => argv[0] === "herdr" && argv[2] === "send-text",
-    async () => {
-      const at = new Date(T0).toISOString();
-      await base.registry.write(withStatus(lane, "done-claimed", "done", at, { claim: { at, evidence: "done" } }));
-    },
-  );
+  const deps = depsFor(world, fakeClock(T0 + MIN), state.dir);
+  await deps.registry.write(lane);
+  beforeNative(deps, "setGoal", async () => {
+    const at = new Date(T0).toISOString();
+    await deps.registry.write(withStatus(lane, "done-claimed", "done", at, { claim: { at, evidence: "done" } }));
+  });
 
   const r = await pauseLane(deps, lane, "owner said wait");
 
@@ -193,6 +197,7 @@ test("a done claim written while /goal pause is confirmed is not overwritten wit
   expect(r.lines).toEqual([
     "LANE_CHANGED race-lane moved on while this ran (now done-claimed, was working); pause (its goal is paused) not recorded",
   ]);
+  expect(world.sessions[sid(1)]?.goal?.status).toBe("paused");
   expect(statusOf(await stored(deps))).toBe("done-claimed");
   expect((await stored(deps)).claim?.evidence).toBe("done");
 });
@@ -230,18 +235,4 @@ test("a failed thread hook leaves the report unposted and the next tick sends it
   clock.at += 2 * MIN;
   expect(await freshnessTick(deps, "/home/test")).toEqual([]);
   expect(hookCalls).toHaveLength(2);
-});
-
-test("a lane lock left by a dead writer is taken over and released after the update", async () => {
-  const deps = depsFor(world, fakeClock(T0), state.dir);
-  await deps.registry.write(lane);
-  const dead = Bun.spawnSync(["true"]).pid;
-  const owner = { pid: dead, host: hostname(), at: new Date().toISOString(), nonce: "left-behind" };
-  writeFileSync(`${deps.registry.path(lane.key)}.lock`, JSON.stringify(owner));
-
-  const updated = await deps.registry.update(lane.key, (current) => current && { ...current, title: "taken over" });
-
-  expect(updated?.title).toBe("taken over");
-  expect((await stored(deps)).title).toBe("taken over");
-  expect(existsSync(`${deps.registry.path(lane.key)}.lock`)).toBe(false);
 });

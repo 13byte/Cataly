@@ -118,11 +118,21 @@ e rapporti pubblici. La telemetria è disattivata per impostazione predefinita.
 
 I comandi attuali sono `cataly`, `cataly-harness` e `omp-cataly` (installazione
 separata). Le nuove installazioni usano `~/.cataly` oppure `~/.omp-cataly`.
-Il runtime predefinito non richiede un backend terminale.
+Cataly funziona su OMP headless per impostazione predefinita in macOS e Linux; Tern è il runtime terminale opzionale.
 
 [Installa una release corrente verificata](docs/releases.md#install-a-current-release)
-o [aggiorna da v0.1.3 senza un backend terminale](docs/releases.md#upgrade-a-v013-installation).
+o [aggiorna da v0.1.3](docs/releases.md#upgrade-a-v013-installation).
 L’aggiornamento mantiene la directory di installazione e la configurazione esistenti.
+
+Questa versione ha rimosso i runtime terminale herdr e hc. Se una directory di
+installazione li usa ancora, installazione e aggiornamento si fermano con:
+
+```text
+This Cataly home still uses the herdr/hc terminal runtime, which this version removed.
+1. Close every herdr/hc lane (`cataly status` lists them) with your previous Cataly version.
+2. Remove "runtime" (if it names herdr or hc) and "sessionRuntime" from <configPath>.
+3. Run this command again. Cataly state and OMP sessions are kept; lanes reopen on headless.
+```
 
 </td></tr></table>
 
@@ -139,9 +149,9 @@ Non sostituire una release esatta con un installer arbitrario di `main`.
 
 ### Lavorare dai sorgenti
 
-Installa prima git e Bun 1.4.4+. Su Linux e macOS la configurazione predefinita non richiede herdr né hc; consulta i
+Installa prima git e Bun 1.4.4+ su Linux o macOS; non serve un server terminale. Consulta i
 [prerequisiti della versione sorgente](docs/releases.md#current-source-bundle).
-Tern è un terzo runtime di sessione nel sorgente di `main`; consulta [Tern](docs/runtime.md#tern).
+Tern è il runtime terminale opzionale; consulta [Tern](docs/runtime.md#tern).
 
 Usa un checkout separato, non un'installazione in esecuzione o una release utente congelata:
 
@@ -165,7 +175,7 @@ usano la tua autenticazione presso il provider e la tua quota di utilizzo.
 
 **Importante**
 
-L'implementazione per gli utenti supporta anche profili isolati macOS arm64 / hc
+L'implementazione per gli utenti supporta anche profili headless isolati macOS arm64
 quando un manifest di release verificato li dichiara. Questo non significa che sia
 stata pubblicata una release macOS. Slack e Telegram restano funzionalità della versione sorgente.
 

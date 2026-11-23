@@ -9,6 +9,7 @@ import {
 import { freshnessError, type FreshnessPolicy } from "./freshness-policy.ts";
 import { isSessionRuntime } from "../../../../src/runtime/select.ts";
 import { currentAgentCommand } from "../../../../src/runtime/legacy-agent-command.ts";
+import { LegacyRuntimeError } from "../../../../src/runtime/registry.ts";
 import { legacyRecipeEnv, recipePaths } from "../../../../src/runtime/recipe-env.ts";
 import type { RuntimeKind, TerminalRuntimeKind } from "../../../../src/runtime/types.ts";
 import { type ArtifactRoot, parseArtifactRoots } from "./artifact-config.ts";
@@ -41,7 +42,7 @@ export type GuardThresholds = {
 };
 
 export type CatalyConfig = LaunchConfig & {
-  /** Historical terminal preference; old installers wrote this without an operator choosing a terminal. */
+  /** Terminal preference: only "tern" remains; "herdr"/"hc" stop the command with the upgrade guidance. */
   readonly runtime?: TerminalRuntimeKind;
   readonly sessionRuntime?: RuntimeKind;
   readonly laneRuntime?: "headless" | "terminal";
@@ -138,14 +139,15 @@ export function configuredHookEnv(
 
 export class ConfigError extends Error {}
 
-const RUNTIMES: Readonly<Record<TerminalRuntimeKind, true>> = { herdr: true, hc: true, tern: true };
-const checkRuntime = (value: unknown): void => {
-  if (value !== undefined && !(typeof value === "string" && Object.hasOwn(RUNTIMES, value)))
-    throw new ConfigError(
-      `invalid runtime: expected ${Object.keys(RUNTIMES)
-        .map((k) => JSON.stringify(k))
-        .join(" or ")}, got ${JSON.stringify(value)}`,
-    );
+/** Settings that name the removed herdr/hc runtimes stop the command with the upgrade guidance. */
+const checkRuntimeSettings = (raw: Readonly<Record<string, unknown>>, path: string): void => {
+  const { runtime, sessionRuntime } = raw;
+  if (runtime === "herdr" || runtime === "hc" || sessionRuntime === "herdr" || sessionRuntime === "hc")
+    throw new LegacyRuntimeError(path);
+  if (runtime !== undefined && runtime !== "tern")
+    throw new ConfigError(`invalid runtime: expected "tern", got ${JSON.stringify(runtime)}`);
+  if (sessionRuntime !== undefined && !isSessionRuntime(sessionRuntime))
+    throw new ConfigError(`invalid sessionRuntime: ${JSON.stringify(sessionRuntime)}`);
 };
 
 export const loadConfig = async (path = configPath(), home = homedir(), env = process.env): Promise<CatalyConfig> => {
@@ -159,9 +161,7 @@ export const loadConfig = async (path = configPath(), home = homedir(), env = pr
   };
   const file = Bun.file(path);
   const raw = (await file.exists()) ? ((await file.json()) as Partial<CatalyConfig>) : {};
-  checkRuntime(raw.runtime);
-  if (raw.sessionRuntime !== undefined && !isSessionRuntime(raw.sessionRuntime))
-    throw new ConfigError(`invalid sessionRuntime: ${JSON.stringify(raw.sessionRuntime)}`);
+  checkRuntimeSettings(raw, path);
   try {
     checkLanePolicy(raw.lanePolicy);
   } catch (error) {

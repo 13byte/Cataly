@@ -158,7 +158,9 @@ describe("Cataly candidate boundaries", () => {
       expect(check["UPDATER_FIXTURE_SECRET"]).toBeUndefined();
       expect(model["HERDR_PANE_ID"]).toBeUndefined();
       expect(model["HC_TERMINAL_ID"]).toBeUndefined();
-      expect(model["CATALY_RUNTIME"]).toBe("herdr");
+      expect(model["CATALY_RUNTIME"]).toBeUndefined();
+      expect(model["CATALY_HERDR_SESSION"]).toBeUndefined();
+      expect(model["HC_SESSION"]).toBeUndefined();
       expect(check["CATALY_TELEMETRY"]).toBe("0");
       expect(check["DO_NOT_TRACK"]).toBe("1");
       expect(model["HOME"]).not.toBe(check["HOME"]);
@@ -183,7 +185,7 @@ describe("Cataly candidate boundaries", () => {
     expect(realpathSync(env["XDG_CACHE_HOME"]!)).toBe(realpathSync(cache));
     expect(realpathSync(env["XDG_RUNTIME_DIR"]!)).toBe(join(realpathSync(directory), "run"));
     expect(isolatedEnv(f.updater.context, directory, "check", cache)["HOME"]).toBe(env["HOME"]);
-    const socket = join(env["XDG_CONFIG_HOME"]!, "herdr", "sessions", "runtime-fixture", "herdr.sock");
+    const socket = join(env["XDG_CONFIG_HOME"]!, "omp", "sessions", "runtime-fixture", "broker.sock");
     expect(Buffer.byteLength(socket)).toBeLessThan(100);
     mkdirSync(dirname(socket), { recursive: true });
     const server = createServer();
@@ -243,6 +245,6 @@ describe("Cataly candidate boundaries", () => {
     expect(load({ worker: { ...f.config.worker, cwd: "a\\..\\b" } })).toThrow(
       "worker.cwd must be relative to the isolated candidate",
     );
-    expect(load({ runtime: "hc" })).toThrow('runtime:"herdr"');
+    expect(load({ runtime: "hc" })).toThrow('target:"cataly"');
   });
 });

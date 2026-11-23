@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { lstatSync, mkdirSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, readlinkSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { installBundle, rollbackRelease } from "../src/release/install.ts";
 import { recoverInstalled, releasePath } from "../src/release/state.ts";
@@ -18,8 +18,6 @@ posix(
     const git = Bun.which("git");
     if (!git) throw new Error("The Git fixture prerequisite is unavailable");
     symlinkSync(git, join(tools, "git"));
-    const runtime = process.platform === "darwin" ? "hc" : "herdr";
-    writeFileSync(join(tools, runtime), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
     // Replacing process.env in the test runner does not replace Bun.which's default environment.
     const child = Bun.spawn(
       [process.execPath, "test", join(import.meta.dir, "fixtures/release-isolated-source-bundle.test.ts")],

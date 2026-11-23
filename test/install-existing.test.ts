@@ -47,7 +47,6 @@ posix("the historical primary source checkout upgrades in place without rewritin
   writeFileSync(join(s.upstream, s.cli), "console.log(process.env.CATALY_CONFIG, process.argv[2]);\n");
   git(s.upstream, "commit", "-qam", "current source skill layout");
   const original = `${JSON.stringify({
-    runtime: "herdr",
     agentCommand: [join(base, "bin/omp"), "--dori-role", "lane", "--model", "{model}", "{prompt}"],
     stateDir: "~/.dori/state",
     ompUlwPath: "",
@@ -109,7 +108,7 @@ posix("a legacy extension alone does not adopt an unrelated historical configura
 });
 
 posix(
-  "a side upgrade keeps the old terminal preference but selects headless through the regenerated environment",
+  "a side upgrade drops the old terminal environment and selects headless through the regenerated environment",
   () => {
     const s = setup();
     const base = join(s.home, ".omp-dori");
@@ -119,7 +118,6 @@ posix(
     writeFileSync(join(base, "skills/omp-dori-mode/owner-note"), "keep\n");
     const configPath = join(base, "config.json");
     const original = `${JSON.stringify({
-      runtime: "herdr",
       agentCommand: [join(base, "bin/omp"), "--dori-role", "lane", "{prompt}"],
       ompUlwPath: "",
       customSetting: { keep: true },
@@ -134,7 +132,6 @@ const configPath = process.env.CATALY_CONFIG;
 console.log(JSON.stringify({
   runtime: readRuntimeChoice({ env: process.env, configPath }),
   agentCommand: (await loadConfig(configPath)).agentCommand,
-  namespace: process.env.HC_SESSION,
 }));
 `;
     const select = (extra: Record<string, string> = {}) =>
@@ -150,7 +147,7 @@ console.log(JSON.stringify({
           "-e",
           probe,
         ],
-        { env: s.env({ HERDR_PANE_ID: "earlier-terminal", ...extra }) },
+        { env: s.env(extra) },
       );
 
     const upgraded = s.install({ CATALY_NO_PULL: "1", OMP_CATALY_HOME: "" });
@@ -168,11 +165,10 @@ console.log(JSON.stringify({
     expect(JSON.parse(defaultRuntime.stdout.toString())).toEqual({
       runtime: { kind: "headless", source: "default" },
       agentCommand: [join(base, "bin/omp"), "--cataly-role", "lane", "{prompt}"],
-      namespace: "omp-dori",
     });
-    const overriddenRuntime = select({ CATALY_RUNTIME: "hc" });
-    expect(overriddenRuntime.exitCode, overriddenRuntime.stderr.toString()).toBe(0);
-    expect(JSON.parse(overriddenRuntime.stdout.toString()).runtime).toEqual({ kind: "hc", source: "env" });
+    const legacyRuntime = select({ CATALY_RUNTIME: "hc" });
+    expect(legacyRuntime.exitCode).not.toBe(0);
+    expect(legacyRuntime.stderr.toString()).toContain("This Cataly home still uses the herdr/hc terminal runtime");
   },
 );
 

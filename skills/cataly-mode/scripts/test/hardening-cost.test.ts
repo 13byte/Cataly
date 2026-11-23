@@ -5,7 +5,8 @@ import { closeLane } from "../src/done-flow.ts";
 import { freshnessTick } from "../src/freshness.ts";
 import type { Lane } from "../src/registry.ts";
 import { Reports } from "../src/reports.ts";
-import { depsFor, fakeClock, newWorld, withState } from "./fakes.ts";
+import { depsFor, fakeClock, nativeLane, newWorld, withState } from "./fakes.ts";
+import { closableLane } from "./native-close-fixture.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00Z");
 
@@ -15,7 +16,6 @@ const lane: Lane = {
   key: "hardening-qa",
   title: "QA",
   thread: "none",
-  pane: "qa:p1",
   brief: "/b.md",
   done: "merged acme/app#1",
   openedAt: new Date(T0).toISOString(),
@@ -30,8 +30,8 @@ test("a lane whose supervision state is corrupt is reported once and the sweep g
       nudgeAfterMin: 999,
       supervision: { defaults: { wallMinutes: 1 }, gitActivity: false },
     });
-    const bad = { ...lane, key: "bad-lane", pane: "qa:p2" };
-    const good = { ...lane, key: "good-lane" };
+    const bad = { ...lane, key: "bad-lane", ...nativeLane(world, 2) };
+    const good = { ...lane, key: "good-lane", ...nativeLane(world, 1) };
     await deps.registry.write(bad);
     await deps.registry.write(good);
     const reports = new Reports(state.dir);
@@ -56,7 +56,7 @@ test("a sweep with no usage hook writes no cost readings", async () => {
     const world = newWorld(),
       clock = fakeClock(T0);
     const deps = depsFor(world, clock, state.dir, { nudgeAfterMin: 999, supervision: { gitActivity: false } });
-    await deps.registry.write(lane);
+    await deps.registry.write({ ...lane, ...nativeLane(world, 1) });
     await new Reports(state.dir).report(lane.key, "milestone", "started", T0);
     await freshnessTick(deps, "/home/test");
     clock.at += MIN;
@@ -76,7 +76,8 @@ test("a failing cost hook is reported and does not stop an authorized close", as
     });
     mkdirSync(join(state.dir, "lanes"), { recursive: true });
     const external = deps.run;
-    await deps.registry.create(lane);
+    const bound = { ...lane, ...closableLane(world, 1, join(state.dir, "repo")) };
+    await deps.registry.create(bound);
     const result = await closeLane(
       {
         ...deps,
@@ -86,7 +87,7 @@ test("a failing cost hook is reported and does not stop an authorized close", as
           return external(argv, opts);
         },
       },
-      lane,
+      bound,
       "verified",
     );
     expect(result.closed).toBe(true);
@@ -107,7 +108,8 @@ test("authorized close records known cost and keeps it in the lane journal", asy
     });
     const external = deps.run;
     const calls: (readonly string[])[] = [];
-    await deps.registry.create(lane);
+    const bound = { ...lane, ...closableLane(world, 1, join(state.dir, "repo")) };
+    await deps.registry.create(bound);
     const result = await closeLane(
       {
         ...deps,
@@ -118,7 +120,7 @@ test("authorized close records known cost and keeps it in the lane journal", asy
           return external(argv, opts);
         },
       },
-      lane,
+      bound,
       "verified",
     );
     // Then the close surface reports the same cumulative values it persisted.

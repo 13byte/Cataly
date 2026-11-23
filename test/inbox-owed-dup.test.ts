@@ -4,15 +4,13 @@ import { join } from "node:path";
 import { flushInbox } from "../src/inbox.ts";
 import { owedFile } from "../src/inbox-files.ts";
 import { payLead } from "../src/inbox-forward.ts";
-import { href } from "./fake.ts";
-import { setup } from "./inbox-setup.ts";
+import { LEAD_REF as LEAD, setup } from "./inbox-setup.ts";
 
 // payLead renames each spooled notice aside (`.moving`), appends it, then removes the file. A run cut short between the
 // append and the removal leaves the notice queued and its `.moving` file behind. A lead flush in another process can
 // deliver that copy before the next payer pass; recovery of the leftover file then finds no queued copy and appends it
 // again, so the lead is told twice (inbox-lock-order.md rule 3: a spool identity is settled when its entry leaves).
 
-const LEAD = href("w1:p1");
 const REAL_RM = fs.rmSync;
 
 afterEach(() => mock.restore());

@@ -68,7 +68,7 @@ export async function create(exec: Exec, spec: CreateSpec, env: Env): Promise<Se
     ...(group === undefined ? {} : { group }),
     ...(container === undefined ? {} : { container }),
   };
-  if (spec.container === "tab") await nameTab(exec, ref, spec.name);
+  if ((spec.container ?? "tab") === "tab") await nameTab(exec, ref, spec.name);
   return ref;
 }
 

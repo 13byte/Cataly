@@ -12,17 +12,13 @@ posix.each(["nudge.md", "nudge-waiting.md"])(
     const root = mkdtempSync("/tmp/cataly-prompts-access-");
     try {
       chmodSync(root, 0o755);
-      for (const dir of ["src", "prompts"]) {
+      const scripts = join("skills", "cataly-mode", "scripts", "src");
+      for (const dir of ["src", "prompts", scripts]) {
         cpSync(join(import.meta.dir, "..", dir), join(root, dir), { recursive: true });
-      }
-      const compat = join("skills", "cataly-mode", "scripts", "src");
-      mkdirSync(join(root, compat), { recursive: true });
-      for (const file of ["checkpoint-lock.ts", "session-compat.ts"]) {
-        cpSync(join(import.meta.dir, "..", compat, file), join(root, compat, file));
       }
       cpSync(join(import.meta.dir, "..", "package.json"), join(root, "package.json"));
       mkdirSync(join(root, "test"));
-      for (const file of ["fake.ts", "fake-hc.ts", "harness-setup.ts"]) {
+      for (const file of ["fake.ts", "fake-terminal.ts", "harness-setup.ts"]) {
         cpSync(join(import.meta.dir, file), join(root, "test", file));
       }
       const work = join(root, "work");

@@ -111,14 +111,11 @@ const sessionProcs = async (
   ref: SessionRef,
   table: readonly Proc[],
   deps: SessionDeps,
-  requireForeground = false,
 ): Promise<{ readonly candidates: readonly Proc[]; readonly probe?: Probe; readonly unknownReason?: string }> => {
   const config = deps.stateDir === undefined ? {} : { stateDir: deps.stateDir };
   const rts = deps.rts ?? runtimesFor(config, process.env, deps.run);
   try {
-    const rt = rts.for(ref);
-    const probe =
-      requireForeground && ref.runtime === "hc" ? await rt.probe(ref, { foregroundOnly: true }) : await rt.probe(ref);
+    const probe = await rts.for(ref).probe(ref);
     const root = probe.rootPid;
     return root
       ? { probe, candidates: [...table.filter((p) => p.pid === root), ...descendants(table, root)] }
@@ -172,7 +169,7 @@ export const trustedPaneState = async (
   const table = await procTable(run);
   // Unbound action callers distinguish a failed read from an absent native record.
   if (table === null) throw new ProcessTableUnavailableError();
-  const { candidates, probe } = await sessionProcs(ref, table, deps, requireForeground);
+  const { candidates, probe } = await sessionProcs(ref, table, deps);
   // The runtime only returns non-shell OMP identity when its writer owns the foreground.
   if (requireForeground && (probe?.shellInFront !== false || probe.approvalPending !== false)) return null;
   return stateForAgent(stateDir, ref, candidates, probe);
@@ -190,7 +187,7 @@ export const resolveSession = async (
       ? { id: state.sessionId, via: "rpc-ui", pid: state.pid }
       : unresolved("headless session observation unconfirmed");
   }
-  // The root itself is a candidate when hc or herdr runs OMP directly, without an intervening shell.
+  // The root itself is a candidate when the terminal runs OMP directly, without an intervening shell.
   const { candidates, probe, unknownReason } = await sessionProcs(ref, table ?? [], deps);
   if (table === null) return unresolved("process table unavailable");
   if (unknownReason) return unresolved(unknownReason);

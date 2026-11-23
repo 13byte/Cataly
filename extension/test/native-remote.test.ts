@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { dirname, join } from "node:path";
-import { readPaneState } from "../../skills/cataly-mode/scripts/src/lane-state.ts";
 import { remoteSocketDir, remoteSocketPath } from "../../src/remote/socket-path.ts";
 import ompCataly from "../index.ts";
 import { DUTY_INVARIANTS, ROLE_INVARIANTS } from "../role-invariants.ts";
@@ -12,14 +11,7 @@ import { fakePi, type FakePi, useConfig } from "./fake-pi.ts";
 type Reply = { ok: true; data: Record<string, unknown> } | { ok: false; error: string };
 const roots: string[] = [];
 const active: FakePi[] = [];
-const names = [
-  "HC_TERMINAL_ID",
-  "HERDR_PANE_ID",
-  "CATALY_HEADLESS_ID",
-  "CATALY_HARNESS_ROLE",
-  "CATALY_CONFIG",
-  "CATALY_STATE_DIR",
-] as const;
+const names = ["CATALY_HEADLESS_ID", "CATALY_HARNESS_ROLE", "CATALY_CONFIG", "CATALY_STATE_DIR"] as const;
 const env = new Map<string, string | undefined>();
 const unixSocketTest = test.skipIf(typeof process.getuid !== "function");
 
@@ -159,8 +151,6 @@ test.each([
 ])("flagless archived duty or malformed newest proof cannot acquire lead capabilities %#", async (proof) => {
   const root = useConfig("");
   roots.push(root);
-  const pane = "w1:p17";
-  process.env.HERDR_PANE_ID = pane;
   const fake = fakePi({
     mode: "tui",
     session: {
@@ -186,7 +176,6 @@ test.each([
   await fake.emit("session_start");
   expect(fake.active).not.toContain("monitor");
   expect(fake.messages).toEqual([]);
-  expect(readPaneState(root, pane)).toBeNull();
   expect(await fake.emit("before_agent_start", { systemPrompt: ["base"] })).toContainEqual({
     systemPrompt: ["base", DUTY_INVARIANTS],
   });

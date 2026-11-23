@@ -100,7 +100,7 @@ const discord = cli
   : undefined;
 if (discord) {
   const config = join(root, "config.json");
-  writeFileSync(config, JSON.stringify({ stateDir: join(root, "queue"), runtime: "herdr", hooks: {} }));
+  writeFileSync(config, JSON.stringify({ stateDir: join(root, "queue"), hooks: {} }));
   fileDiscordInboundStore(join(root, "queue"), "20").save("100");
   Object.assign(process.env, { CATALY_CONFIG: config, CATALY_STATE_DIR: join(root, "queue"),
     CATALY_DISCORD_TOKEN: LOOPBACK_TOKEN, CATALY_DISCORD_OWNER_ID: "10", CATALY_DISCORD_CHANNEL_ID: "20",

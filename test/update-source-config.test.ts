@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { chmodSync, existsSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
+import { LegacyRuntimeError } from "../src/runtime/registry.ts";
 import {
   loadSourceUpdateConfig,
   parseSourceUpdateConfig,
@@ -8,7 +9,7 @@ import {
 } from "../src/update/source-update-config.ts";
 import { sourceFixture } from "./update-source-setup.ts";
 
-const checks = ["check", "e2e-herdr", "e2e-hc"];
+const checks = ["check"];
 test("source configuration opts into daily, thirty-minute, draft-aware updates without creating deployment state", () => {
   const f = sourceFixture();
   expect(f.config.repository).toBe("vntrevx/Cataly");
@@ -16,7 +17,7 @@ test("source configuration opts into daily, thirty-minute, draft-aware updates w
   expect(f.config.ownerQuietMs).toBe(1_800_000);
   expect(f.config.activityMaxAgeMs).toBe(120_000);
   expect(f.config.requiredCi).toEqual(checks);
-  expect(f.config.deployment.nativeStopMode).toBe("ui");
+  expect(Object.keys(f.config.deployment)).not.toContain("nativeStopMode");
   expect(existsSync(f.config.deployment.releaseRoot)).toBe(false);
 });
 
@@ -27,7 +28,7 @@ const invalid: Record<string, unknown>[] = [
   { activityMaxAgeSeconds: 301 },
   { activityFiles: [] },
   { activityFiles: ["outside.json"] },
-  { requiredCi: ["check", "e2e-herdr"] },
+  { requiredCi: ["extra-job"] },
   { requiredCi: [...checks, "check"] },
   { repository: "https://github.com/vntrevx/Cataly" },
   { version: 2 },
@@ -39,14 +40,11 @@ for (const change of invalid)
     expect(() => parseSourceUpdateConfig({ ...f.settings, ...change }, f.path)).toThrow();
   });
 
-test("source configuration cannot opt out of draft-aware stop or count duplicate receivers", () => {
+test("source configuration refuses a terminal-era stop mode and cannot count duplicate receivers", () => {
   const f = sourceFixture();
   expect(() =>
-    parseSourceUpdateConfig(
-      { ...f.settings, deployment: { ...f.settings.deployment, nativeStopMode: "signal" } },
-      f.path,
-    ),
-  ).toThrow("UI stop");
+    parseSourceUpdateConfig({ ...f.settings, deployment: { ...f.settings.deployment, nativeStopMode: "ui" } }, f.path),
+  ).toThrow(LegacyRuntimeError);
   expect(() =>
     parseSourceUpdateConfig(
       { ...f.settings, activityFiles: [...f.settings.activityFiles, ...f.settings.activityFiles] },

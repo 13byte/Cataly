@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import * as localReader from "../skills/cataly-mode/scripts/src/config.ts";
 import { SourceBundleError } from "./release/source-bundle.ts";
+import { LegacyRuntimeError } from "./runtime/registry.ts";
 import { ConfigError as RuntimeConfigError, readRuntimeChoice } from "./runtime/select.ts";
 import { assertSetupFile, type SetupSnapshot } from "./setup-files.ts";
 
@@ -59,7 +60,7 @@ export async function setupReadback(
     }
   } catch (error) {
     reason =
-      error instanceof reader.ConfigError || error instanceof RuntimeConfigError
+      error instanceof reader.ConfigError || error instanceof RuntimeConfigError || error instanceof LegacyRuntimeError
         ? "invalid-effective-configuration"
         : error instanceof SourceBundleError
           ? "current-updater-runtime-unavailable"

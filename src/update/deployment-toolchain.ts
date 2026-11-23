@@ -40,12 +40,11 @@ export function assertRuntimeToolchain(config: DeploymentConfig, receipt: Toolch
   }
 }
 
-/** Query the exact private executable; an admitted prior image may predate the new-release minimum. */
+/** Query the exact private executable against the release's native minimum. */
 export async function inspectRuntimeToolchain(
   config: DeploymentConfig,
   record: DeploymentRecord,
   omp: string,
-  legacy = false,
   nativeSource?: NativeReceipt,
 ): Promise<ToolchainReceipt> {
   // Direct prior-image inspection also verifies and records an explicit executable inside the cache.
@@ -61,7 +60,7 @@ export async function inspectRuntimeToolchain(
     )
       throw new DeploymentHeld("owned native update fence differs");
   } else saveDeploymentJson(nativeConfig, { update: { auto: false } });
-  const home = join(record.directory, legacy ? "legacy-version-home" : "version-home");
+  const home = join(record.directory, "version-home");
   mkdirSync(home, { recursive: true, mode: 0o700 });
   const version = await command(
     [omp, "--config", nativeConfig, "--version"],
@@ -72,12 +71,9 @@ export async function inspectRuntimeToolchain(
   const match = /^(?:omp\/|v)?(\d+\.\d+\.\d+)(?:\s|$)/.exec(version);
   if (!match?.[1]) throw new DeploymentHeld("private native OMP version could not be observed");
   const [major, minor, patch] = match[1].split(".").map(Number);
-  if (
-    !legacy &&
-    ((major ?? 0) < 18 || (major === 18 && (minor ?? 0) < 18) || (major === 18 && minor === 18 && (patch ?? 0) < 8))
-  )
+  if ((major ?? 0) < 18 || (major === 18 && (minor ?? 0) < 18) || (major === 18 && minor === 18 && (patch ?? 0) < 8))
     throw new DeploymentHeld("private native OMP 18.18.8 or newer is required");
-  if (!legacy && lstatSync(join(record.releasePath, "native-omp.lock"), { throwIfNoEntry: false })) {
+  if (lstatSync(join(record.releasePath, "native-omp.lock"), { throwIfNoEntry: false })) {
     const required = readSourceBundle(record.releasePath, true).lock.nativeVersion;
     if (match[1] !== required) throw new DeploymentHeld(`new source bundles require native OMP ${required}`);
   }
@@ -93,7 +89,7 @@ export async function inspectRuntimeToolchain(
     nativeConfigHash: digest(readFileSync(nativeConfig)),
     ...(nativeSource
       ? { nativeSource }
-      : !legacy && lstatSync(join(record.releasePath, "native-omp.lock"), { throwIfNoEntry: false })
+      : lstatSync(join(record.releasePath, "native-omp.lock"), { throwIfNoEntry: false })
         ? { nativeOverride: true as const }
         : {}),
   };
@@ -118,7 +114,7 @@ export async function prepareRuntimeToolchain(config: DeploymentConfig, record: 
     locked && !config.omp ? await provisionNativeSource(record.releasePath, config.home, config.bun) : undefined;
   const omp = native?.omp ?? config.omp;
   if (!omp) throw new DeploymentHeld("older source protocol needs its explicit native executable");
-  record.toolchain = await inspectRuntimeToolchain(config, record, omp, false, native);
+  record.toolchain = await inspectRuntimeToolchain(config, record, omp, native);
   if (locked) {
     const entry = await provisionSourceOverlay(record.releasePath, config.home);
     record.toolchain = {

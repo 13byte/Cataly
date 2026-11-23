@@ -43,14 +43,8 @@ export const validateLaunch = async (
   if (!LANE_KEY.test(input.key)) throw new LaunchError(`key must match ${LANE_KEY}`);
   if (input.key === RESERVED_LANE_KEY)
     throw new LaunchError(`lane key "${RESERVED_LANE_KEY}" is reserved for the lead`);
-  if (
-    input.runtime !== undefined &&
-    input.runtime !== "herdr" &&
-    input.runtime !== "hc" &&
-    input.runtime !== "tern" &&
-    input.runtime !== "headless"
-  )
-    throw new LaunchError("launch runtime must be headless, hc, herdr or tern");
+  if (input.runtime !== undefined && input.runtime !== "tern" && input.runtime !== "headless")
+    throw new LaunchError("launch runtime must be headless or tern");
   if (await deps.registry.read(input.key)) throw new LaunchError(`lane ${input.key} is already registered`);
   const queued = new LaunchQueue(deps.config.stateDir).read(input.key);
   if (queued && queued.status !== "cancelled" && !(queued.status === "starting" && input.queueId === queued.id))

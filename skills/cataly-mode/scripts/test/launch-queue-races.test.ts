@@ -5,6 +5,7 @@ import { cancelQueued, enqueueLaunch, queueTick, startQueued } from "../src/laun
 import { LaunchQueue } from "../src/launch-queue-store.ts";
 import { reopenLane } from "../src/reopen.ts";
 import { statusOf } from "../src/registry.ts";
+import { href, sid } from "./fakes.ts";
 import { queueFixture, roomy, type QueueFixture } from "./launch-queue-fixture.ts";
 
 let f: QueueFixture;
@@ -39,18 +40,20 @@ test("reopening a completed predecessor during the live Done check keeps the dep
   const sessionFile = join(f.state.dir, "prior-session.jsonl");
   const cwd = f.deps.config.defaultCwd;
   writeFileSync(sessionFile, `${JSON.stringify({ type: "session", id: session, cwd })}\n`);
-  const closed = { ...f.prior, session, sessionFile, cwd };
+  // A headless lane reopens only from its recorded (now gone) native session.
+  const closed = { ...f.prior, session, sessionFile, cwd, pane: sid(9), sessionRef: href(sid(9)) };
   await f.deps.registry.write(closed);
   await enqueueLaunch(f.deps, f.input, [closed.key]);
   const deps = {
     ...f.deps,
     run: async (...args: Parameters<typeof f.deps.run>) => {
       if (args[0][0] === "gh") {
+        // The native agent fails to start, but the new paused generation is already durable.
+        f.failStart();
         const reopened = await reopenLane(
           { ...f.deps, config: { ...f.deps.config, agentCommand: ["omp", "{prompt}"], startupWaitSeconds: 1 } },
           closed,
         );
-        // The terminal fixture does not start an OMP agent, but the new paused generation is already durable.
         expect(statusOf(reopened.lane)).toBe("paused");
         expect(reopened.lane.receipt).toBeUndefined();
       }
@@ -90,43 +93,25 @@ test.each(["generation", "successful receipt"])(
   },
 );
 
-test("different queue keys share the last pane slot without waiting for the winner's startup check", async () => {
+test("different queue keys share the last session slot once the winner's reservation exists", async () => {
   const other = { ...f.input, key: "other-lane" };
   await enqueueLaunch(f.deps, f.input, [f.prior.key]);
   await enqueueLaunch(f.deps, other, [f.prior.key]);
   const creating = Promise.withResolvers<void>();
   const allowCreate = Promise.withResolvers<void>();
-  const checkingStartup = Promise.withResolvers<void>();
-  const allowStartup = Promise.withResolvers<void>();
   const waitingForAdmission = Promise.withResolvers<void>();
   const allowRetry = Promise.withResolvers<void>();
   const config = {
     ...f.deps.config,
     guard: { ...f.deps.config.guard, panesMax: 1, memFreeMinPct: 0, diskFreeMinGb: 0 },
   };
-  const first = startQueued(
-    {
-      ...f.deps,
-      config,
-      run: async (...args) => {
-        if (args[0][0] === "herdr" && args[0][1] === "tab" && args[0][2] === "create") {
-          creating.resolve();
-          await allowCreate.promise;
-        }
-        return f.deps.run(...args);
-      },
-      clock: {
-        ...f.deps.clock,
-        sleep: async (ms) => {
-          if (ms === 20_000) {
-            checkingStartup.resolve();
-            await allowStartup.promise;
-          }
-        },
-      },
-    },
-    f.input.key,
-  );
+  const count = f.world.onCreate;
+  f.world.onCreate = async (spec) => {
+    await count?.(spec);
+    creating.resolve();
+    await allowCreate.promise;
+  };
+  const first = startQueued({ ...f.deps, config }, f.input.key);
   await Promise.race([creating.promise, first]);
   const second = startQueued(
     {
@@ -146,7 +131,7 @@ test("different queue keys share the last pane slot without waiting for the winn
   try {
     await Promise.race([waitingForAdmission.promise, second]);
     allowCreate.resolve();
-    await Promise.race([checkingStartup.promise, first]);
+    await first;
     allowRetry.resolve();
 
     expect(await second).toEqual({ code: 4, lines: [`QUEUE_HELD ${other.key} panes 1 >= 1`] });
@@ -155,7 +140,6 @@ test("different queue keys share the last pane slot without waiting for the winn
   } finally {
     allowCreate.resolve();
     allowRetry.resolve();
-    allowStartup.resolve();
     await Promise.allSettled([first, second]);
   }
   expect((await first).code).toBe(0);

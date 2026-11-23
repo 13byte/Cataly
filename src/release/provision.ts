@@ -2,7 +2,7 @@ import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSy
 import { delimiter, dirname, join } from "node:path";
 import { platform } from "../platform/index.ts";
 import type { ConsumerPaths } from "./files.ts";
-import { consumerPaths, isPrimaryConsumer, owned, readJson, realDirectory, regularFile, saveJson } from "./files.ts";
+import { owned, readJson, realDirectory, regularFile, saveJson } from "./files.ts";
 import { assertSourceBundle, readSourceBundle } from "./source-bundle.ts";
 import { checkoutSourceBundle } from "./source-checkout.ts";
 import type { ReleaseManifest } from "./types.ts";
@@ -44,38 +44,12 @@ export function nativeOmp(): string | undefined {
   return undefined;
 }
 
-export function prerequisites(runtime: string, tools = true, legacyNative = false, paths = consumerPaths()): void {
-  if (!platform.supportsReleaseProfile(platform.os, process.arch, runtime))
-    throw new Error(`Unsupported release host/runtime: ${platform.os}/${process.arch}/${runtime}`);
+export function prerequisites(tools = true): void {
+  if (!platform.supportsHeadlessRelease(platform.os, process.arch))
+    throw new Error(`Unsupported release host: ${platform.os}/${process.arch}/headless`);
   if (!tools) return;
   if (!atLeast(Bun.version, [1, 4, 4])) throw new Error("Bun 1.4.4+ is required; install it before Cataly");
-  for (const name of runtime === "headless" ? ["git"] : ["git", runtime]) {
-    if (!Bun.which(name)) throw new Error(`${name} is required; install it before Cataly`);
-  }
-  if (legacyNative) {
-    const executable = isPrimaryConsumer(paths) ? Bun.which("omp") : nativeOmp();
-    if (!executable) throw new Error("Older release protocol requires an independently installed OMP 18.18.8+");
-    if (isPrimaryConsumer(paths)) {
-      const managed = join(paths.cataly, "bin/omp");
-      if (lstatSync(managed, { throwIfNoEntry: false })) {
-        const target = realpathSync(managed);
-        const config = regularFile(paths.config) ? readJson(paths.config) : undefined;
-        const command =
-          config && typeof config === "object" && "agentCommand" in config && Array.isArray(config.agentCommand)
-            ? config.agentCommand[0]
-            : undefined;
-        const configured = typeof command === "string" ? Bun.which(command) : undefined;
-        if (realpathSync(executable) === target || (configured && realpathSync(configured) === target))
-          throw new Error(
-            "Older release protocol requires an independently installed OMP 18.18.8+; managed omp is removed during activation",
-          );
-      }
-    }
-    const omp = Bun.spawnSync([executable, "--version"], { stdout: "pipe", stderr: "pipe", timeout: 10_000 });
-    const version = omp.stdout.toString().match(/\d+\.\d+\.\d+(?:[-+][^\s]+)?/)?.[0] ?? "";
-    if (omp.exitCode !== 0 || !atLeast(version, [18, 18, 8]))
-      throw new Error("Older release protocol requires OMP 18.18.8+");
-  }
+  if (!Bun.which("git")) throw new Error("git is required; install it before Cataly");
 }
 
 async function git(args: readonly string[], cwd: string, home: string): Promise<string> {

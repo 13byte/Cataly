@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { parseDeploymentConfig } from "../src/update/deployment.ts";
 import { capturePointer, restorePointer, saveDeploymentJson, switchPointer } from "../src/update/deployment-files.ts";
 import { processIdentity, sameProcess } from "../src/update/deployment-process.ts";
-import { stopRecordedMonitors } from "../src/update/deployment-native.ts";
+import { stopRecordedMonitors } from "../src/update/deployment-stop.ts";
 import { fixture } from "./update-deploy-setup.ts";
 
 // The kernels whose process identity deployment can bind.

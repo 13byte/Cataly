@@ -33,21 +33,26 @@ const working: Lane = {
   lastReplyAt: T0,
 };
 
-test("adopting a lane refuses a Done line the watcher could never check", async () => {
+test("adopting a Tern block refuses a Done line the watcher could never check, and herdr/hc panes", async () => {
   const deps = depsFor(world, fakeClock(T0), state.dir);
   await expect(
-    adoptLane(deps, { key: "x-lane", title: "x", brief: "/b.md", done: "two clean QA passes", pane: "w:p2" }),
+    adoptLane(deps, { key: "x-lane", title: "x", brief: "/b.md", done: "two clean QA passes", pane: "tern:2" }),
   ).rejects.toBeInstanceOf(LaunchError);
+  for (const pane of ["w:p2", "herdr:w1:p2", "hc:t2"])
+    await expect(
+      adoptLane(deps, { key: "x-lane", title: "x", brief: "/b.md", done: "closed acme/app#3", pane }),
+    ).rejects.toBeInstanceOf(LaunchError);
   const ok = await adoptLane(deps, {
     key: "x-lane",
     title: "x",
     brief: "/b.md",
     done: "closed acme/app#3",
-    pane: "w:p2",
+    pane: "2",
   });
   expect(ok.thread).toBe("none");
+  expect(ok.sessionRef).toEqual({ runtime: "tern", id: "2" });
   await expect(
-    adoptLane(deps, { key: "x-lane", title: "x", brief: "/b.md", done: "closed acme/app#3", pane: "w:p2" }),
+    adoptLane(deps, { key: "x-lane", title: "x", brief: "/b.md", done: "closed acme/app#3", pane: "tern:2" }),
   ).rejects.toThrow("already registered");
 });
 
@@ -84,33 +89,30 @@ async function verifyFooterRuntime() {
     process.env["CATALY_CONFIG"] = configFile;
     const brief = join(dir, "brief.md");
     writeFileSync(brief, "Perform the fixture work.");
-    for (const bin of ["herdr", "hc", "tern"])
-      writeFileSync(
-        join(dir, bin),
-        `#!/usr/bin/env bun\nawait Bun.write(process.env.ARGV_LOG, JSON.stringify([${JSON.stringify(bin)}, ...process.argv.slice(2)]));\n`,
-        { mode: 0o755 },
-      );
+    writeFileSync(
+      join(dir, "tern"),
+      `#!/usr/bin/env bun\nawait Bun.write(process.env.ARGV_LOG, JSON.stringify(["tern", ...process.argv.slice(2)]));\n`,
+      { mode: 0o755 },
+    );
     const marker = join(dir, "must not execute");
     const text = `it's "done"; $(touch ${shellQuote(marker)}) \`touch ${shellQuote(marker)}\` \\ $HOME | 100%
 next line`;
     const cases: Array<{
-      configured?: CatalyConfig["runtime"];
+      configured?: CatalyConfig["sessionRuntime"];
       env: Record<string, string>;
-      selected?: CatalyConfig["runtime"];
+      selected?: CatalyConfig["sessionRuntime"];
       lead?: string;
     }> = [
-      { configured: "herdr", env: {}, selected: "herdr" },
-      { configured: "hc", env: {}, selected: "hc" },
-      { configured: "herdr", env: { CATALY_RUNTIME: "hc" }, selected: "hc" },
-      { env: { HC_TERMINAL_ID: "t1" } },
-      { env: { HERDR_PANE_ID: "w:p1" } },
-      { env: { PATH: dir } },
       { configured: "tern", env: {}, selected: "tern" },
-      { configured: "herdr", env: {}, lead: "" },
+      { env: { CATALY_RUNTIME: "tern" }, selected: "tern" },
+      { env: { TERN_PANE: "7" } },
+      { env: { PATH: dir } },
+      { configured: "tern", env: {}, lead: "" },
       { env: {} },
     ];
     for (const [index, fixture] of cases.entries()) {
-      const deps = depsFor(world, fakeClock(T0), state.dir);
+      // The footer names the runtime chosen from config and env, so these deps build their own runtimes.
+      const { rts: _rts, ...deps } = depsFor(world, fakeClock(T0), state.dir);
       const config = { ...deps.config, leadPane: fixture.lead ?? "lead's pane" };
       delete config.sessionRuntime;
       if (fixture.configured) config.sessionRuntime = fixture.configured;
@@ -160,12 +162,7 @@ next line`;
         expect(await new Response(sender.stderr).text()).toBe("");
         expect(await sender.exited).toBe(0);
         const report = reportLine(saved);
-        const sent =
-          fixture.selected === "herdr"
-            ? ["pane", "run", config.leadPane, report]
-            : fixture.selected === "tern"
-              ? ["run", config.leadPane, "--", report]
-              : ["send", config.leadPane, "--", report];
+        const sent = ["run", config.leadPane, "--", report];
         expect(await Bun.file(argvLog).json()).toEqual([fixture.selected, ...sent]);
       } else expect(forward).toBeUndefined();
       expect(await Bun.file(journal.path(key)).text()).toBe(beforeForward);

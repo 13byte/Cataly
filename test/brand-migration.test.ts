@@ -5,20 +5,24 @@ import { join } from "node:path";
 import { loadConfig } from "../skills/cataly-mode/scripts/src/config.ts";
 import { importLegacyEnvironment } from "../src/legacy-environment.ts";
 import { currentAgentCommand } from "../src/runtime/legacy-agent-command.ts";
+import { LegacyRuntimeError } from "../src/runtime/registry.ts";
 import { readRuntimeChoice } from "../src/runtime/select.ts";
 
-test("upgrading reads the old installer's exact command without rewriting the owner's config or selecting hc", async () => {
+test("upgrading reads the old installer's exact command; a saved hc runtime stops without rewriting config", async () => {
   const home = mkdtempSync(join(tmpdir(), "cataly-upgrade-"));
   const path = join(home, "config.json");
   const argv = [join(home, "bin", "omp"), "--dori-role", "lane", "--model", "{model}", "{prompt}"] as const;
-  const bytes = JSON.stringify({ runtime: "hc", agentCommand: argv, stateDir: join(home, "state") });
+  const bytes = JSON.stringify({ agentCommand: argv, stateDir: join(home, "state") });
+  const legacy = JSON.stringify({ runtime: "hc", agentCommand: argv });
   try {
     writeFileSync(path, bytes);
     const env = { CATALY_HOME: home, PATH: "" };
     const config = await loadConfig(path, home, env);
     expect(config.agentCommand).toEqual([argv[0], "--cataly-role", "lane", ...argv.slice(3)]);
-    expect(readRuntimeChoice({ env, configPath: path }).kind).toBe(process.platform === "win32" ? "hc" : "headless");
     expect(readFileSync(path, "utf8")).toBe(bytes);
+    writeFileSync(path, legacy);
+    expect(() => readRuntimeChoice({ env, configPath: path })).toThrow(LegacyRuntimeError);
+    expect(readFileSync(path, "utf8")).toBe(legacy);
   } finally {
     rmSync(home, { recursive: true });
   }

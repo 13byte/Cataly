@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BRIEF_START } from "../src/launch-footer.ts";
 import { renderTemplate } from "../src/launch-template.ts";
 import { launchLane, prepareLaunch } from "../src/launch.ts";
 import { LaunchQueue } from "../src/launch-queue-store.ts";
-import { Registry } from "../src/registry.ts";
 import { queueFixture, type QueueFixture } from "./launch-queue-fixture.ts";
 
 let f: QueueFixture;
@@ -20,23 +19,17 @@ beforeEach(async () => {
 });
 afterEach(() => f.state.done());
 const template = (name: string, text: string) => writeFileSync(join(templates, name + ".md"), text);
-const cliWith =
-  (preload?: string) =>
-  async (...args: string[]) => {
-    const p = Bun.spawn(
-      [process.execPath, ...(preload ? ["--preload", preload] : []), join(import.meta.dir, "../src/cli.ts"), ...args],
-      {
-        cwd: f.state.dir,
-        env: { HOME: f.state.dir, PATH: join(f.state.dir, "bin"), CATALY_CONFIG: config },
-        stdout: "pipe",
-        stderr: "pipe",
-      },
-    );
-    const out = new Response(p.stdout).text();
-    const err = new Response(p.stderr).text();
-    return { out: await out, err: await err, code: await p.exited };
-  };
-const cli = cliWith();
+const cli = async (...args: string[]) => {
+  const p = Bun.spawn([process.execPath, join(import.meta.dir, "../src/cli.ts"), ...args], {
+    cwd: f.state.dir,
+    env: { HOME: f.state.dir, PATH: join(f.state.dir, "bin"), CATALY_CONFIG: config },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const out = new Response(p.stdout).text();
+  const err = new Response(p.stderr).text();
+  return { out: await out, err: await err, code: await p.exited };
+};
 
 test("includes and variables render literally without evaluating shell or replacement syntax", () => {
   template("common", "Check {{target}}.");
@@ -136,77 +129,6 @@ test.each(["file", "symlink"])("template launch leaves an existing generated out
   expect(lstatSync(brief).isSymbolicLink()).toBe(kind === "symlink");
   expect(f.creates()).toBe(0);
   expect(await f.deps.registry.read(f.input.key)).toBeNull();
-});
-
-test.each(["direct", "queued"])("a %s CLI lane reads its generated brief from a different cwd", async (kind) => {
-  const herdr = join(f.state.dir, "herdr.ts");
-  const preload = join(f.state.dir, "herdr-preload.ts");
-  const repo = join(f.state.dir, "agent-cwd");
-  const state = join(f.state.dir, "state");
-  const recordedCwd = join(f.state.dir, "pane-cwd");
-  const observed = join(f.state.dir, "agent-readback");
-  mkdirSync(repo);
-  writeFileSync(
-    herdr,
-    `import { readFileSync, writeFileSync } from "node:fs";
-const args = process.argv.slice(2);
-if (args[0] === "tab" && args[1] === "create") {
-  writeFileSync(${JSON.stringify(recordedCwd)}, args[args.indexOf("--cwd") + 1]);
-  console.log(JSON.stringify({ result: { root_pane: { pane_id: "w:p1" }, tab_id: "w:t1" } }));
-} else if (args[0] === "pane" && args[1] === "list") {
-  console.log(JSON.stringify({ result: { panes: [] } }));
-} else if (args[0] === "pane" && args[1] === "run") {
-  const brief = /Read and execute the lane brief at (.+?) in full\\./.exec(args[3])?.[1];
-  if (!brief) throw new Error("missing brief in the agent command");
-  process.chdir(readFileSync(${JSON.stringify(recordedCwd)}, "utf8"));
-  writeFileSync(${JSON.stringify(observed)}, readFileSync(brief));
-  // The fixture has read the brief. Stop at the runtime boundary rather than launch a real agent.
-  process.exit(23);
-} else {
-  process.exit(1);
-}
-`,
-  );
-  // Use Bun to run the fixture instead of relying on a PATH shebang, which Windows does not execute.
-  writeFileSync(
-    preload,
-    `const spawn = Bun.spawn.bind(Bun);
-Object.defineProperty(Bun, "spawn", {
-  value: (argv, options) => spawn(
-    Array.isArray(argv) && argv[0] === "herdr"
-      ? [process.execPath, ${JSON.stringify(herdr)}, ...argv.slice(1)]
-      : argv,
-    options,
-  ),
-});
-`,
-  );
-  writeFileSync(
-    config,
-    JSON.stringify({
-      ...f.deps.config,
-      stateDir: "state",
-      defaultCwd: kind === "direct" ? repo : f.state.dir,
-      guard: { ...f.deps.config.guard, memFreeMinPct: 0, diskFreeMinGb: 0 },
-    }),
-  );
-  const registry = new Registry(state);
-  await registry.write({ ...f.prior, done: `file ${JSON.stringify(f.input.brief)}` });
-  template("task", "Read this from the agent working directory.");
-  const args = ["launch", f.input.key, "--title", "Task", "--template", "task", "--done", f.input.done];
-
-  const invoke = cliWith(preload);
-  if (kind === "queued")
-    expect(await invoke(...args, "--after", f.prior.key, "--cwd", repo)).toMatchObject({ code: 0 });
-  const result = kind === "queued" ? await invoke("queue", "start", f.input.key) : await invoke(...args);
-
-  const lane = await registry.read(f.input.key);
-  if (!lane) throw new Error(`generated brief did not reach startup: ${result.err || result.out}`);
-  expect(result.code).toBe(3);
-  expect(result.out).toContain("STARTUP_ERROR");
-  expect(readFileSync(recordedCwd, "utf8")).toBe(kind === "queued" ? realpathSync.native(repo) : repo);
-  expect(readFileSync(observed, "utf8")).toBe(readFileSync(lane.brief, "utf8"));
-  expect(readFileSync(observed, "utf8")).toContain("Read this from the agent working directory.");
 });
 
 test("real CLI queues a rendered snapshot, lists it after restart, and explicitly cancels it", async () => {

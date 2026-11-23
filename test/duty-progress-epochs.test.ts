@@ -3,8 +3,7 @@ import { mkdirSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { dutyTick } from "../src/duty.ts";
 import { ready, report, startLane } from "../src/lanes.ts";
-import { href } from "./fake.ts";
-import { setup } from "./harness-setup.ts";
+import { LEAD_REF, setup } from "./harness-setup.ts";
 
 const MIN = 60_000;
 
@@ -42,7 +41,7 @@ describe("progress epochs", () => {
     lead.status = "working";
     expect(await at(45)).toContainEqual({ lane: "epoch", action: "escalated" });
     const queuedEscalations = () =>
-      d.store.queued(href("w1:p1")).filter((message) => message.text.startsWith("[ESCALATE epoch]"));
+      d.store.queued(LEAD_REF).filter((message) => message.text.startsWith("[ESCALATE epoch]"));
     expect(queuedEscalations()).toHaveLength(1);
     for (const min of [46, 60, 90]) expect(await at(min)).toEqual([]);
     expect(d.store.lane("epoch")!.nudges).toBe(0);

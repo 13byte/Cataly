@@ -2,46 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { up } from "../src/cli-up.ts";
 import { review } from "../src/gate.ts";
 import { agentCommand, defaultDeps, harnessLaunchEnv } from "../src/harness.ts";
-import { startLane } from "../src/lanes.ts";
 import { ompStateDir } from "../src/runtime/omp.ts";
 import { World } from "./fake.ts";
-import { setup } from "./harness-setup.ts";
-import { captureIo } from "./inbox-setup.ts";
 
 describe("OMP harness launches", () => {
-  for (const runtime of ["herdr", "hc"] as const) {
-    test(`${runtime}: lead and duty use the Cataly role and loop commands stay callable`, async () => {
-      const w = new World();
-      const d = { ...w.deps({ runtime }), agentCmd: "omp" };
-      await captureIo(async () => {
-        await up(d, "/w");
-        return 0;
-      });
-      const commands =
-        runtime === "herdr"
-          ? w.calls.filter((c) => c.cmd === "herdr" && c.argv[1] === "run").map((c) => c.argv[3])
-          : w.hc.sent.map((c) => c.text);
-      expect(commands).toEqual([
-        `omp --cataly-role cataly --append-system-prompt '${join(d.store.root, "prompts", "lead.md")}'`,
-        `omp --cataly-role cataly --append-system-prompt '${join(d.store.root, "prompts", "duty.md")}'`,
-        "cataly duty --interval 60",
-        "cataly loop",
-      ]);
-    });
-  }
-
-  test("implementation lanes keep configured model arguments and select the lane role", async () => {
-    const s = setup();
-    const d = { ...s.d, agentCmd: "omp --model provider/model" };
-    const lane = await startLane(d, "omp-task", s.brief, { group: "w1" });
-    expect(s.w.panes.get(lane.paneId)!.ran[0]).toStartWith(
-      "omp --model provider/model --cataly-role lane 'Read your brief at ",
-    );
-  });
-
   test("explicit command and role overrides retain their arguments", () => {
     const d = new World().deps();
     expect(agentCommand({ ...d, agentCmd: "custom-agent --model other" }, "lane")).toBe("custom-agent --model other");
@@ -85,7 +51,7 @@ describe("OMP harness launches", () => {
     expect(call.argv.slice(context.length, context.length + 8)).toEqual([
       "sh",
       "-c",
-      "unset HERDR_PANE_ID HERDR_WORKSPACE_ID HC_TERMINAL_ID TERN_PANE CATALY_HEADLESS_ID CATALY_HARNESS_ROLE CATALY_MANAGED_STARTUP CATALY_LANE; omp --model 'configured model' --cataly-role lane \"$@\"",
+      "unset TERN_PANE CATALY_HEADLESS_ID CATALY_HARNESS_ROLE CATALY_MANAGED_STARTUP CATALY_LANE; omp --model 'configured model' --cataly-role lane \"$@\"",
       "cataly-review",
       "-p",
       "--no-session",

@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
 import { sampleHost } from "../src/host-guard.ts";
 import { canLaunch } from "../src/routing.ts";
-import { type Runner, runtimesFor } from "../src/run.ts";
+import { ChosenRuntimes, type Runner } from "../src/run.ts";
+import { FakeHeadless } from "./fake-headless.ts";
+import { newWorld } from "./fakes.ts";
 
 const loadavg = "0.50 0.40 0.30 1/200 999\n";
 const meminfo = "MemTotal: 16000000 kB\nMemAvailable: 4000000 kB\n";
@@ -21,11 +23,21 @@ const fixture = (
     else if (key === "cat /proc/loadavg") out = loadavg.trim();
     else if (key === "cat /proc/meminfo") out = meminfo.trim();
     else if (argv[0] === "df") out = "Filesystem 1K-blocks Used Available Use% Mounted\n/dev/x 1000 500 524288 50% /";
-    else if (argv[0] === "herdr" && !options.sessionFailure) out = '{"result":{"panes":[]}}';
     else return { code: 127, out: "", err: "unavailable" };
     return { code: 0, out, err: "" };
   };
-  const result = sampleHost(runner, "/data path", runtimesFor({ sessionRuntime: "herdr" }, {}, runner), {
+  const world = newWorld();
+  const supervisor = new (class extends FakeHeadless {
+    override async list() {
+      if (options.sessionFailure) throw new Error("headless supervisor unavailable");
+      return super.list();
+    }
+  })(world, "/state");
+  const rts = new ChosenRuntimes(
+    () => ({ kind: "headless", source: "default" }),
+    () => supervisor,
+  );
+  const result = sampleHost(runner, "/data path", rts, {
     platform,
     readFile: (path) => {
       reads.push(path);
@@ -43,10 +55,10 @@ const fixture = (
       return value;
     },
   });
-  return { result, calls, reads };
+  return { result, calls, reads, world };
 };
 
-test("Linux reads proc directly and only spawns df and the selected session list", async () => {
+test("Linux reads proc directly, only spawns df and counts sessions through the headless supervisor", async () => {
   const f = fixture("linux");
   expect(await f.result).toEqual({
     load1: 0.5,
@@ -57,9 +69,8 @@ test("Linux reads proc directly and only spawns df and the selected session list
     cgroup: { version: null, hard: null, high: null, incomplete: true },
   });
   expect(f.reads).toEqual(["/proc/loadavg", "/proc/meminfo", "/proc/self/cgroup", "/proc/self/mountinfo"]);
-  expect(f.calls).toHaveLength(2);
-  expect(f.calls[0]).toEqual(["df", "-k", "/data path"]);
-  expect(f.calls[1]?.[0]).toBe("herdr");
+  expect(f.calls).toEqual([["df", "-k", "/data path"]]);
+  expect(f.world.calls).toEqual([["headless", "list", ""]]);
 });
 
 test.each([null, "MemTotal: 16000000 kB\n", "MemTotal: 0 kB\nMemAvailable: 0 kB\n", "invalid"])(
@@ -69,7 +80,7 @@ test.each([null, "MemTotal: 16000000 kB\n", "MemTotal: 0 kB\nMemAvailable: 0 kB\
     const s = await f.result;
     expect(s.memFreePct).toBe(100);
     expect(s.load1).toBe(0);
-    expect(f.calls).toHaveLength(2);
+    expect(f.calls).toHaveLength(1);
   },
 );
 
@@ -93,7 +104,7 @@ test.each(["darwin", "freebsd"] as const)(
     const f = fixture(platform, { mac: true });
     expect(await f.result).toEqual({ load1: 1.25, memFreePct: 42, diskFreeGb: 0.5, swapFreeGb: 2, panes: 0 });
     expect(f.reads).toEqual([]);
-    expect(f.calls.map((argv) => argv[0])).toEqual(["sysctl", "memory_pressure", "df", "sysctl", "herdr"]);
+    expect(f.calls.map((argv) => argv[0])).toEqual(["sysctl", "memory_pressure", "df", "sysctl"]);
   },
 );
 
@@ -101,5 +112,5 @@ test("non-Linux probe failures retain the legacy runner fallback", async () => {
   const f = fixture("darwin");
   expect((await f.result).memFreePct).toBe(25);
   expect(f.reads).toEqual([]);
-  expect(f.calls.map((argv) => argv[0])).toEqual(["sysctl", "cat", "memory_pressure", "cat", "df", "sysctl", "herdr"]);
+  expect(f.calls.map((argv) => argv[0])).toEqual(["sysctl", "cat", "memory_pressure", "cat", "df", "sysctl"]);
 });

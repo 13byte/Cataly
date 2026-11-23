@@ -2,8 +2,7 @@
 
 `cataly harness loop` wakes once an hour, checks the recorded work, and starts
 the next eligible work needing no decision. `cataly harness up` starts it as a
-local process in headless mode, below the duty loop on herdr, or in a labelled
-hc terminal. The duty loop handles minute-scale nudges and inbox flushes; the
+local process. The duty loop handles minute-scale nudges and inbox flushes; the
 hourly loop decides what runs next. Installation and container startup do not
 activate either loop.
 
@@ -30,4 +29,4 @@ Duty uses the same progress clock: it nudges quiet lanes at 10 and 20 minutes an
 - Only the lead talks to the human. Questions reach the human through the lead.
 - Kill switch: `cataly harness loop stop [--text WHY]` writes `loop/stop`. Until `cataly harness loop resume`, each run does nothing. The backlog remains editable while stopped.
 - One loop at a time: the lock is created whole with a hard link and taken over with a rename only one process can win, a run checks it still holds the lock before each start, and the last-run stamp keeps a second loop or a cron `--once` from running the same hour twice.
-- A failing `gh`, herdr or hc call becomes a finding and the run continues, including a failed report to the lead. A failed start consumes its slot; after 2 failed starts the item becomes a decision, leaving later items eligible. An opened lane whose `[START]` did not reach the lead still counts. A stopped, locked-out or failing loop waits a full interval. `cataly harness loop --once` exits 1 when a run throws, so cron sees failure.
+- A failing `gh` or session-runtime call becomes a finding and the run continues, including a failed report to the lead. A failed start consumes its slot; after 2 failed starts the item becomes a decision, leaving later items eligible. An opened lane whose `[START]` did not reach the lead still counts. A stopped, locked-out or failing loop waits a full interval. `cataly harness loop --once` exits 1 when a run throws, so cron sees failure.

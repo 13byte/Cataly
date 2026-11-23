@@ -55,7 +55,6 @@ export const windows: PlatformAdapter = {
   posixOwnership: false,
   directoryFsync: false,
   preservesHardLinks: false,
-  supportsHerdrNativeUi: false,
   procfs: false,
   // Nothing takes a prune lock here, so this is the non-darwin default the lease loaded before the adapter.
   flockLibrary: () => "libc.so.6",
@@ -64,10 +63,8 @@ export const windows: PlatformAdapter = {
     // Windows cannot open a directory for fsync; src/update/deployment-files.ts skipped the flush here.
   },
 
-  legacyReleaseRuntime: () => "herdr",
-
-  // No release is built for Windows: provision.ts admitted only linux/x64/herdr and darwin/arm64/hc.
-  supportsReleaseProfile: () => false,
+  // No release is built for Windows: headless OMP sessions need a Unix socket, so this host has no session runtime.
+  supportsHeadlessRelease: () => false,
 
   nativeCacheLabel: () => `native-win32-${process.arch}`,
   programName: (word) => (word.split(/[\\/]/).at(-1) ?? "").replace(/\.exe$/i, ""),

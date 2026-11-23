@@ -1,15 +1,16 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
+import { join } from "node:path";
 
 import { closeLane } from "../src/done-flow.ts";
 import { type Lane, Registry, withStatus } from "../src/registry.ts";
 import { depsFor, fakeClock, newWorld, type TestState, withState } from "./fakes.ts";
+import { closableLane } from "./native-close-fixture.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00.000Z");
 const lane: Lane = {
   key: "discarded-lane",
   title: "registration rollback",
   thread: "chat:team/123",
-  pane: "w:p9",
   brief: "/b.md",
   done: "closed acme/app#1",
   openedAt: new Date(T0).toISOString(),
@@ -38,18 +39,21 @@ test("a close whose registration disappears during signal I/O touches no thread 
   const base = depsFor(world, fakeClock(T0), state.dir, {
     hooks: { threadDone: ["notify", "{thread}", "{text}"] },
   });
-  await base.registry.create(lane);
+  const bound = { ...lane, ...closableLane(world, 9, join(state.dir, "repo")) };
+  await base.registry.create(bound);
   const deps = {
     ...base,
     run: async (argv: readonly string[]) => {
-      if (argv[0] === "gh") await base.registry.discard(lane);
+      if (argv[0] === "gh") await base.registry.discard(bound);
       return base.run(argv);
     },
   };
-  const result = await closeLane(deps, lane, "late close");
+  const result = await closeLane(deps, bound, "late close");
   expect(result.closed).toBe(false);
   expect(result.lines.at(-1)).toStartWith("LANE_CHANGED discarded-lane");
   expect(result.lines.at(-1)).toContain("(now not registered, was working)");
   expect(await base.registry.read(lane.key)).toBeNull();
-  expect(world.calls.some((argv) => argv[0] === "notify" || argv[2] === "close")).toBe(false);
+  expect(world.calls.some((argv) => argv[0] === "notify" || (argv[0] === "headless" && argv[1] === "close"))).toBe(
+    false,
+  );
 });

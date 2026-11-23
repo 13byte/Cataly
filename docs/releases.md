@@ -2,7 +2,7 @@
 
 ## Current source bundle
 
-Current source and releases declaring a verified headless profile use a bound OMP and omp-ulw toolchain. For the default headless setup, install git and Bun 1.4.4+. You do not need herdr, hc, a stock `omp` on `PATH`, Cargo, provider credentials or global native-cache changes to prepare it. Authentication is a separate step before starting an agent.
+Current source and releases declaring a verified headless profile use a bound OMP and omp-ulw toolchain. Cataly runs on headless OMP by default on macOS and Linux; the optional [Tern](runtime.md#tern) terminal runtime is a source feature outside the consumer release path. Install git and Bun 1.4.4+. You do not need a terminal server, a stock `omp` on `PATH`, Cargo, provider credentials or global native-cache changes to prepare it. Authentication is a separate step before starting an agent.
 
 `native-omp.lock` and `native-omp.patch` bind upstream [oh-my-pi](https://github.com/can1357/oh-my-pi) commit `f40f335845f0b136453d12fec8d6057011082766` (19.0.1), the patch SHA-256, resulting Git tree and modified-file SHA-256/modes. The home-local cache is `~/.cache/omp-cataly/native-<platform>-<arch>-<full-source-identity>`. Preparation installs frozen upstream dependencies and the separately frozen official `@oh-my-pi/pi-natives@19.0.1` package from `native-addon/`. It probes the actual addon and copies those version-matched bytes through the existing workspace loader seam; receipts bind the actual addon, Bun and launcher bytes. Rust is unchanged. The addon release stamp establishes its release compatibility, **not** the source delta or binary equivalence to a rebuilt OMP executable.
 
@@ -37,7 +37,7 @@ The immutable `v0.1.0` and `v0.1.1` tags are superseded unpublished release atte
 | Session runtime   | herdr, with its OMP integration | herdr 0.9.5                                    |
 | Messenger         | Discord, using your own bot     | Discord                                        |
 
-Newer Bun or OMP versions meeting the minimum are not automatically tested combinations. The consumer release implementation also supports an isolated macOS arm64/hc profile when a release manifest explicitly declares it; this does not claim that such a release has been published or that a macOS rollout has been exercised. A manifest without capabilities is legacy Linux x64/herdr only. Unsupported host/runtime combinations and releases without the selected capability hold rather than activate. Slack and Telegram remain source features. The maintainer source-container recipe is separate from the public release installer; it is not a published consumer image.
+Newer Bun or OMP versions meeting the minimum are not automatically tested combinations. Current releases install only headless profiles for Linux x64 or macOS arm64; a manifest without a headless capability is a legacy release and holds rather than activates. Slack and Telegram remain source features. The maintainer source-container recipe is separate from the public release installer; it is not a published consumer image.
 
 Linux x64 identifies the platform and architecture, not a tested matrix of Linux distributions. Qualify the specific distribution and toolchain against the release's actual clean-consumer evidence; other Linux distributions remain compatibility targets with unverified consumer behavior.
 
@@ -87,10 +87,10 @@ Only run the installer after every checksum passes. Preserve the PATH export in 
 
 Use a verified asset set from a release that declares a headless capability for
 Linux x64 or macOS arm64. `release-headless.json` is bound by the source manifest
-alongside the bound OMP payload. The legacy `release-capabilities.json` remains
-for terminal profiles. Check the release’s exact tag and checksums before
-running its own bootstrap; an unbuilt or unpublished `main` is not a consumer
-release. Run the following from the directory containing the matching assets:
+alongside the bound OMP payload. Check the release’s exact tag and checksums
+before running its own bootstrap; an unbuilt or unpublished `main` is not a
+consumer release. Run the following from the directory containing the matching
+assets:
 
 ```sh
 download_dir="$(pwd -P)" || exit 1
@@ -106,14 +106,14 @@ bash ./install.sh --from "$download_dir"
 "$HOME/.omp-cataly/bin/cataly" harness status
 ```
 
-With no explicit selection, `harness status` reports `RUNTIME headless (from default)`, even if a terminal binary happens to be installed.
+`harness status` reports `RUNTIME headless (from default)`.
 `cataly harness up` is a separate, explicit start of native OMP lead and duty
 sessions and their local scheduling loops. Installation itself starts nothing.
 
 ## Upgrade a v0.1.3 installation
 
 1. From the original `v0.1.3` installation, stop its sessions and owned loops
-   using its runtime controls. Activation holds while an owned session or loop
+   using its own controls. Activation holds while an owned session or loop
    is live; the installer never stops them for you.
 2. Verify the **new** release’s complete matching asset set, including its
    `install.sh`, and run that bootstrap from the asset directory against the
@@ -131,70 +131,45 @@ sessions and their local scheduling loops. Installation itself starts nothing.
    It publishes `bin/cataly` and `bin/cataly-harness` in that owned home. A fresh
    installation uses the new defaults rather than taking over a legacy home.
 
-3. With no explicit `sessionRuntime` or `CATALY_RUNTIME`, new sessions default
-   to headless. A saved `"runtime": "herdr"` or `"hc"` stays in the file but
-   does not select terminal execution. Keep registered terminal sessions with
-   their owning backend; changing the default does not migrate or close them.
+3. New sessions run on headless OMP.
 
-If v0.1.3 still has entries in `roles.json`, close the old agents, loops and
-role terminals yourself. Leave their **original server** running. Before step 2,
-use the verified **new** bootstrap to check that server and retire only
-registrations it proves are gone:
+### Upgrading from a terminal runtime
 
-```sh
-# Legacy primary: use the original name ("default" only if you used the unnamed server).
-bash "$download_dir/install.sh" --from "$download_dir" --version v0.1.4 \
-  --home "$HOME/.dori" --retire-legacy-roles --legacy-session default
-# Legacy side: its installation home identifies the original namespace.
-bash "$download_dir/install.sh" --from "$download_dir" --version v0.1.4 \
-  --home "$HOME/.omp-dori" --retire-legacy-roles
+This version removed the herdr and hc terminal runtimes. If the home still uses
+one, install and upgrade stop with this message and change nothing:
+
+```text
+This Cataly home still uses the herdr/hc terminal runtime, which this version removed.
+1. Close every herdr/hc lane (`cataly status` lists them) with your previous Cataly version.
+2. Remove "runtime" (if it names herdr or hc) and "sessionRuntime" from <configPath>.
+3. Run this command again. Cataly state and OMP sessions are kept; lanes reopen on headless.
 ```
 
-Run only the command for your installation, with the original XDG environment.
-If a primary home used both backends after migrating a role, also pass
-`--legacy-migrated-session NAME` for the original server on the other backend.
-Retirement neither installs a release nor stops processes. If the original
-server is missing or ownership is uncertain, leave the home intact; do not
-delete `roles.json` to bypass the hold. You can use a separate fresh home
-without adopting those sessions.
+A home with historical entries in `roles.json` also gets: `Retire the historical roles with your previous Cataly version (cataly update --retire-legacy-roles).`
+Do not delete `roles.json` or lane files to bypass the stop.
 
-The verified new bootstrap can upgrade a stopped legacy home **without** the
-old terminal tool. Use it for this OMP 19 release: the frozen `v0.1.3` updater
-rejects OMP 19 manifests even with herdr or hc installed. The bootstrap works
-with the original installation home and publishes `bin/cataly` and
-`bin/cataly-harness` in the same upgrade.
-The legacy command and discovery
-names in an upgraded home are retained for owned update/rollback references;
-use `cataly` for current operation.
+Use the verified new bootstrap in step 2 for this OMP 19 release: the frozen
+`v0.1.3` updater rejects OMP 19 manifests. The bootstrap works with the original
+installation home and publishes `bin/cataly` and `bin/cataly-harness` in the
+same upgrade. The legacy command and discovery names in an upgraded home are
+retained for owned update/rollback references; use `cataly` for current operation.
 
-To go back, stop the new sessions and loops (`cataly harness stop` for the
-owned headless harness), make the original terminal backend available, and
-run `"$HOME/.dori/bin/cataly" update rollback --version v0.1.3`
-(or the same command from the actual installation home). Rollback needs the
-verified retained release and compatible preserved runtime settings. It restores
-the original release and its launchers but does not rewrite config, resume
-sessions or undo external work. Do not resume a retired native duty transcript
-as a lead on v0.1.3: that version has no native duty role. Older independent-native releases also require
-an appropriate independently installed OMP.
+To go back, stop the new sessions and loops (`cataly harness stop`), then run
+`"$HOME/.dori/bin/cataly" update rollback --version v0.1.3` (or the same command
+from the actual installation home). Rollback needs the verified retained release
+and its own runtime prerequisites. It restores the original release and its
+launchers but does not rewrite config, resume sessions or undo external work. Do
+not resume a retired native duty transcript as a lead on v0.1.3: that version
+has no native duty role. Older independent-native releases also require an
+appropriate independently installed OMP.
 
-## Isolated macOS arm64/hc consumer
+## Installation homes
 
-Use this procedure only with a verified release asset set whose source-bound `release-capabilities.json` declares `darwin`/`arm64`/`hc`. The manifest includes that file's SHA256 in its source inventory; capabilities are validated after archive verification, before installation. The `v0.1.2` Linux example above is not evidence that such assets exist. Install git, Bun 1.4.4+ and hc on `PATH`, verify all four matching assets and their checksums using the release's instructions, then run its checked bootstrap. A new 19.0.1 manifest provisions the bound native source and frozen addon described above; it does not require or substitute a stock `omp`. An older 18.18.8 manifest with this capability still requires an independently installed native OMP 18.18.8+ outside Cataly wrappers.
+A fresh installation defaults to `~/.cataly` (Linux primary) or `~/.omp-cataly` (macOS side). `--home` selects an absolute home; `CATALY_INSTALL_MODE=side` and `OMP_CATALY_HOME` select a separate side installation when not using `--home`. An installed update command defaults to its loaded installation. Release selection does not rewrite an existing config.
 
-```sh
-bash ./install.sh --from "$download_dir" --home "$HOME/.omp-cataly" --runtime hc
-"$HOME/.omp-cataly/bin/cataly" update status --home "$HOME/.omp-cataly" --runtime hc
-```
+The isolated home contains `bin/cataly`, `bin/cataly-harness`, `bin/omp`, `bin/omp-cataly` and `omp.yml`. Its renamed `omp-cataly-mode` skill and discovery overlay are retained per release under `releases/consumer-discovery/<release-id>/`. The wrapper resolves the active source pointer before selecting both the extension and that release's skill, so a held or interrupted activation cannot mix their versions. Use local paths such as `"$HOME/.omp-cataly/bin/omp-cataly" omp --cataly-role cataly`; the wrapper loads the local Cataly extension with `--no-extensions`, with the pinned ULW imported for roles. It binds the selected config, clears inherited state/runtime overrides, and defaults state inside that home while preserving an explicitly configured state directory. There are no global command, skill or extension links and no global discovery of this installation. Configure the local home and authenticate deliberately before launching; installation itself launches nothing.
 
-Use `"sessionRuntime": "hc"` in that home’s configuration when you want
-subsequent sessions to use hc. Selecting a release profile at installation
-does not change saved startup settings.
-
-A fresh installation defaults to `~/.cataly` (Linux primary) or `~/.omp-cataly` (macOS side). `--home` selects an absolute home; `CATALY_INSTALL_MODE=side` and `OMP_CATALY_HOME` select a separate side installation when not using `--home`. An installed update command defaults to its loaded installation. For a headless-capable target, `--runtime` or `CATALY_RUNTIME` overrides `sessionRuntime`, which otherwise defaults to headless; an old `runtime` field is not an opt-in. Release selection does not rewrite an existing config or make a one-off flag a standing startup choice.
-
-The isolated home contains `bin/cataly`, `bin/cataly-harness`, `bin/omp`, `bin/omp-cataly` and `omp.yml`. Its renamed `omp-cataly-mode` skill and discovery overlay are retained per release under `releases/consumer-discovery/<release-id>/`. The wrapper resolves the active source pointer before selecting both the extension and that release's skill, so a held or interrupted activation cannot mix their versions. Use local paths such as `"$HOME/.omp-cataly/bin/omp-cataly" omp --cataly-role cataly` or `"$HOME/.omp-cataly/bin/omp-cataly" hc ...`; the wrapper loads the local Cataly extension with `--no-extensions`, with the pinned ULW imported for roles. It binds the selected config, clears inherited state/runtime overrides, and defaults state inside that home while preserving an explicitly configured state directory. Each side home has distinct hc and herdr namespaces; foreign terminal identities are cleared when switching namespaces, while terminals already in that home's namespace retain theirs. There are no global command, skill or extension links and no global discovery of this installation. Configure the local home and authenticate deliberately before launching; installation itself launches nothing.
-
-The manifest and installed-state schema remain compatible with older consumer CLIs, including after a primary Linux rollback. A release without the source-bound capability file is legacy Linux/herdr primary-only: its CLI predates home selection, so bootstrap, update and rollback refuse it in isolated homes.
+The manifest and installed-state schema remain compatible with older consumer CLIs, including after a primary Linux rollback. A release without the source-bound capability file is a legacy primary-only release: its CLI predates home selection, so bootstrap, update and rollback refuse it in isolated homes.
 
 Explicit install, reinstall and rollback refresh unchanged owned launchers to the running Bun. Source-bound releases retain their authenticated native source/addon/Bun receipts; a changed native toolchain holds rather than accepting stock OMP or rewriting those receipts. Older independent-native releases refresh their owned wrapper to the native OMP found outside Cataly wrappers on `PATH`. The isolated OMP dispatcher reads the active release's retained manifest to select that protocol, extension and discovery together, including during interrupted activation. Owner-modified launchers remain held. If an older independent-native release's Bun path has disappeared, run its verified bootstrap using the new toolchain against the same consumer home. A bound native cache still requires its recorded Bun identity; preserve that executable and use it for recovery. Do not hand-edit wrappers or use the source installer to take over a consumer home.
 
@@ -230,8 +205,7 @@ An existing real directory at `~/.cataly/src`, an unmanaged pointer, or a confli
 Set `defaultCwd`, a provider-qualified `defaultModel` available to your account,
 and the messenger hooks you intend to use in the selected home’s `config.json`.
 Keep the installer’s managed `agentCommand` and `ompUlwPath`. Authenticate the
-selected OMP wrapper with your own provider. For terminal-only operation, set
-`sessionRuntime` and configure the terminal `leadPane`/`laneWorkspace` as needed.
+selected OMP wrapper with your own provider.
 For historical releases, follow the startup instructions at their tag instead.
 
 Before starting the lead, select the actual installation (`~/.cataly` for fresh
@@ -264,9 +238,7 @@ with “Cataly mode” and complete the name, messenger destination and permitte
 onboarding. For a headless lead, `cataly harness send lead --text "Cataly mode"`
 submits the message and `cataly harness observe lead` reads recent output. Use
 the selected home’s `bin/cataly` if it is not on `PATH`. Do not start a duplicate
-against the same state. For an interactive terminal lead, select the backend
-first, configure its OMP integration as needed, and use the selected home’s OMP
-wrapper with `--cataly-role cataly`.
+against the same state.
 
 Install, update, rollback and `cataly boot` do not start a provider, inbound
 watcher, Gateway presence process, systemd service or harness. Enable only the
@@ -295,11 +267,11 @@ With the protected token file prepared above and the non-secret IDs inherited fr
 
 The token value never appears in this argv or its monitor receipt: only the child shell reads and exports it. No private helper, external watch script, Node or agent-messenger is needed. A different token-file path is an explicit local choice; keep it owned, regular and mode `0600`.
 
-To let Discord follow-ups reopen a registered herdr lane after a normal tab close, add `--wake-lanes` to that existing shared REST monitor's command. Keep the same state directory, bot, owner, and watched rooms and stop any overlapping per-room poller before enabling it. No installation or update enables the flag for you. The monitor queues the message, resumes the same OMP session in a new tab when its binding is verified, and posts the resulting answer to the original Discord message. Explicitly paused lanes stay paused. Hard-killed or unverified sessions, hc, Gateway intake, and `--loop 0` are outside the automatic reopen path.
+To let Discord follow-ups reopen a registered lane after its session retired cleanly, add `--wake-lanes` to that existing shared REST monitor's command. Keep the same state directory, bot, owner, and watched rooms and stop any overlapping per-room poller before enabling it. No installation or update enables the flag for you. The monitor queues the message, resumes the same OMP session headlessly when its binding is verified, and posts the resulting answer to the original Discord message. Explicitly paused lanes stay paused. Hard-killed or unverified sessions, Gateway intake, and `--loop 0` are outside the automatic reopen path.
 
-Automatic reopen waits for the new foreground pane to own the same native session, not merely for herdr to accept a launch. The lane uses the saved model; when its identity differs, the monitor leaves the message queued. The reopened process uses a bundled quota/retry overlay that disables model fallback, provider-error retries, and automatic saved-reset redemption. It does not edit your OMP configuration. Interrupted or rejected Discord dispatches are held without replay, and a deleted Discord original is never replaced with an unthreaded reply.
+Automatic reopen waits for the new process to own the same native session. The lane uses the saved model; when its identity differs, the monitor leaves the message queued. The reopened process uses a bundled quota/retry overlay that disables model fallback, provider-error retries, and automatic saved-reset redemption. It does not edit your OMP configuration. Interrupted or rejected Discord dispatches are held without replay, and a deleted Discord original is never replaced with an unthreaded reply.
 
-This path currently requires Linux to confirm native session ownership. The shared receiver must remain running while a lane tab is closed; it does not start if the monitor or its owning session has exited.
+This path currently requires Linux to confirm native session ownership. The shared receiver must remain running while a lane is retired; it does not start if the monitor or its owning session has exited.
 
 For a long-running receiver, optionally set `"restart": "on-failure"` in the
 same monitor start request. The monitor retries a nonzero exit or signal after
@@ -323,7 +295,7 @@ The cursor is committed under `<stateDir>/discord-inbound/<channelId>.json` in a
 Only a remote history-read 403/404 removes an unavailable discovered channel; explicitly configured targets still fail on those responses. Content conversion, delivery and local cursor failures are not permission loss. In Gateway mode they stop intake before later queued messages can advance past the failed message. If an already watched channel's cursor disappears, intake reports the missing-state error rather than silently dropping live messages or recreating a baseline. First-seen scope-all channels still seed their new cursors as described above.
 
 An owner message to an exact Discord channel or thread registered to one
-native OMP lane goes to that lane as a Cataly Monitor message, with no terminal
+native OMP lane goes to that lane as a Cataly Monitor message, with no
 keystrokes and no new setting. The receiver commits the lane inbox before
 advancing its cursor; pending messages survive a resume of the same session.
 Unbound or ambiguous channels keep the lead's existing intake behavior.
@@ -351,7 +323,7 @@ Eligible single-choice questions show native Discord buttons, with the
 checked option labeled **Recommended**. Only the configured owner can
 select a button. The bot uses an interaction-only Gateway connection;
 apps with an existing interactions webhook or unavailable Gateway keep
-text replies and the terminal dialog.
+text replies and the native OMP dialog.
 
 For a compatible one-field question, ordinary owner text in the exact
 channel can answer while exactly one such ASK is pending. For a radio
@@ -366,11 +338,11 @@ open. This does not change OMP's own timeout or approval settings.
 
 - A Cataly lead uses the single explicitly configured Discord destination.
   If more than one destination is configured or only discovery is enabled,
-  ASK stays in the terminal rather than guessing.
+  ASK stays in the native OMP dialog rather than guessing.
 - A lane uses only its own registered `discord:<channel-or-thread-id>`
   destination while the same receiver watches it. New `cataly launch` lanes
-  are bound at launch; older lanes need an exact native session identity in
-  the registry (`cataly sync --write` can record it).
+  are bound at launch; an older lane without an exact native session identity
+  in the registry stays unbound.
 - Stopped receivers, unmatched bot credentials and unresolved lanes do not
   enable automatic delivery. A custom token file or receiver can still use
   the existing explicit route below.
@@ -457,17 +429,17 @@ An authentication, configuration or intent failure exits nonzero with a sanitize
 The consumer API runs before ordinary Cataly configuration loading. Use the selected home’s `bin/cataly`, especially for an isolated or upgraded installation:
 
 ```text
-cataly update <check|install|status|rollback|cache> [--version TAG] [--from DIST] [--home PATH] [--runtime headless|hc|herdr]
+cataly update <check|install|status|rollback|cache> [--version TAG] [--from DIST] [--home PATH]
 cataly update cache [--prune [--delete-quarantined] [--grace MINUTES]] [--reference DIR]... [--trust-process PID@START]... [--trust-root-cwd] [--home PATH]
 ```
 
 For example, after obtaining a compatible asset set in `download_dir`:
 
 ```sh
-"$HOME/.omp-cataly/bin/cataly" update check --from "$download_dir" --home "$HOME/.omp-cataly" --runtime hc
-"$HOME/.omp-cataly/bin/cataly" update install --from "$download_dir" --home "$HOME/.omp-cataly" --runtime hc
-"$HOME/.omp-cataly/bin/cataly" update status --home "$HOME/.omp-cataly" --runtime hc
-"$HOME/.omp-cataly/bin/cataly" update rollback --home "$HOME/.omp-cataly" --runtime hc
+"$HOME/.omp-cataly/bin/cataly" update check --from "$download_dir" --home "$HOME/.omp-cataly"
+"$HOME/.omp-cataly/bin/cataly" update install --from "$download_dir" --home "$HOME/.omp-cataly"
+"$HOME/.omp-cataly/bin/cataly" update status --home "$HOME/.omp-cataly"
+"$HOME/.omp-cataly/bin/cataly" update rollback --home "$HOME/.omp-cataly"
 ```
 
 The commands below remain explicit operations. New builds also include the launch-time automatic path described next; historical releases do not acquire it merely because `main` changes. Neither installation nor update enables watchers, services, messenger intake or presence. A stopped activation remains stopped. Each retained release uses its own exact manifest-bound omp-ulw pin and cache across update and rollback.
@@ -571,7 +543,7 @@ The output is a review artifact, not an installed update. A conflict requires a 
 ## Troubleshooting and support reports
 
 - **No stable latest release:** after publication, select the preview explicitly with `--version v0.1.2`. A prerelease is not an automatic latest fallback.
-- **Missing/wrong toolchain:** current headless releases require git and Bun 1.4.4+ and verify their bound OMP receipt. For a historical or explicitly selected terminal profile, also check the required backend. The bootstrap does not replace global tools.
+- **Missing/wrong toolchain:** current headless releases require git and Bun 1.4.4+ and verify their bound OMP receipt. For a historical release, also check the prerequisites listed at its tag. The bootstrap does not replace global tools.
 - **Checksum/manifest/archive failure:** stop using that download. Retain the error, confirm the canonical owner/tag, and download the complete matching asset set again. Do not disable checks or combine files from different releases.
 - **Live actor, unmanaged source or path collision:** keep the existing source/state intact and resolve the reported ownership or session condition. A hold is a nonzero result, not an installed update.
 - **Interrupted activation:** run the installation's `bin/cataly update status` and retain the release state/journal if it reports an unresolved inconsistency. After an isolated 19-to-18 rollback, use the [newer controller's status and reference repair](#committed-rollback-with-reference-refresh-pending). Do not hand-edit the active pointer to manufacture success.
@@ -609,7 +581,7 @@ Primary mode also generates `~/.cataly/bin/omp`; start the lead through that wra
 
 Consumer control records (`consumer-owner.json`, `consumer-installed.json`, `consumer-journal.json` under the release root) and the managed source pointer protect a consumer home before source checkout or package changes. The source marker or omp-cataly extension link never overrides that protection. Primary source installation holds there: use its `cataly update check|install|status|rollback` commands. A selected side home that directly names or aliases any consumer home also holds, including incomplete consumer control state. Choose a separate ordinary checkout and side home; this installer performs no consumer migration or repair.
 
-Use a separate messenger bot/channel and, for terminal experiments, a separate runtime namespace. For the default headless source workflow start the lead with `omp-cataly harness up`; for an explicit hc lead use `omp-cataly hc run --name omp-cataly-lead -- omp-cataly omp --cataly-role cataly`. Installation starts neither workflow nor any watcher. On macOS, hc privacy permissions follow the process that first starts that hc server. See the [container recipe](container.md) and [contributor checks](../CONTRIBUTING.md).
+Use a separate messenger bot/channel. Start the source lead with `omp-cataly harness up`. Installation starts neither the lead nor any watcher. See the [container recipe](container.md) and [contributor checks](../CONTRIBUTING.md).
 
 Maintainer upstream porting uses:
 
@@ -633,7 +605,7 @@ Before publication, maintainers perform isolated real-binary install/update/fail
 
 Use the [per-run evidence contract](../.github/pull_request_template.md#evidence) for release QA too. Link actual receipts with observed source/native/ULW identities (including overlays), OS/architecture, exact commands, runtime/fixture setup, synthetic/loopback/live provider boundaries, and unverified surfaces. Pins are intended inputs, not observed runtime proof; explain unknown or N/A. Rerun affected checks after relevant source, runtime, or environment changes, or keep that claim unverified rather than carrying old receipts forward.
 
-The `.github/workflows/release.yml` tag workflow validates the tag against the canonical package version. It requires successful **`check`**, **`e2e-herdr`** and **`e2e-hc`** results for that exact commit from the repository's own CI workflow and the trusted GitHub Actions app **15368**. A tag push alone does not prove `ci.yml` ran. The separate `.github/workflows/cross-os.yml` workflow reports macOS and Windows results on pull requests and `main` pushes, but it is outside this release gate and forms no part of release evidence. The first release is explicitly marked prerelease. Existing tags, releases and assets must not be overwritten; publication needs maintainer permissions and consumers need none.
+The `.github/workflows/release.yml` tag workflow validates the tag against the canonical package version. It requires a successful **`check`** result for that exact commit from the repository's own CI workflow and the trusted GitHub Actions app **15368**. A tag push alone does not prove `ci.yml` ran. The separate `.github/workflows/cross-os.yml` workflow reports macOS and Windows results on pull requests and `main` pushes, but it is outside this release gate and forms no part of release evidence. The first release is explicitly marked prerelease. Existing tags, releases and assets must not be overwritten; publication needs maintainer permissions and consumers need none.
 
 Every maintainer release-metadata mutation names the tag and commit identity explicitly and reads back the known release ID rather than re-resolving a draft by tag; a body-only draft update can drop that draft's tag binding. The local producer publication path uses the GitHub CLI and needs a `gh` that supports `--paginate` together with `--slurp` for paginated API reads, including release-asset listing, which the trusted Actions runner provides; an older host `gh` without `--slurp` is not a supported producer environment. This is a maintainer tool requirement only: consumer install, check, update and rollback still need no `gh`.
 

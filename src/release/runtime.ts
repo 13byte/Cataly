@@ -217,8 +217,6 @@ export function catalyLaunchEnv(
   })) {
     if (path !== undefined) context[key] = path === "" || isAbsolute(path) ? path : `${process.cwd()}${sep}${path}`;
   }
-  for (const key of ["CATALY_AGENT_ARGV", "CATALY_HERDR_SESSION", "HC_SESSION"] as const) {
-    if (env[key] !== undefined) context[key] = env[key];
-  }
+  if (env["CATALY_AGENT_ARGV"] !== undefined) context["CATALY_AGENT_ARGV"] = env["CATALY_AGENT_ARGV"];
   return context;
 }

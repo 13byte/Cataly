@@ -1,11 +1,9 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { FlowDeps } from "../src/done-flow.ts";
 import { launchLane } from "../src/launch.ts";
-import type { Runner } from "../src/run.ts";
-import { withState } from "./fakes.ts";
-import { queueFixture, type QueueFixture } from "./launch-queue-fixture.ts";
+import { sid, withState } from "./fakes.ts";
+import { queueFixture, type QueueFixture, unspawnableTern } from "./launch-queue-fixture.ts";
 
 let f: QueueFixture;
 let brief: string;
@@ -18,12 +16,14 @@ beforeEach(async () => {
 });
 afterEach(() => f.state.done());
 
-const withCreateReply = (reply: Runner): FlowDeps => ({
-  ...f.deps,
-  run: async (argv, options) =>
-    argv[0] === "herdr" && argv[1] === "tab" && argv[2] === "create" ? reply(argv, options) : f.deps.run(argv, options),
-});
-const noServer = { code: 1, out: "", err: '{"error":{"code":"server_not_running"}}' };
+/** Runs `during` inside the fake supervisor's reservation, after the creation is counted. */
+const duringCreate = (during: () => void): void => {
+  const count = f.world.onCreate;
+  f.world.onCreate = async (spec) => {
+    await count?.(spec);
+    during();
+  };
+};
 
 const retainedBrief = (): string => {
   const attempts = `${brief}.attempts`;
@@ -70,14 +70,9 @@ try {
   expect(f.creates()).toBe(1);
 });
 
-test("a known terminal refusal releases the generated brief and permits a same-key retry", async () => {
+test("an unavailable session runtime releases the generated brief and permits a same-key retry", async () => {
   const input = { ...f.input, brief, template: "task" };
-  await expect(
-    launchLane(
-      withCreateReply(async () => noServer),
-      input,
-    ),
-  ).rejects.toThrow("session create failed");
+  await expect(launchLane(unspawnableTern(f), input)).rejects.toThrow("session create failed");
   expect(existsSync(brief)).toBe(false);
   expect(readdirSync(`${brief}.attempts`)).toEqual([]);
   expect(await f.deps.registry.read(input.key)).toBeNull();
@@ -87,58 +82,29 @@ test("a known terminal refusal releases the generated brief and permits a same-k
   expect(f.creates()).toBe(1);
 });
 
-test("a CLI failure to spawn the runtime releases the generated brief", async () => {
-  const config = join(f.state.dir, "config.json");
-  writeFileSync(config, JSON.stringify(f.deps.config));
-  const cli = join(import.meta.dir, "../src/cli.ts");
-  const args = ["launch", f.input.key, "--title", "Task", "--template", "task", "--done", f.input.done];
-  // PATH is isolated, so no real runtime can start and process creation itself fails.
-  const child = Bun.spawn([process.execPath, cli, ...args], {
-    cwd: f.state.dir,
-    env: {
-      PATH: f.state.dir,
-      HOME: f.state.dir,
-      CATALY_CONFIG: config,
-      ...(process.platform === "win32" ? { SystemRoot: process.env["SystemRoot"], USERPROFILE: f.state.dir } : {}),
-    },
-    stdout: "ignore",
-    stderr: "pipe",
-  });
-  const [err, code] = await Promise.all([new Response(child.stderr).text(), child.exited]);
+test.each(["socket closed", "reservation unreadable"])(
+  "%s during native reservation retains the generated brief and blocks retry",
+  async (detail) => {
+    const input = { ...f.input, brief, template: "task" };
+    duringCreate(() => {
+      throw new Error(detail);
+    });
 
-  expect(code).toBe(1);
-  expect(err).toContain("session create failed");
-  expect(existsSync(brief)).toBe(false);
-  expect(readdirSync(`${brief}.attempts`)).toEqual([]);
-  expect(await f.deps.registry.read(f.input.key)).toBeNull();
-});
+    await expect(launchLane(f.deps, input)).rejects.toThrow("generated brief retained at");
+    const path = retainedBrief();
+    const contents = readFileSync(path, "utf8");
+    expect(contents).toContain("Preserve the rendered instructions.");
+    expect(await f.deps.registry.read(input.key)).toBeNull();
+    await expect(launchLane(f.deps, input)).rejects.toThrow("generated brief not writable");
+    expect(readFileSync(path, "utf8")).toBe(contents);
+    expect(f.creates()).toBe(1);
+  },
+);
 
-test.each([
-  { outcome: "a lost connection", response: { code: 1, out: "", err: "socket closed" } },
-  { outcome: "an incomplete success reply", response: { code: 0, out: '{"result":{}}', err: "" } },
-  { outcome: "a child exiting 127", response: { code: 127, out: "", err: "child exited" } },
-])("$outcome after terminal creation retains the generated brief and blocks retry", async ({ response }) => {
+test("an unavailable session runtime leaves an independently created public brief untouched", async () => {
   const input = { ...f.input, brief, template: "task" };
-  const deps = withCreateReply(async (argv, options) => {
-    await f.deps.run(argv, options);
-    return response;
-  });
-
-  await expect(launchLane(deps, input)).rejects.toThrow("generated brief retained at");
-  const path = retainedBrief();
-  const contents = readFileSync(path, "utf8");
-  expect(contents).toContain("Preserve the rendered instructions.");
-  expect(await deps.registry.read(input.key)).toBeNull();
-  await expect(launchLane(f.deps, input)).rejects.toThrow("generated brief not writable");
-  expect(readFileSync(path, "utf8")).toBe(contents);
-  expect(f.creates()).toBe(1);
-});
-
-test("a known terminal refusal leaves an independently created public brief untouched", async () => {
-  const input = { ...f.input, brief, template: "task" };
-  const deps = withCreateReply(async () => {
+  const deps = unspawnableTern(f, () => {
     writeFileSync(brief, "Independent output", { flag: "wx" });
-    return noServer;
   });
 
   await expect(launchLane(deps, input)).rejects.toThrow("session create failed");
@@ -164,55 +130,17 @@ const fileSymlinksAvailable = (() => {
 })();
 
 test.skipIf(!fileSymlinksAvailable)(
-  "a link inserted during terminal creation is not overwritten or removed",
+  "a link inserted during native reservation is not overwritten or removed",
   async () => {
     const original = readFileSync(f.input.brief, "utf8");
     const input = { ...f.input, brief, template: "task" };
-    const deps = withCreateReply(async (argv, options) => {
-      symlinkSync(f.input.brief, brief);
-      return f.deps.run(argv, options);
-    });
+    duringCreate(() => symlinkSync(f.input.brief, brief));
 
-    await expect(launchLane(deps, input)).rejects.toThrow("generated brief not published");
+    await expect(launchLane(f.deps, input)).rejects.toThrow("generated brief not published");
     expect(lstatSync(brief).isSymbolicLink()).toBe(true);
     expect(readFileSync(f.input.brief, "utf8")).toBe(original);
     expect(readFileSync(retainedBrief(), "utf8")).toContain("Preserve the rendered instructions.");
-    expect(await deps.registry.read(input.key)).toBeNull();
-    expect(f.world.calls).toContainEqual(["herdr", "tab", "close", "w1:t9"]);
+    expect(await f.deps.registry.read(input.key)).toBeNull();
+    expect(f.world.calls).toContainEqual(["headless", "close", sid(1)]);
   },
 );
-
-test.each([
-  { label: "unstructured usage exit", code: 2, err: "child exited without a structured reply", rejected: false },
-  { label: "unstructured invalid-params exit", code: 6, err: "lost reply", rejected: false },
-  { label: "structured invalid-params reply", code: 6, err: '{"error":{"kind":"invalid_params"}}', rejected: true },
-])("an hc $label controls brief retention and retry", async ({ code, err, rejected }) => {
-  const input = { ...f.input, brief, template: "task" };
-  let runs = 0;
-  const deps: FlowDeps = {
-    ...f.deps,
-    config: { ...f.deps.config, sessionRuntime: "hc" },
-    run: async (argv) => {
-      if (argv[0] === "hc" && argv[1] === "--json" && argv[2] === "ls")
-        return { code: 0, out: '{"terminals":[]}', err: "" };
-      if (argv[0] === "hc" && argv[1] === "--json" && argv[2] === "run") {
-        runs++;
-        return { code, out: "", err };
-      }
-      throw new Error(`unexpected command: ${argv.join(" ")}`);
-    },
-  };
-
-  if (rejected) {
-    await expect(launchLane(deps, input)).rejects.toThrow("invalid_params");
-    expect(readdirSync(`${brief}.attempts`)).toEqual([]);
-    await expect(launchLane(deps, input)).rejects.toThrow("invalid_params");
-    expect(runs).toBe(2);
-  } else {
-    await expect(launchLane(deps, input)).rejects.toThrow("generated brief retained at");
-    expect(readFileSync(retainedBrief(), "utf8")).toContain("Preserve the rendered instructions.");
-    await expect(launchLane(deps, input)).rejects.toThrow("inspect the prior attempt");
-    expect(runs).toBe(1);
-  }
-  expect(await deps.registry.read(input.key)).toBeNull();
-});

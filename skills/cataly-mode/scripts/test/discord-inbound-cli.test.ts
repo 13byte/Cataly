@@ -42,7 +42,6 @@ const monitor = async (
       JSON.stringify({
         stateDir: join(state.dir, "state"),
         laneWorkspace: state.dir,
-        runtime: "herdr",
         hooks: {},
         ...(options.recall ? { recall: options.recall } : {}),
       }),

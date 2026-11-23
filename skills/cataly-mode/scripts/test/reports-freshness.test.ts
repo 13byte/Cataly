@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { freshnessTick } from "../src/freshness.ts";
 import { Reports } from "../src/reports.ts";
 import type { Lane } from "../src/registry.ts";
-import { depsFor, fakeClock, newWorld, withState } from "./fakes.ts";
+import { depsFor, fakeClock, type FakeSession, nativeLane, newWorld, sent, withState, type World } from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00Z");
 
@@ -13,12 +13,13 @@ const lane: Lane = {
   key: "report-lane",
   title: "reports",
   thread: "chat:team/1",
-  pane: "w:p7",
   brief: "/b.md",
   done: "file /done.md",
   openedAt: new Date(T0).toISOString(),
   reportProtocol: "jsonl-v1",
 };
+/** The report lane bound to a live native session `sid(7)` in `world`. */
+const watched = (world: World, patch: Partial<FakeSession> = {}): Lane => ({ ...lane, ...nativeLane(world, 7, patch) });
 
 let state: ReturnType<typeof withState>;
 
@@ -80,14 +81,13 @@ test.each(["blocker", "halted", "done"] as const)(
   },
 );
 
-test("freshness forwards a durable report after it has scrolled off the pane", async () => {
-  // Given a stale report, but an actively working pane with no report text.
+test("freshness forwards a durable report after it has scrolled off the session output", async () => {
+  // Given a stale report, but an actively working session with no report text.
   const world = newWorld();
-  world.screen = "Working (2m)\n❯ ";
   const deps = depsFor(world, fakeClock(T0 + 21 * MIN), state.dir, {
     hooks: { threadReply: ["notify", "{thread}", "{text}"] },
   });
-  await deps.registry.write({ ...lane, lastNudgeAt: T0 + 20 * MIN });
+  await deps.registry.write({ ...watched(world, { status: "working" }), lastNudgeAt: T0 + 20 * MIN });
   await reports.report(lane.key, "milestone", "all checks green", T0);
   // When freshness reads its authoritative journal.
   const acts = await freshnessTick(deps, "/home/test");
@@ -97,52 +97,56 @@ test("freshness forwards a durable report after it has scrolled off the pane", a
 });
 
 test("new report time suppresses nudges even when registry lastReplyAt is old", async () => {
-  // Given a newly reported milestone and an old registry timestamp.
+  // Given a newly reported milestone, an old registry timestamp and an idle session that could take a nudge.
   const world = newWorld();
   const deps = depsFor(world, fakeClock(T0 + 30 * MIN), state.dir);
-  await deps.registry.write(lane);
+  await deps.registry.write(watched(world));
   await reports.report(lane.key, "milestone", "just completed step", T0 + 29 * MIN);
   // When freshness runs; then no stale-registry nudge is sent.
   expect(await freshnessTick(deps, "/home/test")).toEqual([]);
-  expect(world.calls.some((call) => call[2] === "send-text")).toBe(false);
+  expect(sent(world)).toEqual([]);
 });
 
 test("a stalled structured lane alerts once even without a thread hook", async () => {
-  // Given a lane whose idle prompt has no fresh progress.
+  // Given a lane whose one native call has run past the hung threshold without fresh progress.
   const world = newWorld();
-  const deps = depsFor(world, fakeClock(T0 + 21 * MIN), state.dir);
-  await deps.registry.write({ ...lane, thread: "none" });
+  const clock = fakeClock(T0 + 21 * MIN);
+  const deps = depsFor(world, clock, state.dir);
+  await deps.registry.write({ ...watched(world, { status: "working", activeSince: T0 }), thread: "none" });
   await reports.report(lane.key, "milestone", "started", T0);
-  // When observed twice; then one alert is emitted and no input is injected.
-  expect((await freshnessTick(deps, "/home/test")).map((act) => act.kind)).toEqual(["stalled"]);
+  // When observed past the stale threshold after its baseline sample; then one alert is emitted and no input is
+  // injected.
   expect(await freshnessTick(deps, "/home/test")).toEqual([]);
-  expect(world.calls.some((call) => call[2] === "send-text")).toBe(false);
+  clock.at += 20 * MIN;
+  expect((await freshnessTick(deps, "/home/test")).map((act) => act.kind)).toEqual(["stalled"]);
+  clock.at += MIN;
+  expect(await freshnessTick(deps, "/home/test")).toEqual([]);
+  expect(sent(world)).toEqual([]);
 });
 
 test.each(["blocker", "halted", "done", "question"] as const)(
   "a %s report still reaches the thread, but the lane is not nudged",
   async (kind) => {
-    // Given a lane that declared %s and then stayed silent past both thresholds.
+    // Given a lane that declared %s and then stayed silent and idle past both thresholds.
     const world = newWorld();
     const deps = depsFor(world, fakeClock(T0 + 30 * MIN), state.dir, {
       hooks: { threadReply: ["notify", "{thread}", "{text}"] },
     });
-    await deps.registry.write(lane);
+    await deps.registry.write(watched(world));
     await reports.report(lane.key, kind, "needs the owner", T0);
-    // When freshness runs; then the report is posted and nothing is sent to the pane.
+    // When freshness runs; then the report is posted and nothing is sent to the session.
     expect((await freshnessTick(deps, "/home/test")).map((act) => act.kind)).toEqual(["posted"]);
     expect(world.calls.find((call) => call[0] === "notify")?.[2]).toContain("needs the owner");
-    expect(world.calls.some((call) => call[2] === "send-text")).toBe(false);
+    expect(sent(world)).toEqual([]);
   },
 );
 
 test("a lane that reports every 10 minutes still gets its latest report posted, at most once per postAfterMin", async () => {
-  // Given a lane whose reports keep the nudge clock fresh while its thread stays quiet.
+  // Given a working lane whose reports keep the nudge clock fresh while its thread stays quiet.
   const world = newWorld();
   const clock = fakeClock(T0 + 21 * MIN);
   const deps = depsFor(world, clock, state.dir, { hooks: { threadReply: ["notify", "{thread}", "{text}"] } });
-  await deps.registry.write(lane);
-  world.screen = "Working (1m)\n❯ ";
+  await deps.registry.write(watched(world, { status: "working" }));
   await reports.report(lane.key, "milestone", "step one", T0 + 5 * MIN);
   await reports.report(lane.key, "milestone", "step two", T0 + 15 * MIN);
   const posts = () => world.calls.filter((call) => call[0] === "notify").map((call) => call[2]);
@@ -160,11 +164,11 @@ test("a lane that reports every 10 minutes still gets its latest report posted, 
 });
 
 test("a report written in the same millisecond as the last post is still posted later, once", async () => {
-  // Given a post at T0+21 and a blocker the lane writes in that same millisecond, just after the tick.
+  // Given a post at T0+21 and a blocker the working lane writes in that same millisecond, just after the tick.
   const world = newWorld();
   const clock = fakeClock(T0 + 21 * MIN);
   const deps = depsFor(world, clock, state.dir, { hooks: { threadReply: ["notify", "{thread}", "{text}"] } });
-  await deps.registry.write(lane);
+  await deps.registry.write(watched(world, { status: "working" }));
   await reports.report(lane.key, "milestone", "step one", T0 + 15 * MIN);
   expect((await freshnessTick(deps, "/home/test")).map((act) => act.kind)).toEqual(["posted"]);
   await reports.report(lane.key, "blocker", "needs the owner", T0 + 21 * MIN);
@@ -178,28 +182,14 @@ test("a report written in the same millisecond as the last post is still posted 
   expect(posts.at(-1)).toContain("needs the owner");
 });
 
-test("an adopted lane ignores a journal record and keeps the screen path", async () => {
-  // Given an adopted lane (no reportProtocol) with a blocker record and 30 silent minutes.
+test("structured lanes never fall back to report-like session output", async () => {
+  // Given a lane with no journal whose recent output only quotes the report grammar.
   const world = newWorld();
-  world.panes = [{ pane_id: "w:p7", workspace_id: "w", agent: "pi", agent_status: "idle" }];
-  world.onEnterStatus = "working";
-  const deps = depsFor(world, fakeClock(T0 + 30 * MIN), state.dir);
-  const { reportProtocol: _, ...adopted } = lane;
-  await deps.registry.write(adopted);
-  await reports.report(lane.key, "blocker", "waiting on review", T0);
-  // When freshness runs; then the journal does not hold back the nudge.
-  expect((await freshnessTick(deps, "/home/test")).map((act) => act.kind)).toEqual(["nudged"]);
-  expect(world.calls.filter((call) => call[2] === "send-text").map((call) => call[3])).toEqual(["w:p7"]);
-});
-
-test("structured lanes never fall back to unrelated pane report text", async () => {
-  // Given a new-protocol lane with no journal and report-like screen output.
-  const world = newWorld();
-  world.screen = `[REPORT] ${lane.key} | done | example, not durable`;
   const deps = depsFor(world, fakeClock(T0 + 30 * MIN), state.dir, {
     hooks: { threadReply: ["notify", "{thread}", "{text}"] },
   });
-  await deps.registry.write({ ...lane, lastNudgeAt: T0 + 29 * MIN });
+  const recent = [`[REPORT] ${lane.key} | done | example, not durable`];
+  await deps.registry.write({ ...watched(world, { status: "working", recent }), lastNudgeAt: T0 + 29 * MIN });
   // When forwarding is due; then the missing journal remains explicit.
   expect((await freshnessTick(deps, "/home/test")).map((act) => act.kind)).toEqual(["no-report"]);
   expect(world.calls.some((call) => call[0] === "notify")).toBe(false);

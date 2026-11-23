@@ -2,10 +2,10 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { adoptLane, LaunchError, launchLane } from "../src/launch.ts";
+import { LaunchError, launchLane } from "../src/launch.ts";
 import { Registry } from "../src/registry.ts";
 import { run } from "../src/run.ts";
-import { depsFor, fakeClock, newWorld, withState, type World } from "./fakes.ts";
+import { depsFor, fakeClock, href, newWorld, sid, withState, type World } from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00.000Z");
 const REFUSED = 'lane key "lead" is reserved for the lead';
@@ -36,21 +36,7 @@ test("launch refuses the lane key lead before it writes the brief, the registry 
   expect(stateFiles()).toEqual(["brief.md"]);
 });
 
-test("adopt refuses the lane key lead and registers nothing", async () => {
-  const deps = depsFor(world, fakeClock(T0), state.dir);
-  await expect(
-    adoptLane(deps, { key: "lead", title: "t", brief: "/b.md", done: "closed acme/app#3", pane: "lead:p1" }),
-  ).rejects.toThrow(REFUSED);
-  expect(await deps.registry.read("lead")).toBeNull();
-  expect(stateFiles()).toEqual([]);
-  // A key that only contains the word is an ordinary lane.
-  expect(
-    (await adoptLane(deps, { key: "lead-docs", title: "t", brief: "/b.md", done: "closed acme/app#3", pane: "w:p2" }))
-      .key,
-  ).toBe("lead-docs");
-});
-
-test("cataly launch and cataly adopt with key lead exit 1 with the reserved message and write nothing", async () => {
+test("cataly launch with key lead exits 1 with the reserved message and writes nothing", async () => {
   const config = join(state.dir, "config.json");
   const brief = join(state.dir, "brief.md");
   writeFileSync(config, JSON.stringify({ stateDir: state.dir, defaultCwd: state.dir, hooks: {} }));
@@ -61,7 +47,6 @@ test("cataly launch and cataly adopt with key lead exit 1 with the reserved mess
   for (const args of [
     ["launch", "lead", ...common],
     ["launch", "lead", ...common, "--dry-run"],
-    ["adopt", "lead", ...common, "--pane", "lead:p1"],
   ]) {
     const r = await invoke(...args);
     expect({ args, code: r.code, err: r.err.trim() }).toEqual({ args, code: 1, err: REFUSED });
@@ -71,22 +56,23 @@ test("cataly launch and cataly adopt with key lead exit 1 with the reserved mess
 });
 
 test("bySession never returns a record keyed lead left from before the key was reserved", async () => {
-  // Given a legacy registry record named lead on the lead's pane, next to a real lane.
+  // Given a legacy registry record named lead on the lead's session, next to a real lane.
   const registry = new Registry(state.dir);
   const legacy = {
     key: "lead",
     title: "old",
     thread: "none",
-    pane: "lead:p1",
+    pane: sid(1),
+    sessionRef: href(sid(1)),
     brief: "/b.md",
     done: "closed acme/app#3",
     openedAt: new Date(T0).toISOString(),
   };
   await registry.write(legacy);
-  await registry.write({ ...legacy, key: "real-lane", pane: "w:p2" });
-  // Then the lead's pane resolves to no lane, the lane's pane still resolves, and the record stays readable by key.
-  expect(await registry.bySession({ runtime: "herdr", id: "lead:p1" })).toBeNull();
-  expect((await registry.bySession({ runtime: "herdr", id: "w:p2" }))?.key).toBe("real-lane");
-  expect((await registry.read("lead"))?.pane).toBe("lead:p1");
+  await registry.write({ ...legacy, key: "real-lane", pane: sid(2), sessionRef: href(sid(2)) });
+  // Then the lead's session resolves to no lane, the lane's session still resolves, and the record stays readable.
+  expect(await registry.bySession(href(sid(1)))).toBeNull();
+  expect((await registry.bySession(href(sid(2))))?.key).toBe("real-lane");
+  expect((await registry.read("lead"))?.sessionRef).toEqual(href(sid(1)));
   expect(existsSync(registry.path("lead"))).toBe(true);
 });

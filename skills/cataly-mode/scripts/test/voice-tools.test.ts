@@ -9,7 +9,18 @@ import { Reports } from "../src/reports.ts";
 import type { VoiceSettings } from "../src/voice/settings.ts";
 import { voiceTools } from "../src/voice/tools.ts";
 import type { VoiceTool } from "../src/voice/types.ts";
-import { depsFor, fakeClock, newWorld, type TestState, withState, type World } from "./fakes.ts";
+import {
+  depsFor,
+  fakeClock,
+  href,
+  nativeLane,
+  nativeLead,
+  newWorld,
+  sid,
+  type TestState,
+  withState,
+  type World,
+} from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00.000Z");
 const NOTES = "123456789012345678";
@@ -21,12 +32,13 @@ let requests: HttpRequest[];
 let reply: HttpResponse;
 let tool: VoiceTool;
 
-const lane = (key: string, pane: string, at: string): Lane => ({
+/** A lane registered on headless session `sid(n)`; the test's world decides whether that session is live. */
+const lane = (key: string, n: number, at: string): Lane => ({
   key,
   title: key,
   thread: `thread-${key}`,
-  sessionRef: { runtime: "herdr", id: pane, group: "w1" },
-  pane,
+  sessionRef: href(sid(n)),
+  pane: sid(n),
   brief: "brief",
   done: "pr:o/r#1",
   openedAt: at,
@@ -43,18 +55,18 @@ beforeEach(() => {
     requests.push(req);
     return reply;
   };
-  tool = voiceTools(depsFor(world, clock, state.dir, { leadPane: "w1:p1" }), new Discord(http, clock, "t"), settings);
+  const deps = depsFor(world, clock, state.dir, { leadPane: nativeLead(world, 1) });
+  tool = voiceTools(deps, new Discord(http, clock, "t"), settings);
 });
 afterEach(() => state.done());
 
 test("get_status reads lanes and reports in one call, each part with its own timestamps, and writes nothing", async () => {
   const deps = depsFor(world, fakeClock(T0), state.dir);
-  await deps.registry.write(lane("api-fix", "w1:p2", "2026-01-01T10:00:00.000Z"));
-  await deps.registry.write(lane("docs-sync", "w1:p3", "2026-01-01T09:00:00.000Z"));
-  world.panes = [
-    { pane_id: "w1:p1", workspace_id: "w1", agent: "omp", agent_status: "idle" },
-    { pane_id: "w1:p2", workspace_id: "w1", agent: "omp", agent_status: "working" },
-  ];
+  await deps.registry.write({
+    ...lane("api-fix", 2, "2026-01-01T10:00:00.000Z"),
+    ...nativeLane(world, 2, { status: "working" }),
+  });
+  await deps.registry.write(lane("docs-sync", 3, "2026-01-01T09:00:00.000Z"));
   const reports = new Reports(state.dir);
   await reports.report("docs-sync", "milestone", "docs drafted", Date.parse("2026-01-01T11:00:00.000Z"));
   await reports.report("api-fix", "blocker", "needs a token\u001b[31m", Date.parse("2026-01-01T11:30:00.000Z"));
@@ -66,9 +78,9 @@ test("get_status reads lanes and reports in one call, each part with its own tim
   expect(Object.keys(r.parts ?? {})).toEqual(["lanes", "reports"]);
   const lanes = r.parts?.["lanes"]?.result ?? "";
   expect(lanes).toStartWith("read at 2026-01-01T12:00:00.000Z\n");
-  expect(lanes).toContain("- api-fix working since 2026-01-01T10:00:00.000Z pane=w1:p2 thread=thread-api-fix");
-  expect(lanes).toContain("docs-sync: pane w1:p3 is gone");
-  expect(lanes).not.toContain("w1:p1");
+  expect(lanes).toContain(`- api-fix working since 2026-01-01T10:00:00.000Z pane=${sid(2)} thread=thread-api-fix`);
+  expect(lanes).toContain(`docs-sync: pane ${sid(3)} is gone`);
+  expect(lanes).not.toContain(sid(1));
   const reportLines = (r.parts?.["reports"]?.result ?? "").split("\n");
   expect(reportLines).toEqual([
     "read at 2026-01-01T12:00:00.000Z",
@@ -77,14 +89,15 @@ test("get_status reads lanes and reports in one call, each part with its own tim
   ]);
   expect(r.result).toBe(`[lanes] ${lanes}\n[reports] ${reportLines.join("\n")}`);
   expect(readFileSync(join(state.dir, "lanes", "api-fix.json"), "utf8")).toBe(registryBefore);
-  expect(world.calls.some((c) => c[2] === "send-text" || c[2] === "send-keys")).toBe(false);
+  // Read-only: the supervisor was only listed, never delivered to, started or closed.
+  expect(world.calls.filter((c) => c[0] !== "headless" || c[1] !== "list")).toEqual([]);
   expect(requests).toHaveLength(0);
 });
 
 test("get_status names a damaged journal without failing the others, and accepts streamed JSON arguments", async () => {
   const deps = depsFor(world, fakeClock(T0), state.dir);
-  await deps.registry.write(lane("good-lane", "w1:p2", "2026-01-01T10:00:00.000Z"));
-  await deps.registry.write(lane("bad-lane", "w1:p3", "2026-01-01T10:00:00.000Z"));
+  await deps.registry.write(lane("good-lane", 2, "2026-01-01T10:00:00.000Z"));
+  await deps.registry.write(lane("bad-lane", 3, "2026-01-01T10:00:00.000Z"));
   await new Reports(state.dir).report("good-lane", "done", "merged", Date.parse("2026-01-01T11:00:00.000Z"));
   mkdirSync(join(state.dir, "lanes", "bad-lane"), { recursive: true });
   writeFileSync(join(state.dir, "lanes", "bad-lane", "reports.jsonl"), "{not json\n");

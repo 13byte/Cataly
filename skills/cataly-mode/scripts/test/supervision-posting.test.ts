@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { freshnessTick } from "../src/freshness.ts";
 import type { Runner } from "../src/run.ts";
-import { depsFor, newWorld, type TestState, withState } from "./fakes.ts";
+import { depsFor, nativeLane, newWorld, sid, type TestState, withState } from "./fakes.ts";
 import { coverageFixture, git, start } from "./supervision-coverage.fixture.ts";
 
 let state: TestState;
@@ -14,20 +14,21 @@ for (const idle of [false, true]) {
   test(`held hung posts report-only milestones once without repeated STALLED while ${idle ? "idle" : "partially observed"}`, async () => {
     const f = coverageFixture(state);
     const world = newWorld();
-    world.panes.push({ pane_id: "w:p7", workspace_id: "w", agent: "omp", agent_status: "working" });
+    const native = nativeLane(world, 7, { status: "working", activeSince: start - 21 * 60_000 });
     const deps = depsFor(world, f.clock, state.dir, {
       nudgeAfterMin: 1,
       postAfterMin: 0,
       hooks: { threadReply: ["notify", "{thread}", "{text}"] },
       supervision: { hungAfterMinutes: 0, staleAfterMinutes: 0 },
     });
-    const lane = { ...f.lane, pane: "w:p7", thread: "test-thread" };
+    const lane = { ...f.lane, ...native, thread: "test-thread" };
     await deps.registry.write(lane);
     await f.reports.report(lane.key, "milestone", "started", start);
     const run: Runner = (argv, options) => (argv[0] === "git" ? git(argv, options) : deps.run(argv, options));
     const tick = async (turn: number) => {
       f.clock.at = start + turn * 60_000;
-      world.screen = idle && turn > 7 ? ">" : `Working ${21 + turn}m`;
+      const session = world.sessions[sid(7)];
+      if (session) session.status = idle && turn > 7 ? "idle" : "working";
       return f.settle(() => freshnessTick({ ...deps, run }, state.dir));
     };
     for (let turn = 0; turn < 7; turn++) await tick(turn);

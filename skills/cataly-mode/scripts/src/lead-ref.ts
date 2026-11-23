@@ -11,7 +11,7 @@ type LeadAddress =
 
 /** A default for new sessions is never evidence about the address of an existing lead. */
 export function leadAddress(
-  config: Pick<CatalyConfig, "leadPane" | "runtime">,
+  config: Pick<CatalyConfig, "leadPane">,
   env: Readonly<Record<string, string | undefined>>,
 ): LeadAddress {
   let recorded: SessionRef | undefined;
@@ -33,14 +33,10 @@ export function leadAddress(
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") return { reason: "unreadable" };
   }
   const pane = config.leadPane.trim();
-  if (pane === "<your herdr pane id, from: herdr pane current>")
+  // The placeholder an old config example shipped is no address.
+  if (!pane || pane === "<your herdr pane id, from: herdr pane current>")
     return recorded ? { ref: recorded } : { reason: "unconfigured" };
-  if (!pane) return recorded ? { ref: recorded } : { reason: "unconfigured" };
-  const explicit =
-    parseRef(pane) ??
-    (config.runtime === "hc" || (recorded?.runtime === "hc" && recorded.id === pane)
-      ? parseRef(`hc:${pane}`)
-      : undefined);
+  const explicit = parseRef(pane);
   if (!explicit) return recorded ? { reason: "ambiguous" } : { reason: "invalid", unboundAlias: true };
   if (recorded && (recorded.runtime !== explicit.runtime || recorded.id !== explicit.id))
     return { reason: "ambiguous" };

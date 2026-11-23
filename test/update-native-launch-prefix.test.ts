@@ -2,7 +2,8 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadUpdateConfig, nativeAgent } from "../src/update/load.ts";
+import { loadUpdateConfig } from "../src/update/load.ts";
+import { nativeAgent } from "../src/update/native-agent.ts";
 import { runCommand } from "../src/update/process.ts";
 import type { UpdateJob } from "../src/update/types.ts";
 
@@ -55,7 +56,6 @@ console.log(JSON.stringify({ type: "agent_end", isTerminal: true, messages: [mes
     JSON.stringify({
       version: 1,
       target: "cataly",
-      runtime: "herdr",
       root: join(dir, "updates"),
       remote: join(dir, "remote"),
       ref: "refs/heads/main",

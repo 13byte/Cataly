@@ -6,7 +6,7 @@ import type { Lane } from "../src/registry.ts";
 import { Reports } from "../src/reports.ts";
 import { laneStatus } from "../src/status.ts";
 import { renderBoard, renderStatus } from "../src/status-render.ts";
-import { agentIn, depsFor, fakeClock, laneState, newWorld, withState } from "./fakes.ts";
+import { depsFor, fakeClock, nativeLane, newWorld, withState } from "./fakes.ts";
 
 let state: { dir: string; done: () => void };
 const now = Date.parse("2026-01-01T13:00:00.000Z");
@@ -16,7 +16,6 @@ const lane: Lane = {
   key: "status-demo",
   title: "demo",
   thread: "discord:40",
-  pane: "w:p7",
   openedAt: "2026-01-01T12:00:00Z",
   brief: "/brief",
   done: "file /done",
@@ -26,13 +25,12 @@ beforeEach(() => {
 });
 afterEach(() => state.done());
 
-test("an unbound lane never adopts the current occupant of a reused pane", async () => {
+test("an unbound lane never adopts the current occupant of its native session", async () => {
   const world = newWorld();
-  world.panes = [{ pane_id: "w:p7", workspace_id: "w", agent: "omp", agent_status: "working" }];
-  agentIn(world, "w:p7");
-  laneState(state.dir, "w:p7", { agentStatus: "working" });
+  // Bind only the session address, never the session identity: the lane must not adopt whoever runs there now.
+  const { session: _session, sessionFile: _file, ...address } = nativeLane(world, 7, { status: "working" });
   const deps = depsFor(world, fakeClock(now), state.dir);
-  await deps.registry.write(lane);
+  await deps.registry.write({ ...lane, ...address });
   expect((await laneStatus(deps)).lanes[0]?.runtime).toBeNull();
 });
 
@@ -126,7 +124,9 @@ test("explicit out-of-tree session monitor metadata is included like boot", asyn
       monitors: [{ monitorId: "mon_a", sessionId: "outside", persistent: true }],
     }),
   );
-  const deps = { ...depsFor(newWorld(), fakeClock(now), state.dir), env: { PI_SESSION_DIR: external } };
+  // Terminal metadata belongs to a terminal scope: here a Tern lead.
+  const world = depsFor(newWorld(), fakeClock(now), state.dir, { leadPane: "tern:5001" });
+  const deps = { ...world, env: { PI_SESSION_DIR: external } };
   expect((await laneStatus(deps)).monitors.recorded).toBe(1);
 });
 

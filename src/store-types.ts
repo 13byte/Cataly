@@ -5,9 +5,9 @@ export type LaneStatus = "working" | "waiting" | "ready" | "done" | "lost";
 
 /**
  * One lane record. `sessionRef` is the session it runs in, on whichever runtime opened it; `paneId`/`tabId` are written
- * beside it (the ref's id and container) so an older binary still reads the file. `migratedFrom`: the sessions it ran in
- * before a `cataly migrate`. `migration`: a handover is in progress, and the duty loop leaves the record alone.
- * `sessionPath`: the agent's own session file, when its command records one; `cataly migrate --resume` needs it.
+ * beside it (the ref's id and container) so an older binary still reads the file. `migratedFrom` and `migration` were
+ * written by the removed `cataly migrate` and are only read: `migration` marks a handover an older binary left in
+ * progress, and the duty loop leaves that record alone. `sessionPath`: the native session file the lane started with.
  * `policyBinding`: the root registration's exact headless policy snapshot binding, not a lookup by lane key.
  * `progressAt`: the last time the lane made progress (start, a report with new evidence, READY); the duty loop nudges and
  * escalates on it, and a record from before it existed falls back to its last start, report or READY. `lastEvidence`:

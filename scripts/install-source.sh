@@ -9,14 +9,11 @@
 # Source omp-ulw uses the bound lock+overlay by default; OMP_ULW_REF explicitly selects an unpatched branch/tag/commit.
 # Primary mode discovers it globally; side mode loads it only through the isolated omp-cataly omp wrapper.
 # Optional paths: CATALY_SRC, OMP_ULW_SRC, OMP_ULW_REPO, SKILLS_DIR, OMP_EXTENSIONS_DIR, OMP_CATALY_HOME, OMP_CATALY_BIN_DIR.
-# For optional side-mode terminal operations, OMP_CATALY_HC_SESSION names the hc namespace (default omp-cataly)
-# and OMP_CATALY_HC_SPACE names a Herdr app space. Neither selects the session runtime.
 set -euo pipefail
 
 # Translate only source-installer inputs. An explicitly set Cataly spelling, even empty, wins.
 for selector in CATALY_INSTALL_MODE:DORI_INSTALL_MODE CATALY_SRC:DORI_SRC CATALY_NO_PULL:DORI_NO_PULL \
-  CATALY_OMP:DORI_OMP OMP_CATALY_HOME:OMP_DORI_HOME OMP_CATALY_BIN_DIR:OMP_DORI_BIN_DIR \
-  OMP_CATALY_HC_SESSION:OMP_DORI_HC_SESSION OMP_CATALY_HC_SPACE:OMP_DORI_HC_SPACE; do
+  CATALY_OMP:DORI_OMP OMP_CATALY_HOME:OMP_DORI_HOME OMP_CATALY_BIN_DIR:OMP_DORI_BIN_DIR; do
   canonical_selector="${selector%:*}"
   legacy_selector="${selector#*:}"
   if [ -z "${!canonical_selector+x}" ] && [ -n "${!legacy_selector+x}" ]; then
@@ -426,19 +423,12 @@ fi
 legacy_side_cli=""
 legacy_home_link=""
 legacy_global_link=""
-hc_session="${OMP_CATALY_HC_SESSION:-}"
 if [ "$mode" = side ]; then
-  if [ -z "$hc_session" ] && owned_directory "$base" && marked "$base" side; then
-    hc_session="$(source_legacy namespace "$base")"
-    hc_session="${hc_session%.}"
-  fi
   if [ -n "$legacy_install" ]; then
-    hc_session="${hc_session:-omp-dori}"
     legacy_side_sources=("$src" "$base/src")
     [ -z "$legacy_side_source" ] || legacy_side_sources+=("$legacy_side_source")
     legacy_side_cli="$(source_legacy side-cli "$base" "${legacy_side_sources[@]}")"
   fi
-  hc_session="${hc_session:-omp-cataly}"
 elif [ -n "$legacy_primary_cli" ]; then
   legacy_primary_sources=("$src" "$base/src")
   [ -z "$legacy_primary_source" ] || legacy_primary_sources+=("$legacy_primary_source")
@@ -691,7 +681,7 @@ Installed.
   CLI:       cataly (messenger/lane CLI), cataly harness (upstream harness)
   Config:    $config
 Next: configure your model, project and messenger hooks in $config.
-New sessions default to headless; set sessionRuntime to hc or herdr only to opt into terminal execution.
+Sessions run on headless OMP.
 Run cataly harness up from your project to start the harness, or open the lead with
 $base/bin/omp --cataly-role cataly. Installation does not start a messenger or watcher.
 EOF
@@ -724,10 +714,6 @@ fi
   # Clear inherited legacy aliases as well so a side session never uses primary dependencies.
   printf '%s\n' 'unset DORI_AGENT_CMD DORI_AGENT_EXECUTABLE DORI_OMP_ULW_PATH'
   printf 'export CATALY_AGENT_ARGV=%q\n' "$agent_argv"
-  # Keep optional hc operations isolated without selecting a terminal runtime.
-  printf 'export HC_SESSION=%q\n' "$hc_session"
-  # A Herdr app space id shows the side Cataly's terminals in that space; without one, hc keeps them hidden.
-  [ -z "${OMP_CATALY_HC_SPACE:-}" ] || printf 'export CATALY_HC_SPACE=%q\n' "$OMP_CATALY_HC_SPACE"
   printf 'case ":$PATH:" in *:%q:*) ;; *) export PATH=%q:"$PATH" ;; esac\n' "$base/bin" "$base/bin"
 } | write_generated "$base/env.sh" 644
 wrapper() {
@@ -743,7 +729,7 @@ if [ -n "$legacy_side_cli" ]; then
   fi
 fi
 { ulw_guard; printf 'exec %q --no-extensions -e %q -e %q --config %q "$@"\n' "$omp_bin" "$src/extension" "$ulw" "$base/omp.yml"; } | wrapper omp
-printf 'case "${1:-}" in\n  omp) shift; exec %q "$@" ;;\n  hc) shift; exec hc "$@" ;;\n  *) exec %q "$@" ;;\nesac\n' \
+printf 'case "${1:-}" in\n  omp) shift; exec %q "$@" ;;\n  *) exec %q "$@" ;;\nesac\n' \
   "$base/bin/omp" "$base/bin/cataly" | wrapper omp-cataly
 mkdir -p "$bin_dir"
 if [ "$bin_dir/omp-cataly" != "$base/bin/omp-cataly" ]; then
@@ -754,13 +740,13 @@ CATALY_SETUP_SNAPSHOT="$setup_snapshot" configuration readback
 cat <<EOF
 Installed next to the Cataly in $primary_home, which was not changed.
   Home:       $base (config.json, state, generated skill, omp.yml and wrappers)
-  Command:    $bin_dir/omp-cataly  (omp-cataly <cataly command> | omp-cataly omp ... | omp-cataly hc ...)
+  Command:    $bin_dir/omp-cataly  (omp-cataly <cataly command> | omp-cataly omp ...)
   Skill:      omp-cataly-mode; cataly-mode is hidden in omp-cataly omp sessions
   Extensions: $src/extension and $ulw, loaded only by omp-cataly omp, which discovers no other OMP extension
   omp-ulw:    $ulw
   Config:     $config
 Next: configure your model and project in $config and use separate messenger credentials and hooks for this home.
-New sessions default to headless; set sessionRuntime to hc or herdr only to opt into terminal execution.
+Sessions run on headless OMP.
 Run omp-cataly harness up from your project to start the harness, or open the lead with
-omp-cataly omp --cataly-role cataly. Installation does not start a messenger, watcher or terminal server.
+omp-cataly omp --cataly-role cataly. Installation does not start a messenger or watcher.
 EOF

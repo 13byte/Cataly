@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { matchesDeploymentConfigHash } from "./deployment-config.ts";
 import { saveDeploymentJson } from "./deployment-files.ts";
 import { captureHandoff } from "./deployment-handoff.ts";
-import { forwardStopStarted } from "./deployment-native-ui.ts";
 import { command, DeploymentHeld } from "./deployment-process.ts";
+import { forwardStopStarted } from "./deployment-stop.ts";
 import type { DeploymentConfig, DeploymentRecord } from "./deployment-types.ts";
 import { digest, sourceManifest } from "./source.ts";
 
@@ -58,8 +58,8 @@ export function deferRestartIntent(config: DeploymentConfig, record: DeploymentR
     pending?.id !== record.id ||
     pending.status !== "held" ||
     pending.step !== "stop" ||
-    forwardStopStarted(config, pending) ||
-    forwardStopStarted(config, record) ||
+    forwardStopStarted(pending) ||
+    forwardStopStarted(record) ||
     record.launchRequestedAt
   )
     throw new DeploymentHeld("busy restart intent has runtime effects");
@@ -97,7 +97,7 @@ export async function newRestartIntent(config: DeploymentConfig, signal?: AbortS
     commit: identity[0]!,
     tree: identity[1]!,
     configHash: digest(JSON.stringify(config)),
-    inputHash: digest(JSON.stringify({ source: manifest.hash, session: config.sessionId })),
+    inputHash: digest(JSON.stringify({ source: manifest.hash, harness: config.catalyHome })),
     createdAt: new Date().toISOString(),
     status: "prepared",
     step: "prepare",

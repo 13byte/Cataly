@@ -6,8 +6,7 @@ import type { Deps } from "../src/harness.ts";
 import { hooksSettled } from "../src/hooks.ts";
 import { readQueue } from "../src/inbox-files.ts";
 import { startLane } from "../src/lanes.ts";
-import { href } from "./fake.ts";
-import { quietLane } from "./harness-setup.ts";
+import { LEAD, LEAD_REF, quietLane } from "./harness-setup.ts";
 
 const MIN = 60_000;
 
@@ -52,7 +51,7 @@ describe("duty notices survive queue and settlement retries", () => {
     expect((await at(40)).map((e) => e.action)).toContain("lane-failed");
     expect(d.store.lane("talker")!.escalatedAt).toBeUndefined();
     await at(41);
-    expect(d.store.queued(href("w1:p1"))).toHaveLength(1);
+    expect(d.store.queued(LEAD_REF)).toHaveLength(1);
     expect(d.store.lane("talker")!.escalatedAt).toBe(d.now());
     lead.status = "idle";
     await at(42);
@@ -65,7 +64,7 @@ describe("duty notices survive queue and settlement retries", () => {
     dieOnce(d, "saveLane");
     await at(40);
     expect(told("ESCALATE")).toBe(0);
-    expect(await at(41)).toContainEqual({ pane: "w1:p1", action: "flushed" });
+    expect(await at(41)).toContainEqual({ pane: `tern:${LEAD}`, action: "flushed" });
     await at(42);
     expect(told("ESCALATE")).toBe(1);
     expect(d.store.lane("talker")!.log.filter((e) => e.kind === "escalate")).toHaveLength(1);
@@ -96,7 +95,7 @@ describe("duty notices survive queue and settlement retries", () => {
     await hooksSettled();
     const hooked = () => w.calls.filter((c) => c.cmd === "my-hook").map((c) => c.argv);
     expect(hooked()).toEqual([["talker"]]);
-    d.store.setRole("lead", href("w1:p1"));
+    d.store.setRole("lead", LEAD_REF);
     await dutyTick(d);
     await dutyTick(d);
     await hooksSettled();
@@ -115,7 +114,7 @@ describe("duty notices survive queue and settlement retries", () => {
     const again = await startLane(d, "talker", brief, { group: "w1" });
     expect(again.createdAt).not.toBe(lane.createdAt);
     await dutyTick(d);
-    d.store.setRole("lead", href("w1:p1"));
+    d.store.setRole("lead", LEAD_REF);
     await dutyTick(d);
     await dutyTick(d);
     expect(told("LOST")).toBe(1);
@@ -129,8 +128,8 @@ describe("duty notices survive queue and settlement retries", () => {
     // The move appended the kept notice to the lead's inbox and stopped before removing the copy it renamed aside.
     const kept = join(d.store.root, "duty", "lead.jsonl");
     renameSync(kept, `${kept}.merging`);
-    d.store.setRole("lead", href("w1:p1"));
-    for (const m of readQueue(`${kept}.merging`)) await d.store.enqueue(href("w1:p1"), m, false);
+    d.store.setRole("lead", LEAD_REF);
+    for (const m of readQueue(`${kept}.merging`)) await d.store.enqueue(LEAD_REF, m, false);
     await dutyTick(d);
     await dutyTick(d);
     expect(told("LOST")).toBe(1);
@@ -151,7 +150,7 @@ describe("duty notices survive queue and settlement retries", () => {
     await at(41);
     await at(42);
     expect(told("ESCALATE")).toBe(1);
-    expect(d.store.queued(href("w1:p1"))).toEqual([]);
+    expect(d.store.queued(LEAD_REF)).toEqual([]);
   });
 
   test("killed before or after queueing a nudge: the lane gets it once and it is counted once", async () => {

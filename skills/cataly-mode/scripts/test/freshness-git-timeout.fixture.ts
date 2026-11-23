@@ -6,7 +6,7 @@ import type { Lane } from "../src/registry.ts";
 import { Reports } from "../src/reports.ts";
 import { run, type Runner } from "../src/run.ts";
 import type { Observation } from "../src/supervision-observe.ts";
-import { depsFor, fakeClock, newWorld } from "./fakes.ts";
+import { depsFor, fakeClock, nativeLane, newWorld } from "./fakes.ts";
 
 export const T0 = Date.parse("2026-01-01T12:00:00Z");
 export const MIN = 60_000;
@@ -30,11 +30,13 @@ export const setup = async (home: string, budget: boolean, watch = false) => {
   writeFileSync(join(cwd, "work.txt"), "staged work\n");
   await git("add", "--", "app/work.txt");
 
+  const world = newWorld();
+  // The lane's current call started 21 minutes before T0, so its native timer reads `21 + minutes`.
   const lane: Lane = {
     key,
     title: "Freshness Git timeout",
     thread: budget ? "none" : "123",
-    pane: "w:p1",
+    ...nativeLane(world, 1, { status: "working", activeSince: T0 - 21 * MIN }),
     brief: "/b.md",
     done: "",
     openedAt: new Date(T0).toISOString(),
@@ -43,8 +45,6 @@ export const setup = async (home: string, budget: boolean, watch = false) => {
   };
   const clock = fakeClock(T0);
   const wall = Date.now();
-  const world = newWorld();
-  world.panes = [{ pane_id: "w:p1", workspace_id: "w", agent: "omo", agent_status: "working" }];
   const deps = depsFor(world, clock, stateDir, {
     nudgeAfterMin: 999,
     postAfterMin: 22,
@@ -99,7 +99,6 @@ export const setup = async (home: string, budget: boolean, watch = false) => {
         return deps.run(argv, opts);
       };
       clock.at = T0 + minutes * MIN;
-      world.screen = `Working ${21 + minutes}m`;
       const now = spyOn(Date, "now").mockImplementation(() => wall + minutes * MIN);
       try {
         const acts = await freshnessTick({ ...deps, run: runner }, home);

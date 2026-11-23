@@ -23,12 +23,10 @@
 | `posixOwnership` | Whether file ownership is compared by uid, as `src/release/files.ts` `owned()` does | `true` | `true` | `false` |
 | `directoryFsync` | Whether a directory can be opened and fsynced; callers only call `syncDirectory`, which does nothing where this is false | `true` | `true` | `false` |
 | `preservesHardLinks` | Whether a hard link must keep a symlink's own inode, as `preserveLink` in `src/update/deployment-files.ts` does on rollback | `true`: `linkat` with flags 0, because `link(2)` follows the symlink | `false`: plain `link(2)` links the path itself | `false`, as Linux |
-| `supportsHerdrNativeUi` | Whether herdr's native UI path, reading a pane's screen and sending it keys, is open on this host | `false` | `true` | `false` |
 | `procfs` | Whether a process's kernel state is readable under `/proc`: its task list (a zombie leader's threads still run), `CapEff`, `environ` and `cwd` | `false`: a zombie has ended, only root can enter another user's directory, a relative home stays unresolved | `true` | `false`, as darwin |
 | `flockLibrary()` | The C library `flock(2)` is loaded from, as the native cache lease locks its prune file | `libSystem.B.dylib` | `libc.so.6` | `libc.so.6`, the non-darwin default the lease used |
 | `syncDirectory(path)` | Flush a directory's own entries after a rename or link; the only call a caller makes, and a no-op where `directoryFsync` is false | Opens and fsyncs | Opens and fsyncs | No-op |
-| `defaultRuntime()` | The runtime a fresh installation selects with none configured | `"hc"` | `"herdr"` | `"herdr"` |
-| `supportsReleaseProfile(platform, arch, runtime)` | Whether a release built for that profile is admitted, as `src/release/provision.ts` prerequisites do | `darwin`/`arm64`/`hc` only | `linux`/`x64`/`herdr` only | Never |
+| `supportsHeadlessRelease(platform, arch)` | Whether a headless release built for that platform and architecture is admitted, as `src/release/provision.ts` prerequisites do | `darwin`/`arm64` only | `linux`/`x64` only | Never: headless OMP sessions need a Unix socket, so Windows has no session runtime |
 | `nativeCacheLabel()` | The native build cache name, `native-<platform>-<arch>` | `native-darwin-<arch>` | `native-linux-<arch>` | `native-win32-<arch>` |
 | `programName(word)` | A program word's name: its part after the last separator, on Windows without the `.exe` it runs as | Splits on `/` | Splits on `/` | Splits on `/[\\/]/` and strips a trailing `.exe` |
 | `windowsExecutableNames` | Whether a program word may name this host's executable with an `.exe` suffix, as `isOmpExecutable` in `src/runtime/omp-argv.ts` reads `C:\bin\omp.exe` | `false` | `false` | `true` |
@@ -47,9 +45,7 @@ Tests never run on another OS. `adapterFor(os)` returns the implementation for a
 - **POSIX ownership is a darwin and linux assumption.** Comparing ownership by uid (`posixOwnership`) and the permission-bit checks built on it run only where the property is true; Windows code must not assume a uid or POSIX modes.
 - **Directory fsync is conditional.** Call `syncDirectory` rather than the syscall: on Windows the adapter cannot open a directory for fsync and its implementation does nothing, so no caller repeats the `directoryFsync` test.
 - **Per-process kernel state is Linux-only.** Where `procfs` is false, a zombie process has ended, only root can enter an owner-only entry, and a relative home cannot be resolved against the process, so the native cache's use scan holds on all three.
-- **The herdr native UI is Linux-only.** `herdrDeploymentCli` in `src/update/deployment-cli.ts` attaches its `nativeUi` read and exit operations only where `supportsHerdrNativeUi` is true, so darwin and win32 deployments have no `nativeUi` key.
-- **The default runtime differs.** A fresh installation on darwin selects `hc`; linux and win32 select `herdr`.
-- **Only two release profiles are admitted.** `supportsReleaseProfile` accepts `linux`/`x64`/`herdr` and `darwin`/`arm64`/`hc`, and nothing on Windows. A host never admits another host's release.
+- **Only two release profiles are admitted.** `supportsHeadlessRelease` accepts `linux`/`x64` and `darwin`/`arm64`, and nothing on Windows. A host never admits another host's release.
 - **Program names and paths follow the adapter's host.** `programName` strips a Windows `.exe` and splits on either separator, `windowsExecutableNames` says whether that spelling may name OMP, and `isAbsolutePath` answers with the adapter's own `node:path` (`posix` or `win32`), so an injected adapter answers for its OS even on another host.
 - **Hard links and executable identity are named too.** `preservesHardLinks` decides whether rollback needs `linkat` to keep a symlink's inode, and `procExeLink` decides whether the identity token is a `/proc` link target or the image path.
 

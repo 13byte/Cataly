@@ -7,7 +7,7 @@ import type { Lane } from "../src/registry.ts";
 import { Reports } from "../src/reports.ts";
 import type { Runner } from "../src/run.ts";
 import { readObservation, type SupervisionOptions } from "../src/supervision-observe.ts";
-import { depsFor, fakeClock, newWorld, withState } from "./fakes.ts";
+import { depsFor, fakeClock, nativeLane, newWorld, withState } from "./fakes.ts";
 import { commit, git, native, submoduleFixture, tracked } from "./supervision-git-fixtures.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00Z");
@@ -22,14 +22,14 @@ async function supervisedLane(home: string, cwd: string, stateDir: string, optio
     key,
     title: "Native Git boundary",
     thread: "none",
-    pane: "w:p1",
+    // One continuing native call that started 21 minutes before T0.
+    ...nativeLane(world, 1, { status: "working", activeSince: T0 - 21 * MIN }),
     brief: "",
     done: "",
     openedAt: new Date(T0).toISOString(),
     reportProtocol: "jsonl-v1",
     cwd,
   } satisfies Lane;
-  world.panes = [{ pane_id: lane.pane, workspace_id: "w", agent: "omo", agent_status: "working" }];
   const supervision = { hungAfterMinutes: 20, staleAfterMinutes: 20, ...options };
   const deps = depsFor(world, clock, stateDir, { nudgeAfterMin: 999, postAfterMin: 999, hooks: {}, supervision });
   const reports = new Reports(stateDir);
@@ -42,7 +42,6 @@ async function supervisedLane(home: string, cwd: string, stateDir: string, optio
     observation: () => readObservation(join(stateDir, "lanes", key, "supervision.json"), lane),
     async tick(minutes: number, runner = native, gitActivity = true) {
       clock.at = T0 + minutes * MIN;
-      world.screen = `Working ${21 + minutes}m`;
       const config = { ...deps.config, supervision: { ...supervision, gitActivity } };
       const dispatch: Runner = (argv, opts) => (argv[0] === "git" ? runner(argv, opts) : deps.run(argv, opts));
       const now = spyOn(Date, "now").mockImplementation(() => wall + minutes * MIN);

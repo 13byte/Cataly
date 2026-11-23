@@ -10,8 +10,11 @@ import { type Lane, Registry } from "../../skills/cataly-mode/scripts/src/regist
 import { Reports, reportScope } from "../../skills/cataly-mode/scripts/src/reports.ts";
 import { type FakePi, type FakeSession, load, useConfig } from "./fake-pi";
 
+const HEADLESS = "00000000-0000-4000-8000-000000000005";
+const native = { mode: "rpc", hasUI: true } as const;
+
 test("cataly_report scopes reopened evidence while sharing the journal acceptance sequence", async () => {
-  const names = ["CATALY_CONFIG", "CATALY_STATE_DIR", "HERDR_PANE_ID", "HC_TERMINAL_ID"] as const;
+  const names = ["CATALY_CONFIG", "CATALY_STATE_DIR", "CATALY_HEADLESS_ID"] as const;
   const saved = Object.fromEntries(names.map((name) => [name, process.env[name]]));
   let pi: FakePi | undefined;
   try {
@@ -19,14 +22,14 @@ test("cataly_report scopes reopened evidence while sharing the journal acceptanc
     const key = "generation-evidence";
     const generation = randomUUID();
     const oldGeneration = randomUUID();
-    process.env.HERDR_PANE_ID = "w1:p5";
-    delete process.env.HC_TERMINAL_ID;
+    process.env.CATALY_HEADLESS_ID = HEADLESS;
     const registry = new Registry(stateDir);
     const priorLane = {
       key,
       title: "reopened evidence",
       thread: "none",
-      pane: "w1:p5",
+      pane: HEADLESS,
+      sessionRef: { runtime: "headless", id: HEADLESS },
       brief: "/brief.md",
       done: "file /done.md",
       openedAt: "2026-01-01T00:00:00.000Z",
@@ -53,7 +56,11 @@ test("cataly_report scopes reopened evidence while sharing the journal acceptanc
       );
     });
     await registry.write({ ...priorLane, openedAt: "2026-01-02T00:00:00.000Z", lifecycleEpoch: generation });
-    pi = await load({ session: { id: "generation-session", entries: [] }, flags: { "cataly-role": "lane" } });
+    pi = await load({
+      session: { id: "generation-session", entries: [] },
+      flags: { "cataly-role": "lane" },
+      ...native,
+    });
     await pi.emit("session_start");
     const tool = pi.tools.get("cataly_report");
     if (!tool) throw new Error("cataly_report is not registered");
@@ -83,7 +90,7 @@ test("cataly_report scopes reopened evidence while sharing the journal acceptanc
 });
 
 test("cataly_report accepts only the verified native run and scopes both journals to it", async () => {
-  const names = ["CATALY_CONFIG", "CATALY_STATE_DIR", "HERDR_PANE_ID", "HC_TERMINAL_ID", "CATALY_LANE_RUN"] as const;
+  const names = ["CATALY_CONFIG", "CATALY_STATE_DIR", "CATALY_HEADLESS_ID", "CATALY_LANE_RUN"] as const;
   const saved = Object.fromEntries(names.map((name) => [name, process.env[name]]));
   let pi: FakePi | undefined;
   try {
@@ -116,7 +123,8 @@ test("cataly_report accepts only the verified native run and scopes both journal
       key,
       title: "verified evidence",
       thread: "none",
-      pane: "w1:p5",
+      pane: HEADLESS,
+      sessionRef: { runtime: "headless", id: HEADLESS },
       session: session.id,
       brief: "/brief.md",
       done: "file /done.md",
@@ -131,11 +139,10 @@ test("cataly_report accepts only the verified native run and scopes both journal
     const currentRef = {
       requestId: lane.requestId,
       runId: lane.runId,
-      nativeRef: { sessionId: session.id, ref: { runtime: "herdr" as const, id: lane.pane } },
+      nativeRef: { sessionId: session.id, ref: { runtime: "headless" as const, id: HEADLESS } },
     };
-    process.env.HERDR_PANE_ID = lane.pane;
+    process.env.CATALY_HEADLESS_ID = HEADLESS;
     process.env.CATALY_LANE_RUN = lane.runId;
-    delete process.env.HC_TERMINAL_ID;
     const registry = new Registry(stateDir);
     await registry.write(oldRun);
     const oldSource = join(dirname(stateDir), "old-run.txt");
@@ -163,7 +170,7 @@ test("cataly_report accepts only the verified native run and scopes both journal
       if (!current || current.runId !== lane.runId) throw new Error("current execution is not registered");
       recordExecution(stateDir, current, now);
     });
-    const root = await load({ session, flags: { "cataly-role": "lane" } });
+    const root = await load({ session, flags: { "cataly-role": "lane" }, ...native });
     pi = root;
     await root.emit("session_start");
     const tool = root.tools.get("cataly_report");

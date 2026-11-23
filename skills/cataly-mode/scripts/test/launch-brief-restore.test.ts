@@ -3,9 +3,8 @@ import * as fs from "node:fs";
 import { linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { FlowDeps } from "../src/done-flow.ts";
 import { launchLane } from "../src/launch.ts";
-import { depsFor, fakeClock, newWorld, type TestState, withState, type World } from "./fakes.ts";
+import { depsFor, fakeClock, newWorld, sid, type TestState, withState, type World } from "./fakes.ts";
 
 // The in-place brief write after registration can fail part-way (a file size limit, a full disk): the brief must
 // never be left cut short.
@@ -29,14 +28,6 @@ beforeEach(() => {
 });
 afterEach(() => state.done());
 
-const withTab = (base: FlowDeps): FlowDeps => ({
-  ...base,
-  run: async (argv, opts) =>
-    argv[0] === "herdr" && argv[1] === "tab" && argv[2] === "create"
-      ? { code: 0, out: JSON.stringify({ result: { root_pane: { pane_id: "w:p9" }, tab_id: "w:t9" } }), err: "" }
-      : base.run(argv, opts),
-});
-
 /** Writes to the brief: the first is cut at 1024 bytes and fails; later ones fail too while `restoreFails`. */
 const shortWrites = (restoreFails: boolean) => {
   const write = fs.writeFileSync;
@@ -53,7 +44,7 @@ const shortWrites = (restoreFails: boolean) => {
 };
 
 const launch = async (restoreFails: boolean): Promise<string> => {
-  const deps = withTab(depsFor(world, fakeClock(T0), state.dir));
+  const deps = depsFor(world, fakeClock(T0), state.dir);
   const spy = shortWrites(restoreFails);
   try {
     await launchLane(deps, { key: "short-lane", title: "t", brief, done: DONE });
@@ -63,9 +54,7 @@ const launch = async (restoreFails: boolean): Promise<string> => {
   } finally {
     spy.mockRestore();
     expect(await deps.registry.read("short-lane")).toBeNull();
-    expect(world.calls.filter((c) => c[0] === "herdr" && c[2] === "close")).toEqual([
-      ["herdr", "tab", "close", "w:t9"],
-    ]);
+    expect(world.calls.filter((c) => c[0] === "headless" && c[1] === "close")).toEqual([["headless", "close", sid(1)]]);
   }
 };
 

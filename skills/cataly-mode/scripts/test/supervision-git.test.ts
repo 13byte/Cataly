@@ -5,7 +5,7 @@ import { freshnessTick } from "../src/freshness.ts";
 import type { Lane } from "../src/registry.ts";
 import { Reports } from "../src/reports.ts";
 import { run, type Runner } from "../src/run.ts";
-import { depsFor, fakeClock, newWorld, withState } from "./fakes.ts";
+import { depsFor, fakeClock, nativeLane, newWorld, withState } from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00Z");
 const MIN = 60_000;
@@ -81,7 +81,8 @@ test.each(layouts)("freshness preserves tracked Git activity but not its writer 
       key,
       title: "Git writer lock",
       thread: "none",
-      pane: "w:p1",
+      // One continuing native call that started 21 minutes before T0.
+      ...nativeLane(world, 1, { status: "working", activeSince: T0 - 21 * MIN }),
       brief: "/b.md",
       done: "",
       openedAt: new Date(T0).toISOString(),
@@ -93,7 +94,6 @@ test.each(layouts)("freshness preserves tracked Git activity but not its writer 
       expect(root.code, root.err).toBe(0);
       expect(realpathSync.native(root.out.replace(/\r?\n$/, ""))).toBe(realpathSync.native(repo));
     }
-    world.panes = [{ pane_id: "w:p1", workspace_id: "w", agent: "omo", agent_status: "working" }];
     const deps = depsFor(world, clock, stateDir, {
       nudgeAfterMin: 999,
       postAfterMin: 999,
@@ -136,7 +136,6 @@ test.each(layouts)("freshness preserves tracked Git activity but not its writer 
     const wall = Date.now();
     const tick = async (minutes: number) => {
       clock.at = T0 + minutes * MIN;
-      world.screen = `Working ${21 + minutes}m`;
       const now = spyOn(Date, "now").mockImplementation(() => wall + minutes * MIN);
       try {
         return await freshnessTick({ ...deps, run: sample }, fixture.dir);

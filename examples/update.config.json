@@ -1,7 +1,6 @@
 {
   "version": 1,
   "target": "cataly",
-  "runtime": "herdr",
   "root": "../../cataly-update-staging",
   "remote": "https://github.com/sisyphuslabs/dori-superagent.git",
   "ref": "refs/heads/main",

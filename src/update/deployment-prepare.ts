@@ -1,6 +1,5 @@
 import { chmodSync, copyFileSync, lstatSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { legacyDeploymentSource } from "./deployment-legacy-brand.ts";
 import { command, DeploymentHeld } from "./deployment-process.ts";
 import type { DeploymentConfig, DeploymentInput, DeploymentRecord } from "./deployment-types.ts";
 import { assertSourceAdmission, digest, sameManifest, sourceManifest } from "./source.ts";
@@ -132,8 +131,7 @@ export async function prepareRelease(
     (numbers[0] === 1 && numbers[1] === 4 && (numbers[2] ?? 0) < 4)
   )
     throw new DeploymentHeld("private Bun 1.4.4 or newer is required");
-  const skill = legacyDeploymentSource(record.releasePath, record.sourceHash) ? "dori-mode" : "cataly-mode";
-  for (const relative of ["", `skills/${skill}/scripts`, "extension"]) {
+  for (const relative of ["", "skills/cataly-mode/scripts", "extension"]) {
     for (const name of ["package.json", "bun.lock"]) {
       if (!input.publicManifest.files.some((file) => file.path === (relative ? `${relative}/${name}` : name)))
         throw new DeploymentHeld("published release lacks a frozen dependency manifest");

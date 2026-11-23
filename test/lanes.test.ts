@@ -1,24 +1,22 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { groupId } from "../src/runtime/group.ts";
 import { Runtimes } from "../src/runtime/registry.ts";
 import { TernRuntime } from "../src/runtime/tern/index.ts";
-import { Store } from "../src/store.ts";
 import { Refusal } from "../src/refusal.ts";
 import { done, ready, startLane } from "../src/lanes.ts";
-import { href } from "./fake.ts";
 import { block, FakeTern } from "./fake-tern.ts";
-import { setup } from "./harness-setup.ts";
+import { LEAD_REF, setup } from "./harness-setup.ts";
 
 describe("lanes", () => {
-  test("start opens a tab, launches omo with the brief, and tells the lead", async () => {
+  test("start opens a native lane, begins its goal with the brief, and tells the lead", async () => {
     const { w, d, lead, brief } = setup();
     const lane = await startLane(d, "fix-login", brief, { group: "w1" });
     const pane = w.panes.get(lane.paneId)!;
-    expect(pane.ran[0]).toStartWith("omo 'Read your brief at ");
+    expect(lane.sessionRef).toEqual({ runtime: "headless", id: lane.paneId, group: "w1" });
+    expect(pane.received[0]).toStartWith("Read your brief at ");
     expect(await Bun.file(lane.brief).text()).toContain("cataly ready fix-login --text");
-    expect(lead.received).toEqual([`[START fix-login] lane opened in ${lane.paneId}`]);
+    expect(lead.received).toEqual([`[START fix-login] lane opened in headless:${lane.paneId}`]);
     await expect(startLane(d, "fix-login", brief, { group: "w1" })).rejects.toThrow(Refusal);
   });
 
@@ -33,7 +31,7 @@ describe("lanes", () => {
     }
     expect(w.calls).toEqual([]);
     expect(lead.received).toEqual([]);
-    expect(d.store.roles().lead).toEqual(href("w1:p1"));
+    expect(d.store.roles().lead).toEqual(LEAD_REF);
   });
 
   test("ready requires evidence, then reaches the lead; done closes only a ready lane", async () => {
@@ -65,50 +63,41 @@ describe("startLane group fallback", () => {
         else process.env[k] = v;
     }
   };
-  const clear = { HERDR_PANE_ID: undefined, HERDR_WORKSPACE_ID: undefined, HC_TERMINAL_ID: undefined };
+  const clear = { CATALY_HEADLESS_ID: undefined };
 
-  test("herdr with no group and no caller session: workspace create, tab create in it, pane run", async () => {
+  test("a lane with no group gets this home's group label, never a caller's old herdr workspace id", async () => {
     const { w, d, brief } = setup();
-    await withEnv(clear, async () => {
+    const saved = { pane: process.env["HERDR_PANE_ID"], workspace: process.env["HERDR_WORKSPACE_ID"] };
+    process.env["HERDR_PANE_ID"] = "w9:p9";
+    process.env["HERDR_WORKSPACE_ID"] = "w9";
+    try {
       await startLane(d, "no-group", brief);
-    });
-    const opening = ["workspace create", "tab create", "pane run"];
-    const verbs = w.calls.filter((c) => c.cmd === "herdr").map((c) => c.argv.slice(0, 2).join(" "));
-    expect(verbs.filter((v) => opening.includes(v))).toEqual(opening);
-    const tab = w.calls.find((c) => c.cmd === "herdr" && c.argv[0] === "tab")!;
-    expect(tab.argv).toContain("--workspace");
-  });
-
-  test("an hc lane gets this home's group label, never the caller's herdr workspace id", async () => {
-    const { w, d: base, brief } = setup({ runtime: "hc" });
-    // Keep the foreign workspace text in an unrelated path to catch substring-based false positives.
-    const d = { ...base, store: new Store(join(base.store.root, "home-w9")) };
-    d.store.setRole("lead", href("w1:p1"));
-    await withEnv({ ...clear, HERDR_PANE_ID: "w9:p9", HERDR_WORKSPACE_ID: "w9" }, async () => {
-      await startLane(d, "hc-lane", brief);
-    });
-    const run = w.hc.calls.find((args) => args[0] === "run")!;
-    expect(run).toBeDefined();
-    const group = run.find((a) => a.startsWith("cataly.group="))!;
-    expect(group).toMatch(/^cataly\.group=[0-9a-f]{8}$/);
-    expect(run.filter((a) => a.startsWith("cataly.group="))).toEqual([`cataly.group=${groupId(d.store.root)}`]);
-    expect(run).toContain(`CATALY_HOME=${d.store.root}`);
-    expect(run).not.toContain("w9");
-    expect(run).not.toContain("w9:p9");
-    expect(run).not.toContain("--workspace");
+    } finally {
+      if (saved.pane === undefined) delete process.env["HERDR_PANE_ID"];
+      else process.env["HERDR_PANE_ID"] = saved.pane;
+      if (saved.workspace === undefined) delete process.env["HERDR_WORKSPACE_ID"];
+      else process.env["HERDR_WORKSPACE_ID"] = saved.workspace;
+    }
+    const spec = w.created.at(-1)!;
+    expect(spec.group).toBe(groupId(d.store.root));
+    expect(spec.group).toMatch(/^[0-9a-f]{8}$/);
+    expect(spec.env["CATALY_HOME"]).toBe(d.store.root);
+    expect(Object.values(spec.env)).not.toContain("w9");
+    expect(Object.values(spec.env)).not.toContain("w9:p9");
   });
 
   test("a tern lane is a named tab in the caller's own Tern session, else in the session named cataly", async () => {
-    const { d: base, lead, brief } = setup();
+    const { d: base, brief } = setup();
     const fake = new FakeTern({ "5001": block() });
     const tern = new TernRuntime(fake.exec, { env: process.env, sleep: async () => {} });
-    const d = {
-      ...base,
-      runtimes: new Runtimes("tern", (k) => (k === "tern" ? tern : base.runtimes.for(href("w1:p1")))),
-    };
+    const d = { ...base, runtimes: new Runtimes("tern", () => tern) };
+    // The lead is the Tern block the first lane is opened from.
+    d.store.setRole("lead", { runtime: "tern", id: "5001" });
     await withEnv({ ...clear, TERN_PANE: "5001" }, async () => {
       await startLane(d, "inside", brief);
     });
+    // The lead's turn on the first START ends before the second lane opens.
+    fake.blocks.get("5001")!.working = false;
     await withEnv({ ...clear, TERN_PANE: undefined }, async () => {
       await startLane(d, "outside", brief);
     });
@@ -118,15 +107,15 @@ describe("startLane group fallback", () => {
       ["new", "session", "cataly"],
     ]);
     expect(fake.calls.filter((c) => c[0] === "rename").map((c) => c[2])).toEqual(["inside", "outside"]);
-    expect(fake.ran.map((r) => r.command.split(" ")[0])).toEqual(["omo", "omo"]);
+    expect(fake.ran.map((r) => r.command.split(" ")[0])).toEqual(["omp", "omp"]);
     expect(d.store.lane("inside")).toMatchObject({
       sessionRef: { runtime: "tern", id: "8000", group: "7001", container: "8001" },
       paneId: "8000",
       tabId: "8001",
     });
-    expect(lead.received).toEqual([
-      "[START inside] lane opened in tern:8000",
-      "[START outside] lane opened in tern:8003",
+    expect(fake.submitted).toEqual([
+      { id: "5001", text: "[START inside] lane opened in tern:8000" },
+      { id: "5001", text: "[START outside] lane opened in tern:8003" },
     ]);
   });
 });

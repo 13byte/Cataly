@@ -6,7 +6,6 @@ const oldCli = "skills/dori-mode/scripts/src/cli.ts";
 // The two forms Bash printf %q emits for a nonempty value: a backslash-escaped
 // word, or an ANSI-C quoted word. Neither is passed to a shell for evaluation.
 const word = String.raw`(?:[^\x00-\x20\\'"$\x60|&;()<>*?\[\]{}#!~]|\\[^\r\n])+|\$'(?:[^\\'\r\n]|\\.)*'`;
-const sessionLine = new RegExp(`^export HC_SESSION=(${word})$`, "u");
 const wrapperEnv = new RegExp(`^\\. (${word})$`, "u");
 const wrapperExec = new RegExp(`^exec (${word}) (${word}) "\\$@"$`, "u");
 const ansiEscape = String.raw`\\(?:[abEefnrtv\\'"]|[0-7]{1,3}|x[\da-fA-F]{1,2}|u[\da-fA-F]{1,4}|U[\da-fA-F]{1,8})`;
@@ -63,15 +62,6 @@ function ownedText(path: string): string | undefined {
   return readFileSync(path, "utf8");
 }
 
-function savedNamespace(base: string): string {
-  const assignments = ownedText(join(base, "env.sh"))
-    ?.split("\n")
-    .filter((line) => line.startsWith("export HC_SESSION="));
-  if (assignments?.length !== 1) return "";
-  const value = sessionLine.exec(assignments[0] ?? "")?.[1];
-  return (value && decodeWord(value)) || "";
-}
-
 function matchesHistoricalSource(path: string, sources: readonly string[]): boolean {
   const suffix = `/${oldCli}`;
   if (!isAbsolute(path) || !path.endsWith(suffix)) return false;
@@ -110,10 +100,6 @@ function oldPrimaryLink(path: string, sources: readonly string[]): boolean {
 export function inspectHistoricalSource([action, path, ...sources]: readonly string[]): void {
   if (!path) throw new TypeError("Expected an installation path");
   switch (action) {
-    case "namespace":
-      // A final sentinel keeps command substitution from trimming literal trailing newlines.
-      process.stdout.write(`${savedNamespace(path)}.`);
-      break;
     case "side-cli":
       if (oldSideCli(path, sources)) console.log("owned");
       break;

@@ -7,7 +7,7 @@ const gatewayCli = async (scenario: string) => {
   const state = withState();
   try {
     const config = join(state.dir, "config.json");
-    writeFileSync(config, JSON.stringify({ stateDir: state.dir, runtime: "herdr", hooks: {} }));
+    writeFileSync(config, JSON.stringify({ stateDir: state.dir, hooks: {} }));
     const child = Bun.spawn(
       [
         process.execPath,

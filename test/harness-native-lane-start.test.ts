@@ -17,22 +17,31 @@ import { HOUR, loopTick } from "../src/loop.ts";
 import { HeadlessRuntime } from "../src/runtime/headless.ts";
 import { Runtimes } from "../src/runtime/registry.ts";
 import { Store } from "../src/store.ts";
-import { World, href } from "./fake.ts";
+import { World, tref } from "./fake.ts";
 import { headlessFixture } from "./fixtures/runtime-headless.ts";
 
 type Fixture = ReturnType<typeof headlessFixture>;
 
+const LEAD = "1";
+
+/** Lanes run on the real native runtime `rt`; the lead is a fake session of the test world inside it. */
 function rootDeps(f: Fixture, rt: HeadlessRuntime) {
   const w = new World();
   const base = w.deps();
+  const fake = base.runtimes.default;
   const store = new Store(f.home);
-  const lead = w.addPane("w1:p1");
-  store.setRole("lead", href("w1:p1"));
+  const lead = w.addTerminal(LEAD);
+  store.setRole("lead", tref(LEAD));
+  const probe = rt.probe.bind(rt);
+  const deliver = rt.deliver.bind(rt);
+  rt.probe = (ref) => (ref.id === LEAD ? fake.probe(ref) : probe(ref));
+  rt.deliver = (ref, text, options) =>
+    ref.id === LEAD ? fake.deliver(ref, text, options) : deliver(ref, text, options);
   const d: Deps = {
     ...base,
     store,
     choice: () => ({ kind: "headless", source: "default" }),
-    runtimes: new Runtimes("headless", (kind) => (kind === "headless" ? rt : base.runtimes.terminal(kind))),
+    runtimes: new Runtimes("headless", () => rt),
   };
   return { d, w, lead, dispose: () => rmSync(base.store.root, { recursive: true, force: true }) };
 }
@@ -101,7 +110,7 @@ test.skipIf(process.platform === "win32")(
     const key = f.input.key;
     try {
       await withRootConfig(f, async () => {
-        w.promptFails.set("w1:p1", "lead fixture cannot receive");
+        w.deliverFails.set(LEAD, "lead fixture cannot receive");
         backlogAdd(d, key, f.input.brief, { cwd: f.deps.config.defaultCwd });
         const run = await loopTick(d);
         const lane = d.store.lane(key);

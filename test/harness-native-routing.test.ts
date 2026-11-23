@@ -37,7 +37,7 @@ test.skipIf(process.platform === "win32")(
       if (code !== 0) throw new Error(`${args[0]} exited ${code}: ${err || out}`);
       return out.trim();
     };
-    const lead = await rt.create({ name: "lead", role: "lead", cwd: f.home, env: {}, container: "tab" });
+    const lead = await rt.create({ name: "lead", role: "lead", cwd: f.home, env: {} });
     try {
       const seen = await rt.startNative(lead, headlessArgv(f.deps.config.agentCommand, "fixture/initial", "lead"), {
         ...f.env,

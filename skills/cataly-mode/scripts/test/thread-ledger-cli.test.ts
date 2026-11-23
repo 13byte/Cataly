@@ -46,7 +46,7 @@ test("adopt persists the ungrouped sentinel for a blank --thread", async () => {
       "--done",
       lane.done,
       "--pane",
-      "w1:p1",
+      "tern:5001",
       "--thread=",
     ]);
     expect(adopted.code).toBe(0);

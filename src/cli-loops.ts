@@ -28,7 +28,7 @@ export async function runDuty(d: Deps, a: Args, x: string | undefined, lifecycle
   if (!(Number.isFinite(interval) && interval >= 1))
     throw new Refusal("--interval must be a number of seconds, 0.001 or more");
   const once = one(a, "once") === "true";
-  const lease = controllerLease(d, { role: "duty-loop", once, token: one(a, "controller-handoff"), lifecycle });
+  const lease = controllerLease(d, { role: "duty-loop", once, lifecycle });
   try {
     while (await lease.beforePass()) {
       const events = await dutyTick(d);
@@ -90,7 +90,7 @@ export async function runLoop(d: Deps, a: Args, x: string | undefined, lifecycle
     );
   }
   const once = one(a, "once") === "true";
-  const lease = controllerLease(d, { role: "hourly-loop", once, token: one(a, "controller-handoff"), lifecycle });
+  const lease = controllerLease(d, { role: "hourly-loop", once, lifecycle });
   try {
     while (await lease.beforePass()) {
       try {

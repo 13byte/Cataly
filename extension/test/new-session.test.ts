@@ -8,7 +8,7 @@ import { readMonitorSet } from "../../src/update/deployment-monitors.ts";
 import { ROLE_INVARIANTS } from "../role-invariants.ts";
 import { type FakePi, type FakeSession, load, until, useConfig } from "./fake-pi";
 
-const PANE = "w1:p61";
+const PANE = "6100";
 const ROLE = "omp-cataly:role";
 const MONITOR = "omp-dori:monitor";
 const agentStart = { type: "before_agent_start", prompt: "ulw keep working", systemPrompt: ["base prompt"] };
@@ -47,11 +47,10 @@ const runningPid = async (pi: FakePi): Promise<number> => {
 };
 
 beforeEach(() => {
-  for (const key of ["CATALY_CONFIG", "CATALY_STATE_DIR", "HERDR_PANE_ID", "HC_TERMINAL_ID", "CATALY_MANAGED_STARTUP"])
+  for (const key of ["CATALY_CONFIG", "CATALY_STATE_DIR", "TERN_PANE", "CATALY_MANAGED_STARTUP"])
     previousEnv.set(key, process.env[key]);
   stateDir = useConfig(join(import.meta.dir, "fake-ulw.ts"));
-  process.env.HERDR_PANE_ID = PANE;
-  delete process.env.HC_TERMINAL_ID;
+  process.env.TERN_PANE = PANE;
   delete process.env.CATALY_MANAGED_STARTUP;
 });
 afterEach(async () => {

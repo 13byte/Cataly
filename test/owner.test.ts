@@ -14,7 +14,8 @@ const NOON = new Date(2026, 10, 20, 12, 0).getTime();
 function home() {
   const w = new World();
   w.clock = NOON;
-  const d = w.deps();
+  // `up` writes the role prompts only on a terminal runtime; the native harness passes them by argv.
+  const d = w.deps({ runtime: "tern" });
   const paths = ownerPaths(d.store.root);
   const write = (body: Partial<Record<string, string[]>>) =>
     writeFileSync(

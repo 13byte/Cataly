@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { accessSync, constants, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 
 import { ToolError } from "../../../../src/runtime/exec.ts";
-import { HcError, isReportedKind } from "../../../../src/runtime/hc/exec.ts";
 import { type CreateSpec, formatRef, type RuntimeKind, type SessionRef } from "../../../../src/runtime/types.ts";
 import type { FlowDeps } from "./done-flow.ts";
 import { recordExecution, runContext } from "./lane-run.ts";
@@ -97,30 +96,11 @@ const removeStaged = (staged: string): void => {
   }
 };
 
-// A nonzero exit alone is not proof: the transport may have failed after terminal creation.
-const creationWasRejected = (rts: ChosenRuntimes, error: unknown): boolean => {
-  if (rts.failure !== undefined && error === rts.failure) return true;
-  if (!(error instanceof ToolError)) return false;
-  if (error.result.spawnFailed) return true;
-  if (error instanceof HcError) {
-    // A failed list was preflight; after `run`, only an explicit rejection reply proves non-creation.
-    return error.argv[1] === "ls" || isReportedKind(error, "usage", "invalid_params", "name_taken");
-  }
-  try {
-    const response: unknown = JSON.parse(error.result.stderr || error.result.stdout);
-    if (!response || typeof response !== "object" || !("error" in response)) return false;
-    const rejection = response.error;
-    return (
-      rejection !== null &&
-      typeof rejection === "object" &&
-      "code" in rejection &&
-      rejection.code === "server_not_running"
-    );
-  } catch (error) {
-    if (error instanceof SyntaxError) return false;
-    throw error;
-  }
-};
+// A nonzero exit alone is not proof: the transport may have failed after terminal creation. Only a runtime that could
+// not be chosen, or a terminal binary that never spawned, proves no session was made.
+const creationWasRejected = (rts: ChosenRuntimes, error: unknown): boolean =>
+  (rts.failure !== undefined && error === rts.failure) ||
+  (error instanceof ToolError && error.result.spawnFailed === true);
 
 // A brief that is a link (a shared template) is written through it, as a plain write would.
 const briefTarget = (brief: string): string => {

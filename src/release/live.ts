@@ -7,6 +7,7 @@ import { processIdentity, sameProcess } from "../update/deployment-process.ts";
 import { processExists } from "../update/proc.ts";
 import { type ConsumerPaths, readJson, readOptionalJson, realDirectory, regularFile } from "./files.ts";
 import { registeredNativeStates } from "./launch-leases.ts";
+import { assertNoLegacyRuntime } from "./legacy-runtime.ts";
 
 function live(value: unknown): number | undefined {
   if (!object(value) || (value["role"] !== "cataly" && value["role"] !== "dori") || !Number.isSafeInteger(value["pid"]))
@@ -59,18 +60,6 @@ function assertNoNativeReservations(state: string): void {
   }
 }
 
-export function assertNoLegacyRoleRegistrations(paths: ConsumerPaths): void {
-  const path = join(paths.cataly, "roles.json");
-  if (regularFile(path)) {
-    const roles = readJson(path);
-    if (!object(roles)) throw new Error("Uncertain harness roles hold release activation");
-    if (Object.keys(roles).length)
-      throw new Error(
-        "Harness roles hold release activation. For current releases, use cataly harness stop. For v0.1.3, close your terminals in the original servers, then use the verified new install.sh --retire-legacy-roles --home PATH. For a primary home name the original server(s) with --legacy-session NAME and, if used, --legacy-migrated-session NAME. Do not edit roles.json.",
-      );
-  }
-}
-
 function assertNoNativeHarnessRoles(paths: ConsumerPaths): void {
   const native = readPrivate<unknown>(join(paths.cataly, "harness-native.json"));
   if (native === undefined) return;
@@ -103,11 +92,10 @@ function assertNoControllerLocks(paths: ConsumerPaths): void {
 /** Read only lifecycle receipts and process identity. Native session contents are never opened. */
 export function assertNoLiveCataly(paths: ConsumerPaths): void {
   assertStoppedRuntime(paths);
-  assertNoLegacyRoleRegistrations(paths);
+  assertNoLegacyRuntime({ stateDir: join(paths.cataly, "state"), configPath: paths.config, home: paths.home });
 }
 
-/** The legacy cleanup command can check that the home is stopped without treating its own input as a live role. */
-export function assertStoppedRuntime(paths: ConsumerPaths): void {
+function assertStoppedRuntime(paths: ConsumerPaths): void {
   assertNoNativeHarnessRoles(paths);
   assertNoControllerLocks(paths);
   const states = new Set<string>([join(paths.cataly, "state"), ...registeredNativeStates(paths)]);

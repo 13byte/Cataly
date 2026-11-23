@@ -46,16 +46,9 @@ describe("hourly loop", () => {
 
 describe("hardening", () => {
   test("a loop that loses its lock mid-run starts nothing more and leaves the new holder's lock in place", async () => {
-    let home = "";
-    const { d, add, tick } = setup({
-      exec: (inner) => async (cmd, argv) => {
-        if (cmd === "herdr" && argv[0] === "tab") {
-          writeFileSync(join(home, "loop", "lock"), JSON.stringify({ pid: process.ppid, at: 0, nonce: "usurper" }));
-        }
-        return inner(cmd, argv);
-      },
-    });
-    home = d.store.root;
+    const { w, d, add, tick } = setup();
+    w.onCreate = () =>
+      writeFileSync(join(d.store.root, "loop", "lock"), JSON.stringify({ pid: process.ppid, at: 0, nonce: "usurper" }));
     add("first");
     add("second");
     const run = await tick({ maxStarts: 2 });

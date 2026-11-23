@@ -72,13 +72,14 @@ test("a registered lane cannot manage a shared thread title", async () => {
       key: "group-member",
       title: "member",
       thread: `discord:${ids.thread}`,
-      pane: "w:p7",
+      pane: "5007",
+      sessionRef: { runtime: "tern", id: "5007" },
       brief: "/b",
       done: "file /done",
       openedAt: new Date().toISOString(),
     });
     const r = await f.invoke(["thread", "discord", "status", ids.thread, "working"], {
-      environment: { HERDR_PANE_ID: "w:p7" },
+      environment: { TERN_PANE: "5007" },
     });
     expect(r.code).not.toBe(0);
     expect(r.err).toContain("thread status is the lead's");

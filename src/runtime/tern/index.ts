@@ -1,6 +1,6 @@
 import type { Exec } from "../exec.ts";
 import { spawnExec } from "../exec.ts";
-import type { Sleep } from "../herdr/deliver.ts";
+import type { Sleep } from "../terminal/deliver.ts";
 import type {
   AgentIdentity,
   CloseScope,

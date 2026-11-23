@@ -4,6 +4,7 @@ import { makeCli } from "../src/cli-context.ts";
 import { report } from "../src/cli-report.ts";
 import { freshnessTick } from "../src/freshness.ts";
 import { reportId } from "../src/reports.ts";
+import { agentIn } from "./fake-tern-world.ts";
 import { waitFixture } from "./wait-fixture.ts";
 
 for (const [name, owner, postRaw] of [
@@ -16,7 +17,7 @@ for (const [name, owner, postRaw] of [
     const f = await waitFixture();
     const log = spyOn(console, "log").mockImplementation(() => {});
     try {
-      f.world.screen = "Working (1m)";
+      agentIn(f.world, f.lane.pane!, { body: "Working (1m)" });
       await f.deps.registry.write({ ...f.lane, thread: "discord:123" });
       const internal = "private-operation-identity";
       await report(

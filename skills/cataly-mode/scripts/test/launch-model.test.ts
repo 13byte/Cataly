@@ -4,7 +4,11 @@ import { join } from "node:path";
 import type { ModelReadback, PaneState } from "../src/lane-state.ts";
 import { launchLane } from "../src/launch.ts";
 import { modelLaunchCommand, modelLaunchProblem } from "../src/launch-model.ts";
-import { agentIn, depsFor, fakeClock, laneState, newWorld, sent, withState, type TestState } from "./fakes.ts";
+import { agentIn, laneState, ternDeps, ternSent as sent } from "./fake-tern-world.ts";
+import { fakeClock, newWorld, withState, type TestState } from "./fakes.ts";
+
+/** The Tern block the fixture's `tern new` opens, already running OMP. */
+const PANE = "5009";
 
 let state: TestState;
 beforeEach(() => {
@@ -17,11 +21,9 @@ const launch = async (model: string, patch: Partial<PaneState> = {}, launchKeywo
   const clock = fakeClock(Date.parse("2026-01-01T12:00:00.000Z"));
   const brief = join(state.dir, "brief.md");
   writeFileSync(brief, "Do not dispatch until the model is checked.\n");
-  world.panes = [{ pane_id: "w:p9", workspace_id: "w", agent: "omp", agent_status: "idle" }];
-  agentIn(world, "w:p9");
-  laneState(state.dir, "w:p9", { agentStatus: "idle", ...patch });
-  world.onEnterStatus = "working";
-  const base = depsFor(
+  agentIn(world, PANE);
+  laneState(state.dir, PANE, { agentStatus: "idle", ...patch });
+  const base = ternDeps(
     world,
     {
       ...clock,
@@ -35,15 +37,17 @@ const launch = async (model: string, patch: Partial<PaneState> = {}, launchKeywo
   const deps = {
     ...base,
     run: async (argv: readonly string[]) => {
-      if (argv[0] === "herdr" && argv[1] === "tab" && argv[2] === "create")
-        return {
-          code: 0,
-          out: JSON.stringify({ result: { root_pane: { pane_id: "w:p9" }, tab_id: "w:t9" } }),
-          err: "",
-        };
+      if (argv[0] === "tern" && argv[1] === "new")
+        return { code: 0, out: JSON.stringify({ session: 7001, tab: 9009, block: Number(PANE) }), err: "" };
       const response = await base.run(argv);
-      if (argv[0] === "herdr" && argv[2] === "send-keys" && argv[4] === "enter" && response.code === 0)
-        laneState(state.dir, "w:p9", { ...patch, agentStatus: "working" });
+      if (
+        argv[0] === "tern" &&
+        argv[1] === "send" &&
+        argv[3] === "keys" &&
+        argv.includes("enter") &&
+        response.code === 0
+      )
+        laneState(state.dir, PANE, { ...patch, agentStatus: "working" });
       return response;
     },
   };
@@ -59,9 +63,9 @@ const launch = async (model: string, patch: Partial<PaneState> = {}, launchKeywo
 
 test("an unknown native model never receives the launch brief even with a goal-marker opt-out", async () => {
   const { result, world } = await launch("subscription/exact");
-  expect(result.startup).toStartWith("STARTUP_MODEL_HOLD model-gate w:p9:");
+  expect(result.startup).toStartWith(`STARTUP_MODEL_HOLD model-gate ${PANE}:`);
   expect(sent(world)).toEqual([]);
-  expect(world.calls.find((argv) => argv[2] === "run")?.at(-1)).not.toContain("Read and execute");
+  expect(world.calls.find((argv) => argv[0] === "tern" && argv[1] === "run")?.at(-1)).not.toContain("Read and execute");
 });
 
 const matched = {
@@ -75,10 +79,10 @@ const matched = {
 
 test("an exact live readback delivers once after starting without the brief", async () => {
   const { result, world } = await launch("subscription/exact", { modelReadback: matched });
-  expect(result.startup).toBe("STARTUP_OK model-gate w:p9");
+  expect(result.startup).toBe(`STARTUP_OK model-gate ${PANE}`);
   expect(sent(world)).toHaveLength(1);
   expect(sent(world)[0]).toContain("Read and execute");
-  const command = world.calls.find((argv) => argv[2] === "run")?.at(-1);
+  const command = world.calls.find((argv) => argv[0] === "tern" && argv[1] === "run")?.at(-1);
   expect(command).toContain("--cataly-launch-model=subscription/exact");
   expect(command).not.toContain("Read and execute");
 });
@@ -87,7 +91,7 @@ test("native case-insensitive exact readback is accepted without changing the re
   const { result, world } = await launch("Subscription/EXACT", {
     modelReadback: { ...matched, requested: { provider: "Subscription", id: "EXACT" } },
   });
-  expect(result.startup).toBe("STARTUP_OK model-gate w:p9");
+  expect(result.startup).toBe(`STARTUP_OK model-gate ${PANE}`);
   expect(sent(world)).toHaveLength(1);
   expect(modelLaunchProblem(["omp", "--model", "{model}", "{prompt}"], "ollama/qwen:14b")).toBeNull();
 });
@@ -99,9 +103,9 @@ test("a thinking-suffixed launch delivers once its base model and native level b
     thinking: { requested: "high", observed: "high" },
   };
   const { result, world } = await launch("subscription/exact:high", { modelReadback: high });
-  expect(result.startup).toBe("STARTUP_OK model-gate w:p9");
+  expect(result.startup).toBe(`STARTUP_OK model-gate ${PANE}`);
   expect(sent(world)).toHaveLength(1);
-  expect(world.calls.find((argv) => argv[2] === "run")?.at(-1)).toContain(
+  expect(world.calls.find((argv) => argv[0] === "tern" && argv[1] === "run")?.at(-1)).toContain(
     "--cataly-launch-model=subscription/exact:high",
   );
   for (const patch of [
@@ -130,7 +134,7 @@ test("a thinking record must name the request's own effort suffix before it sele
     }) as ModelReadback;
   // A literal catalog id that ends in a level keeps the exact path without a thinking record.
   const literal = await launch("subscription/exact:high", { modelReadback: proof("exact:high") });
-  expect(literal.result.startup).toBe("STARTUP_OK model-gate w:p9");
+  expect(literal.result.startup).toBe(`STARTUP_OK model-gate ${PANE}`);
   expect(sent(literal.world)).toHaveLength(1);
   for (const [model, patch] of [
     ["subscription/exact:high", proof("exact:high", {})],

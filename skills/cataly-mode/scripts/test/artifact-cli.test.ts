@@ -21,7 +21,6 @@ const invoke = (...args: string[]) => {
       TMPDIR: tmpdir(),
       PATH: process.env["PATH"],
       CATALY_CONFIG: join(f.state.dir, "config.json"),
-      CATALY_RUNTIME: "herdr",
       DO_NOT_TRACK: "1",
       CATALY_TELEMETRY: "0",
     },

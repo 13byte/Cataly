@@ -191,7 +191,7 @@ posix("readback distinguishes a saved file from effective environment overrides 
   mkdirSync(base, { mode: 0o700 });
   writeFileSync(
     join(base, "config.json"),
-    JSON.stringify({ stateDir: join(base, "owned"), leadPane: "owner-pane", sessionRuntime: "herdr" }),
+    JSON.stringify({ stateDir: join(base, "owned"), leadPane: "owner-pane", sessionRuntime: "headless" }),
     { mode: 0o600 },
   );
   const result = s.install({
@@ -205,9 +205,9 @@ posix("readback distinguishes a saved file from effective environment overrides 
   expect(records(result.out, "SETUP_READBACK")[0]).toMatchObject({
     saved: true,
     effective: "shadowed",
-    overridden: ["stateDir", "leadPane", "sessionRuntime"],
+    overridden: ["stateDir", "leadPane"],
   });
-  expect(JSON.parse(readFileSync(join(base, "config.json"), "utf8"))).toMatchObject({ sessionRuntime: "herdr" });
+  expect(JSON.parse(readFileSync(join(base, "config.json"), "utf8"))).toMatchObject({ sessionRuntime: "headless" });
   const alternate = join(s.home, "alternate.json");
   writeFileSync(alternate, "{}\n", { mode: 0o600 });
   const second = s.install({ CATALY_INSTALL_MODE: "primary", CATALY_NO_PULL: "1", CATALY_CONFIG: alternate });

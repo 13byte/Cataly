@@ -23,7 +23,7 @@ test.skipIf(process.platform === "win32")(
       CATALY_TEST_BACKGROUND_DONE: backgroundDone,
     };
     const rt = new HeadlessRuntime(dir, env);
-    const ref = await rt.create({ role: "lane", container: "tab", cwd: dir, env, name: "remote" });
+    const ref = await rt.create({ role: "lane", cwd: dir, env, name: "remote" });
     let session: string | undefined;
     try {
       const model = "fixture/initial";

@@ -95,22 +95,6 @@ posix("a side install from a linked git worktree installs that checkout instead 
   expect(readFileSync(join(home, ".omp-cataly/bin/cataly"), "utf8")).toContain(join(worktree, cli));
 });
 
-posix("an optional hc command still uses the side namespace and requested Herdr space", () => {
-  const s = setup();
-  const { home, install } = s;
-  withOtherCataly(home);
-  writeFileSync(join(s.root, "bin/hc"), '#!/bin/sh\nprintf "%s\\n" "$HC_SESSION" "${CATALY_HC_SPACE:-}" "$@"\n', {
-    mode: 0o700,
-  });
-  const terminal = () => Bun.spawnSync([join(home, "global-bin/omp-cataly"), "hc", "ls"], { env: s.env() });
-
-  expect(install({ CATALY_INSTALL_MODE: "side" }).code).toBe(0);
-  expect(terminal().stdout.toString()).toBe("omp-cataly\n\nls\n");
-  expect(install({ CATALY_INSTALL_MODE: "side", OMP_CATALY_HC_SPACE: "sp0a1b" }).code).toBe(0);
-  expect(terminal().stdout.toString()).toBe("omp-cataly\nsp0a1b\nls\n");
-  expectOtherCatalyUntouched(home);
-});
-
 posix("an omp-cataly install from before the marker, with its checkout elsewhere, is updated without asking", () => {
   // Given an unmanaged source home whose earlier source installer linked the external checkout's extension.
   const { home, src, install } = setup();

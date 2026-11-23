@@ -1,18 +1,15 @@
 //! The host launch guard a wake must pass: `sampleHost` + `canLaunch` (`host-guard.ts`, `routing.ts`,
 //! `cgroup-memory.ts`).
 //!
-//! The session count cannot ask herdr or hc (their CLIs are gone from the wake path). It counts every live
-//! headless broker plus every terminal pane record whose writer process is alive; an unknown or failed headless
-//! observation makes it unknown (-1), as before.
+//! The session count cannot ask herdr or hc (both runtimes are removed). It counts every live headless broker; an
+//! unknown or failed headless observation makes it unknown (-1), as before.
 
-use std::fs;
 use std::path::Path;
 
 use serde::Deserialize;
 
 use super::headless;
-use super::registry::int_field;
-use super::util::{RECORD_LIMIT, read_limited, signalable};
+use super::util::{RECORD_LIMIT, read_limited};
 
 /// `GuardThresholds` from the loaded config.
 #[derive(Clone, Debug, Deserialize)]
@@ -299,25 +296,7 @@ async fn sessions(state: &Path) -> i64 {
     {
         return -1;
     }
-    let mut count = i64::try_from(hosts.len()).unwrap_or(i64::MAX);
-    if let Ok(entries) = fs::read_dir(state.join("sessions")) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(std::ffi::OsStr::to_str) != Some("json") {
-                continue;
-            }
-            let Ok(raw) = read_limited(&path, RECORD_LIMIT) else {
-                continue;
-            };
-            let Ok(pane) = serde_json::from_slice::<super::json::Json>(&raw) else {
-                continue;
-            };
-            if int_field(&pane, "pid").is_some_and(signalable) {
-                count += 1;
-            }
-        }
-    }
-    count
+    i64::try_from(hosts.len()).unwrap_or(i64::MAX)
 }
 
 async fn sample(state: &Path, cwd: &Path) -> Sample {

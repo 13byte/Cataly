@@ -33,8 +33,8 @@ export function updateReleaseMetadata(
 export function notes(manifest: ReleaseManifest): string {
   return [
     `Cataly ${manifest.tag}${manifest.prerelease ? " Linux x64 preview" : ""}.`,
-    "Supported consumer runtime: Linux x64, herdr, Discord. Other CI platforms do not imply consumer support.",
-    `Requires existing Bun ${manifest.requirements.bun}, OMP ${manifest.requirements.omp}, git and herdr.`,
+    "Supported consumer runtime: headless OMP on Linux x64 and macOS arm64, Discord. Other CI platforms do not imply consumer support.",
+    `Requires existing Bun ${manifest.requirements.bun} and git; the bound OMP ${manifest.requirements.omp} is provisioned.`,
     `Commit: \`${manifest.commit}\`. SourceManifest: \`${manifest.source.hash}\`.`,
     `Pinned external omp-ulw: \`${manifest.ompUlw.commit}\`; dependency bodies are not bundled.`,
     `Verify all files in \`SHA256SUMS\` before running \`bash install.sh --version ${manifest.tag}\` from this release.`,

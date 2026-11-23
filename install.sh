@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Release bootstrap. Requires git and Bun 1.4.4+; historical releases also require their terminal runtime.
+# Release bootstrap. Requires git and Bun 1.4.4+; installs only headless releases.
 set -euo pipefail
 command -v bun >/dev/null || { echo "Bun 1.4.4+ is required; install it before Cataly" >&2; exit 1; }
 bun run - "$@" <<'BUN'
@@ -19,19 +19,11 @@ let temporary;
 try {
   const args = parseArgs({ args: process.argv.slice(2), strict: true,
     options: { version: { type: "string" }, from: { type: "string" }, home: { type: "string" },
-      runtime: { type: "string" }, "retire-legacy-roles": { type: "boolean" },
-      "legacy-session": { type: "string" }, "legacy-migrated-session": { type: "string" },
       help: { type: "boolean", short: "h" } } });
   if (args.values.help) {
-    console.log("install.sh [--version vX.Y.Z] [--from DIST] [--home PATH] [--runtime headless|hc|herdr]\ninstall.sh --retire-legacy-roles --home PATH [--legacy-session NAME] [--legacy-migrated-session NAME] [--version vX.Y.Z] [--from DIST]\nRetirement verifies the new release and the already-stopped v0.1.3 home, without installing or stopping terminals.\nCATALY_RELEASE selects an explicit tag. Current releases default to headless. No services are started.");
+    console.log("install.sh [--version vX.Y.Z] [--from DIST] [--home PATH]\nCATALY_RELEASE selects an explicit tag. Releases run on headless OMP. No services are started.");
     process.exit(0);
   }
-  const retire = args.values["retire-legacy-roles"] === true;
-  if (retire && (!args.values.home || args.values.runtime !== undefined))
-    fail("--retire-legacy-roles requires --home and does not take --runtime");
-  const sessionFlags = ["legacy-session", "legacy-migrated-session"];
-  if (!retire && sessionFlags.some((key) => args.values[key] !== undefined))
-    fail("Legacy session flags apply only to --retire-legacy-roles");
   const version = args.values.version ?? process.env.CATALY_RELEASE ?? process.env.DORI_RELEASE;
   if (version !== undefined && !/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) fail("Select an exact --version vX.Y.Z");
   if (args.values.from !== undefined && !args.values.from.trim()) fail("--from requires a directory");
@@ -43,10 +35,7 @@ try {
   };
   const linux = process.platform === "linux" && process.arch === "x64";
   const darwin = process.platform === "darwin" && process.arch === "arm64";
-  const legacyRuntime = darwin ? "hc" : "herdr";
-  const requested = retire ? "headless" : args.values.runtime ?? ((process.env.CATALY_RUNTIME ?? process.env.DORI_RUNTIME) || undefined);
-  if ((!linux && !darwin) || (requested !== undefined && requested !== "headless" && requested !== legacyRuntime))
-    fail(`Unsupported host/runtime: ${process.platform}/${process.arch}/${requested ?? "headless"}`);
+  if (!linux && !darwin) fail(`Unsupported host: ${process.platform}/${process.arch}/headless`);
   const installMode = process.env.CATALY_INSTALL_MODE ?? process.env.DORI_INSTALL_MODE;
   const mode = installMode ?? (darwin ? "side" : "primary");
   if (mode !== "primary" && mode !== "side") fail("CATALY_INSTALL_MODE must be primary or side");
@@ -61,10 +50,8 @@ try {
   };
   const stat = (path) => lstatSync(path, { throwIfNoEntry: false });
   let home, configPath, configEntry, config = {};
-  const selectHome = (historical) => {
-    const primary = historical ? historicalPrimary : currentPrimary;
-    const side = historical ? ".omp-dori" : ".omp-cataly";
-    const selectedHome = explicitHome ?? (mode === "side" ? join(homedir(), side) : primary);
+  const selectHome = () => {
+    const selectedHome = explicitHome ?? (mode === "side" ? join(homedir(), ".omp-cataly") : currentPrimary);
     if (!isAbsolute(selectedHome)) fail("--home / OMP_CATALY_HOME must be an absolute installation home");
     home = resolve(selectedHome);
     const actualHome = physical(home);
@@ -109,9 +96,32 @@ try {
       if (!object(config)) fail("Preserved config must be an object");
     }
   };
-  if (explicitHome !== undefined) selectHome(false);
+  selectHome();
+  // The upgrade guard; the target release's updater repeats it with lane records before activation.
+  const legacyMessage = (roles) => [
+    "This Cataly home still uses the herdr/hc terminal runtime, which this version removed.",
+    "1. Close every herdr/hc lane (`cataly status` lists them) with your previous Cataly version.",
+    `2. Remove "runtime" (if it names herdr or hc) and "sessionRuntime" from ${configPath}.`,
+    "3. Run this command again. Cataly state and OMP sessions are kept; lanes reopen on headless.",
+    ...(roles ? ["Retire the historical roles with your previous Cataly version (cataly update --retire-legacy-roles)."] : []),
+  ].join("\n");
+  if (["hc", "herdr"].includes(config.runtime) || ["hc", "herdr"].includes(config.sessionRuntime))
+    fail(legacyMessage(false));
+  if (config.runtime !== undefined && config.runtime !== "tern") fail("Preserved config runtime must be tern when present");
+  if (config.sessionRuntime !== undefined && !["headless", "tern"].includes(config.sessionRuntime))
+    fail("Preserved config sessionRuntime must be headless or tern when present");
+  const rolesPath = join(home, "roles.json");
+  const rolesEntry = stat(rolesPath);
+  if (rolesEntry) {
+    if (!rolesEntry.isFile() || rolesEntry.uid !== process.getuid() || (rolesEntry.mode & 0o022) || rolesEntry.size > 4 * 1024 * 1024)
+      fail("Unsafe historical roles.json");
+    const roles = JSON.parse(readFileSync(rolesPath, "utf8"));
+    // A running harness registers `headless:` or `tern:` refs here; any other ref is a historical herdr/hc role.
+    if (!object(roles) || Object.values(roles).some((ref) => typeof ref !== "string" || !/^(headless|tern):/.test(ref)))
+      fail(legacyMessage(true));
+  }
   if (!atLeast(Bun.version, [1, 4, 4])) fail("Bun 1.4.4+ is required");
-  if (!retire && !Bun.which("git")) fail("git is required; install it before Cataly");
+  if (!Bun.which("git")) fail("git is required; install it before Cataly");
   const fetchBytes = async (url, limit) => {
     const response = await fetch(url, { headers: { Accept: url.startsWith(api) ? "application/vnd.github+json" : "application/octet-stream" },
       signal: AbortSignal.timeout(120000) });
@@ -224,62 +234,27 @@ try {
     offset += Math.ceil(size / 512) * 512;
   }
   if (!ended || files.length !== expected.size) fail("Release archive omits manifest source");
-  const terminalFile = files.find((file) => file.path === "release-capabilities.json");
   const nativeFile = files.find((file) => file.path === "release-headless.json");
-  const readProfiles = (file, allowed) => {
-    const profiles = new Set();
-    const capabilities = JSON.parse(decoder.decode(file.bytes));
-    if (!object(capabilities) || Object.keys(capabilities).sort().join() !== "profiles,version" ||
-      capabilities.version !== 1 || !Array.isArray(capabilities.profiles) || !capabilities.profiles.length)
-      fail("Invalid release capabilities");
-    for (const entry of capabilities.profiles) {
-      if (!object(entry) || Object.keys(entry).sort().join() !== "arch,platform,runtime" ||
-        typeof entry.platform !== "string" || typeof entry.arch !== "string" || typeof entry.runtime !== "string")
-        fail("Invalid release capability");
-      const profile = `${entry.platform}/${entry.arch}/${entry.runtime}`;
-      if (!allowed.includes(profile) || profiles.has(profile))
-        fail("Invalid or duplicate release capability");
-      profiles.add(profile);
-    }
-    return profiles;
-  };
-  const terminal = terminalFile
-    ? readProfiles(terminalFile, ["linux/x64/herdr", "darwin/arm64/hc"])
-    : new Set(["linux/x64/herdr"]);
-  const native = nativeFile ? readProfiles(nativeFile, ["linux/x64/headless", "darwin/arm64/headless"]) : undefined;
   const native19 = (version) => typeof version === "string" && /^19\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version);
   const omp = manifest.requirements?.omp;
-  if (native && (!terminalFile || (omp !== "18.20.0" && !native19(omp))))
-    fail("Headless capability requires a bound native OMP payload and historical release profiles");
-  if (retire && !native) fail("--retire-legacy-roles requires the new verified release, not the v0.1.3 archive");
-  if (home === undefined) selectHome(!native);
-  if (config.sessionRuntime !== undefined && !["headless", "hc", "herdr"].includes(config.sessionRuntime))
-    fail("Preserved config sessionRuntime must be headless, hc or herdr");
-  if (config.runtime !== undefined && !["hc", "herdr"].includes(config.runtime))
-    fail("Preserved config runtime must be hc or herdr when present");
-  const runtime = requested ?? config.sessionRuntime ?? (native ? "headless" : config.runtime ?? legacyRuntime);
-  const profiles = runtime === "headless" && native ? native : terminal;
-  if (!profiles.has(`${process.platform}/${process.arch}/${runtime}`)) fail("Release does not support selected host/runtime");
-  if (!terminalFile && home !== historicalPrimary) fail("Legacy release requires the primary ~/.dori home");
-  if (!native && home === currentPrimary) fail("Historical releases require their original consumer home and launcher layout");
-  if (!native && configEntry) {
-    if (!["hc", "herdr"].includes(config.runtime))
-      fail('Preserved config must explicitly select runtime: set "runtime" to "herdr" or "hc" before retrying');
-    if (config.runtime !== runtime || (config.sessionRuntime !== undefined && config.sessionRuntime !== runtime))
-      fail(`Selected runtime ${runtime} conflicts with preserved config runtime ${config.runtime}`);
+  if (!nativeFile || (omp !== "18.20.0" && !native19(omp)))
+    fail(`Release ${manifest.tag} has no bound headless profile; this installer installs only headless releases`);
+  const native = new Set();
+  const capabilities = JSON.parse(decoder.decode(nativeFile.bytes));
+  if (!object(capabilities) || Object.keys(capabilities).sort().join() !== "profiles,version" ||
+    capabilities.version !== 1 || !Array.isArray(capabilities.profiles) || !capabilities.profiles.length)
+    fail("Invalid release capabilities");
+  for (const entry of capabilities.profiles) {
+    if (!object(entry) || Object.keys(entry).sort().join() !== "arch,platform,runtime" ||
+      typeof entry.platform !== "string" || typeof entry.arch !== "string" || typeof entry.runtime !== "string")
+      fail("Invalid release capability");
+    const profile = `${entry.platform}/${entry.arch}/${entry.runtime}`;
+    if (!["linux/x64/headless", "darwin/arm64/headless"].includes(profile) || native.has(profile))
+      fail("Invalid or duplicate release capability");
+    native.add(profile);
   }
-  if (!native) {
-    const path = join(home, "roles.json");
-    const entry = stat(path);
-    if (entry) {
-      if (!entry.isFile() || entry.uid !== process.getuid() || (entry.mode & 0o022) || entry.size > 4 * 1024 * 1024)
-        fail("Unsafe historical roles.json");
-      const roles = JSON.parse(readFileSync(path, "utf8"));
-      if (!object(roles) || Object.keys(roles).length)
-        fail("Historical roles hold activation. Use the verified new install.sh --retire-legacy-roles --home PATH first; do not edit roles.json.");
-    }
-  }
-  // Bootstrapping an old tag runs that tag's updater, which cannot enforce newer protocol retention itself.
+  if (!native.has(`${process.platform}/${process.arch}/headless`)) fail("Release does not support this host");
+  // Bootstrapping an older tag runs that tag's updater, which cannot enforce newer protocol retention itself.
   for (const name of ["consumer-installed.json", "consumer-journal.json"]) {
     const path = join(home, "releases", name);
     const entry = stat(path);
@@ -287,16 +262,10 @@ try {
     if (!entry.isFile() || entry.uid !== process.getuid() || (entry.mode & 0o022)) fail("Unsafe consumer release receipt");
     const receipt = JSON.parse(readFileSync(path, "utf8"));
     const selected = name === "consumer-journal.json" ? [receipt.before?.current, receipt.after?.current] : [receipt.current];
-    for (const current of selected) {
-      if (!current) continue;
-      const installedOmp = current.requirements?.omp;
-      if ((native19(installedOmp) && !native19(omp)) ||
-        (installedOmp === "18.20.0" && omp === "18.18.8") ||
-        (!native && current.source?.files?.some((file) => file.path === "release-headless.json")))
+    for (const current of selected)
+      if (current && native19(current.requirements?.omp) && !native19(omp))
         fail("Install cannot downgrade the bound runtime protocol; use rollback with its required tools");
-    }
   }
-  if (runtime !== "headless" && !Bun.which(runtime)) fail(`${runtime} is required; install it before Cataly`);
   temporary = mkdtempSync(join(realpathSync(tmpdir()), "cataly-bootstrap-"));
   const extracted = join(temporary, "source"), dist = join(temporary, "dist");
   mkdirSync(extracted, { mode: 0o700 }); mkdirSync(dist, { mode: 0o700 });
@@ -310,19 +279,11 @@ try {
   const env = { ...process.env };
   for (const prefix of ["CATALY", "DORI"])
     for (const key of ["HOME", "CONFIG", "STATE_DIR", "RUNTIME", "CMD", "AGENT_CMD", "AGENT_ARGV", "OMP_ULW_PATH", "MANAGED_STARTUP"])
-      if (!retire || key !== "STATE_DIR") delete env[`${prefix}_${key}`];
-  const prefix = native ? "CATALY" : "DORI";
-  env[`${prefix}_HOME`] = home;
-  env[`${prefix}_CONFIG`] = configPath;
-  const childArgs = [process.execPath, join(extracted, "src/release/cli.ts")];
-  if (retire) {
-    childArgs.push("retire-legacy-roles", "--home", home);
-    for (const key of sessionFlags)
-      if (args.values[key] !== undefined) childArgs.push(`--${key}`, args.values[key]);
-  } else {
-    childArgs.push("install", "--from", dist, "--version", manifest.tag);
-    if (terminalFile) childArgs.push("--home", home, "--runtime", runtime);
-  }
+      delete env[`${prefix}_${key}`];
+  env.CATALY_HOME = home;
+  env.CATALY_CONFIG = configPath;
+  const childArgs = [process.execPath, join(extracted, "src/release/cli.ts"),
+    "install", "--from", dist, "--version", manifest.tag, "--home", home];
   const child = Bun.spawn(childArgs,
     { stdin: "inherit", stdout: "inherit", stderr: "inherit", env });
   process.exitCode = await child.exited;

@@ -92,7 +92,6 @@ export function fixture() {
   const config: UpdateConfig = {
     version: 1,
     target: "cataly",
-    runtime: "herdr",
     root: join(directory, "updates"),
     remote,
     ref: "refs/heads/main",

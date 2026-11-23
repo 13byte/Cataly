@@ -10,7 +10,7 @@ import { calls, type FakePi, type FakeSession, load, until, useConfig } from "./
 
 const FAKE_ULW = join(import.meta.dir, "fake-ulw.ts");
 const REAL_ULW = join(import.meta.dir, "../../ref/omp-ulw/index.ts");
-const PANE = "w1:p2";
+const PANE = "5002";
 const ROLE = "omp-cataly:role";
 const posix = test.skipIf(process.platform === "win32");
 
@@ -27,13 +27,9 @@ let stateDir: string;
 beforeEach(() => {
   calls.length = 0;
   stateDir = useConfig(FAKE_ULW);
-  process.env.HERDR_PANE_ID = PANE;
-  delete process.env.HC_TERMINAL_ID;
-  delete process.env.TERN_PANE;
+  process.env.TERN_PANE = PANE;
 });
 afterEach(() => {
-  delete process.env.HERDR_PANE_ID;
-  delete process.env.HC_TERMINAL_ID;
   delete process.env.TERN_PANE;
 });
 
@@ -184,7 +180,7 @@ describe("role", () => {
     await first.emit("session_start");
     expect(s.entries).toEqual([wireRole("lane")]);
 
-    // a later process resumes the same session file (herdr restore, `omp --resume`) without the flag
+    // a later process resumes the same session file (`omp --resume`) without the flag
     calls.length = 0;
     const resumed = await load({ session: s });
     await resumed.emit("session_start");
@@ -391,7 +387,7 @@ describe("monitor restore", () => {
     await monitorCall(first, { ...tick, restart: "on-failure" });
     await first.emit("session_shutdown"); // omp exits: the monitor process dies with it
 
-    // herdr restores the pane with `omp --resume`: a new process, no flag, nobody asks for the monitor again
+    // a restart resumes the pane with `omp --resume`: a new process, no flag, nobody asks for the monitor again
     const resumed = await load({ session: s });
     await resumed.emit("session_start");
     expect(resumed.messages[0]).toEqual({
@@ -753,54 +749,37 @@ describe("pane state", () => {
     expect(existsSync(paneStatePath(stateDir, PANE))).toBe(false);
   });
 
-  test("hc uses its terminal id even when an inherited herdr pane id is present", async () => {
+  test("only TERN_PANE names the pane: inherited herdr and hc ids are ignored", async () => {
+    process.env.HERDR_PANE_ID = "w1:p2";
     process.env.HC_TERMINAL_ID = "t1b";
-    const pi = await load({ session: session("hc-lane"), flags: { "cataly-role": "lane" } });
-    await pi.emit("session_start");
-    expect(readPaneState(stateDir, "t1b")).toMatchObject({
-      paneId: "t1b",
-      sessionId: "hc-lane",
-      approvalPending: false,
-    });
-    expect(readPaneState(stateDir, PANE)).toBeNull();
-    await pi.emit("tool_approval_requested", {
-      type: "tool_approval_requested",
-      sessionId: pi.session.id,
-      toolName: "bash",
-      approvalMode: "always-ask",
-      toolCallId: "hc-approval",
-    });
-    expect(readPaneState(stateDir, "t1b")?.approvalPending).toBe(true);
-    await pi.emit("goal_updated", { type: "goal_updated", goal: { objective: "hc port", status: "paused" } });
-    expect(readPaneState(stateDir, "t1b")?.goal.status).toBe("paused");
-    await pi.emit("session_shutdown");
-    expect(readPaneState(stateDir, "t1b")).toMatchObject({ pid: 0, sessionId: "hc-lane" });
-  });
-
-  test("a Tern block reports under TERN_PANE only when no hc or herdr id is set", async () => {
-    process.env.TERN_PANE = "5001";
-    const inherited = await load({ session: session("herdr-lane"), flags: { "dori-role": "lane" } });
-    await inherited.emit("session_start");
-    expect(readPaneState(stateDir, PANE)?.sessionId).toBe("herdr-lane");
-    expect(readPaneState(stateDir, "5001")).toBeNull();
-    await inherited.emit("session_shutdown");
-
-    delete process.env.HERDR_PANE_ID;
-    const pi = await load({ session: session("tern-lane"), flags: { "dori-role": "lane" } });
-    await pi.emit("session_start");
-    expect(readPaneState(stateDir, "5001")).toMatchObject({
-      paneId: "5001",
-      sessionId: "tern-lane",
-      approvalPending: false,
-    });
-    await pi.emit("tool_approval_requested", { type: "tool_approval_requested", toolCallId: "tern-approval" });
-    expect(readPaneState(stateDir, "5001")?.approvalPending).toBe(true);
-    await pi.emit("session_shutdown");
-    expect(readPaneState(stateDir, "5001")).toMatchObject({ pid: 0, sessionId: "tern-lane" });
+    try {
+      const pi = await load({ session: session("tern-lane"), flags: { "dori-role": "lane" } });
+      await pi.emit("session_start");
+      expect(readPaneState(stateDir, PANE)).toMatchObject({
+        paneId: PANE,
+        sessionId: "tern-lane",
+        approvalPending: false,
+      });
+      expect(readPaneState(stateDir, "w1:p2")).toBeNull();
+      expect(readPaneState(stateDir, "t1b")).toBeNull();
+      await pi.emit("tool_approval_requested", {
+        type: "tool_approval_requested",
+        sessionId: pi.session.id,
+        toolName: "bash",
+        approvalMode: "always-ask",
+        toolCallId: "tern-approval",
+      });
+      expect(readPaneState(stateDir, PANE)?.approvalPending).toBe(true);
+      await pi.emit("session_shutdown");
+      expect(readPaneState(stateDir, PANE)).toMatchObject({ pid: 0, sessionId: "tern-lane" });
+    } finally {
+      delete process.env.HERDR_PANE_ID;
+      delete process.env.HC_TERMINAL_ID;
+    }
   });
 
   test("is not written without a runtime session id", async () => {
-    delete process.env.HERDR_PANE_ID;
+    delete process.env.TERN_PANE;
     const pi = await load({ session: session("lane-3"), flags: { "cataly-role": "lane" } });
     await pi.emit("session_start");
     expect(existsSync(join(stateDir, "sessions"))).toBe(false);

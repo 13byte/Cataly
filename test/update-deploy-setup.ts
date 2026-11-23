@@ -4,18 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseDeploymentConfig } from "../src/update/deployment.ts";
 
-export type ForegroundFixtureOptions = {
-  activity?: boolean;
-  bunOnly?: boolean;
-  unknown?: boolean;
-  parentShell?: boolean;
-  rollback?: boolean;
-  paneShell?: boolean;
-  stoppable?: boolean;
-  subshell?: boolean;
-  transient?: boolean;
-};
-
 export function deploymentConfig(root: string) {
   return parseDeploymentConfig(
     {
@@ -27,11 +15,6 @@ export function deploymentConfig(root: string) {
       stateDir: "home/.cataly/state",
       bun: "home/private-bun/bun",
       omp: "home/private-omp/omp",
-      herdr: "home/private-cli/herdr",
-      herdrSession: "owned-namespace",
-      pane: "w1:p1",
-      sessionId: "preserved-session",
-      model: "openai-codex/gpt-6.1-sol",
       restartLock: "home/.cataly/restart.lock",
       launcherPath: "home/.cataly/bin/restart",
       healthTimeoutMs: 100,
@@ -57,10 +40,6 @@ export function fixture() {
       stateDir: "home/.cataly/state",
       bun: process.execPath,
       omp: process.execPath,
-      herdr: process.execPath,
-      pane: "w1:p1",
-      sessionId: "preserved-session",
-      model: "openai-codex/gpt-6.1-sol",
       restartLock: "home/.cataly/restart.lock",
       launcherPath: "home/.cataly/bin/managed-restart",
       healthTimeoutMs: 100,

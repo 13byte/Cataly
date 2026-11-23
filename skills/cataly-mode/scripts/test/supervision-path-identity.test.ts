@@ -7,7 +7,7 @@ import type { Lane } from "../src/registry.ts";
 import { Reports } from "../src/reports.ts";
 import { run, type Runner } from "../src/run.ts";
 import type { Observation, SupervisionOptions } from "../src/supervision-observe.ts";
-import { depsFor, fakeClock, newWorld, withState } from "./fakes.ts";
+import { depsFor, fakeClock, nativeLane, newWorld, withState } from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00Z");
 const MIN = 60_000;
@@ -19,14 +19,14 @@ const seedLane = async (home: string, stateDir: string, cwd: string, options: Su
     key: "path-identity-lane",
     title: "Path identity",
     thread: "none",
-    pane: "w:p1",
+    // One continuing native call that started 21 minutes before T0.
+    ...nativeLane(world, 1, { status: "working", activeSince: T0 - 21 * MIN }),
     brief: "/b.md",
     done: "",
     openedAt: new Date(T0).toISOString(),
     reportProtocol: "jsonl-v1",
     cwd,
   };
-  world.panes = [{ pane_id: "w:p1", workspace_id: "w", agent: "omo", agent_status: "working" }];
   const deps = depsFor(world, clock, stateDir, {
     nudgeAfterMin: 999,
     postAfterMin: 999,
@@ -46,7 +46,6 @@ const seedLane = async (home: string, stateDir: string, cwd: string, options: Su
     state: () => reports.read(lane.key)?.state,
     tick: async (minutes: number, runner: Runner = deps.run) => {
       clock.at = T0 + minutes * MIN;
-      world.screen = `Working ${21 + minutes}m`;
       const now = spyOn(Date, "now").mockImplementation(() => wall + minutes * MIN);
       try {
         return await freshnessTick({ ...deps, run: runner }, home);

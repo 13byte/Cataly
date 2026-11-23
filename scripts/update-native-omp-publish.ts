@@ -131,7 +131,7 @@ export async function publishNativeUpdate(
       head: branch,
       base: "main",
       draft: true,
-      body: `Prepared from exact Cataly ${candidate.sourceCommit}; native ${candidate.previous} -> ${candidate.commit} (${candidate.tag}).\n\nThe overlay applied without textual three-way conflicts. Native identity and required addon, extension, and real-host fixture package pins/frozen locks were regenerated with lifecycle scripts disabled. This is not semantic compatibility approval or a passing CI claim.\n\nExact-head CI is dispatched on ${commit}. Review all required check/e2e-herdr/e2e-hc results, breaking changes, notices, and isolated installation evidence before merging. No self-merge, approval, tag, release, consumer pointer, or live installation was changed.\n\n[Preparation artifact](${artifact}).`,
+      body: `Prepared from exact Cataly ${candidate.sourceCommit}; native ${candidate.previous} -> ${candidate.commit} (${candidate.tag}).\n\nThe overlay applied without textual three-way conflicts. Native identity and required addon, extension, and real-host fixture package pins/frozen locks were regenerated with lifecycle scripts disabled. This is not semantic compatibility approval or a passing CI claim.\n\nExact-head CI is dispatched on ${commit}. Review the required check results, breaking changes, notices, and isolated installation evidence before merging. No self-merge, approval, tag, release, consumer pointer, or live installation was changed.\n\n[Preparation artifact](${artifact}).`,
     }),
     branch,
     commit,

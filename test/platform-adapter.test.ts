@@ -4,7 +4,6 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { constants, tmpdir } from "node:os";
 import { join } from "node:path";
-import { herdrDeploymentCli } from "../src/update/deployment-cli.ts";
 import type { HostOs } from "../src/platform/adapter.ts";
 import { darwinMemFreePct } from "../src/platform/darwin.ts";
 import { adapterFor, platform } from "../src/platform/index.ts";
@@ -45,14 +44,6 @@ describe("capability matrix", () => {
     expect(adapterFor("win32").posixOwnership).toBe(false);
   });
 
-  test("macOS legacy releases use hc", () => {
-    expect(adapterFor("darwin").legacyReleaseRuntime()).toBe("hc");
-  });
-
-  test("Linux legacy releases use herdr", () => {
-    expect(adapterFor("linux").legacyReleaseRuntime()).toBe("herdr");
-  });
-
   test("Windows strips .exe from a program word", () => {
     expect(adapterFor("win32").programName("C:\\a\\bun.exe")).toBe("bun");
   });
@@ -76,26 +67,18 @@ describe("capability matrix", () => {
     expect(adapterFor("linux").directoryFsync).toBe(true);
   });
 
-  test("release profiles are the ones provision.ts admitted", () => {
-    expect(adapterFor("darwin").supportsReleaseProfile("darwin", "arm64", "hc")).toBe(true);
-    expect(adapterFor("darwin").supportsReleaseProfile("darwin", "arm64", "headless")).toBe(true);
-    expect(adapterFor("darwin").supportsReleaseProfile("linux", "x64", "herdr")).toBe(false);
-    expect(adapterFor("linux").supportsReleaseProfile("linux", "x64", "herdr")).toBe(true);
-    expect(adapterFor("linux").supportsReleaseProfile("linux", "x64", "headless")).toBe(true);
-    expect(adapterFor("linux").supportsReleaseProfile("linux", "arm64", "headless")).toBe(false);
-    expect(adapterFor("linux").supportsReleaseProfile("linux", "arm64", "herdr")).toBe(false);
-    expect(adapterFor("win32").supportsReleaseProfile("linux", "x64", "herdr")).toBe(false);
+  test("headless releases are admitted on Linux x64 and macOS arm64; Windows has no session runtime", () => {
+    expect(adapterFor("darwin").supportsHeadlessRelease("darwin", "arm64")).toBe(true);
+    expect(adapterFor("darwin").supportsHeadlessRelease("linux", "x64")).toBe(false);
+    expect(adapterFor("linux").supportsHeadlessRelease("linux", "x64")).toBe(true);
+    expect(adapterFor("linux").supportsHeadlessRelease("linux", "arm64")).toBe(false);
+    expect(adapterFor("win32").supportsHeadlessRelease("linux", "x64")).toBe(false);
+    expect(adapterFor("win32").supportsHeadlessRelease("win32", "x64")).toBe(false);
   });
 
   test("the native cache label keeps the native-<platform>-<arch> shape", () => {
     for (const os of ["darwin", "linux", "win32"] as const)
       expect(adapterFor(os).nativeCacheLabel()).toBe(`native-${os}-${process.arch}`);
-  });
-
-  test("only Linux opens the herdr native UI", () => {
-    expect(adapterFor("linux").supportsHerdrNativeUi).toBe(true);
-    expect(adapterFor("darwin").supportsHerdrNativeUi).toBe(false);
-    expect(adapterFor("win32").supportsHerdrNativeUi).toBe(false);
   });
 
   test("only Linux reads a process's kernel state through /proc", () => {
@@ -135,11 +118,6 @@ describe("capability matrix", () => {
     expect(adapterFor("darwin").flockLibrary()).toBe("libSystem.B.dylib");
     expect(adapterFor("linux").flockLibrary()).toBe("libc.so.6");
     expect(adapterFor("win32").flockLibrary()).toBe("libc.so.6");
-  });
-
-  test("the herdr deployment CLI carries nativeUi exactly where the host admits it", () => {
-    const cli = herdrDeploymentCli(async () => ({ code: 0, stdout: "", stderr: "" }));
-    expect("nativeUi" in cli).toBe({ darwin: false, linux: true, win32: false }[platform.os]);
   });
 
   test("the every-thread flag reaches the Linux task walk", () => {

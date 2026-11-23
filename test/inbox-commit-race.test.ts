@@ -2,18 +2,20 @@ import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
 import { dutyTick } from "../src/duty.ts";
 import { flushInbox, send } from "../src/inbox.ts";
-import { href } from "./fake.ts";
+import { href, sid } from "./fake.ts";
 import { quietLane } from "./harness-setup.ts";
-import { setup } from "./inbox-setup.ts";
+import { LEAD_REF, PANE, setup } from "./inbox-setup.ts";
 
-const OLD = href("w1:p2");
-const NEW = href("w1:p4");
+const OLD = href(PANE);
+const NEW = href(sid(4));
 const REAL_WRITE = fs.writeFileSync;
 
 afterEach(() => mock.restore());
 
 test("send reports DELIVERED only after delivering to the destination rechecked under its route", async () => {
   const s = await quietLane();
+  // The native start handed the lane its kickoff; only what this send delivers counts below.
+  s.pane.received.length = 0;
   const next = s.w.addPane(NEW.id, "idle");
   const lane = s.d.store.lane("talker");
   if (lane === undefined) throw new Error("missing fixture lane");
@@ -66,7 +68,7 @@ test("an id-less spool entry settled before an interrupted rewrite is never deli
 test("enumeration during a locked partial rewrite does not abort delivery to another inbox", async () => {
   const s = setup();
   await s.d.store.enqueue(OLD, { at: s.d.now(), from: "cli", text: "rewriting" }, false);
-  await s.d.store.enqueue(href("w1:p1"), { at: s.d.now(), from: "cli", text: "unrelated" }, false);
+  await s.d.store.enqueue(LEAD_REF, { at: s.d.now(), from: "cli", text: "unrelated" }, false);
   const release = s.d.store.lockInbox(OLD, s.d.now());
   if (release === undefined) throw new Error("fixture inbox locked");
   const path = s.d.store.inboxPath(OLD);

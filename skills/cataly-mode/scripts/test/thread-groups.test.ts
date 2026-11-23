@@ -5,6 +5,7 @@ import { withDeliveryLock } from "../src/delivery-lock.ts";
 import { closeLane, watchTick } from "../src/done-flow.ts";
 import { type Lane, statusOf } from "../src/registry.ts";
 import { depsFor, fakeClock, newWorld, type TestState, withState } from "./fakes.ts";
+import { closableLane } from "./native-close-fixture.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00Z");
 const lane: Lane = {
@@ -185,7 +186,7 @@ test("a Done signal that changes while waiting stops the first close even when i
 
 test.each(["MERGED", "OPEN"])("watch retries a held thread close and rechecks Done signals (%s)", async (nextState) => {
   const world = newWorld();
-  world.panes = [{ pane_id: "w:p7", workspace_id: "w", agent: "pi", agent_status: "idle" }];
+  const session = closableLane(world, 7, state.dir);
   let now = T0 + 10 * 60_000;
   const clock = {
     now: () => now,
@@ -196,7 +197,7 @@ test.each(["MERGED", "OPEN"])("watch retries a held thread close and rechecks Do
   const deps = depsFor(world, clock, state.dir, { threadDonePolicy: "last-lane", hooks: { threadDone: ["notify"] } });
   await deps.registry.write({
     ...lane,
-    pane: "w:p7",
+    ...session,
     status: "done-claimed",
     claim: { at: new Date(T0).toISOString(), evidence: "merged acme/app#1", emitted: true },
   });
@@ -206,7 +207,7 @@ test.each(["MERGED", "OPEN"])("watch retries a held thread close and rechecks Do
   const waiting = await deps.registry.read(lane.key);
   expect(waiting && statusOf(waiting)).toBe("verified-done");
   expect(waiting?.objection).toBeUndefined();
-  expect(world.calls.some((c) => c[0] === "notify" || c[2] === "send-text")).toBe(false);
+  expect(world.calls.some((c) => c[0] === "notify" || (c[0] === "headless" && c[1] === "deliver"))).toBe(false);
   world.prState = nextState;
   const retried = await watchTick(deps);
   const finished = await deps.registry.read(lane.key);

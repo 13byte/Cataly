@@ -150,6 +150,8 @@ export function validateReleaseManifest(value: unknown): ReleaseManifest {
   const omp = requirements["omp"];
   if (omp !== "18.18.8" && omp !== "18.20.0" && !matches(omp, /^19\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/))
     throw new Error("Release requirements do not match the supported runtime");
+  // A frozen v1 schema: these literals no longer describe the host or session runtime (releases run headless on Linux
+  // x64 and macOS arm64, per release-headless.json), but older installed updaters validate them exactly.
   const supported = {
     platform: "linux",
     arch: "x64",

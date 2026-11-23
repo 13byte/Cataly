@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { defaultConfig, loadConfig } from "../skills/cataly-mode/scripts/src/config.ts";
-import { claimDone, closeLane, type FlowDeps } from "../skills/cataly-mode/scripts/src/done-flow.ts";
+import { claimDone, closeLane } from "../skills/cataly-mode/scripts/src/done-flow.ts";
 import { freshnessTick } from "../skills/cataly-mode/scripts/src/freshness.ts";
 import { launchLane } from "../skills/cataly-mode/scripts/src/launch.ts";
 import { parkLane } from "../skills/cataly-mode/scripts/src/park.ts";
@@ -37,7 +37,7 @@ test("legacy terminal preferences keep native execution and explicit lane overri
     expect((await loadConfig(f.path, f.home, { ...f.env, CATALY_LANE_RUNTIME: "terminal" })).laneRuntime).toBe(
       "terminal",
     );
-    expect(runtimesOf(f.deps).default.kind).toBe(process.platform === "win32" ? "hc" : "headless");
+    if (process.platform !== "win32") expect(runtimesOf(f.deps).default.kind).toBe("headless");
     expect(() => headlessArgv(["omp", "--mode", "json", "{prompt}"], "test")).toThrow();
     expect(() => headlessArgv(["omp", "--resume", "some-session", "{prompt}"], "test")).toThrow();
     expect(() => headlessArgv(["omp", "--cataly-role", "cataly", "{prompt}"], "test")).toThrow();
@@ -180,11 +180,7 @@ test.skipIf(process.platform === "win32")(
       const parked = await parkLane(f.deps, initial, "stop work");
       expect(parked.code).toBe(0);
       expect((await rt.observe(initial.sessionRef)).status).toBe("gone");
-      const deps: FlowDeps = {
-        ...f.deps,
-        run: async (argv) => (argv[0] === "hc" ? { code: 0, out: '{"terminals":[]}', err: "" } : noExternal(argv)),
-      };
-      const opened = await reopenLane(deps, parked.lane);
+      const opened = await reopenLane({ ...f.deps, run: noExternal }, parked.lane);
       if (opened.lane.sessionRef) refs.push(opened.lane.sessionRef);
       expect(opened.lines[0]).toStartWith("REOPENED");
       expect(opened.code).toBe(0);
@@ -220,7 +216,7 @@ test("headless session resolution discards cached identities after a failed live
   let seen = confirmed;
   const runtime = Object.assign(new HeadlessRuntime("/fixture"), { observe: async () => seen });
   const rts = new ChosenRuntimes(
-    () => ({ kind: "hc", source: "config" }),
+    () => ({ kind: "headless", source: "config" }),
     () => runtime,
   );
   const deps = { run: noExternal, sessionsDir: "/fixture", rts };

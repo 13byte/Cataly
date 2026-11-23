@@ -27,7 +27,7 @@ test.skipIf(process.platform === "win32" || !nativeDiscordBinary())(
   async () => {
     const state = withState();
     const discord = discordLoopback([]);
-    writeFileSync(join(state.dir, "config.json"), JSON.stringify({ stateDir: state.dir, runtime: "herdr", hooks: {} }));
+    writeFileSync(join(state.dir, "config.json"), JSON.stringify({ stateDir: state.dir, hooks: {} }));
     const cli = join(import.meta.dir, "../src/cli.ts");
     const child = Bun.spawn([process.execPath, cli, "inbound", "discord", "--loop", "0.05"], {
       env: {

@@ -70,9 +70,8 @@ To install a selected checkout alongside a primary installation without pulling:
 CATALY_INSTALL_MODE=side CATALY_NO_PULL=1 CATALY_SRC="$PWD" bash scripts/install-source.sh
 ```
 
-Side mode defaults to `~/.omp-cataly`. `OMP_CATALY_HOME` selects its home,
-`OMP_CATALY_BIN_DIR` selects the command destination, and `OMP_CATALY_HC_SESSION`
-overrides its default `omp-cataly` hc namespace. Keep the generated `stateDir`,
+Side mode defaults to `~/.omp-cataly`. `OMP_CATALY_HOME` selects its home and
+`OMP_CATALY_BIN_DIR` selects the command destination. Keep the generated `stateDir`,
 `agentCommand`, wrappers, and skill together. Consumer-managed homes, including
 aliases, are protected from source installation in both primary and side modes.
 See [source installation](docs/releases.md#source-checkouts-for-maintainers).
@@ -168,15 +167,13 @@ bun test --parallel=1 --timings=.bun-test-timings.json --update-timings ./test/
 ```
 
 Automatic CI runs in two workflows. `ci.yml` holds the release gate and requires
-exactly **`check`, `e2e-herdr`, and `e2e-hc`** on Linux; all three must pass on the
-reviewed head and actual combined target content. The herdr job verifies a pinned
-asset checksum, limits download attempts, and fails immediately on a checksum
-mismatch. A missing hc E2E file is a failure, not a skip.
+exactly **`check`** on Linux; it must pass on the reviewed head and actual
+combined target content.
 
 `cross-os.yml` runs **`test-macos`** (`macos-15`, arm64: the root, skill and
 extension suites with prepared fixtures, a 30-second per-test timeout on the root
-suite because the runner is slower, and the genuine Darwin arm64 consumer
-transition from the historical hc profile to headless on pushes to `main` and
+suite because the runner is slower, and the genuine Darwin arm64 headless
+consumer release on pushes to `main` and
 manual runs, never on pull requests) and
 **`test-windows`** (`windows-2025`: `check`, `typecheck`, `knip`, `lint:loc` and
 the three suites with the native OMP host fixture). Both run on every pull request
@@ -270,7 +267,7 @@ Record the exact head, target, commands, and content each evidence run covers.
 - Once code is stable, complete one full local `bun run ci` with real fixtures.
   Do not present partial reruns or summed historical results as a new full run.
 - Prose-only changes need accurate content, commands, and links, not artificial
-  runtime or word-count tests. The three required remote jobs still apply.
+  runtime or word-count tests. The required remote job still applies.
 - Public issues, PRs, commits, and review comments are English. Exclude private
   transcripts, configuration, account data, and QA workspace contents.
 

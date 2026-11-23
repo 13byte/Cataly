@@ -58,7 +58,7 @@ test("cataly harness forwards root flags, persists backlog changes and propagate
     expect((await invoke("harness", "missing-command")).code).toBe(64);
     const help = await invoke("harness", "--help");
     expect(help.code).toBe(0);
-    for (const command of ["up", "inbox", "duty", "review", "merge", "loop", "backlog", "migrate"])
+    for (const command of ["up", "inbox", "duty", "review", "merge", "loop", "backlog"])
       expect(help.out).toContain(command);
     const skill = await invoke();
     expect(skill.code).toBe(0);

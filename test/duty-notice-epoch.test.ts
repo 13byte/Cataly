@@ -6,8 +6,7 @@ import type { Deps } from "../src/harness.ts";
 import { ready, report, startLane } from "../src/lanes.ts";
 import type { Lane } from "../src/store-types.ts";
 import { Store } from "../src/store.ts";
-import { href } from "./fake.ts";
-import { setup } from "./harness-setup.ts";
+import { LEAD_REF, setup } from "./harness-setup.ts";
 
 const MIN = 60_000;
 
@@ -128,7 +127,7 @@ describe("duty notice identities across progress epochs and lane incarnations", 
       });
       const minute = kind === "nudge" ? 10 : kind === "escalate" ? 40 : 0;
       expect(await at(minute)).toContainEqual(expect.objectContaining({ lane: "talker", action: "lane-failed" }));
-      const target = kind === "nudge" ? lane.sessionRef : href("w1:p1");
+      const target = kind === "nudge" ? lane.sessionRef : LEAD_REF;
       expect(d.store.queued(target)).toHaveLength(1);
       expect(d.store.queued(target)[0]!.id).toEqual(expect.any(String));
       w.clock = lane.createdAt + (minute + 1) * MIN;
@@ -162,11 +161,11 @@ describe("duty notice identities across progress epochs and lane incarnations", 
       expect(again.sessionRef).toEqual(lane.sessionRef);
       w.panes.delete(again.paneId);
       await dutyTick(d);
-      d.store.setRole("lead", href("w1:p1"));
+      d.store.setRole("lead", LEAD_REF);
       await dutyTick(d);
       await dutyTick(d);
       expect(told("LOST")).toBe(2);
-      expect(d.store.queued(href("w1:p1"))).toEqual([]);
+      expect(d.store.queued(LEAD_REF)).toEqual([]);
     },
   );
 });

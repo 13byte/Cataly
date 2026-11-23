@@ -75,8 +75,8 @@ export function lockQueue(root: string, ref: SessionRef, now: number): (() => vo
 
 /**
  * Takes the route lock of ref's inbox (`<inbox>.route`, judged stale like the inbox lock). A sender holds it from
- * reading the `.forward` marker to writing its message, and a migration while it writes, drains or removes the marker
- * (migrate-inbox.ts), so a message is never written where the marker it read no longer points.
+ * reading the `.forward` marker to writing its message, and a drain or native stop holds it while it changes the
+ * marker, so a message is never written where the marker it read no longer points.
  */
 export function lockRoute(root: string, ref: SessionRef, now: number): (() => void) | undefined {
   return takeInboxLock(`${inboxFile(root, ref)}.route`, now);

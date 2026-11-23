@@ -2,13 +2,24 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type HeadlessObservation, HeadlessRuntime } from "../../../../src/runtime/headless.ts";
+import type { AgentStatus } from "../../../../src/runtime/types.ts";
 import { freshnessTick } from "../src/freshness.ts";
 import { ConfigError, loadConfig } from "../src/config.ts";
 import { Reports, reportId } from "../src/reports.ts";
 import { type Lane, sessionFields } from "../src/registry.ts";
 import { ChosenRuntimes, type Runner } from "../src/run.ts";
 import { readObservation } from "../src/supervision-observe.ts";
-import { agentIn, laneState, depsFor, fakeClock, newWorld, sent, withState, type TestState } from "./fakes.ts";
+import {
+  depsFor,
+  fakeClock,
+  type FakeSession,
+  nativeLane,
+  newWorld,
+  sent,
+  type TestState,
+  withState,
+  type World,
+} from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00Z");
 const MIN = 60_000;
@@ -16,45 +27,48 @@ const lane: Lane = {
   key: "policy-lane",
   title: "policy",
   thread: "discord:123",
-  pane: "w:p7",
   brief: "/b.md",
   done: "file /done.md",
   openedAt: new Date(T0).toISOString(),
 };
+/** The policy lane bound to a live native session `sid(7)` in `world`. */
+const watched = (world: World, patch: Partial<FakeSession> = {}): Lane => ({
+  ...lane,
+  ...nativeLane(world, 7, patch),
+  reportProtocol: "jsonl-v1",
+});
 let state: TestState;
 beforeEach(() => {
   state = withState();
 });
 afterEach(() => state.done());
 
-test.each(["working", "blocked", "error", "shell", "unknown"])("idle-only does not nudge %s", async (status) => {
-  const world = newWorld();
-  world.panes = [{ pane_id: "w:p7", workspace_id: "w", agent: "omp", agent_status: status }];
-  const deps = depsFor(world, fakeClock(T0 + 30 * MIN), state.dir, { freshness: { nudge: "idle-only" } });
-  await deps.registry.write(lane);
-  expect(await freshnessTick(deps, "/home/test")).toEqual([]);
-  expect(sent(world)).toEqual([]);
-  expect((await deps.registry.read(lane.key))?.lastNudgeAt).toBeUndefined();
-});
+test.each(["working", "blocked", "error", "unknown"] as const satisfies readonly AgentStatus[])(
+  "idle-only does not nudge %s",
+  async (status) => {
+    const world = newWorld();
+    const deps = depsFor(world, fakeClock(T0 + 30 * MIN), state.dir, { freshness: { nudge: "idle-only" } });
+    await deps.registry.write(watched(world, { status }));
+    expect(await freshnessTick(deps, "/home/test")).toEqual([]);
+    expect(sent(world)).toEqual([]);
+    expect((await deps.registry.read(lane.key))?.lastNudgeAt).toBeUndefined();
+  },
+);
 
 test("idle-only nudges a live idle lane once and preserves the delivery gate", async () => {
   const world = newWorld();
-  world.panes = [{ pane_id: "w:p7", workspace_id: "w", agent: "omp", agent_status: "idle" }];
-  agentIn(world, "w:p7");
-  laneState(state.dir, "w:p7", { agentStatus: "idle" });
-  world.onEnterStatus = "working";
+  world.onDeliverStatus = "working";
   const deps = depsFor(world, fakeClock(T0 + 30 * MIN), state.dir, { freshness: { nudge: "idle-only" } });
-  await deps.registry.write(lane);
+  await deps.registry.write(watched(world));
   expect((await freshnessTick(deps, "/home/test")).map((a) => a.kind)).toEqual(["nudged"]);
   expect(sent(world)).toHaveLength(1);
   expect(await freshnessTick(deps, "/home/test")).toEqual([]);
 });
 
-test("an idle status over a shell is not delivered or recorded as a nudge", async () => {
+test("an idle session whose input is held is not delivered or recorded as a nudge", async () => {
   const world = newWorld();
-  world.panes = [{ pane_id: "w:p7", workspace_id: "w", agent: "omp", agent_status: "idle", foreground: "bash" }];
   const deps = depsFor(world, fakeClock(T0 + 30 * MIN), state.dir, { freshness: { nudge: "idle-only" } });
-  await deps.registry.write(lane);
+  await deps.registry.write(watched(world, { held: true }));
   expect(await freshnessTick(deps, "/home/test")).toEqual([]);
   expect(sent(world)).toEqual([]);
   expect((await deps.registry.read(lane.key))?.lastNudgeAt).toBeUndefined();
@@ -62,13 +76,12 @@ test("an idle status over a shell is not delivered or recorded as a nudge", asyn
 
 test("summary-only posts the owner summary, not the lead detail, and remembers its exact identity", async () => {
   const world = newWorld();
-  world.screen = "Working (1m)";
   const clock = fakeClock(T0 + 21 * MIN);
   const deps = depsFor(world, clock, state.dir, {
     freshness: { nudge: "idle-only", postRaw: false, autoPostKinds: ["milestone"] },
     hooks: { threadReply: ["notify", "{thread}", "{text}"] },
   });
-  await deps.registry.write({ ...lane, reportProtocol: "jsonl-v1" });
+  await deps.registry.write(watched(world, { status: "working" }));
   const reports = new Reports(state.dir);
   const report = reports.report(
     lane.key,
@@ -94,7 +107,7 @@ test.each(["blocker", "question", "halted", "done"] as const)(
       freshness: { autoPostKinds: ["milestone"] },
       hooks: { threadReply: ["notify", "{text}"] },
     });
-    await deps.registry.write({ ...lane, reportProtocol: "jsonl-v1" });
+    await deps.registry.write(watched(world));
     new Reports(state.dir).report(lane.key, kind, "Internal question", T0, undefined, "Please decide");
     expect((await freshnessTick(deps, "/home/test")).map((a) => a.kind)).toEqual(["unrelayed"]);
     expect(await freshnessTick(deps, "/home/test")).toEqual([]);
@@ -105,28 +118,14 @@ test.each(["blocker", "question", "halted", "done"] as const)(
 
 test.each([true, false])("summary-only alerts rather than leaking detail (hook=%s)", async (hook) => {
   const world = newWorld();
-  world.screen = "Working (1m)";
   const deps = depsFor(world, fakeClock(T0 + 30 * MIN), state.dir, {
     freshness: { postRaw: false, nudge: "idle-only" },
     hooks: hook ? { threadReply: ["notify", "{text}"] } : {},
   });
-  await deps.registry.write({ ...lane, reportProtocol: "jsonl-v1" });
+  await deps.registry.write(watched(world, { status: "working" }));
   new Reports(state.dir).report(lane.key, "milestone", "Internal detail", T0);
   expect((await freshnessTick(deps, "/home/test")).map((a) => a.kind)).toEqual(["unrelayed"]);
   expect(await freshnessTick(deps, "/home/test")).toEqual([]);
-  expect(world.calls.some((c) => c[0] === "notify")).toBe(false);
-});
-
-test("summary-only never sends an adopted lane's screen report", async () => {
-  const world = newWorld();
-  world.screen = `[REPORT] ${lane.key} | milestone | internal detail`;
-  const deps = depsFor(world, fakeClock(T0 + 30 * MIN), state.dir, {
-    freshness: { postRaw: false, nudge: "idle-only" },
-    hooks: { threadReply: ["notify", "{text}"] },
-  });
-  await deps.registry.write(lane);
-  expect((await freshnessTick(deps, "/home/test")).map((a) => a.kind)).toEqual(["pending-report"]);
-  expect((await freshnessTick(deps, "/home/test")).map((a) => a.kind)).toEqual(["unrelayed"]);
   expect(world.calls.some((c) => c[0] === "notify")).toBe(false);
 });
 
@@ -179,7 +178,7 @@ test.each(journalStates)("enforces ceilings for an unobserved %s lane", async (j
     },
   });
   const rts = new ChosenRuntimes(
-    () => ({ kind: "herdr", source: "config" }),
+    () => ({ kind: "headless", source: "config" }),
     () => runtime,
   );
   const base = depsFor(newWorld(), clock, state.dir, {
@@ -201,7 +200,7 @@ test.each(journalStates)("enforces ceilings for an unobserved %s lane", async (j
     return { code: 0, out: JSON.stringify({ tokens }), err: "" };
   };
   const deps = { ...base, rts, run };
-  const nativeLane: Lane = {
+  const budgetLane: Lane = {
     ...lane,
     ...sessionFields(ref),
     key: "headless-budget",
@@ -212,37 +211,37 @@ test.each(journalStates)("enforces ceilings for an unobserved %s lane", async (j
     lifecycleEpoch: ref.id,
     reportProtocol: "jsonl-v1",
   };
-  await deps.registry.write(nativeLane);
+  await deps.registry.write(budgetLane);
   const reports = new Reports(state.dir);
   const scope = { generation: ref.id };
-  reports.report(nativeLane.key, "milestone", "initial evidence", clock.at, ref.id);
-  const observation = join(dirname(reports.path(nativeLane.key)), "supervision.json");
+  reports.report(budgetLane.key, "milestone", "initial evidence", clock.at, ref.id);
+  const observation = join(dirname(reports.path(budgetLane.key)), "supervision.json");
   expect(await freshnessTick(deps, state.dir)).toEqual([]);
-  const verified = readObservation(observation, nativeLane);
+  const verified = readObservation(observation, budgetLane);
   if (!verified?.activity) throw new Error("missing verified baseline");
-  if (journalState === "stalled") reports.observe(nativeLane.key, "❯ ", T0 + MIN, 0, true, scope);
-  const prior = reports.read(nativeLane.key, scope);
+  if (journalState === "stalled") reports.observe(budgetLane.key, "❯ ", T0 + MIN, 0, true, scope);
+  const prior = reports.read(budgetLane.key, scope);
   expect(prior?.state).toBe(journalState);
 
   observed = { ...observed, status: "unknown", held: true, detail: "fixture broker observation unavailable" };
   clock.at += MIN;
   const warnings = journalState === "stalled" ? ["tokens ceiling cannot be checked: usage unavailable"] : [];
   expect(await freshnessTick(deps, state.dir)).toEqual(
-    warnings.map((detail) => ({ kind: "warning", lane: nativeLane.key, detail })),
+    warnings.map((detail) => ({ kind: "warning", lane: budgetLane.key, detail })),
   );
-  expect(reports.read(nativeLane.key, scope)).toEqual(prior);
-  expect(readObservation(observation, nativeLane)).toEqual({ ...verified, alerts: warnings });
+  expect(reports.read(budgetLane.key, scope)).toEqual(prior);
+  expect(readObservation(observation, budgetLane)).toEqual({ ...verified, alerts: warnings });
   writeFileSync(join(state.dir, "watched.txt"), "new content without verified runtime activity");
   clock.at += MIN;
   const ceilings = ["wallMinutes ceiling reached (2)", "tokens ceiling reached (10)"];
   expect(await freshnessTick(deps, state.dir)).toEqual(
-    ceilings.map((detail) => ({ kind: "blocked", lane: nativeLane.key, detail })),
+    ceilings.map((detail) => ({ kind: "blocked", lane: budgetLane.key, detail })),
   );
-  expect(reports.read(nativeLane.key, scope)?.lastReport).toMatchObject({
+  expect(reports.read(budgetLane.key, scope)?.lastReport).toMatchObject({
     kind: "blocker",
     text: ceilings.join("; "),
   });
-  expect(readObservation(observation, nativeLane)).toEqual({ ...verified, alerts: ceilings });
+  expect(readObservation(observation, budgetLane)).toEqual({ ...verified, alerts: ceilings });
   clock.at += MIN;
   expect(await freshnessTick(deps, state.dir)).toEqual([]);
   expect(usageReads).toBe(4);

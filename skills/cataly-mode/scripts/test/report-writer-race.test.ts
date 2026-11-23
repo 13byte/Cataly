@@ -17,12 +17,13 @@ test.each(["milestone", "done", "blocker"] as const)(
     try {
       const config = join(state.dir, "config.json");
       const key = "race-lane";
-      writeFileSync(config, JSON.stringify({ stateDir: state.dir, runtime: "herdr" }));
+      writeFileSync(config, JSON.stringify({ stateDir: state.dir, runtime: "tern" }));
       await new Registry(state.dir).write({
         key,
         title: "race",
         thread: "none",
-        pane: "w:p7",
+        pane: "5007",
+        sessionRef: { runtime: "tern", id: "5007" },
         brief: "/b.md",
         done: "file /done.md",
         openedAt: new Date().toISOString(),

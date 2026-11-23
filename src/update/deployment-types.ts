@@ -1,34 +1,23 @@
 import type { NativeReceipt } from "../release/native.ts";
 import type { SourceManifest } from "./types.ts";
 
+/** The managed target is the native headless harness owned by `catalyHome` (its `harness-native.json`). */
 export type DeploymentConfig = {
   readonly releaseRoot: string;
   readonly liveSource: string;
   readonly home: string;
   readonly catalyHome: string;
   readonly catalyConfig: string;
-  /** Cataly's pane/monitor metadata root; native session files stay where they are. */
+  /** The harness's native state directory: reservations, runtime health and monitor metadata. */
   readonly stateDir: string;
   readonly bun: string;
   /** Omitted selects the release-bound native source; an absolute path is an explicit external-toolchain override. */
   readonly omp?: string;
-  readonly legacyOmp?: string;
-  /** Absent runtime remains herdr and retains legacy journal hashes; hc opts into its own binary and terminal. */
-  readonly runtime?: "herdr" | "hc";
-  readonly herdr?: string;
-  readonly herdrSession?: string;
-  readonly hc?: string;
-  readonly hcSession?: string;
-  readonly pane: string;
-  readonly sessionId: string;
-  readonly model: string;
-  /** A directory lock shared with the managed model-watch launcher. */
+  /** A directory lock shared with the managed restart launcher. */
   readonly restartLock: string;
   readonly launcherPath: string;
   readonly healthTimeoutMs: number;
   readonly stopTimeoutMs: number;
-  readonly nativeStopMode?: "ui" | "signal";
-  readonly monitorBootstrapFile?: string;
   readonly quiesceCheckpointFile?: string;
   readonly shims: readonly { readonly path: string; readonly source: string }[];
 };
@@ -48,10 +37,13 @@ export type ProcessIdentity = {
   readonly imageDev?: string;
   readonly imageIno?: string;
 };
+/** The harness lead's OMP process, bound to its headless reservation and native session. */
 export type RuntimeIdentity = ProcessIdentity & {
-  readonly pane: string;
+  /** The lead's headless reservation id (`headless:<ref>`). */
+  readonly ref: string;
   readonly sessionId: string;
   readonly sessionFile: string;
+  /** The reservation's start time. */
   readonly startedAt: string;
   readonly cwd: string;
   readonly role: "cataly";
@@ -90,7 +82,13 @@ export type MonitorSet = {
   readonly sessionId: string;
   readonly monitors: readonly MonitorSpec[];
   readonly intake: IntakeSpec;
-  readonly runtime?: ProcessIdentity & Pick<RuntimeIdentity, "pane" | "role" | "sessionId" | "startedAt">;
+  /** A historical trusted bootstrap receipt; parsed for the extension's bootstrap reader. */
+  readonly runtime?: ProcessIdentity & {
+    readonly pane: string;
+    readonly role: "cataly";
+    readonly sessionId: string;
+    readonly startedAt: string;
+  };
   readonly running?: readonly {
     readonly name: string;
     readonly pid: number;
@@ -134,21 +132,19 @@ export type DeploymentRecord = {
   oldSourceHash?: string;
   oldRuntime?: RuntimeIdentity;
   oldMonitors?: readonly MonitorProcessIdentity[];
+  /** The old lead session's desired monitors and intake, captured before its stop; the resumed lead restores them. */
   monitors?: MonitorSet;
-  bootstrap?: boolean;
   quiesceHash?: string;
   pointers?: readonly PointerRecord[];
   stopRequestedAt?: string;
-  nativeUiExitRequestedAt?: string;
+  /** The old lead was already gone when the stop was first attempted. */
   nativeExitObservedAt?: string;
   launchRequestedAt?: string;
   runtime?: RuntimeIdentity;
-  launchProcess?: ProcessIdentity;
   runtimeMonitors?: readonly MonitorProcessIdentity[];
   rollbackRequestedAt?: string;
   rollbackLaunchRequestedAt?: string;
   rollbackRuntime?: RuntimeIdentity;
-  rollbackProcess?: ProcessIdentity;
   healthyAt?: string;
   rollbackHealthyAt?: string;
   error?: string;
@@ -156,6 +152,7 @@ export type DeploymentRecord = {
 };
 export type RuntimeHealth = {
   readonly version: 1;
+  /** The writer's session address: a headless reservation id. */
   readonly paneId: string;
   readonly pid: number;
   readonly sessionId: string;

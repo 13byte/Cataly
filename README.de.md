@@ -118,11 +118,22 @@ aktiviert sie; `DO_NOT_TRACK=1` hat Vorrang.
 
 Die aktuellen Befehle heißen `cataly`, `cataly-harness` und `omp-cataly` (separate
 Installation). Neue Installationen verwenden `~/.cataly` beziehungsweise
-`~/.omp-cataly`. Standardmäßig ist kein Terminal-Backend nötig.
+`~/.omp-cataly`. Cataly läuft unter macOS und Linux standardmäßig auf headless OMP;
+Tern ist die optionale Terminal-Laufzeit.
 
 [Aktuelles, geprüftes Release installieren](docs/releases.md#install-a-current-release)
-oder [von v0.1.3 ohne Terminal-Backend aktualisieren](docs/releases.md#upgrade-a-v013-installation).
+oder [von v0.1.3 aktualisieren](docs/releases.md#upgrade-a-v013-installation).
 Dabei bleiben das bisherige Installationsverzeichnis und die Konfiguration erhalten.
+
+Diese Version hat die Terminal-Laufzeiten herdr und hc entfernt. Nutzt ein
+Installationsverzeichnis sie noch, stoppen Installation und Update mit:
+
+```text
+This Cataly home still uses the herdr/hc terminal runtime, which this version removed.
+1. Close every herdr/hc lane (`cataly status` lists them) with your previous Cataly version.
+2. Remove "runtime" (if it names herdr or hc) and "sessionRuntime" from <configPath>.
+3. Run this command again. Cataly state and OMP sessions are kept; lanes reopen on headless.
+```
 
 </td></tr></table>
 
@@ -139,9 +150,9 @@ Ersetze ein exaktes Release nicht durch einen beliebigen Installer von `main`.
 
 ### Mit dem Quellcode arbeiten
 
-Installiere zuerst git und Bun 1.4.4+. Unter Linux und macOS benötigt die Standardkonfiguration weder herdr noch hc; siehe die
+Installiere zuerst git und Bun 1.4.4+ unter Linux oder macOS; ein Terminal-Server ist nicht nötig. Siehe die
 [Voraussetzungen für die Quellcode-Version](docs/releases.md#current-source-bundle).
-Tern ist eine dritte Session-Laufzeit im Quellcode von `main`; siehe [Tern](docs/runtime.md#tern).
+Tern ist die optionale Terminal-Laufzeit; siehe [Tern](docs/runtime.md#tern).
 
 Verwende einen separaten Checkout, keine laufende Installation und kein eingefrorenes Endnutzer-Release:
 
@@ -165,7 +176,7 @@ Native Sessions nutzen deine eigene Provider-Authentifizierung und dein Nutzungs
 
 **Wichtig**
 
-Die Endnutzer-Implementierung unterstützt auch isolierte macOS-arm64/hc-Profile,
+Die Endnutzer-Implementierung unterstützt auch isolierte headless Profile für macOS arm64,
 wenn ein geprüftes Release-Manifest sie ausweist. Das bedeutet nicht, dass ein
 macOS-Release veröffentlicht wurde. Slack und Telegram bleiben Funktionen der Quellcode-Version.
 

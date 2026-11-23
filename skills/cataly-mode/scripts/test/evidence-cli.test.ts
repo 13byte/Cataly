@@ -10,10 +10,7 @@ let state: TestState;
 beforeEach(() => {
   state = withState();
   mkdirSync(join(state.dir, "state/lanes"), { recursive: true });
-  writeFileSync(
-    join(state.dir, "config.json"),
-    JSON.stringify({ runtime: "herdr", stateDir: join(state.dir, "state"), ompUlwPath: "" }),
-  );
+  writeFileSync(join(state.dir, "config.json"), JSON.stringify({ stateDir: join(state.dir, "state"), ompUlwPath: "" }));
   writeFileSync(
     join(state.dir, "state/lanes/fixture.json"),
     JSON.stringify({
@@ -37,7 +34,6 @@ const cataly = (...args: string[]) => {
       HOME: state.dir,
       PATH: process.env["PATH"],
       CATALY_CONFIG: join(state.dir, "config.json"),
-      CATALY_RUNTIME: "herdr",
       CATALY_TELEMETRY: "0",
       DO_NOT_TRACK: "1",
     },

@@ -1,105 +1,35 @@
 import { describe, expect, test } from "bun:test";
-import { writeFileSync } from "node:fs";
 import { main } from "../src/cli.ts";
 import { dutyTick } from "../src/duty.ts";
 import { flushInbox } from "../src/inbox.ts";
-import { HeadlessRuntime } from "../src/runtime/headless.ts";
-import { Runtimes } from "../src/runtime/registry.ts";
-import { formatRef, type DeliverOutcome, type SessionRef } from "../src/runtime/types.ts";
-import { captureIo, setup, typedEntry } from "./inbox-setup.ts";
+import { formatRef, type SessionRef } from "../src/runtime/types.ts";
+import { captureIo, PANE, setup } from "./inbox-setup.ts";
 import { href } from "./fake.ts";
 
 // #108: follow-ups to #89 (PR 102).
 
-describe("a typed entry whose pane's agent changed is held, never Entered (#108 1)", () => {
-  test("the typed attempt records the agent name and foreground process group herdr reported", async () => {
+const REF = href(PANE);
+const SHOWN = formatRef(REF);
+
+describe("a legacy typed entry (#108 1)", () => {
+  test("forwarded by an older binary from a herdr pane to an idle native lane, it is held instead of submitted", async () => {
     const s = setup();
-    s.pane.agent = "omo";
-    s.pane.pgid = 4242;
-    await typedEntry(s);
-    expect(s.d.store.queued(href("w1:p2"))[0]!.attempt).toMatchObject({ state: "typed", agent: "omo", pgid: 4242 });
-  });
+    const old: SessionRef = { runtime: "herdr", id: "w1:p2" };
+    s.d.store.saveInbox(old, [
+      { at: s.w.clock, from: "cli", text: "half typed", attempt: { at: s.w.clock + 1, state: "typed" } },
+    ]);
+    await Bun.write(`${s.d.store.inboxPath(old)}.forward`, `${SHOWN}\n`);
 
-  test("the agent exits (no agent in the pane): held, the lead is told once, and no Enter when an agent comes back", async () => {
-    const s = setup();
-    await typedEntry(s);
-    s.pane.status = "shell";
-    expect(await dutyTick(s.d)).toContainEqual(
-      expect.objectContaining({ pane: "w1:p2", action: "delivery-ambiguous" }),
-    );
-    expect(s.d.store.queued(href("w1:p2")).map((m) => m.attempt?.state)).toEqual(["ambiguous"]);
-
-    s.pane.status = "idle";
-    s.pane.pgid = 202;
-    for (let i = 0; i < 2; i++) {
-      expect(await dutyTick(s.d)).toContainEqual(
-        expect.objectContaining({ pane: "w1:p2", action: "delivery-ambiguous" }),
-      );
-    }
-    expect(s.count("w1:p2", "pane", "send-keys")).toBe(3);
-    expect(s.count("w1:p2", "pane", "send-text")).toBe(1);
-    expect(s.notices()).toHaveLength(1);
-    expect(s.notices()[0]).not.toContain("SECRET");
-  });
-
-  test("another agent process in front (foreground process group changed between ticks): held, no Enter, one notice", async () => {
-    const s = setup();
-    await typedEntry(s);
-    s.pane.pgid = 777;
-    expect(await dutyTick(s.d)).toContainEqual(
-      expect.objectContaining({ pane: "w1:p2", action: "delivery-ambiguous" }),
-    );
-    await dutyTick(s.d);
-    expect(s.count("w1:p2", "pane", "send-keys")).toBe(3);
-    expect(s.d.store.queued(href("w1:p2")).map((m) => m.attempt?.state)).toEqual(["ambiguous"]);
-    expect(s.notices()).toHaveLength(1);
-  });
-
-  test("another agent name in the pane: held, no Enter", async () => {
-    const s = setup();
-    await typedEntry(s);
-    s.pane.agent = "claude";
-    await dutyTick(s.d);
-    expect(s.count("w1:p2", "pane", "send-keys")).toBe(3);
-    expect(s.d.store.queued(href("w1:p2")).map((m) => m.attempt?.state)).toEqual(["ambiguous"]);
-    expect(s.notices()).toHaveLength(1);
-  });
-
-  test("control: the same agent is still in front: only Enter is pressed and the entry is delivered", async () => {
-    const s = setup();
-    await typedEntry(s);
-    expect(await dutyTick(s.d)).toEqual([{ pane: "w1:p2", action: "flushed" }]);
-    expect(s.count("w1:p2", "pane", "send-keys")).toBe(4);
-    expect(s.d.store.queued(href("w1:p2"))).toEqual([]);
-    expect(s.notices()).toEqual([]);
-  });
-
-  test("a typed entry forwarded to an idle native lane is held instead of submitted again", async () => {
-    const s = setup();
-    const old = href("w1:p2");
-    const ref: SessionRef = { runtime: "headless", id: "00000000-0000-4000-8000-000000000001" };
-    const sent: string[] = [];
-    const native = Object.assign(new HeadlessRuntime(s.d.store.root), {
-      probe: async () => ({ status: "idle", shellInFront: false, sessionId: "native-lane" }) as const,
-      deliver: async (_ref: SessionRef, text: string): Promise<DeliverOutcome> => {
-        sent.push(text);
-        return { kind: "delivered" };
-      },
-    });
-    const runtimes = new Runtimes("herdr", (kind) => (kind === "headless" ? native : s.d.runtimes.terminal(kind)));
-    await typedEntry(s);
-    writeFileSync(`${s.d.store.inboxPath(old)}.forward`, `${formatRef(ref)}\n`);
-
-    expect(await flushInbox({ ...s.d, runtimes }, old)).toBe("held");
-    expect(s.d.store.queued(ref).map((msg) => msg.attempt?.state)).toEqual(["ambiguous"]);
-    expect(sent).toEqual([]);
+    expect(await flushInbox(s.d, old)).toBe("held");
+    expect(s.d.store.queued(REF).map((msg) => msg.attempt?.state)).toEqual(["ambiguous"]);
+    expect(s.pane.received).toEqual([]);
   });
 });
 
 describe("releasing held entries: cataly inbox list | ack | resend (#108 2)", () => {
   function heldInbox(s: ReturnType<typeof setup>) {
     const long = `SECRET "quoted"\n${"x".repeat(100)}`;
-    s.d.store.saveInbox(href("w1:p2"), [
+    s.d.store.saveInbox(REF, [
       { at: 0, from: "lane-a", text: long, attempt: { at: 1, state: "ambiguous", detail: "timeout" } },
       { at: 60_000, from: "cli", text: "typed one", attempt: { at: 60_001, state: "typed" } },
       { at: 120_000, from: "duty", text: "plain" },
@@ -110,7 +40,7 @@ describe("releasing held entries: cataly inbox list | ack | resend (#108 2)", ()
   test("list prints index, state, sender and queued time, and at most the first 60 characters JSON-escaped", async () => {
     const s = setup();
     const long = heldInbox(s);
-    const r = await captureIo(() => main(["inbox", "list", "w1:p2"], s.d));
+    const r = await captureIo(() => main(["inbox", "list", SHOWN], s.d));
     expect(r.code).toBe(0);
     expect(r.out.split("\n")).toEqual([
       `1 held from lane-a queued 1970-01-01T00:00:00.000Z ${JSON.stringify(long.slice(0, 60))}...`,
@@ -123,43 +53,41 @@ describe("releasing held entries: cataly inbox list | ack | resend (#108 2)", ()
   test("ack drops the held entry and nothing else; a role name resolves to its pane", async () => {
     const s = setup();
     heldInbox(s);
-    s.d.store.setRole("duty", href("w1:p2"));
+    s.d.store.setRole("duty", REF);
     const r = await captureIo(() => main(["inbox", "ack", "duty", "1"], s.d));
-    expect(r).toEqual({ code: 0, out: "ACKED w1:p2 1" });
-    expect(s.d.store.queued(href("w1:p2")).map((m) => m.text)).toEqual(["typed one", "plain"]);
+    expect(r).toEqual({ code: 0, out: `ACKED ${SHOWN} 1` });
+    expect(s.d.store.queued(REF).map((m) => m.text)).toEqual(["typed one", "plain"]);
   });
 
   test("ack and resend refuse an entry that is not held, and an index out of range", async () => {
     const s = setup();
     heldInbox(s);
-    await expect(main(["inbox", "ack", "w1:p2", "2"], s.d)).rejects.toThrow(/not held/);
-    await expect(main(["inbox", "resend", "w1:p2", "3"], s.d)).rejects.toThrow(/not held/);
-    await expect(main(["inbox", "ack", "w1:p2", "4"], s.d)).rejects.toThrow(/no entry 4/);
-    await expect(main(["inbox", "ack", "w1:p2", "x"], s.d)).rejects.toThrow(/no entry/);
-    expect(s.d.store.queued(href("w1:p2"))).toHaveLength(3);
+    await expect(main(["inbox", "ack", SHOWN, "2"], s.d)).rejects.toThrow(/not held/);
+    await expect(main(["inbox", "resend", SHOWN, "3"], s.d)).rejects.toThrow(/not held/);
+    await expect(main(["inbox", "ack", SHOWN, "4"], s.d)).rejects.toThrow(/no entry 4/);
+    await expect(main(["inbox", "ack", SHOWN, "x"], s.d)).rejects.toThrow(/no entry/);
+    expect(s.d.store.queued(REF)).toHaveLength(3);
   });
 
   test("resend clears the attempt, and the next flush delivers it exactly once", async () => {
     const s = setup();
-    s.d.store.saveInbox(href("w1:p2"), [
+    s.d.store.saveInbox(REF, [
       { at: 0, from: "cli", text: "again", attempt: { at: 1, state: "ambiguous", detail: "timeout" } },
     ]);
-    expect(await dutyTick(s.d)).toContainEqual(
-      expect.objectContaining({ pane: "w1:p2", action: "delivery-ambiguous" }),
-    );
+    expect(await dutyTick(s.d)).toContainEqual(expect.objectContaining({ pane: SHOWN, action: "delivery-ambiguous" }));
     expect(s.pane.received).toEqual([]);
-    const r = await captureIo(() => main(["inbox", "resend", "w1:p2", "1"], s.d));
-    expect(r.out).toBe("RELEASED w1:p2 1: the next flush delivers it");
-    expect(s.d.store.queued(href("w1:p2"))).toEqual([{ at: 0, from: "cli", text: "again" }]);
-    expect(await dutyTick(s.d)).toEqual([{ pane: "w1:p2", action: "flushed" }]);
+    const r = await captureIo(() => main(["inbox", "resend", SHOWN, "1"], s.d));
+    expect(r.out).toBe(`RELEASED ${SHOWN} 1: the next flush delivers it`);
+    expect(s.d.store.queued(REF)).toEqual([{ at: 0, from: "cli", text: "again" }]);
+    expect(await dutyTick(s.d)).toEqual([{ pane: SHOWN, action: "flushed" }]);
     expect(await dutyTick(s.d)).toEqual([]);
     expect(s.pane.received).toEqual(["again"]);
   });
 
   test("a gone pane with only held entries reports inbox-target-gone, not delivery-ambiguous", async () => {
     const s = setup();
-    s.d.store.saveInbox(href("w1:p2"), [{ at: 0, from: "cli", text: "held", attempt: { at: 1, state: "ambiguous" } }]);
-    s.w.panes.delete("w1:p2");
-    expect(await dutyTick(s.d)).toEqual([{ pane: "w1:p2", action: "inbox-target-gone" }]);
+    s.d.store.saveInbox(REF, [{ at: 0, from: "cli", text: "held", attempt: { at: 1, state: "ambiguous" } }]);
+    s.w.panes.delete(PANE);
+    expect(await dutyTick(s.d)).toEqual([{ pane: SHOWN, action: "inbox-target-gone" }]);
   });
 });

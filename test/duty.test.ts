@@ -3,8 +3,10 @@ import { main } from "../src/cli.ts";
 import { dutyTick } from "../src/duty.ts";
 import { send } from "../src/inbox.ts";
 import { startLane } from "../src/lanes.ts";
-import { setup } from "./harness-setup.ts";
-import { href } from "./fake.ts";
+import { LEAD, LEAD_REF, setup } from "./harness-setup.ts";
+import { href, sid } from "./fake.ts";
+
+const BROKEN = sid(9);
 
 describe("duty loop", () => {
   test("nudges a quiet lane at 10 and 20 minutes and escalates once at 40", async () => {
@@ -28,21 +30,21 @@ describe("duty loop", () => {
 
   test("a failing inbox flush on one pane does not stop the loop for the other panes", async () => {
     const { w, d, lead } = setup();
-    const broken = w.addPane("w1:p9", "idle");
-    w.promptFails.set("w1:p9", "herdr exploded");
-    await d.store.enqueue(href("w1:p9"), { at: w.clock, from: "cli", text: "to broken" }, false);
-    await d.store.enqueue(href("w1:p1"), { at: w.clock, from: "cli", text: "to lead" }, false);
+    const broken = w.addPane(BROKEN, "idle");
+    w.deliverFails.set(BROKEN, "native host exploded");
+    await d.store.enqueue(href(BROKEN), { at: w.clock, from: "cli", text: "to broken" }, false);
+    await d.store.enqueue(LEAD_REF, { at: w.clock, from: "cli", text: "to lead" }, false);
     const events = await dutyTick(d);
     expect(events).toContainEqual({
-      pane: "w1:p9",
+      pane: `headless:${BROKEN}`,
       action: "delivery-ambiguous",
-      detail: expect.stringContaining("herdr exploded"),
+      detail: expect.stringContaining("native host exploded"),
     });
-    expect(events).toContainEqual({ pane: "w1:p1", action: "flushed" });
+    expect(events).toContainEqual({ pane: `tern:${LEAD}`, action: "flushed" });
     expect(lead.received.filter((m) => m.includes("to lead"))).toHaveLength(1);
     // The held batch is reported to the lead once (#111); the test is about the other pane still flushing, not about
     // the lead's inbox holding one message.
-    expect(lead.received.filter((m) => m.includes("[DELIVERY-AMBIGUOUS w1:p9]"))).toHaveLength(1);
+    expect(lead.received.filter((m) => m.includes(`[DELIVERY-AMBIGUOUS headless:${BROKEN}]`))).toHaveLength(1);
     expect(broken.received).toEqual([]);
   });
 
@@ -54,8 +56,8 @@ describe("duty loop", () => {
     w.panes.delete(lost.paneId);
     w.panes.get(stuck.paneId)!.status = "idle";
     w.panes.get(fine.paneId)!.status = "idle";
-    w.promptFails.set("w1:p1", "lead exploded");
-    w.promptFails.set(stuck.paneId, "stuck exploded");
+    w.deliverFails.set(LEAD, "lead exploded");
+    w.deliverFails.set(stuck.paneId, "stuck exploded");
     w.clock = fine.createdAt + 10 * 60_000;
     const events = await dutyTick(d);
     expect(events).toContainEqual({
@@ -72,40 +74,22 @@ describe("duty loop", () => {
     expect(w.panes.get(fine.paneId)!.received.at(-1)).toContain("quiet for 10 minutes");
   });
 
-  test("a LOST notice whose Enter failed once still reaches the lead on the next tick, exactly once", async () => {
-    const { w, d, lead, brief } = setup();
-    const gone = await startLane(d, "gone-lane", brief, { group: "w1" });
-    lead.received.length = 0;
-    w.panes.delete(gone.paneId);
-    w.promptFails.set("w1:p1", '{"error":{"code":"agent_not_ready"}}');
-    w.keyFails = 3;
-    expect(await dutyTick(d)).toContainEqual({
-      lane: "gone-lane",
-      action: "lane-failed",
-      detail: expect.stringContaining("key press failed"),
-    });
-    expect(lead.received.filter((m) => m.includes("[LOST gone-lane]"))).toHaveLength(1);
-    const events = await dutyTick(d);
-    expect(events).toContainEqual({ pane: "w1:p1", action: "flushed" });
-    expect(lead.received.filter((m) => m.includes("[LOST gone-lane]"))).toHaveLength(1);
-    expect(await dutyTick(d)).toEqual([]);
-    expect(lead.received.filter((m) => m.includes("[LOST gone-lane]"))).toHaveLength(1);
-  });
-
-  test("the delivery-ambiguous detail is herdr's first output line, never the queued message", async () => {
+  test("the delivery-ambiguous detail is the failure's first line, never the queued message", async () => {
     const { w, d } = setup();
-    w.addPane("w1:p9", "idle");
-    w.promptFails.set("w1:p9", "herdr exploded\nsecond line");
-    await d.store.enqueue(href("w1:p9"), { at: w.clock, from: "cli", text: "SECRET queued message" }, false);
+    w.addPane(BROKEN, "idle");
+    w.deliverFails.set(BROKEN, "native host exploded\nsecond line");
+    await d.store.enqueue(href(BROKEN), { at: w.clock, from: "cli", text: "SECRET queued message" }, false);
     const events = await dutyTick(d);
-    expect(events).toEqual([{ pane: "w1:p9", action: "delivery-ambiguous", detail: "herdr exploded" }]);
+    expect(events).toEqual([
+      { pane: `headless:${BROKEN}`, action: "delivery-ambiguous", detail: "native host exploded" },
+    ]);
   });
 
   test("the duty loop prints a delivery-ambiguous line with the reason", async () => {
     const { w, d } = setup();
-    w.addPane("w1:p9", "idle");
-    w.promptFails.set("w1:p9", "herdr exploded");
-    await d.store.enqueue(href("w1:p9"), { at: w.clock, from: "cli", text: "to broken" }, false);
+    w.addPane(BROKEN, "idle");
+    w.deliverFails.set(BROKEN, "native host exploded");
+    await d.store.enqueue(href(BROKEN), { at: w.clock, from: "cli", text: "to broken" }, false);
     const lines: string[] = [];
     const log = console.log;
     console.log = (...a: unknown[]) => void lines.push(a.join(" "));
@@ -115,8 +99,8 @@ describe("duty loop", () => {
       console.log = log;
     }
     expect(lines).toHaveLength(1);
-    expect(lines[0]).toStartWith("DUTY w1:p9 delivery-ambiguous: ");
-    expect(lines[0]).toContain("herdr exploded");
+    expect(lines[0]).toStartWith(`DUTY headless:${BROKEN} delivery-ambiguous: `);
+    expect(lines[0]).toContain("native host exploded");
   });
 
   test("kill switch: a stopped duty loop flushes, nudges and escalates nothing; resume delivers what was held", async () => {
@@ -146,7 +130,7 @@ describe("duty loop", () => {
 
     await main(["duty", "resume"], d);
     const events = await dutyTick(d);
-    expect(events).toContainEqual({ pane: "w1:p1", action: "flushed" });
+    expect(events).toContainEqual({ pane: `tern:${LEAD}`, action: "flushed" });
     expect(events).toContainEqual({ lane: "quiet", action: "nudge-1" });
     expect(lead.received).toEqual(["held note"]);
   });

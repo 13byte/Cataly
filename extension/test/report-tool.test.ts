@@ -9,18 +9,18 @@ import { Reports } from "../../skills/cataly-mode/scripts/src/reports.ts";
 import { toolEvidence } from "../../skills/cataly-mode/scripts/src/tool-evidence.ts";
 import { type Entry, type FakePi, load, useConfig } from "./fake-pi";
 
-const PANE = "w1:p5";
+const HEADLESS = "00000000-0000-4000-8000-000000000005";
 const KEY = "evidence-lane";
 let stateDir: string;
 beforeEach(async () => {
   stateDir = useConfig(join(import.meta.dir, "fake-ulw.ts"));
-  process.env.HERDR_PANE_ID = PANE;
-  delete process.env.HC_TERMINAL_ID;
+  process.env.CATALY_HEADLESS_ID = HEADLESS;
   await new Registry(stateDir).write({
     key: KEY,
     title: "evidence",
     thread: "none",
-    pane: PANE,
+    pane: HEADLESS,
+    sessionRef: { runtime: "headless", id: HEADLESS },
     brief: "/brief.md",
     done: "file /done.md",
     openedAt: "2026-01-01T00:00:00.000Z",
@@ -28,7 +28,7 @@ beforeEach(async () => {
   });
 });
 afterEach(() => {
-  delete process.env.HERDR_PANE_ID;
+  delete process.env.CATALY_HEADLESS_ID;
 });
 
 const call = (id: string, name: string, args: Record<string, unknown>): Entry => ({
@@ -56,7 +56,12 @@ const report = async (pi: FakePi, params: Record<string, unknown>, ctx = pi.ctx(
 };
 
 const lane = async (entries: Entry[]): Promise<FakePi> => {
-  const pi = await load({ session: { id: "lane-session", entries }, flags: { "cataly-role": "lane" } });
+  const pi = await load({
+    session: { id: "lane-session", entries },
+    flags: { "cataly-role": "lane" },
+    mode: "rpc",
+    hasUI: true,
+  });
   await pi.emit("session_start");
   return pi;
 };
@@ -243,9 +248,9 @@ test("cataly_report runs only in a registered lane's main session", async () => 
     await expect(report(pi, { kind: "milestone", text: "x" }, { ...pi.ctx(), agent })).rejects.toThrow(
       "works only in a lane's main session",
     );
-  process.env.HERDR_PANE_ID = "w1:p9";
+  process.env.CATALY_HEADLESS_ID = "00000000-0000-4000-8000-000000000009";
   await expect(report(pi, { kind: "milestone", text: "x" })).rejects.toThrow("no open lane is registered");
-  process.env.HERDR_PANE_ID = PANE;
+  process.env.CATALY_HEADLESS_ID = HEADLESS;
   const registry = new Registry(stateDir);
   const registered = await registry.read(KEY);
   if (!registered) throw new Error("evidence lane is not registered");

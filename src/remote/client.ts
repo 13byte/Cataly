@@ -39,7 +39,7 @@ export type Request = Readonly<{
 export const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 
-/** A definite rejection from a peer, unlike an error reading or transporting an acknowledgement. */
+/** A definite rejection from a native endpoint, unlike an error reading or transporting an acknowledgement. */
 export class RemoteRejection extends Error {}
 
 export function parseReply(text: string): unknown {

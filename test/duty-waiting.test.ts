@@ -11,13 +11,17 @@ import { captureIo } from "./inbox-setup.ts";
 
 const MIN = 60_000;
 
-/** A lane whose idle pane has just reported `text` as waiting; `at(m)` runs one duty pass m minutes after it started. */
-async function waitingLane(opts: { waitingFor?: string } = {}, text = "WAITING: CI on acme/app#3") {
-  const s = setup();
+/**
+ * A lane whose idle session has just reported `text` as waiting, on headless unless `runtime` says Tern; `at(m)` runs
+ * one duty pass m minutes after it started.
+ */
+async function waitingLane(opts: { waitingFor?: string; runtime?: "tern" } = {}, text = "WAITING: CI on acme/app#3") {
+  const { runtime, ...wait } = opts;
+  const s = setup(runtime ? { runtime } : {});
   const lane = await startLane(s.d, "blocked", s.brief, { group: "w1" });
   const pane = s.w.panes.get(lane.paneId)!;
   pane.status = "idle";
-  await report(s.d, "blocked", text, { status: "waiting", ...opts });
+  await report(s.d, "blocked", text, { status: "waiting", ...wait });
   const at = async (min: number) => {
     s.w.clock = lane.createdAt + min * MIN;
     return dutyTick(s.d);
@@ -116,7 +120,8 @@ describe("a waiting lane", () => {
   });
 
   test("the status line names what it waits on and since when, within 120 columns, the time kept on a long target", async () => {
-    const { w, d, lane } = await waitingLane({ waitingFor: "CI 812" });
+    // A Tern block's short ref leaves room for the last entry; a headless UUID ref, never cut, takes that room first.
+    const { w, d, lane } = await waitingLane({ waitingFor: "CI 812", runtime: "tern" });
     const since = hhmm(lane.createdAt);
     const [line] = laneBoard(d.store.lanes(), w.clock);
     expect(line).toContain(`waiting: CI 812 since ${since} | report`);

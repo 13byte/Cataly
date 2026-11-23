@@ -28,13 +28,13 @@ describe("groupId", () => {
 
 describe("exec", () => {
   test("ToolError names the tool, argv, exit code and the tool's own reason", () => {
-    const err = new ToolError(["get", "t7"], { code: 3, stdout: "out", stderr: " not found \n" }, "hc");
+    const err = new ToolError(["pr", "view"], { code: 3, stdout: "out", stderr: " not found \n" }, "gh");
     expect(err).toBeInstanceOf(Error);
-    expect(err.message).toBe("hc get t7 failed (3): not found");
-    expect(err.argv).toEqual(["get", "t7"]);
+    expect(err.message).toBe("gh pr view failed (3): not found");
+    expect(err.argv).toEqual(["pr", "view"]);
     expect(err.result.code).toBe(3);
-    expect(new ToolError(["x"], { code: 1, stdout: "from stdout", stderr: "" }, "herdr").message).toBe(
-      "herdr x failed (1): from stdout",
+    expect(new ToolError(["x"], { code: 1, stdout: "from stdout", stderr: "" }, "omp").message).toBe(
+      "omp x failed (1): from stdout",
     );
   });
 

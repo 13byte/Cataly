@@ -5,7 +5,7 @@ import { isAbsolute, join, relative, sep } from "node:path";
 
 import { launchLane } from "../src/launch.ts";
 import { laneTokenEnv, OUTSIDE_HOME_FLAG, RESOLVED_HOME, RESOLVED_MARK, TokenFileError } from "../src/slack-token.ts";
-import { depsFor, fakeClock, newWorld, withState, type World } from "./fakes.ts";
+import { depsFor, fakeClock, newWorld, sid, withState, type World } from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00.000Z");
 const KEYS = ["CATALY_CONFIG", "CATALY_SLACK_TOKEN", "CATALY_SLACK_TOKEN_FILE"] as const;
@@ -37,58 +37,60 @@ const tokenFile = (dir: string, text: string, mode: number): string => {
   return file;
 };
 
-const launchArgv = async (home: string, key: string, config = join(home, "config.json")): Promise<string[][]> => {
+// The env the native lane started with, and every `KEY=value` its session was reserved with.
+type Launched = { readonly env: Readonly<Record<string, string | undefined>>; readonly reserved: string[] };
+const pairs = (env: Launched["env"]): string[] => Object.entries(env).map(([k, v]) => `${k}=${v}`);
+const launchEnv = async (home: string, key: string, config = join(home, "config.json")): Promise<Launched> => {
   const brief = join(state.dir, "brief.md");
   writeFileSync(brief, "# brief\n");
   process.env["CATALY_CONFIG"] = config;
   world = newWorld();
-  await launchLane(depsFor(world, fakeClock(T0), join(home, "state"), { runtime: "hc" }), {
-    key,
-    title: "t",
-    brief,
-    done: "closed acme/app#3",
-  });
-  return world.calls.map((c) => [...c]);
+  const reserved: string[] = [];
+  world.onCreate = (spec) => {
+    reserved.push(...pairs(spec.env));
+  };
+  const deps = { ...depsFor(world, fakeClock(T0), join(home, "state"), { defaultCwd: state.dir }), env: process.env };
+  await launchLane(deps, { key, title: "t", brief, done: "closed acme/app#3" });
+  return { env: world.sessions[sid(1)]?.env ?? {}, reserved };
 };
 
-test("the create argv for a lane never contains the token value, only the token file's path (#200)", async () => {
+test("the env a lane is reserved and started with never holds the token value, only the token file's path (#200)", async () => {
   // Given a launcher with a token in its env and this home's owner-only token file next to its config.
   const home = join(state.dir, "home");
   const file = tokenFile(home, "xoxb-file-secret\n", 0o600);
   process.env["CATALY_SLACK_TOKEN"] = "xoxb-launcher-secret";
   delete process.env["CATALY_SLACK_TOKEN_FILE"];
-  // When the lane is created on hc, which puts every env value on the command line.
-  const calls = await launchArgv(home, "token-lane");
-  // Then no argv of any call holds a token, and the lane gets the path with CATALY_SLACK_TOKEN blanked.
-  expect(calls.flat().filter((arg) => arg.includes("xoxb-"))).toEqual([]);
-  const create = calls.find((c) => c[0] === "hc" && c.includes("run") && c.includes("--bg")) ?? [];
-  expect(create).toContain(`CATALY_SLACK_TOKEN_FILE=${real(file)}`);
-  expect(create).toContain("CATALY_SLACK_TOKEN=");
+  // When the lane is reserved and started on the native supervisor.
+  const { env, reserved } = await launchEnv(home, "token-lane");
+  // Then no runtime call, reservation or start env holds a token, and the lane gets the path with the token blanked.
+  expect([...world.calls.flat(), ...reserved, ...pairs(env)].filter((arg) => arg.includes("xoxb-"))).toEqual([]);
+  expect(reserved).toContain(`CATALY_SLACK_TOKEN_FILE=${real(file)}`);
+  expect(env["CATALY_SLACK_TOKEN_FILE"]).toBe(real(file));
+  expect(env["CATALY_SLACK_TOKEN"]).toBe("");
 });
 
 test("with no token file the lane env is unchanged, as in a single-home setup", async () => {
   process.env["CATALY_SLACK_TOKEN"] = "xoxb-launcher-secret";
   delete process.env["CATALY_SLACK_TOKEN_FILE"];
-  const calls = await launchArgv(join(state.dir, "plain-home"), "plain-lane");
-  expect(calls.flat().filter((arg) => arg.includes("CATALY_SLACK_TOKEN") || arg.includes("xoxb-"))).toEqual([]);
+  const { env, reserved } = await launchEnv(join(state.dir, "plain-home"), "plain-lane");
+  const passed = [...world.calls.flat(), ...reserved, ...pairs(env)];
+  expect(passed.filter((arg) => arg.includes("CATALY_SLACK_TOKEN") || arg.includes("xoxb-"))).toEqual([]);
 });
 
 test("a relative token-file path is passed absolute, since the lane runs in another directory", async () => {
   const home = join(state.dir, "rel-home");
   const file = tokenFile(home, "xoxb-rel\n", 0o600);
   process.env["CATALY_SLACK_TOKEN_FILE"] = relative(process.cwd(), file);
-  const create = (await launchArgv(home, "rel-lane")).find((c) => c[0] === "hc" && c.includes("--bg")) ?? [];
-  expect(create).toContain(`CATALY_SLACK_TOKEN_FILE=${real(file)}`);
+  const { env } = await launchEnv(home, "rel-lane");
+  expect(env["CATALY_SLACK_TOKEN_FILE"]).toBe(real(file));
 });
 
 test("the home's own slack-token is passed even when missing, so the lane never falls back to the core's token", async () => {
   const absent = join(state.dir, "named-home", "slack-token");
   process.env["CATALY_SLACK_TOKEN_FILE"] = absent;
-  const create =
-    (await launchArgv(join(state.dir, "named-home"), "named-lane")).find((c) => c[0] === "hc" && c.includes("--bg")) ??
-    [];
-  expect(create).toContain(`CATALY_SLACK_TOKEN_FILE=${real(absent)}`);
-  expect(create).toContain("CATALY_SLACK_TOKEN=");
+  const { env } = await launchEnv(join(state.dir, "named-home"), "named-lane");
+  expect(env["CATALY_SLACK_TOKEN_FILE"]).toBe(real(absent));
+  expect(env["CATALY_SLACK_TOKEN"]).toBe("");
 });
 
 test("any other named token file that does not exist yet is refused: a link later put there is what the lane would follow", () => {
@@ -174,10 +176,10 @@ test("a launch with a token file outside this home is refused before any session
   delete process.env["CATALY_SLACK_TOKEN"];
   process.env["CATALY_SLACK_TOKEN_FILE"] = other;
   delete process.env[OUTSIDE_HOME_FLAG];
-  await expect(launchArgv(home, "outside-lane")).rejects.toThrow(
+  await expect(launchEnv(home, "outside-lane")).rejects.toThrow(
     /^token file refused: CATALY_SLACK_TOKEN_FILE .* is outside this home/,
   );
-  expect(world.calls.some((c) => c[0] === "hc" && c.includes("run"))).toBe(false);
+  expect(world.calls.filter((c) => c[0] === "headless")).toEqual([]);
 });
 
 test("a relative CATALY_CONFIG is passed to the lane absolute, so the lane finds the same home and its token-file mark holds", async () => {
@@ -186,12 +188,11 @@ test("a relative CATALY_CONFIG is passed to the lane absolute, so the lane finds
   delete process.env["CATALY_SLACK_TOKEN"];
   delete process.env["CATALY_SLACK_TOKEN_FILE"];
   const config = relative(process.cwd(), join(home, "config.json"));
-  const calls = await launchArgv(home, "relconf-lane", config);
-  const create = calls.find((c) => c[0] === "hc" && c.includes("--bg")) ?? [];
+  const { env } = await launchEnv(home, "relconf-lane", config);
   // A path that has no relative form (another drive on Windows) is already absolute and reaches the lane as it is.
   const passed = isAbsolute(config) ? config : `${process.cwd()}${sep}${config}`;
-  expect(create).toContain(`CATALY_CONFIG=${passed}`);
-  expect(create).toContain(`CATALY_SLACK_TOKEN_FILE=${real(file)}`);
+  expect(env["CATALY_CONFIG"]).toBe(passed);
+  expect(env["CATALY_SLACK_TOKEN_FILE"]).toBe(real(file));
 });
 
 test("a CATALY_CONFIG whose home moves when normalized (empty, '.', '..') is refused instead of moving the home up", async () => {
@@ -199,7 +200,7 @@ test("a CATALY_CONFIG whose home moves when normalized (empty, '.', '..') is ref
   delete process.env["CATALY_SLACK_TOKEN_FILE"];
   const home = join(state.dir, "bad-config-home");
   for (const raw of ["", ".", ".."]) {
-    await expect(launchArgv(home, `bad-${raw.length}`, raw)).rejects.toThrow(/does not name a config file/);
+    await expect(launchEnv(home, `bad-${raw.length}`, raw)).rejects.toThrow(/does not name a config file/);
   }
 });
 
@@ -209,8 +210,8 @@ test("an absolute CATALY_CONFIG reaches the lane unchanged, so a link in it reso
   const home = join(state.dir, "abs-home");
   mkdirSync(home, { recursive: true });
   const raw = `${home}/sub/../config.json`;
-  const create = (await launchArgv(home, "abs-lane", raw)).find((c) => c[0] === "hc" && c.includes("--bg")) ?? [];
-  expect(create).toContain(`CATALY_CONFIG=${raw}`);
+  const { env } = await launchEnv(home, "abs-lane", raw);
+  expect(env["CATALY_CONFIG"]).toBe(raw);
 });
 
 test("a relative CATALY_CONFIG with '..' keeps it, so the OS follows a link in it for the lane as it did for the launcher", async () => {
@@ -219,8 +220,8 @@ test("a relative CATALY_CONFIG with '..' keeps it, so the OS follows a link in i
   const home = join(state.dir, "dotdot-home");
   mkdirSync(join(home, "sub"), { recursive: true });
   const raw = `${relative(process.cwd(), join(home, "sub"))}${sep}..${sep}config.json`;
-  const create = (await launchArgv(home, "dotdot-lane", raw)).find((c) => c[0] === "hc" && c.includes("--bg")) ?? [];
+  const { env } = await launchEnv(home, "dotdot-lane", raw);
   // Not collapsed on paper: the '..' is still there for the OS to resolve. A cross-drive path is already absolute.
   const passed = isAbsolute(raw) ? raw : `${process.cwd()}${sep}${raw}`;
-  expect(create).toContain(`CATALY_CONFIG=${passed}`);
+  expect(env["CATALY_CONFIG"]).toBe(passed);
 });

@@ -9,7 +9,7 @@ import { ready, report } from "../src/lanes.ts";
 import type { SessionRef } from "../src/runtime/types.ts";
 import { href } from "./fake.ts";
 import { quietLane } from "./harness-setup.ts";
-import { setup } from "./inbox-setup.ts";
+import { LEAD_REF as LEAD, PANE, setup } from "./inbox-setup.ts";
 
 // A message for the lead whose route stays held past the wait (a migration of the lead's inbox that does not let go)
 // is kept for the lead, not dropped: the next duty pass that finds the route free moves it into the lead's inbox.
@@ -26,15 +26,13 @@ function holdRoute(d: Deps, ref: SessionRef): () => void {
 /** Every wait for a held route returns at once; counts the waits. */
 const noWait = () => spyOn(Bun, "sleep").mockImplementation(async () => {});
 
-const LEAD = href("w1:p1");
-
 describe("a message for the lead whose route stays held is kept for the lead", () => {
   test("a held-delivery notice: the lead is told once the route is free", async () => {
     const s = setup();
-    s.w.promptFails.set("w1:p2", "timeout");
+    s.w.deliverFails.set(PANE, "timeout");
     const free = holdRoute(s.d, LEAD);
     const waits = noWait();
-    expect(await send(s.d, "w1:p2", "SECRET instruction", "cli")).toBe("HELD");
+    expect(await send(s.d, `headless:${PANE}`, "SECRET instruction", "cli")).toBe("HELD");
     expect(waits.mock.calls.length).toBeGreaterThan(0);
     expect(s.notices()).toEqual([]);
     free();
@@ -80,33 +78,33 @@ describe("a message for the lead whose route stays held is kept for the lead", (
 
 test("a send whose write fails lets go of the route: a later send is not kept waiting behind it", async () => {
   const s = setup();
-  const lock = `${s.d.store.inboxPath(href("w1:p2"))}.lock`;
+  const lock = `${s.d.store.inboxPath(href(PANE))}.lock`;
   const real = fs.writeFileSync;
   spyOn(fs, "writeFileSync").mockImplementation(((file: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
     if (String(file) === lock) throw new Error("disk full");
     return (real as (...a: unknown[]) => unknown)(file, ...rest);
   }) as never);
   await expect(
-    s.d.store.enqueue(href("w1:p2"), { at: s.d.now(), from: "cli", text: "lost write" }, false),
+    s.d.store.enqueue(href(PANE), { at: s.d.now(), from: "cli", text: "lost write" }, false),
   ).rejects.toThrow("disk full");
   mock.restore();
-  expect(fs.existsSync(`${s.d.store.inboxPath(href("w1:p2"))}.route`)).toBe(false);
+  expect(fs.existsSync(`${s.d.store.inboxPath(href(PANE))}.route`)).toBe(false);
 });
 
 test("a send waiting for a held route does not stop the process: other work runs, and the send goes once it is free", async () => {
   const s = setup();
-  const free = holdRoute(s.d, href("w1:p2"));
+  const free = holdRoute(s.d, href(PANE));
   const waiting = Promise.withResolvers<void>();
   const wake = Promise.withResolvers<void>();
   spyOn(Bun, "sleep").mockImplementation(async () => {
     waiting.resolve();
     await wake.promise;
   });
-  const sent = s.d.store.enqueue(href("w1:p2"), { at: s.d.now(), from: "cli", text: "waited" }, false);
+  const sent = s.d.store.enqueue(href(PANE), { at: s.d.now(), from: "cli", text: "waited" }, false);
   // The route's holder is this process's own other work: it can only let go while the waiting send has yielded.
   await waiting.promise;
   free();
   wake.resolve();
-  expect(await sent).toEqual({ kind: "queued", at: href("w1:p2") });
-  expect(s.d.store.queued(href("w1:p2")).map((m) => m.text)).toEqual(["waited"]);
+  expect(await sent).toEqual({ kind: "queued", at: href(PANE) });
+  expect(s.d.store.queued(href(PANE)).map((m) => m.text)).toEqual(["waited"]);
 });

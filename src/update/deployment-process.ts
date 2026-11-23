@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { DeploymentConfig, ProcessIdentity, ToolchainReceipt } from "./deployment-types.ts";
-import { runtimeBinary } from "./deployment-config.ts";
 import { bootId, procExe, procExeTarget, procStat } from "./proc.ts";
 
 export class DeploymentHeld extends Error {}
@@ -74,7 +73,6 @@ export function actorEnv(config: DeploymentConfig, toolchain?: ToolchainReceipt)
     PATH: [
       dirname(toolchain?.bun ?? config.bun),
       dirname(toolchain?.omp ?? config.omp ?? join(config.catalyHome, "bin/omp")),
-      dirname(runtimeBinary(config)),
       join(config.catalyHome, "bin"),
       join(config.home, ".bun", "bin"),
       "/usr/bin",
@@ -92,13 +90,6 @@ export function actorEnv(config: DeploymentConfig, toolchain?: ToolchainReceipt)
     ...(process.env["OMP_ULW_SCOPE_FILE"] === undefined
       ? {}
       : { OMP_ULW_SCOPE_FILE: process.env["OMP_ULW_SCOPE_FILE"] }),
-    ...(config.runtime === "hc"
-      ? { HC_TERMINAL_ID: config.pane, ...(config.hcSession ? { HC_SESSION: config.hcSession } : {}) }
-      : {
-          HERDR_PANE_ID: config.pane,
-          HERDR_WORKSPACE_ID: config.pane.slice(0, config.pane.indexOf(":")),
-          ...(config.herdrSession ? { CATALY_HERDR_SESSION: config.herdrSession } : {}),
-        }),
     CATALY_TELEMETRY: "0",
     DO_NOT_TRACK: "1",
   };

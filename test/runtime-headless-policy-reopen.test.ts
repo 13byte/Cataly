@@ -24,11 +24,7 @@ test.skipIf(process.platform === "win32")(
       agentCommand: [omp, "--cataly-role", "lane", ...args],
       lanePolicy: { denyBash: ["blocked-operation"] },
     };
-    const deps: FlowDeps = {
-      ...f.deps,
-      config,
-      run: async (argv) => (argv[0] === "hc" ? { code: 0, out: '{"terminals":[]}', err: "" } : f.deps.run(argv)),
-    };
+    const deps: FlowDeps = { ...f.deps, config };
     writeFileSync(f.path, JSON.stringify(config));
     const grant = async () => {
       const p = Bun.spawn(

@@ -16,7 +16,6 @@ const HEADER_BYTES: u64 = 32 * 1024;
 const LINE_LIMIT: u64 = 64 * 1024 * 1024;
 
 pub(super) struct Transcript {
-    pub(super) file: PathBuf,
     pub(super) model: Option<String>,
 }
 
@@ -254,11 +253,11 @@ pub(super) fn exact(
         }
     }
     handle.seek(SeekFrom::Start(0))?;
-    read_branch(handle, file)
+    read_branch(handle)
 }
 
 /// Reads every entry for the saved model; `None` when the transcript departed or holds a non-object line.
-fn read_branch(handle: File, file: PathBuf) -> Result<Option<Transcript>> {
+fn read_branch(handle: File) -> Result<Option<Transcript>> {
     let mut reader = BufReader::new(handle);
     let mut entries: HashMap<String, BranchEntry> = HashMap::new();
     let mut leaf: Option<String> = None;
@@ -319,7 +318,6 @@ fn read_branch(handle: File, file: PathBuf) -> Result<Option<Transcript>> {
         Some(_) => last_self_selected.as_deref(),
     };
     Ok(Some(Transcript {
-        file,
         model: saved_model(&entries, start),
     }))
 }

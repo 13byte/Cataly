@@ -2,9 +2,8 @@ import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { doctorCheck } from "../src/doctor.ts";
-import { paneStatePath, readPaneState } from "../src/lane-state.ts";
 import { Reports } from "../src/reports.ts";
-import { agentIn, depsFor, fakeClock, laneState, newWorld, withState, type TestState } from "./fakes.ts";
+import { depsFor, fakeClock, nativeLead, newWorld, withState, type TestState } from "./fakes.ts";
 
 let state: TestState;
 beforeEach(() => {
@@ -14,34 +13,15 @@ afterEach(() => state.done());
 const now = Date.parse("2026-01-01T12:00:00Z");
 
 test.each([
-  {
-    name: "multiline status",
-    stored: "working\nWARN forged lead status",
-    expected: "unknown",
-    approval: true,
-    expectedApproval: "true",
-  },
-  { name: "unsupported status", stored: "paused", expected: "unknown", approval: true, expectedApproval: "true" },
-  { name: "supported status", stored: "working", expected: "working", approval: false, expectedApproval: "false" },
-  {
-    name: "invalid approval",
-    stored: "idle",
-    expected: "idle",
-    approval: "true\nWARN forged approval",
-    expectedApproval: undefined,
-  },
-])("doctor reports only admitted lead metadata: $name", async (scenario) => {
-  const { stored, expected, approval, expectedApproval } = scenario;
+  { name: "working lead", status: "working", held: false, expected: "working", expectedApproval: "false" },
+  { name: "idle lead with an open approval", status: "idle", held: true, expected: "idle", expectedApproval: "true" },
+  { name: "blocked lead", status: "blocked", held: true, expected: "unknown", expectedApproval: "true" },
+  { name: "unattested lead", status: "unknown", held: false, expected: "unknown", expectedApproval: undefined },
+] as const)("doctor reports only attested lead metadata: $name", async (scenario) => {
+  const { status, held, expected, expectedApproval } = scenario;
   const world = newWorld();
-  const pane = "w1:p1";
-  world.panes = [{ pane_id: pane, workspace_id: "w1", agent: "omp", agent_status: "idle", cwd: "/repo" }];
-  agentIn(world, pane);
+  const pane = nativeLead(world, 1, { status, held });
   const deps = depsFor(world, fakeClock(now), state.dir, { leadPane: pane, sessionsDir: join(state.dir, "sessions") });
-  laneState(state.dir, pane, { role: "cataly" });
-  writeFileSync(
-    paneStatePath(state.dir, pane),
-    JSON.stringify({ ...readPaneState(state.dir, pane), agentStatus: stored, approvalPending: approval }),
-  );
   const result = await doctorCheck(deps);
   expect(result.findings.filter((finding) => finding.check === "runtime")).toEqual([
     {
@@ -49,8 +29,8 @@ test.each([
       severity: expectedApproval === undefined ? "WARN" : "OK",
       detail:
         expectedApproval === undefined
-          ? `herdr lead="${pane}" has no trusted live Cataly record`
-          : `herdr lead="${pane}" role=cataly status=${expected} approvalPending=${expectedApproval}`,
+          ? `headless lead="${pane}" has no trusted live Cataly record`
+          : `headless lead="${pane}" role=cataly status=${expected} approvalPending=${expectedApproval}`,
     },
   ]);
 });

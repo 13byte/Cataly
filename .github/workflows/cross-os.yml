@@ -41,7 +41,7 @@ jobs:
       - name: Extension tests
         if: ${{ !cancelled() }}
         run: bun run test:extension
-      - name: Darwin arm64 headless consumer transition (hc for legacy only)
+      - name: Darwin arm64 headless consumer release
         if: ${{ !cancelled() && github.event_name != 'pull_request' }}
         run: |
           set -euo pipefail
@@ -50,22 +50,13 @@ jobs:
           bun -e 'if (process.platform !== "darwin" || process.arch !== "arm64") throw new Error("Darwin arm64 is required")'
           gtar="$(command -v gtar)"
           "$gtar" --version
-          runtime="$RUNNER_TEMP/consumer-hc"
-          mkdir -m 700 "$runtime" "$runtime/home" "$runtime/s" "$runtime/r" "$runtime/c"
-          curl --proto '=https' --tlsv1.2 -fL https://releases.herdr.dev/core/install.sh -o "$runtime/install-hc.sh"
-          printf '%s  %s\n' '9d29a920d796d11b00fde9ab0958b616179d88acc25edf0fde8b574bde0227d2' "$runtime/install-hc.sh" | shasum -a 256 -c -
-          env -i HOME="$runtime/home" PATH=/usr/bin:/bin HC_VERSION=0.1.20 sh "$runtime/install-hc.sh"
-          hc="$runtime/home/.local/bin/hc"
-          env -i HOME="$runtime/home" PATH="$runtime/home/.local/bin:/usr/bin:/bin" \
-            XDG_STATE_HOME="$runtime/s" XDG_RUNTIME_DIR="$runtime/r" XDG_CONFIG_HOME="$runtime/c" \
-            HC_SESSION=consumer-installer hc update --version 0.1.20
           baseline=97371823c4936f7e83f656cfa6ca9d446ecf1995
           git merge-base --is-ancestor "$baseline" HEAD
           git worktree add --detach "$RUNNER_TEMP/consumer-baseline" "$baseline"
           git worktree add --detach "$RUNNER_TEMP/consumer-candidate" HEAD
           bun "$RUNNER_TEMP/consumer-candidate/scripts/verify-consumer-release.ts" \
             --source-a "$RUNNER_TEMP/consumer-baseline" --source-b "$RUNNER_TEMP/consumer-candidate" \
-            --runtime-bin "$hc" --tar-bin "$gtar" \
+            --tar-bin "$gtar" \
             --out "/private/tmp/odcr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
   test-windows:

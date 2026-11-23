@@ -7,7 +7,7 @@ import { fill } from "../../skills/cataly-mode/scripts/src/config.ts";
 import { recordCommandOutput } from "./command-output.ts";
 import { canonical, contains, UpdateError, UpdateInterrupted } from "./config.ts";
 import { type Capability, isolatedEnv } from "./environment.ts";
-import { nativeAgent, ompPart } from "./load.ts";
+import { nativeAgent, ompPart } from "./native-agent.ts";
 import { nativePromptOptions } from "./native-prompts.ts";
 import { readAgentResponse } from "./response.ts";
 import { REVIEW_TOOLS, readReviewScope } from "./reviewer-guard.ts";

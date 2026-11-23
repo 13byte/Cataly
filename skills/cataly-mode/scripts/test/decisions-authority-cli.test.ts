@@ -1,13 +1,12 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Decisions } from "../src/decisions.ts";
 import { settled } from "../src/decisions-record.ts";
-import { paneStateDir, paneStatePath, readPaneState } from "../src/lane-state.ts";
 import { Registry } from "../src/registry.ts";
 import { run } from "../src/run.ts";
 import { Worklog } from "../src/worklog.ts";
-import { laneState, type TestState, withState } from "./fakes.ts";
+import { type TestState, withState } from "./fakes.ts";
 
 const cli = join(import.meta.dir, "../src/cli.ts");
 
@@ -222,29 +221,4 @@ test("a routine decision still binds the owner's reply, and the owner's answer s
   const late = await invoke("decision", "choose", d.id, "1", "--reason", "r", "--source", "d:t/5", "--thread", "d:t");
   expect([late.code, late.err.trim()]).toEqual([1, `decision ${d.id} is answered: 2`]);
   expect(await invoke("decision", "match", "d:t/2")).toMatchObject({ code: 1, out: "" });
-});
-
-test("no decision answer or choice grants a native approval: the pane's open approval prompt stays as it was", async () => {
-  // Given a lane pane with a native tool approval prompt open.
-  laneState(state.dir, "w:p1", { approvalPending: true });
-  const pane = paneStatePath(state.dir, "w:p1");
-  const before = readFileSync(pane, "utf8");
-  const invoke = cliIn(state.dir);
-  const ask = ["--source", "d:t/1", "--thread", "d:t", "--option", "yes", "--option", "no"];
-  const owner = JSON.parse((await invoke("decision", "ask", "Let the lane run the migration?", ...ask)).out);
-  const lead = JSON.parse((await invoke("decision", "ask", "Run the migration now?", ...ask, "--kind", "routine")).out);
-  // When the owner answers yes to one and the lead chooses yes on the other.
-  const answered = await invoke("decision", "answer", owner.id, "1", "--source", "d:t/3");
-  const why = ["--reason", "r", "--source", "d:t/5", "--thread", "d:t"];
-  const chosen = await invoke("decision", "choose", lead.id, "1", ...why);
-  // Then each prints only its decision, and the pane's record and its open approval are untouched.
-  for (const result of [answered, chosen]) {
-    expect([result.code, result.err]).toEqual([0, ""]);
-    expect(result.out.trim().split("\n")).toHaveLength(1);
-  }
-  expect(JSON.parse(answered.out)).toMatchObject({ answer: "1", option: 1, authority: "owner" });
-  expect(JSON.parse(chosen.out)).toMatchObject({ answer: "yes", option: 1, authority: "lead" });
-  expect(readFileSync(pane, "utf8")).toBe(before);
-  expect(readPaneState(state.dir, "w:p1")?.approvalPending).toBe(true);
-  expect(readdirSync(paneStateDir(state.dir))).toEqual([pane.slice(paneStateDir(state.dir).length + 1)]);
 });

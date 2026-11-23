@@ -2,13 +2,14 @@ import { Refusal } from "./refusal.ts";
 
 export const USAGE = `cataly harness - a proactive multi-session harness using native OMP (headless by default)
 
-  cataly harness up [--cwd DIR]                         open lead, duty, duty loop and hourly loop sessions
+  cataly harness up [--cwd DIR] [--fresh]               open lead, duty, duty loop and hourly loop sessions
+                                                      the lead resumes its cleanly stopped session unless --fresh
   cataly harness stop                                   gracefully stop only the owned native harness; busy and blocked agents hold
-                                                      legacy terminals are never stopped; retire only proven-gone registrations
+                                                      terminal roles are never stopped; retire only proven-gone registrations
   cataly harness observe <role|lane|headless:UUID>        show native session identity, recent output and pending dialog IDs (JSON)
   cataly harness answer <role|lane|headless:UUID> --session ID --request ID --text JSON
                                                       explicitly answer one pending native dialog (e.g. {"value":"Deny"})
-  cataly harness role <lead|duty> [REF]                 register a session (w1:p3, herdr:w1:p3, hc:t7, tern:42) as lead or duty (default: this one)
+  cataly harness role <lead|duty> [REF]                 register a Tern session (tern:42) as lead or duty (default: this one)
   cataly harness start <key> --brief FILE [--cwd DIR]   open an OMP lane with the brief and lane rules
                           [--priority 1-9]            its turn for a lock (1 first, 9 last; default 5)
   cataly harness priority <key> <1-9>                   set an open lane's priority
@@ -19,11 +20,11 @@ export const USAGE = `cataly harness - a proactive multi-session harness using n
                                                       TARGET: job:ID, approval:ID, ci:owner/repo#N[@CHECK_RUN_ID];
                                                       other text is an unverified label, not a pending-operation proof
   cataly harness ready <key> --text T --evidence LINK [--evidence LINK ...]
-  cataly harness send <lead|duty|key|pane> --text T     deliver now, or queue until the pane's agent is idle
-                          [--to-shell]                operator only: type this one message into a pane with no agent
-  cataly harness inbox list <pane|role|key>             queued entries: index, state (queued|typed|held), sender, time, first 60 chars
-  cataly harness inbox ack <pane|role|key> <index>      drop a held entry: it did reach the pane
-  cataly harness inbox resend <pane|role|key> <index>   release a held entry: the next flush delivers it
+  cataly harness send <lead|duty|key|ref> --text T      deliver now, or queue until the session's agent is idle
+                          [--to-shell]                operator only: type this one message into a Tern block with no agent
+  cataly harness inbox list <ref|role|key>              queued entries: index, state (queued|typed|held), sender, time, first 60 chars
+  cataly harness inbox ack <ref|role|key> <index>       drop a held entry: it did reach the session
+  cataly harness inbox resend <ref|role|key> <index>    release a held entry: the next flush delivers it
   cataly harness duty [--once] [--interval SECONDS]     flush inboxes, nudge idle lanes, escalate, detect lost lanes
   cataly harness duty stop [--text WHY] | resume | status   kill switch
   cataly harness loop [--once] [--interval S] [--max-lanes N] [--max-starts N] [--max-load L] [--force]
@@ -39,9 +40,6 @@ export const USAGE = `cataly harness - a proactive multi-session harness using n
                                                       wait in line for lock <name> (lowest priority number first, then
                                                       first come), run CMD holding it, exit with CMD's code
   cataly harness lock <name> --list                     the lock's holder and its queue, one line
-  cataly harness migrate [--to hc|herdr|tern] (--lane K | --role lead|duty|duty-loop|hourly-loop | --all) [--dry-run]
-                       [--wait-minutes N] [--resume]  hand sessions over to another runtime; MIGRATED, SKIP, DEFERRED,
-                                                      or MIGRATE_ROLLBACK (exit 3) per session
   cataly harness owner init | show | snapshot | check   opt-in owner profile ($CATALY_HOME/owner.md) at the end of the
                                                       lead's prompt: create it, print what the lead reads, keep
                                                       today's copy, validate it (OWNER_OK or OWNER_PROBLEM, exit 1)
@@ -58,16 +56,7 @@ export type Args = { pos: string[]; flags: Map<string, string[]>; rest: string[]
 
 // Flags that never take a value. Every other flag takes the next argument verbatim, even one starting with "--", so a
 // relayed value such as `--from "$SENDER"` or `--text "$MSG"` can never turn into a flag like --to-shell (#66).
-const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
-  "once",
-  "force",
-  "dry-run",
-  "to-shell",
-  "all",
-  "resume",
-  "help",
-  "list",
-]);
+const BOOLEAN_FLAGS: ReadonlySet<string> = new Set(["once", "force", "dry-run", "to-shell", "help", "list", "fresh"]);
 
 export function parse(argv: readonly string[]): Args {
   const pos: string[] = [];

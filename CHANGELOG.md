@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Remove the herdr and hc terminal runtimes: their adapters, install and release profiles, CI jobs, the hc `cataly remote --on/--via` transport and `cataly harness migrate`. Sessions run on headless OMP by default on macOS and Linux; Tern stays as the optional terminal runtime. A home that still uses herdr or hc (a `runtime` or `sessionRuntime` naming them, open herdr/hc lanes, or historical roles) stops install and upgrade with the [upgrade message](docs/releases.md#upgrading-from-a-terminal-runtime), changing nothing.
+
+- `cataly harness up` on headless OMP resumes the lead session the last `cataly harness stop` closed cleanly; `--fresh` starts a new one. Managed deployment, restart and rollback resume the old lead's session and fail health unless the new lead has that same session, reports the monitors its session wanted before the stop and delivers a fresh intake heartbeat.
+
 - Add read-only schedule show and add --dry-run previews for one-shot, cron and conditional trigger times. Related to #214.
 
 - Add opt-in conditional command polling with initial-success/rising-edge or every-success delivery, exact-stdout digest suppression, bounded probes, and version-2 watch state. Related to #214; direct lane/lead actions and routine management extensions remain separate.

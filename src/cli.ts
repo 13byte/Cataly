@@ -14,13 +14,13 @@ import { ConfigError, hooksSettled } from "./hooks.ts";
 import { send, type SendResult } from "./inbox.ts";
 import { inboxList, releaseHeld, sendToShell } from "./inbox-held.ts";
 import { Refusal } from "./refusal.ts";
-import { runMigrate } from "./migrate.ts";
 import { runOwner } from "./cli-owner.ts";
 import { refText } from "./refs.ts";
 import { HeadlessRuntime } from "./runtime/headless.ts";
 import { HeadlessError } from "./runtime/headless-record.ts";
+import { LegacyRuntimeError } from "./runtime/registry.ts";
 import { ConfigError as RuntimeConfigError, RuntimeChoiceError } from "./runtime/select.ts";
-import { parseRef } from "./runtime/types.ts";
+import { isLegacyRuntime, parseRef } from "./runtime/types.ts";
 import type { Role } from "./store-types.ts";
 import { resolveTarget } from "./target.ts";
 
@@ -42,7 +42,6 @@ const COMMANDS = new Set([
   "status",
   "loop",
   "backlog",
-  "migrate",
   "lock",
   "priority",
   "owner",
@@ -69,7 +68,7 @@ export async function main(argv: readonly string[], d: Deps = defaultDeps()): Pr
   if (cmd !== undefined && COMMANDS.has(cmd)) d.usage.touch();
   switch (cmd) {
     case "up":
-      await up(d, resolve(one(a, "cwd") ?? process.cwd()));
+      await up(d, resolve(one(a, "cwd") ?? process.cwd()), a.flags.has("fresh"));
       return 0;
     case "stop":
       if (x !== undefined || a.flags.size || a.rest.length) throw new Refusal("usage: cataly harness stop (no force)");
@@ -113,9 +112,9 @@ export async function main(argv: readonly string[], d: Deps = defaultDeps()): Pr
       if (!ROLES.includes(role)) throw new Refusal(`role must be one of ${ROLES.join(", ")}`);
       const given = a.pos[2];
       const ref = given === undefined ? d.runtimes.selfAny(process.env) : parseRef(given);
-      if (given !== undefined && ref === undefined)
-        throw new Refusal(`${given} is not a session ref (w1:p3, herdr:w1:p3, hc:t7 or tern:42)`);
-      if (ref === undefined) throw new Refusal(`missing session ref (not inside herdr, hc or tern?)\n\n${USAGE}`);
+      if (given !== undefined && (ref === undefined || isLegacyRuntime(ref.runtime)))
+        throw new Refusal(`${given} is not a session ref (tern:42)`);
+      if (ref === undefined) throw new Refusal(`missing session ref (not inside tern?)\n\n${USAGE}`);
       await withHarnessLock(d, () => {
         if (ref.runtime === "headless" || nativeInventory(d))
           throw new Refusal("native lead and duty roles are registered by cataly harness up, not by hand");
@@ -198,12 +197,6 @@ export async function main(argv: readonly string[], d: Deps = defaultDeps()): Pr
       await done(d, need(x, "lane key"));
       console.log(`DONE ${x}`);
       return 0;
-    case "migrate":
-      return withHarnessLock(d, () => {
-        if ((a.flags.has("role") || a.flags.has("all")) && nativeInventory(d))
-          throw new Refusal("native harness roles cannot be migrated; use cataly harness stop first");
-        return runMigrate(d, a);
-      });
     case "lock":
       return runLock(d, a);
     case "priority":
@@ -231,7 +224,8 @@ if (import.meta.main) {
       e instanceof HeadlessError ||
       e instanceof ConfigError ||
       e instanceof RuntimeConfigError ||
-      e instanceof RuntimeChoiceError
+      e instanceof RuntimeChoiceError ||
+      e instanceof LegacyRuntimeError
     ))
       throw e;
     console.error(e.message);

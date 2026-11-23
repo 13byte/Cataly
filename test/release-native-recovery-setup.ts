@@ -1,11 +1,12 @@
-import { chmodSync, copyFileSync, mkdirSync, readFileSync, renameSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { extractArchive, readArchive } from "../src/release/archive.ts";
+import type { VerifiedBundle } from "../src/release/bundle.ts";
 import { type ConsumerPaths, pointer, saveJson } from "../src/release/files.ts";
 import { installBundle } from "../src/release/install.ts";
 import { validateReleaseManifest } from "../src/release/manifest.ts";
 import { readSourceBundle } from "../src/release/source-bundle.ts";
-import { sourceManifest } from "../src/update/source.ts";
+import { digest, sourceManifest } from "../src/update/source.ts";
 import { archive, type ConsumerFixture, fixture, withArchive } from "./release-consumer-setup.ts";
 import { nativeCacheFixture, overlayFixture } from "./source-bundle-setup.ts";
 
@@ -13,7 +14,7 @@ export function boundRelease(
   f: ConsumerFixture,
   selected: string,
   nativeSource?: string,
-  options: { version?: string; populateSource?: (source: string) => void } = {},
+  options: { version?: string; populateSource?: (source: string) => void; headless?: boolean } = {},
 ) {
   const original = f.release(selected);
   const source = join(f.root, `bound-${selected}`);
@@ -26,6 +27,20 @@ export function boundRelease(
   );
   copyFileSync(resolve(import.meta.dir, "../scripts/consumer/omp"), join(source, "scripts/consumer/omp"));
   chmodSync(join(source, "scripts/consumer/omp"), 0o755);
+  // The source-bound marker that makes this a headless release target on both supported hosts. A frozen pre-19
+  // release keeps the historical source shape without it, so its own controller finds its native cache.
+  if (options.headless !== false)
+    writeFileSync(
+      join(source, "release-headless.json"),
+      JSON.stringify({
+        version: 1,
+        profiles: [
+          { platform: "linux", arch: "x64", runtime: "headless" },
+          { platform: "darwin", arch: "arm64", runtime: "headless" },
+        ],
+      }),
+      { mode: 0o600 },
+    );
   options.populateSource?.(source);
   if (nativeSource) {
     mkdirSync(join(source, "native-addon"), { mode: 0o700 });
@@ -65,6 +80,28 @@ export function boundRelease(
     identity: bundle.identity,
   });
   return { source, bundle: { manifest, files: readArchive(bytes, manifest) } };
+}
+
+/** Publish a verified bundle's exact archive bytes and manifest as a local `--from` distribution directory. */
+export function releaseDist(dist: string, bundle: VerifiedBundle): string {
+  const { manifest } = bundle;
+  const bytes = archive(
+    bundle.files.map((file) => ({
+      name: `${manifest.archive.root}/${file.path}`,
+      bytes: Buffer.from(file.bytes),
+      mode: file.executable ? 0o755 : 0o644,
+    })),
+  );
+  if (digest(bytes) !== manifest.archive.sha256) throw new Error("Bundle archive bytes do not reproduce");
+  const metadata = `${JSON.stringify(manifest, null, 2)}\n`;
+  mkdirSync(dist, { mode: 0o700 });
+  writeFileSync(join(dist, manifest.archive.name), bytes);
+  writeFileSync(join(dist, "release-manifest.json"), metadata);
+  writeFileSync(
+    join(dist, "SHA256SUMS"),
+    `${digest(bytes)}  ${manifest.archive.name}\n${digest(metadata)}  release-manifest.json\n`,
+  );
+  return dist;
 }
 
 export function blockStatePublication(paths: ConsumerPaths, root: string, target: string) {

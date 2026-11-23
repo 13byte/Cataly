@@ -5,8 +5,7 @@ import { main } from "../src/cli.ts";
 import { dutyTick } from "../src/duty.ts";
 import { oneName } from "../src/fit.ts";
 import { ready, report, startLane } from "../src/lanes.ts";
-import { href } from "./fake.ts";
-import { setup } from "./harness-setup.ts";
+import { LEAD_REF, setup } from "./harness-setup.ts";
 import { captureIo } from "./inbox-setup.ts";
 
 const MIN = 60_000;
@@ -118,7 +117,7 @@ describe("the progress clock", () => {
     rmSync(join(d.store.root, "roles.json"));
     expect(await at(40)).toContainEqual(expect.objectContaining({ lane: "talker", action: "escalate-no-lead" }));
     expect(d.store.lane("talker")!.escalatedAt).toBeUndefined();
-    d.store.setRole("lead", href("w1:p1"));
+    d.store.setRole("lead", LEAD_REF);
     expect(await at(41)).toContainEqual({ lane: "talker", action: "escalated" });
     expect(lead.received.at(-1)).toContain("[ESCALATE talker] no new evidence for 41m");
     expect(d.store.lane("talker")!.log.at(-1)).toMatchObject({ kind: "escalate", text: lead.received.at(-1) });

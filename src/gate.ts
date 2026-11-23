@@ -48,7 +48,7 @@ export async function review(
         ),
         "sh",
         "-c",
-        `unset HERDR_PANE_ID HERDR_WORKSPACE_ID HC_TERMINAL_ID TERN_PANE CATALY_HEADLESS_ID CATALY_HARNESS_ROLE CATALY_MANAGED_STARTUP CATALY_LANE; ${agentCommand(d, "lane")} "$@"`,
+        `unset TERN_PANE CATALY_HEADLESS_ID CATALY_HARNESS_ROLE CATALY_MANAGED_STARTUP CATALY_LANE; ${agentCommand(d, "lane")} "$@"`,
         "cataly-review",
         "-p",
         "--no-session",

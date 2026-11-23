@@ -1,6 +1,6 @@
 /**
- * The Slack token without putting it on a command line (#200). hc passes a session's env as argv (`env K=V ...`), which
- * `ps`, `hc get` and logs show, so a lane gets the path of an owner-only token file instead of the token itself.
+ * The Slack token without putting it on a command line (#200). A terminal passes a session's env as argv
+ * (`env K=V ...`), which `ps` and logs show, so a lane gets the path of an owner-only token file instead of the token.
  */
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -175,7 +175,7 @@ export const homeTokenFile = (env: Env, configFile: string): string | undefined 
  * when CATALY_SLACK_TOKEN_FILE is unset. A CATALY_SLACK_TOKEN_FILE inside the home is passed even when missing, so the lane
  * refuses with the path-only error. One outside the home is most likely inherited from another home's core (#200, one
  * variable over), so it is refused unless CATALY_SLACK_TOKEN_FILE_OUTSIDE_HOME=1 says it was meant. With no token file at
- * all nothing is added, as before. CATALY_SLACK_TOKEN is passed empty: an hc lane inherits the core's env, which may hold
+ * all nothing is added, as before. CATALY_SLACK_TOKEN is passed empty: a lane may inherit the core's env, which may hold
  * another home's token, and a set CATALY_SLACK_TOKEN is read before the file. The allow flag is passed empty too, so a
  * lane never carries this home's permission into a home it starts.
  */

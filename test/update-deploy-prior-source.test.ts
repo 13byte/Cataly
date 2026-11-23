@@ -3,9 +3,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { provisionSourceOverlay } from "../src/release/source-checkout.ts";
-import type { DeploymentCli } from "../src/update/deployment-cli.ts";
 import { ownReleaseRoot } from "../src/update/deployment-files.ts";
-import { launchRuntime } from "../src/update/deployment-launch.ts";
 import { admitRuntimeToolchains } from "../src/update/deployment-prior.ts";
 import { managedOmpCommand, processIdentity } from "../src/update/deployment-process.ts";
 import { assertRuntimeToolchain } from "../src/update/deployment-toolchain.ts";
@@ -64,8 +62,8 @@ async function conversion(sameOverlay: boolean) {
   const runtime: RuntimeIdentity = {
     ...processIdentity(process.pid)!,
     role: "cataly",
-    pane: config.pane,
-    sessionId: config.sessionId,
+    ref: "00000000-0000-4000-8000-000000000001",
+    sessionId: "prior-session",
     sessionFile: join(root, "session.jsonl"),
     startedAt: record.createdAt,
     cwd: root,
@@ -89,15 +87,6 @@ it("a first conversion binds its rollback toolchain to the prior source before a
     "-e",
     join(f.oldSource, "extension"),
   ]);
-  // The rollback launch builds its command before observing the pane; reaching the pane proves it is launchable.
-  const cli = {
-    foreground: async () => {
-      throw new Error("rollback reached the pane shell check");
-    },
-  } as unknown as DeploymentCli;
-  await expect(launchRuntime(f.config, cli, f.record, false, true)).rejects.toThrow(
-    "rollback reached the pane shell check",
-  );
 });
 
 it("a prior source pinning a different extension overlay is held before any stop", async () => {

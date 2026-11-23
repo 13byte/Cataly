@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
+import { clearStoppedLead, type LeadResume } from "./harness-native-resume.ts";
 import { harnessLaunchEnv, nativeHarnessCommand, rolePrompt, type Deps } from "./harness.ts";
 import { acquire, release } from "./loop-lock.ts";
 import { Refusal } from "./refusal.ts";
@@ -11,7 +12,8 @@ import { laneEntry, readPrivate, writePrivate } from "./runtime/headless-record.
 import { HEADLESS_ADDRESS, type SessionRef } from "./runtime/types.ts";
 import { RESERVED_KEYS, type Role } from "./store-types.ts";
 
-export type Binding = { readonly ref: SessionRef; readonly sessionId?: string };
+/** Agent roles record the OMP session they proved; the lead's transcript is what a later `up` resumes. */
+export type Binding = { readonly ref: SessionRef; readonly sessionId?: string; readonly sessionFile?: string };
 type Inventory = { readonly version: 1; readonly stateDir: string; readonly roles: Partial<Record<Role, Binding>> };
 
 export const inventoryPath = (d: Deps) => join(d.store.root, "harness-native.json");
@@ -57,7 +59,8 @@ export function nativeInventory(d: Deps): Inventory | undefined {
         (!agent(role as Role) ||
           !record.sessionId ||
           typeof record.sessionId !== "string" ||
-          sessions.has(record.sessionId)))
+          sessions.has(record.sessionId))) ||
+      (record.sessionFile !== undefined && (typeof record.sessionFile !== "string" || !isAbsolute(record.sessionFile)))
     )
       throw new Refusal("native harness inventory has an ambiguous role or session identity");
     ids.add(record.ref.id);
@@ -83,8 +86,11 @@ function scopeCommand(d: Deps, role: "lead" | "duty", argv: readonly string[]): 
   return [...argv, "--append-system-prompt", promptPath];
 }
 
-/** Runs under the harness lock. Publish a reservation before its process starts, then publish only proven roles. */
-export async function startNativeHarness(d: Deps, rt: HeadlessRuntime, cwd: string): Promise<void> {
+/**
+ * Runs under the harness lock. Publish a reservation before its process starts, then publish only proven roles. A
+ * `resume` lead must prove exactly that session; duty and the loops always start fresh.
+ */
+export async function startNativeHarness(d: Deps, rt: HeadlessRuntime, cwd: string, resume?: LeadResume) {
   const commands = {
     lead: scopeCommand(d, "lead", (await nativeHarnessCommand(d, "lead")).argv),
     duty: scopeCommand(d, "duty", (await nativeHarnessCommand(d, "duty")).argv),
@@ -112,7 +118,9 @@ export async function startNativeHarness(d: Deps, rt: HeadlessRuntime, cwd: stri
       state.roles[role] = { ref };
       save();
       const scoped = role === "lead" ? env : { ...env, ...laneMessengerOverrides };
-      const seen = agent(role) ? await rt.startNative(ref, commands[role], scoped) : await rt.startLoop(ref, scoped);
+      const seen = agent(role)
+        ? await rt.startNative(ref, commands[role], scoped, role === "lead" ? resume : undefined)
+        : await rt.startLoop(ref, scoped);
       if (agent(role)) {
         if (
           !seen.sessionId ||
@@ -122,8 +130,9 @@ export async function startNativeHarness(d: Deps, rt: HeadlessRuntime, cwd: stri
         )
           throw new Refusal("native role did not prove a distinct OMP session");
         files.add(seen.sessionFile);
-        state.roles[role] = { ref, sessionId: seen.sessionId };
+        state.roles[role] = { ref, sessionId: seen.sessionId, sessionFile: seen.sessionFile };
         save();
+        if (role === "lead") clearStoppedLead(d);
       }
       if (d.store.roles()[role]) throw new Refusal(`${role} was registered independently during startup`);
       d.store.setRole(role, ref);
@@ -135,7 +144,7 @@ export async function startNativeHarness(d: Deps, rt: HeadlessRuntime, cwd: stri
   }
   const show = (role: Role) => refText(state.roles[role]!.ref);
   console.log(
-    `UP runtime=headless lead=${show("lead")} duty=${show("duty")} loop=${show("duty-loop")} hourly=${show("hourly-loop")} home=${d.store.root}`,
+    `UP runtime=headless lead=${show("lead")} duty=${show("duty")} loop=${show("duty-loop")} hourly=${show("hourly-loop")} home=${d.store.root}${resume ? ` resumed=${resume.sessionId}` : ""}`,
   );
 }
 

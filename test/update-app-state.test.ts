@@ -22,7 +22,7 @@ describe("candidate application state recovery", () => {
       thread: "none",
       brief: "candidate brief",
       done: "file result.txt",
-      sessionRef: { runtime: "herdr", id: "w1:p1" },
+      sessionRef: { runtime: "headless", id: "00000000-0000-4000-8000-0000000000aa" },
       status: "paused",
       pausedFrom: "working",
       openedAt: new Date().toISOString(),

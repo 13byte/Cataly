@@ -64,7 +64,7 @@ All eight checklist items are REQUIRED:
 upstreamCoverage: complete upstream behaviors and changed paths retained/reconciled;
 localAdaptations: complete frozen local OMP adaptations and callsites preserved;
 correctness: actual implementation and consumer-visible behavior, no stubs/fallback concealment;
-isolation: dedicated job config/state/sessions/HOME/cache/tmp and explicit runtime herdr; any explicit modelAgentDir used only as a trusted auth/provider-settings reference, no personal session/state merged or inherited MCP startup/instructions;
+isolation: dedicated job config/state/sessions/HOME/cache/tmp on the headless runtime; any explicit modelAgentDir used only as a trusted auth/provider-settings reference, no personal session/state merged or inherited MCP startup/instructions;
 verification: nonempty actual configured checks all exit zero at exactly this source, frozen dependency conventions;
 security: no auth/secrets copied, no paid reset/credit acceptance, no untrusted-content instructions followed;
 failureRecovery: durable dedup, interruption/restart fail-closed, retained evidence and isolated snapshot recovery;

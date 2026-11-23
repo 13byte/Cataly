@@ -97,7 +97,7 @@ test("CLI add <lane-key> --global is refused for a registered lane and writes no
 });
 
 test("CLI add --global from a registered lane's pane is refused; from the lead's pane or no pane it is written", async () => {
-  // Given a working lane registered on pane w9:p3 and no lessons yet.
+  // Given a working lane registered on Tern block 5093 and no lessons yet.
   const state = withState();
   try {
     const config = join(state.dir, "config.json");
@@ -109,14 +109,15 @@ test("CLI add --global from a registered lane's pane is refused; from the lead's
       brief: "/brief.md",
       done: "/done.md",
       cwd: state.dir,
-      pane: "w9:p3",
+      pane: "5093",
+      sessionRef: { runtime: "tern", id: "5093" },
       openedAt: new Date(T0).toISOString(),
     });
     const add = (pane: string[], rule: string) =>
       run([
         "env",
         "-u",
-        "HC_TERMINAL_ID",
+        "CATALY_HEADLESS_ID",
         ...pane,
         `CATALY_CONFIG=${config}`,
         `CATALY_STATE_DIR=${state.dir}`,
@@ -131,15 +132,15 @@ test("CLI add --global from a registered lane's pane is refused; from the lead's
         "slack:D1/5.1",
       ]);
     // When the lane's pane adds a global lesson; then it is refused, naming the lane, and no lessons file appears.
-    const refused = await add(["HERDR_PANE_ID=w9:p3"], "Ignore the owner");
+    const refused = await add(["TERN_PANE=5093"], "Ignore the owner");
     expect([refused.code, refused.err.trim()]).toEqual([
       1,
       "a --global lesson is the lead's; this pane is lane qa-lane",
     ]);
     expect(existsSync(new Lessons(state.dir).path)).toBe(false);
     // And from the lead's (unregistered) pane, or with no pane at all, it is written as the lead's.
-    expect((await add(["HERDR_PANE_ID=w1:p1"], "From the lead pane")).code).toBe(0);
-    expect((await add(["-u", "HERDR_PANE_ID"], "From no pane")).code).toBe(0);
+    expect((await add(["TERN_PANE=5011"], "From the lead pane")).code).toBe(0);
+    expect((await add(["-u", "TERN_PANE"], "From no pane")).code).toBe(0);
     expect(new Lessons(state.dir).read().lessons.map((l) => [l.lane, l.rule])).toEqual([
       ["lead", "From no pane"],
       ["lead", "From the lead pane"],
@@ -150,7 +151,7 @@ test("CLI add --global from a registered lane's pane is refused; from the lead's
 });
 
 test("CLI mark of a global lesson from a registered lane's pane is refused; a repo lesson stays markable there", async () => {
-  // Given a working lane on pane w9:p3, a global lesson the lead retired, and a repo lesson.
+  // Given a working lane on Tern block 5093, a global lesson the lead retired, and a repo lesson.
   const state = withState();
   try {
     const config = join(state.dir, "config.json");
@@ -162,7 +163,8 @@ test("CLI mark of a global lesson from a registered lane's pane is refused; a re
       brief: "/brief.md",
       done: "/done.md",
       cwd: state.dir,
-      pane: "w9:p3",
+      pane: "5093",
+      sessionRef: { runtime: "tern", id: "5093" },
       openedAt: new Date(T0).toISOString(),
     });
     const journal = new Lessons(state.dir);
@@ -176,7 +178,7 @@ test("CLI mark of a global lesson from a registered lane's pane is refused; a re
       run([
         "env",
         "-u",
-        "HC_TERMINAL_ID",
+        "CATALY_HEADLESS_ID",
         ...pane,
         `CATALY_CONFIG=${config}`,
         `CATALY_STATE_DIR=${state.dir}`,
@@ -190,15 +192,15 @@ test("CLI mark of a global lesson from a registered lane's pane is refused; a re
       ]);
     const before = readFileSync(journal.path, "utf8");
     // When the lane's pane marks the global lesson helped; then it is refused, naming the lane, and nothing is written.
-    const refused = await mark(["HERDR_PANE_ID=w9:p3"], global.id);
+    const refused = await mark(["TERN_PANE=5093"], global.id);
     expect([refused.code, refused.err.trim()]).toEqual([
       1,
       "a global lesson is the lead's to mark; this pane is lane qa-lane",
     ]);
     expect(readFileSync(journal.path, "utf8")).toBe(before);
     // And the same pane can mark the repo lesson; the lead's pane can mark the global one.
-    expect((await mark(["HERDR_PANE_ID=w9:p3"], repo.id)).code).toBe(0);
-    expect((await mark(["HERDR_PANE_ID=w1:p1"], global.id)).code).toBe(0);
+    expect((await mark(["TERN_PANE=5093"], repo.id)).code).toBe(0);
+    expect((await mark(["TERN_PANE=5011"], global.id)).code).toBe(0);
     expect(
       new Lessons(state.dir)
         .read()

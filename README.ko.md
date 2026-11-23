@@ -82,7 +82,7 @@
    확인할 수 있는 답장 맥락과 첨부 파일 메타데이터를 함께 전달합니다.
 2. **리드가 작업을 맡깁니다.** 간단한 요청은 직접 처리합니다. 긴 작업에는 브리프와
    명시적인 `Done` 조건을 붙여 **레인**을 엽니다. 레인은 전용
-   [oh-my-pi(OMP)](https://github.com/can1357/oh-my-pi) 코딩 세션이며, 기본값은 터미널 없는 실행입니다.
+   [oh-my-pi(OMP)](https://github.com/can1357/oh-my-pi) 코딩 세션이며, 터미널 없이 실행됩니다.
    레지스트리는 작업을 세션과 메신저 스레드에 연결합니다.
 3. **레인이 작업하고 보고합니다.** 작업 로그·보고·체크포인트를 통해 재시작 후에도
    진행 상황을 확인할 수 있습니다. Discord 채널이 레인 하나에 연결돼
@@ -113,7 +113,18 @@
 `~/.omp-cataly`입니다. 기존 설치를 업데이트해도 홈이나 설정 파일은 바뀌지 않습니다.
 
 [검증된 현재 릴리스 설치](docs/releases.md#install-a-current-release) 또는
-[터미널 도구 없이 v0.1.3에서 업데이트](docs/releases.md#upgrade-a-v013-installation)를 참고하세요.
+[v0.1.3에서 업데이트](docs/releases.md#upgrade-a-v013-installation)를 참고하세요.
+
+Cataly는 macOS와 Linux에서 기본적으로 headless OMP로 실행되며, Tern은 선택 사항인 터미널 런타임입니다.
+이 버전에서 herdr와 hc 터미널 런타임이 제거됐습니다. 아직 이를 쓰는 홈에서는 설치와
+업데이트가 다음 메시지와 함께 멈춥니다.
+
+```text
+This Cataly home still uses the herdr/hc terminal runtime, which this version removed.
+1. Close every herdr/hc lane (`cataly status` lists them) with your previous Cataly version.
+2. Remove "runtime" (if it names herdr or hc) and "sessionRuntime" from <configPath>.
+3. Run this command again. Cataly state and OMP sessions are kept; lanes reopen on headless.
+```
 
 </td></tr></table>
 
@@ -140,7 +151,7 @@ bun add cataly
 |            | [게시된 프리릴리스](#게시된-프리릴리스-써보기) | [현재 소스](#현재-소스에서-시작하기)           |
 | ---------- | ---------------------------------------------- | ---------------------------------------------- |
 | **빌드**   | v0.1.2 프리릴리스                              | 현재 `main`                                    |
-| **범위**   | Linux x64 / herdr / Discord                    | 네이티브 세션 기본, herdr·hc 선택 사항          |
+| **범위**   | Linux x64 / herdr / Discord                    | Linux·macOS의 headless OMP 세션, Tern 선택 사항 |
 | **OMP**    | 별도로 설치한 네이티브 OMP 18.18.8             | 고정된 패치 버전 OMP 19.0.1과 omp-ulw 오버레이 |
 | **설치 홈** | 이전 설치 홈 `~/.dori`                        | Side 모드 `~/.omp-cataly`                       |
 
@@ -162,11 +173,11 @@ Bun 1.4.4, 네이티브 OMP 18.18.8, herdr 0.9.5입니다. 별도로 설치한 O
 
 ### 현재 소스에서 시작하기
 
-git과 Bun 1.4.4 이상을 준비해 별도 체크아웃을 사용하세요. Linux와 macOS에서는
-기본 실행에 herdr나 hc가 필요 없습니다. 소스 설치기는 고정된 패치 버전 **OMP 19.0.1**과 **omp-ulw** 오버레이를
+git과 Bun 1.4.4 이상을 준비해 별도 체크아웃을 사용하세요. Linux와 macOS에서 세션은
+기본적으로 headless OMP로 실행되며 터미널 서버가 필요 없습니다. 소스 설치기는 고정된 패치 버전 **OMP 19.0.1**과 **omp-ulw** 오버레이를
 준비합니다. 기본 설치에는 사전에 설치한 OMP나 Cargo가 필요 없고, 일반 배포판 `omp`로
 이 구성을 대체하지 않습니다.
-소스 `main`에서는 세 번째 세션 런타임으로 Tern도 쓸 수 있습니다. [Tern](docs/runtime.md#tern)을 참고하세요.
+선택 사항인 터미널 런타임으로 Tern을 쓸 수 있습니다. [Tern](docs/runtime.md#tern)을 참고하세요.
 
 ```bash
 git clone https://github.com/vntrevx/Cataly.git "$HOME/src/Cataly" || exit 1
@@ -177,16 +188,12 @@ CATALY_INSTALL_MODE=side CATALY_NO_PULL=1 CATALY_SRC="$PWD" \
 
 Side 모드는 기본적으로 `~/.omp-cataly`를 사용하며 기존 `~/.cataly` 설치를 건드리지
 않습니다. `omp-cataly omp`로 바인딩된 OMP를 열어 모델 제공업체를 설정하고,
-`omp-cataly harness up`으로 하네스를 명시적으로 시작하세요. 런타임별
+`omp-cataly harness up`으로 하네스를 명시적으로 시작하세요. 메신저별
 구성과 실행은 [소스 설치 가이드](docs/releases.md#source-checkouts-for-maintainers)를
 참고하세요. `omp-cataly doctor`는 설정을 읽기 전용으로 점검하고, `omp-cataly status`는
 레인 상태를 보여줍니다.
 
-새 세션의 기본 런타임은 headless이며, `cataly harness status`에서
-`RUNTIME headless (from default)`를 확인할 수 있습니다. 이전 설치기가 기록한
-`"runtime": "hc"`나 `"herdr"`를 직접 지울 필요는 없습니다.
-새 세션에도 터미널을 쓰려면 `"sessionRuntime": "hc"` 또는 `"herdr"`를 지정하세요.
-이미 열린 터미널 세션은 기존 런타임 소유로 남습니다.
+`cataly harness status`에서 `RUNTIME headless (from default)`를 확인할 수 있습니다.
 
 ### 순정 OMP용 Rust 컨트롤러 개발
 
@@ -251,7 +258,7 @@ Rust가 Gateway 하트비트와 재연결, REST 조회·전송, 버튼, OMP 레�
 보내거나 head로 돌리지 않습니다. Discord 수신은 Rust 전용입니다. OMP `monitor` 도구 아래에서 `cataly inbound discord`(필터
 `^INBOUND`)는 같은 PID, stdout, IPC 채널을 유지한 채 `cataly discord --supervised`로 자신을
 대체합니다. `CATALY_DISCORD_SCOPE=all`, `--context`, `--activity-file`, recall, `--wake-lanes`도
-모두 Rust에서 실행되며, `--wake-lanes`는 herdr나 hc 없이 lane OMP를 직접 시작합니다. 라이브
+모두 Rust에서 실행되며, `--wake-lanes`는 lane OMP를 headless로 직접 시작합니다. 라이브
 세션은 계속 OMP 확장이 소유합니다. 네이티브 바이너리가 없으면 `cataly inbound discord`는
 빌드 명령(`cargo build --locked --release`)을 안내하며 실패합니다.
 
@@ -323,7 +330,7 @@ OMP 하네스만 빌드하려면 `--no-default-features`를 사용하세요.
 
 **지원 범위:** Slack과 Telegram은 소스에 남아 있는 연동 기능이며 게시된 프리릴리스의
 지원 범위에 포함되지 않습니다. 호환 릴리스 매니페스트에 명시된 경우 격리된
-macOS arm64 / hc 설치가 가능하지만, 해당 배포본이 게시됐다는 뜻은 아닙니다.
+macOS arm64 headless 설치가 가능하지만, 해당 배포본이 게시됐다는 뜻은 아닙니다.
 `main` 병합만으로 기존 프리릴리스가 업데이트되지는 않습니다.
 
 </td></tr></table>

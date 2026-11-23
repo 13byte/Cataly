@@ -1,10 +1,8 @@
 import { linkSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { Deps } from "./harness.ts";
-import type { SessionRef } from "./runtime/types.ts";
 
-type LockIdentity = { readonly ref: SessionRef; readonly handoff?: string };
-type LockBody = { readonly pid: number; readonly nonce: string } & Partial<LockIdentity>;
+type LockBody = { readonly pid: number; readonly nonce: string };
 type LockStore = { readonly store: Pick<Deps["store"], "lockPath"> };
 
 function alive(pid: number): boolean {
@@ -34,11 +32,6 @@ function readLock(path: string): LockBody | "missing" | "corrupt" {
   }
 }
 
-export function liveLoopLock(path: string): LockBody | undefined {
-  const l = readLock(path);
-  return typeof l === "string" || !alive(l.pid) ? undefined : l;
-}
-
 const sameLock = (a: LockBody | "missing" | "corrupt", b: LockBody | "missing" | "corrupt"): boolean =>
   typeof a === "string" || typeof b === "string" ? a === b : a.nonce === b.nonce;
 
@@ -50,11 +43,10 @@ const sameLock = (a: LockBody | "missing" | "corrupt", b: LockBody | "missing" |
 export function acquire(
   d: LockStore & Pick<Deps, "now">,
   path: string = d.store.lockPath("loop"),
-  identity?: LockIdentity,
 ): { nonce: string } | { holder: string } {
   const nonce = randomUUID();
   const tmp = `${path}.${nonce}`;
-  writeFileSync(tmp, JSON.stringify({ ...identity, pid: process.pid, at: d.now(), nonce }));
+  writeFileSync(tmp, JSON.stringify({ pid: process.pid, at: d.now(), nonce }));
   try {
     for (let i = 0; i < 3; i++) {
       try {

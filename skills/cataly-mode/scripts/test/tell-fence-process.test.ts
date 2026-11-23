@@ -5,18 +5,10 @@ import { DeliveryState } from "../src/delivery-state.ts";
 import type { Lane } from "../src/registry.ts";
 import { run } from "../src/run.ts";
 import { resolveTell, tellLane } from "../src/tell.ts";
-import { depsFor, fakeClock, newWorld, sent, withState, type World } from "./fakes.ts";
+import { depsFor, fakeClock, nativeLane, newWorld, sent, withState, type World } from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00.000Z");
-const lane: Lane = {
-  key: "tell-process",
-  title: "tell",
-  thread: "none",
-  pane: "w:p7",
-  brief: "/b.md",
-  done: "merged acme/app#1",
-  openedAt: new Date(T0).toISOString(),
-};
+let lane: Lane;
 let state: ReturnType<typeof withState>;
 let world: World;
 const deps = () => depsFor(world, fakeClock(T0), state.dir);
@@ -24,7 +16,17 @@ const store = () => new DeliveryState(deps().registry, lane.key);
 beforeEach(async () => {
   state = withState();
   world = newWorld();
-  world.panes = [{ pane_id: "w:p7", workspace_id: "w", agent: "omo", agent_status: "working" }];
+  // The supervisor took the text but its answer was lost: the delivery cannot be confirmed either way.
+  world.deliverOutcome = () => ({ kind: "ambiguous", detail: "host response lost", failure: new Error("lost") });
+  lane = {
+    key: "tell-process",
+    title: "tell",
+    thread: "none",
+    ...nativeLane(world, 7),
+    brief: "/b.md",
+    done: "merged acme/app#1",
+    openedAt: new Date(T0).toISOString(),
+  };
   await deps().registry.write(lane);
 });
 afterEach(() => state.done());
@@ -33,12 +35,12 @@ test("process exit after submission leaves an exact hold and its dead lock can b
   const accepted = join(state.dir, "accepted.txt");
   const script = [
     `import { tellLane } from ${JSON.stringify(join(import.meta.dir, "../src/tell.ts"))};`,
-    `import { depsFor, fakeClock, newWorld } from ${JSON.stringify(join(import.meta.dir, "fakes.ts"))};`,
+    `import { depsFor, fakeClock, nativeLane, newWorld } from ${JSON.stringify(join(import.meta.dir, "fakes.ts"))};`,
     'import { writeFileSync } from "node:fs";',
     `const lane = ${JSON.stringify(lane)};`,
     "const world = newWorld();",
-    `world.panes = ${JSON.stringify(world.panes)};`,
-    `world.onSendText = () => { writeFileSync(${JSON.stringify(accepted)}, "accepted"); process.exit(77); };`,
+    "nativeLane(world, 7);",
+    `world.deliverOutcome = () => { writeFileSync(${JSON.stringify(accepted)}, "accepted"); process.exit(77); };`,
     `await tellLane(depsFor(world, fakeClock(${T0}), ${JSON.stringify(state.dir)}), lane, "first request");`,
   ].join("\n");
   const child = Bun.spawn([process.execPath, "-e", script], { stdout: "pipe", stderr: "pipe" });
@@ -64,7 +66,7 @@ test("real CLI inspects and releases an exact hold without runtime access or imp
   const request = store().read();
   if (!request) throw new Error("expected request");
   const config = join(state.dir, "config.json");
-  writeFileSync(config, JSON.stringify({ stateDir: state.dir, defaultCwd: state.dir, runtime: "herdr", hooks: {} }));
+  writeFileSync(config, JSON.stringify({ stateDir: state.dir, defaultCwd: state.dir, hooks: {} }));
   const cli = (...args: string[]) =>
     run([
       "env",

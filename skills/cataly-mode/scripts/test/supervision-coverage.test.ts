@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import { join } from "node:path";
 import { freshnessTick } from "../src/freshness.ts";
 import type { Runner } from "../src/run.ts";
-import { depsFor, newWorld, type TestState, withState } from "./fakes.ts";
+import { depsFor, nativeLane, newWorld, type TestState, withState } from "./fakes.ts";
 import { coverageFixture, git, start } from "./supervision-coverage.fixture.ts";
 
 let state: TestState;
@@ -114,17 +114,17 @@ test("a real Git failure invalidates the whole cycle without resetting its pendi
 test("production freshness keeps a proven stall through partial windows until actual evidence changes", async () => {
   const f = coverageFixture(state);
   const world = newWorld();
-  world.panes.push({ pane_id: "w:p7", workspace_id: "w", agent: "omp", agent_status: "working" });
+  // One continuing native call that started 21 minutes before the first tick.
+  const native = nativeLane(world, 7, { status: "working", activeSince: start - 21 * 60_000 });
   const deps = depsFor(world, f.clock, state.dir, {
     supervision: { hungAfterMinutes: 0, staleAfterMinutes: 0 },
   });
-  const lane = { ...f.lane, pane: "w:p7" };
+  const lane = { ...f.lane, ...native };
   await deps.registry.write(lane);
   await f.reports.report(lane.key, "milestone", "started", f.clock.at);
   const run: Runner = (argv, options) => (argv[0] === "git" ? git(argv, options) : deps.run(argv, options));
   const tick = async (turn: number) => {
     f.clock.at = start + turn * 60_000;
-    world.screen = `Working ${21 + turn}m`;
     return f.settle(() => freshnessTick({ ...deps, run }, state.dir));
   };
   for (let turn = 0; turn < 7; turn++) {

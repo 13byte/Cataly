@@ -86,13 +86,6 @@ export interface PlatformAdapter {
   readonly preservesHardLinks: boolean;
 
   /**
-   * True when herdr's native UI path — reading a pane's screen and sending it keys — is open on this host. It is
-   * Linux-only today: herdr serves `pane read` and `pane send-keys` there, and src/update/deployment-cli.ts attaches
-   * `nativeUi` only where this is true.
-   */
-  readonly supportsHerdrNativeUi: boolean;
-
-  /**
    * True when a process's kernel state is readable under `/proc`: its task list (a zombie leader's threads still run),
    * `CapEff`, `environ` and `cwd`. src/release/native-cache-lease.ts asks before a zombie counts as ended, and
    * native-cache-uses.ts before it reads capabilities or resolves a home. Where false, a zombie has ended, only root
@@ -106,14 +99,12 @@ export interface PlatformAdapter {
   /** Flush a directory's own entries after a rename or link; a no-op where directoryFsync is false. */
   syncDirectory(path: string): void;
 
-  /** The historical terminal profile, used only for releases without native-session capability. */
-  legacyReleaseRuntime(): "herdr" | "hc";
-
   /**
-   * Whether this host admits a release built for `platform`, `arch` and `runtime`, exactly as
-   * src/release/provision.ts prerequisites do: headless on Linux x64 and Darwin arm64, or each host's legacy profile.
+   * Whether this host admits a headless release built for `platform` and `arch`, exactly as
+   * src/release/provision.ts prerequisites do: Linux x64 and Darwin arm64. Windows admits none: headless OMP sessions
+   * need a Unix socket.
    */
-  supportsReleaseProfile(platform: string, arch: string, runtime: string): boolean;
+  supportsHeadlessRelease(platform: string, arch: string): boolean;
 
   /** The native build cache name, `native-<platform>-<arch>`, as src/release/native.ts builds it. */
   nativeCacheLabel(): string;

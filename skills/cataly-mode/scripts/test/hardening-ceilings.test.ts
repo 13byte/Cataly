@@ -3,63 +3,39 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "../src/config.ts";
 import { launchLane } from "../src/launch.ts";
-import type { Lane } from "../src/registry.ts";
 import { Reports } from "../src/reports.ts";
 import { depsFor, fakeClock, newWorld, withState } from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00Z");
-
-const lane: Lane = {
-  key: "hardening-qa",
-  title: "QA",
-  thread: "none",
-  pane: "qa:p1",
-  brief: "/b.md",
-  done: "merged acme/app#1",
-  openedAt: new Date(T0).toISOString(),
-  reportProtocol: "jsonl-v1",
-};
+const KEY = "hardening-qa";
 
 test("launch persists default and per-lane ceilings with explicit override precedence", async () => {
-  // Given a real brief and a fake external pane creator.
+  // Given a real brief and the fake native supervisor.
   const state = withState();
   try {
     const brief = join(state.dir, "brief.md");
     writeFileSync(brief, "Do the fixture work.");
     const world = newWorld();
     const deps = depsFor(world, fakeClock(T0), state.dir, {
+      defaultCwd: state.dir,
       supervision: {
         defaults: { wallMinutes: 240, tokens: 1000, costUsd: null },
-        lanes: { "hardening-qa": { tokens: 2000 } },
+        lanes: { [KEY]: { tokens: 2000 } },
       },
     });
-    const original = deps.run;
-    const result = await launchLane(
-      {
-        ...deps,
-        run: async (argv, opts) =>
-          argv[0] === "herdr" && argv[1] === "tab" && argv[2] === "create"
-            ? {
-                code: 0,
-                out: JSON.stringify({ result: { root_pane: { pane_id: "qa:p1" }, tab_id: "qa:t1" } }),
-                err: "",
-              }
-            : original(argv, opts),
-      },
-      {
-        key: lane.key,
-        title: "QA",
-        brief,
-        done: "merged acme/app#1",
-        budget: { wallMinutes: null },
-        activityPaths: ["src/file.ts"],
-      },
-    );
+    const result = await launchLane(deps, {
+      key: KEY,
+      title: "QA",
+      brief,
+      done: "merged acme/app#1",
+      budget: { wallMinutes: null },
+      activityPaths: ["src/file.ts"],
+    });
     // Then launched registry data, not prompt prose, pins the configured behavior.
     expect(result.lane.budget).toEqual({ wallMinutes: null, tokens: 2000, costUsd: null });
-    expect((await deps.registry.read(lane.key))?.budget).toEqual({ wallMinutes: null, tokens: 2000, costUsd: null });
-    expect((await deps.registry.read(lane.key))?.activityPaths).toEqual(["src/file.ts"]);
-    expect(new Reports(state.dir).read(lane.key)?.state).toBe("running");
+    expect((await deps.registry.read(KEY))?.budget).toEqual({ wallMinutes: null, tokens: 2000, costUsd: null });
+    expect((await deps.registry.read(KEY))?.activityPaths).toEqual(["src/file.ts"]);
+    expect(new Reports(state.dir).read(KEY)?.state).toBe("running");
   } finally {
     state.done();
   }
@@ -71,25 +47,18 @@ test("a launch budget field passed as undefined keeps the configured ceiling; on
     const brief = join(state.dir, "brief.md");
     writeFileSync(brief, "Do the fixture work.");
     const deps = depsFor(newWorld(), fakeClock(T0), state.dir, {
+      defaultCwd: state.dir,
       supervision: { defaults: { wallMinutes: 240, tokens: 1000, costUsd: 5 } },
     });
-    const original = deps.run;
-    const result = await launchLane(
-      {
-        ...deps,
-        run: async (argv, opts) =>
-          argv[0] === "herdr" && argv[1] === "tab" && argv[2] === "create"
-            ? {
-                code: 0,
-                out: JSON.stringify({ result: { root_pane: { pane_id: "qa:p1" }, tab_id: "qa:t1" } }),
-                err: "",
-              }
-            : original(argv, opts),
-      },
-      { key: lane.key, title: "QA", brief, done: "merged acme/app#1", budget: { tokens: undefined, costUsd: null } },
-    );
+    const result = await launchLane(deps, {
+      key: KEY,
+      title: "QA",
+      brief,
+      done: "merged acme/app#1",
+      budget: { tokens: undefined, costUsd: null },
+    });
     expect(result.lane.budget).toEqual({ wallMinutes: 240, tokens: 1000, costUsd: null });
-    expect((await deps.registry.read(lane.key))?.budget).toEqual({ wallMinutes: 240, tokens: 1000, costUsd: null });
+    expect((await deps.registry.read(KEY))?.budget).toEqual({ wallMinutes: 240, tokens: 1000, costUsd: null });
   } finally {
     state.done();
   }

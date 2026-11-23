@@ -3,9 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { matchesDeploymentConfigHash } from "./deployment-config.ts";
 import { saveDeploymentJson } from "./deployment-files.ts";
-import { legacyMonitorReceipts } from "./deployment-legacy-monitors.ts";
-import { monitorProcessReceipts, readRuntimeHealth } from "./deployment-monitor-receipts.ts";
-import { captureRuntime, nativeCli } from "./deployment-native.ts";
+import { captureRuntime } from "./deployment-harness.ts";
+import { leadRuntimeHealth, monitorProcessReceipts } from "./deployment-monitor-receipts.ts";
 import { runtimeUsesToolchain } from "./deployment-prior.ts";
 import { actorEnv, command, DeploymentHeld, sameProcess } from "./deployment-process.ts";
 import { assertRuntimeToolchain } from "./deployment-toolchain.ts";
@@ -14,7 +13,6 @@ import type {
   DeploymentConfig,
   DeploymentRecord,
   MonitorProcessIdentity,
-  MonitorSet,
   RuntimeIdentity,
   ToolchainReceipt,
 } from "./deployment-types.ts";
@@ -25,9 +23,7 @@ export type ActiveDeployment = {
   readonly source: string;
   readonly sourceHash: string;
   readonly runtime: RuntimeIdentity;
-  readonly monitors: MonitorSet;
   readonly monitorProcesses: readonly MonitorProcessIdentity[];
-  readonly legacy: boolean;
   readonly toolchain: ToolchainReceipt;
 };
 
@@ -46,9 +42,10 @@ export async function inspectActiveDeployment(config: DeploymentConfig, signal?:
     const active = readActiveDeployment(config);
     if (!active || active.version !== 1 || !matchesDeploymentConfigHash(config, active.configHash))
       throw new DeploymentHeld("no matching managed active receipt");
-    const runtime = await captureRuntime(config, nativeCli(config, signal), true);
+    const runtime = await captureRuntime(config, true);
     if (
       !sameProcess(active.runtime, runtime) ||
+      active.runtime.ref !== runtime.ref ||
       active.runtime.startedAt !== runtime.startedAt ||
       active.runtime.sessionId !== runtime.sessionId ||
       active.runtime.sessionFile !== runtime.sessionFile
@@ -96,23 +93,16 @@ export async function inspectActiveDeployment(config: DeploymentConfig, signal?:
 export function saveActiveDeployment(config: DeploymentConfig, record: DeploymentRecord, rollback = false): void {
   const runtime = rollback ? record.rollbackRuntime : record.runtime;
   const toolchain = rollback ? record.oldToolchain : record.toolchain;
-  if (!runtime || !record.monitors || !toolchain)
-    throw new Error("active deployment has no verified runtime/toolchain");
-  const legacy = rollback
-    ? record.bootstrap === true
-    : record.releasePath === record.oldSource && record.bootstrap === true;
-  const monitorProcesses = legacy
-    ? legacyMonitorReceipts(runtime.pid, record.oldMonitors ?? [])
-    : monitorProcessReceipts(config, runtime, record.monitors, false);
+  if (!runtime || !toolchain) throw new Error("active deployment has no verified runtime/toolchain");
+  const health = leadRuntimeHealth(config.stateDir, runtime);
+  if (!health) throw new DeploymentHeld("active deployment has no current runtime health");
   const active: ActiveDeployment = {
     version: 1,
     configHash: record.configHash,
     source: realpathSync(config.liveSource),
     sourceHash: rollback ? record.oldSourceHash! : record.sourceHash,
     runtime,
-    monitors: record.monitors,
-    monitorProcesses,
-    legacy,
+    monitorProcesses: monitorProcessReceipts(runtime, health),
     toolchain,
   };
   saveDeploymentJson(join(config.releaseRoot, "active.json"), active);
@@ -131,13 +121,11 @@ if (import.meta.main) {
   } = await Bun.stdin.json();
   try {
     const source = realpathSync(config.liveSource);
-    const health = readRuntimeHealth(config);
+    const health = leadRuntimeHealth(config.stateDir, runtime);
     if (
       source !== active.source ||
       !health ||
       !health.presetLoaded ||
-      health.pid !== runtime.pid ||
-      health.startedAt !== runtime.startedAt ||
       realpathSync(health.source) !== source ||
       Date.now() - Date.parse(health.updatedAt) > 5_000 ||
       health.extensionHash !== digest(readFileSync(join(source, "extension/index.ts")))

@@ -1,6 +1,6 @@
 import { chmodSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { loadSourceUpdateConfig } from "../src/update/source-update-config.ts";
+import { loadSourceUpdateConfig, type SourceUpdateConfig } from "../src/update/source-update-config.ts";
 import { saveDeploymentJson } from "../src/update/deployment-files.ts";
 import { currentSource } from "../src/update/source-update-git.ts";
 import { githubFixture } from "./release-producer-setup.ts";
@@ -8,8 +8,15 @@ import { preparationFixture } from "./update-deploy-prepare-setup.ts";
 import { git } from "./update-setup.ts";
 import { sourceFixture } from "./update-source-setup.ts";
 
+type SourceFixture = {
+  readonly root: string;
+  readonly path: string;
+  readonly settings: Readonly<Record<string, unknown>>;
+  readonly config: SourceUpdateConfig;
+};
+
 /** Real clean Git history and clones; only the GitHub transport is recorded, with no network/model calls. */
-export async function gitSourceFixture(f = sourceFixture()) {
+export async function gitSourceFixture(f: SourceFixture = sourceFixture()) {
   const source = f.config.deployment.liveSource;
   const prepared = preparationFixture();
   for (const file of prepared.input.publicManifest.files) {

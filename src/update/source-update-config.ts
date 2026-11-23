@@ -26,7 +26,7 @@ export function sourceRequiredCi(value: unknown): string[] {
   )
     throw new Error("requiredCi must list nonempty CI job names");
   if (new Set(value).size !== value.length || !MAIN_CI_CHECKS.every((name) => value.includes(name)))
-    throw new Error("requiredCi must include check, e2e-herdr and e2e-hc exactly once");
+    throw new Error(`requiredCi must include ${MAIN_CI_CHECKS.join(", ")} exactly once`);
   return value;
 }
 
@@ -60,9 +60,8 @@ export function parseSourceUpdateConfig(value: unknown, path: string): SourceUpd
   ];
   if (!object(value) || value["version"] !== 1 || Object.keys(value).some((key) => !keys.includes(key)))
     throw new Error("source update config must be version 1 with only documented settings");
-  const parsed = parseDeploymentConfig(value["deployment"], dirname(resolve(path)));
-  const deployment: DeploymentConfig = { ...parsed, nativeStopMode: parsed.nativeStopMode ?? "ui" };
-  if (deployment.nativeStopMode !== "ui") throw new Error("source updates require idle-only native UI stop");
+  // Source updates stop the harness only at its idle boundary: they never pass a quiesce checkpoint.
+  const deployment: DeploymentConfig = parseDeploymentConfig(value["deployment"], dirname(resolve(path)));
   const repository = value["repository"] ?? "vntrevx/Cataly";
   if (typeof repository !== "string" || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository))
     throw new Error("repository must be a GitHub owner/repo");

@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ownerPaths, TEMPLATE } from "../src/owner.ts";
-import { href } from "./fake.ts";
-import { setup } from "./loop-setup.ts";
+import { tref } from "./fake.ts";
+import { LEAD, setup } from "./loop-setup.ts";
 
 const at = (day: number, hour: number): number => new Date(2026, 10, day, hour, 0).getTime();
 
@@ -61,7 +61,7 @@ describe("owner distill from the hourly loop", () => {
     const { w, d, config, profile, tick, requests } = distillWorld();
     config({ ownerDistillHour: 21 });
     profile();
-    const leadRef = href("w1:p1");
+    const leadRef = tref(LEAD);
     const release = d.store.lockInbox(leadRef, w.clock);
     if (release === undefined) throw new Error("fixture could not hold lead inbox");
     try {

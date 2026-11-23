@@ -1,42 +1,37 @@
 import { expect, test } from "bun:test";
-import { supportsReleaseProfile } from "../src/release/capabilities.ts";
-import { validateReleaseManifest } from "../src/release/manifest.ts";
+import { headlessReleaseProfiles } from "../src/release/capabilities.ts";
+import type { ReleaseManifest } from "../src/release/types.ts";
 import { digest } from "../src/update/source.ts";
 import { releaseFixture } from "./release-producer-setup.ts";
 
-const linux = { platform: "linux", arch: "x64", runtime: "herdr" } as const;
-const darwin = { platform: "darwin", arch: "arm64", runtime: "hc" } as const;
+const linux = { platform: "linux", arch: "x64", runtime: "headless" } as const;
+const darwin = { platform: "darwin", arch: "arm64", runtime: "headless" } as const;
 
-function bound(bytes: Uint8Array) {
+function bound(bytes: Uint8Array, omp = "18.20.0"): ReleaseManifest {
   const fixture = releaseFixture();
   const files = [
     ...fixture.source.files,
-    { path: "release-capabilities.json", sha256: digest(bytes), executable: false },
+    { path: "release-headless.json", sha256: digest(bytes), executable: false },
   ].sort((a, b) => a.path.localeCompare(b.path));
-  return validateReleaseManifest({
+  return {
     ...fixture,
     source: { ...fixture.source, files, hash: digest(JSON.stringify({ files, ulwPresent: false })) },
-  });
+    requirements: { ...fixture.requirements, omp } as ReleaseManifest["requirements"],
+  };
 }
 
-test("legacy manifests preserve their schema and support only Linux", () => {
-  const fixture = releaseFixture();
-  const manifest = validateReleaseManifest(fixture);
-  expect(manifest).toEqual(fixture);
-  expect(supportsReleaseProfile(manifest, linux)).toBe(true);
-  expect(supportsReleaseProfile(manifest, darwin)).toBe(false);
-  expect(() => supportsReleaseProfile(manifest, linux, Buffer.from("{}"))).toThrow();
-  expect(() => validateReleaseManifest({ ...fixture, capabilities: [darwin] })).toThrow();
+test("a release without the headless marker is historical and has no profiles", () => {
+  const manifest = releaseFixture();
+  expect(headlessReleaseProfiles(manifest)).toEqual([]);
+  expect(() => headlessReleaseProfiles(manifest, Buffer.from("{}"))).toThrow("Unexpected");
 });
 
-test("source-bound metadata selects exact supported profiles", () => {
-  const bytes = Buffer.from(JSON.stringify({ version: 1, profiles: [darwin] }));
-  const manifest = bound(bytes);
-  expect(supportsReleaseProfile(manifest, darwin, bytes)).toBe(true);
-  expect(supportsReleaseProfile(manifest, linux, bytes)).toBe(false);
-  expect(supportsReleaseProfile(manifest, { ...darwin, runtime: "herdr" }, bytes)).toBe(false);
-  expect(() => supportsReleaseProfile(manifest, darwin)).toThrow();
-  expect(() => supportsReleaseProfile(manifest, darwin, Buffer.from("{}"))).toThrow();
+test("source-bound metadata selects exact headless profiles", () => {
+  const bytes = Buffer.from(JSON.stringify({ version: 1, profiles: [darwin, linux] }));
+  expect(headlessReleaseProfiles(bound(bytes), bytes)).toEqual([darwin, linux]);
+  expect(() => headlessReleaseProfiles(bound(bytes))).toThrow("SHA256");
+  expect(() => headlessReleaseProfiles(bound(bytes), Buffer.from("{}"))).toThrow("SHA256");
+  expect(() => headlessReleaseProfiles(bound(bytes, "18.18.8"), bytes)).toThrow("bound native OMP");
 });
 
 test.each([
@@ -49,9 +44,11 @@ test.each([
   { value: { version: 1, profiles: [{ platform: "linux", arch: "x64" }] } },
   { value: { version: 1, profiles: [{ ...linux, extra: true }] } },
   { value: { version: 1, profiles: [{ ...linux, arch: "arm64" }] } },
+  { value: { version: 1, profiles: [{ ...linux, runtime: "herdr" }] } },
+  { value: { version: 1, profiles: [{ ...darwin, runtime: "hc" }] } },
   { value: { version: 1, profiles: [linux, linux] } },
   { value: { version: 1, profiles: [linux], extra: true } },
-])("rejects malformed or duplicate source metadata: $value", ({ value }) => {
+])("rejects malformed, terminal or duplicate source metadata: $value", ({ value }) => {
   const bytes = Buffer.from(JSON.stringify(value) ?? "undefined");
-  expect(() => supportsReleaseProfile(bound(bytes), linux, bytes)).toThrow();
+  expect(() => headlessReleaseProfiles(bound(bytes), bytes)).toThrow();
 });

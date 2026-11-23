@@ -4,7 +4,7 @@ import { EvidenceError, fileEvidence } from "../src/evidence.ts";
 import { freshnessTick } from "../src/freshness.ts";
 import type { Runner } from "../src/run.ts";
 import type { SupervisionOptions } from "../src/supervision-observe.ts";
-import { depsFor, newWorld, type TestState, withState } from "./fakes.ts";
+import { depsFor, nativeLane, newWorld, type TestState, withState } from "./fakes.ts";
 import { coverageFixture, git, start } from "./supervision-coverage.fixture.ts";
 
 let state: TestState;
@@ -17,15 +17,15 @@ afterEach(() => state.done());
 const production = async (supervision: SupervisionOptions = {}) => {
   const f = coverageFixture(state);
   const world = newWorld();
-  world.panes.push({ pane_id: "w:p7", workspace_id: "w", agent: "omp", agent_status: "working" });
+  // One continuing native call that started 21 minutes before the first tick.
+  const native = nativeLane(world, 7, { status: "working", activeSince: start - 21 * 60_000 });
   const deps = depsFor(world, f.clock, state.dir, { supervision: { hungAfterMinutes: 1_000, ...supervision } });
-  const lane = { ...f.lane, pane: "w:p7" };
+  const lane = { ...f.lane, ...native };
   await deps.registry.write(lane);
   await f.reports.report(lane.key, "milestone", "started", start);
   const run: Runner = (argv, options) => (argv[0] === "git" ? git(argv, options) : deps.run(argv, options));
   const tick = async (turn: number) => {
     f.clock.at = start + turn * 60_000;
-    world.screen = `Working ${21 + turn}m`;
     return f.settle(() => freshnessTick({ ...deps, run }, state.dir));
   };
   const lastError = async () => (await deps.registry.read(lane.key))?.lastSupervisionError;

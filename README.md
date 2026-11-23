@@ -84,7 +84,7 @@ Here is the workflow on current `main`:
    metadata into the work.
 2. **The lead assigns the work.** The lead can handle small requests directly or
    launch a **lane**: a dedicated [oh-my-pi (OMP)](https://github.com/can1357/oh-my-pi)
-   coding session with a brief and an explicit `Done` condition. Native sessions run without a terminal by default.
+   coding session with a brief and an explicit `Done` condition. Native sessions run without a terminal.
    The lane registry ties the work to its session and messenger thread.
 3. **The lane works and reports.** Worklogs, reports, and checkpoints make
    progress inspectable across restarts. Ordinary Discord chat
@@ -115,8 +115,19 @@ Use `cataly` for operation, `cataly-harness` for the standalone harness, and
 (primary) or `~/.omp-cataly` (side). An upgrade stays in its original home.
 
 [Install a verified current release](docs/releases.md#install-a-current-release)
-or [upgrade an existing v0.1.3 installation without terminal tooling](docs/releases.md#upgrade-a-v013-installation).
+or [upgrade an existing v0.1.3 installation](docs/releases.md#upgrade-a-v013-installation).
 The upgrade leaves existing configuration unchanged.
+
+Cataly runs on headless OMP by default on macOS and Linux; Tern is the optional terminal runtime.
+This version removed the herdr and hc terminal runtimes; a home that still uses
+one stops install and upgrade with:
+
+```text
+This Cataly home still uses the herdr/hc terminal runtime, which this version removed.
+1. Close every herdr/hc lane (`cataly status` lists them) with your previous Cataly version.
+2. Remove "runtime" (if it names herdr or hc) and "sessionRuntime" from <configPath>.
+3. Run this command again. Cataly state and OMP sessions are kept; lanes reopen on headless.
+```
 
 </td></tr></table>
 
@@ -143,7 +154,7 @@ setup, use one of the options below.
 |                | [Published preview](#try-the-published-preview) | [Current source](#work-from-current-source)          |
 | -------------- | ----------------------------------------------- | ---------------------------------------------------- |
 | **Build**      | v0.1.2 prerelease                               | current `main`                                       |
-| **Scope**      | Linux x64 / herdr / Discord                     | native headless sessions; optional herdr or hc       |
+| **Scope**      | Linux x64 / herdr / Discord                     | headless OMP sessions on Linux and macOS; optional Tern |
 | **OMP**        | independently installed native OMP 18.18.8      | pinned, patched OMP 19.0.1 with the omp-ulw overlay |
 | **Home**       | historical primary `~/.dori`                   | side mode `~/.omp-cataly`                            |
 
@@ -166,11 +177,11 @@ It does not contain the newer `main` features or toolchain.
 
 ### Work from current source
 
-Use a separate checkout with git and Bun 1.4.4+. On Linux and macOS the
-default session runtime needs neither herdr nor hc. The installer prepares the pinned, patched **OMP 19.0.1**
+Use a separate checkout with git and Bun 1.4.4+. On Linux and macOS sessions
+run on headless OMP by default; no terminal server is needed. The installer prepares the pinned, patched **OMP 19.0.1**
 and **omp-ulw** overlay; a stock `omp` is not a substitute. No preinstalled OMP
 or Cargo is needed for this default setup.
-Tern is a third session runtime on source `main`; see [Tern](docs/runtime.md#tern).
+Tern is the optional terminal runtime; see [Tern](docs/runtime.md#tern).
 
 To inspect configuration changes first, add `--preview` to the final command below;
 review its paths and hashes, then run it without that flag to install. The preview
@@ -187,14 +198,10 @@ Side mode uses `~/.omp-cataly` by default and leaves the primary `~/.cataly`
 installation alone. Use `omp-cataly omp` to open the bound OMP for provider
 setup, and `omp-cataly harness up` to start the harness explicitly. Follow the
 [source setup and startup guide](docs/releases.md#source-checkouts-for-maintainers)
-for your runtime and messenger. Use `omp-cataly doctor` for a read-only setup
+for your messenger. Use `omp-cataly doctor` for a read-only setup
 check and `omp-cataly status` to see your lanes.
 
-For new sessions, `cataly harness status` shows `RUNTIME headless (from default)`
-unless you explicitly select another runtime. Old installations may have
-`"runtime": "hc"` or `"herdr"`; leave that field in place. To opt in to a terminal
-for new sessions, set `"sessionRuntime": "hc"` or `"herdr"`. Stored terminal
-sessions still belong to their original backend.
+`cataly harness status` shows `RUNTIME headless (from default)`.
 
 Opt-in [source updates](skills/cataly-mode/references/scripts.md#ci-gated-source-updates)
 follow CI-passing main with idle and quiet admission, same-session restart,
@@ -271,7 +278,7 @@ Discord intake is Rust-only. Under the OMP `monitor` tool, `cataly inbound disco
 (filter `^INBOUND`) replaces itself in place with `cataly discord --supervised`,
 keeping its PID, stdout and IPC channel. `CATALY_DISCORD_SCOPE=all`, `--context`,
 `--activity-file`, recall and `--wake-lanes` all run in Rust. `--wake-lanes` starts a lane's
-OMP directly, without herdr or hc. The OMP extension still owns the live session.
+OMP directly, headless. The OMP extension still owns the live session.
 Without the native binary, `cataly inbound discord` fails and names the build command.
 
 For a head owned entirely by Rust, run a separate receiver with
@@ -350,8 +357,8 @@ only want the OMP harness without Discord's networking libraries.
 **Important**
 
 **Support boundary:** Slack and Telegram are retained source integrations, not
-part of the published preview. The installer can support isolated macOS arm64 / hc
-consumer profiles declared by a compatible release manifest; no such release is
+part of the published preview. The installer can support isolated macOS arm64
+headless consumer profiles declared by a compatible release manifest; no such release is
 claimed here. A merge to `main` does not update the published preview.
 
 </td></tr></table>

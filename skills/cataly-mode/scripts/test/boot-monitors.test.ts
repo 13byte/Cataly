@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { type Manifest, type Monitor, monitorCleanup, readMonitorManifests } from "../src/boot-monitors.ts";
 import { reconcilePanes } from "../src/reconcile.ts";
 import type { Lane, LaneStatus } from "../src/registry.ts";
-import { withState } from "./fakes.ts";
+import { href, sid, type TestState, withState } from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00Z");
 
@@ -28,7 +28,7 @@ const manifest = (monitors: Monitor[]): Manifest => ({
   },
 });
 
-let state: ReturnType<typeof withState>;
+let state: TestState;
 
 beforeEach(() => {
   state = withState();
@@ -36,22 +36,22 @@ beforeEach(() => {
 
 afterEach(() => state.done());
 
-test("vanished, live and unassigned panes reconcile without mutating the lane records", () => {
-  // Given lanes whose panes are gone, live, or never assigned.
+test("vanished, live and unassigned sessions reconcile without mutating the lane records", () => {
+  // Given lanes whose sessions are gone, live, or never assigned.
   const lanes = [
-    lane("old", "working", "w1:p8"),
-    lane("current", "working", "w2:p2"),
+    { ...lane("old"), pane: sid(8), sessionRef: href(sid(8)) },
+    { ...lane("current"), pane: sid(2), sessionRef: href(sid(2)) },
     { ...lane("pending"), pane: undefined },
   ];
   const before = JSON.stringify(lanes);
-  // When reconciled against the live pane list.
+  // When reconciled against the live session list.
   const result = reconcilePanes(lanes, [
-    { ref: { runtime: "herdr", id: "w2:p1", group: "w2" } },
-    { ref: { runtime: "herdr", id: "w2:p2", group: "w2" } },
+    { ref: href(sid(1)), status: "idle" },
+    { ref: href(sid(2)), status: "working" },
   ]);
-  // Then each lane is classified, unowned panes are listed, and the input is untouched.
+  // Then each lane is classified, unowned sessions are listed, and the input is untouched.
   expect(result.lanes.map((l) => l.paneState)).toEqual(["vanished", "live", "unassigned"]);
-  expect(result.unregistered).toEqual(["w2:p1"]);
+  expect(result.unregistered).toEqual([sid(1)]);
   expect(JSON.stringify(lanes)).toBe(before);
 });
 

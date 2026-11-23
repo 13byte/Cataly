@@ -2,13 +2,13 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { readPaneState } from "../../skills/cataly-mode/scripts/src/lane-state.ts";
+import type { ModelReadback } from "../../skills/cataly-mode/scripts/src/lane-state.ts";
 import { calls, load, useConfig, type FakeOptions } from "./fake-pi.ts";
 
 const exact = { provider: "subscription", id: "exact" };
 
 test("rpc-ui binds the native catalog proof to the launch and guards the first goal turn", async () => {
-  const keys = ["CATALY_CONFIG", "CATALY_STATE_DIR", "HERDR_PANE_ID", "HC_TERMINAL_ID", "CATALY_HEADLESS_ID"];
+  const keys = ["CATALY_CONFIG", "CATALY_STATE_DIR", "CATALY_HEADLESS_ID"];
   const previous = keys.map((key) => process.env[key]);
   const stateDir = useConfig("");
   const refId = "00000000-0000-4000-8000-000000000001";
@@ -23,8 +23,6 @@ test("rpc-ui binds the native catalog proof to the launch and guards the first g
     subscription: true,
   };
   process.env.CATALY_HEADLESS_ID = refId;
-  delete process.env.HC_TERMINAL_ID;
-  delete process.env.HERDR_PANE_ID;
   let pi: Awaited<ReturnType<typeof load>> | undefined;
   try {
     pi = await load(settings);
@@ -109,15 +107,16 @@ for (const [name, options, status, thinking] of [
   ["unknown native selection", {}, "unknown"],
 ] as const) {
   test(`native launch guard: ${name}`, async () => {
-    const keys = ["CATALY_CONFIG", "CATALY_STATE_DIR", "HERDR_PANE_ID", "HC_TERMINAL_ID"];
+    const keys = ["CATALY_CONFIG", "CATALY_STATE_DIR", "CATALY_HEADLESS_ID"];
     const previous = keys.map((key) => process.env[key]);
     const stateDir = useConfig(join(import.meta.dir, "fake-ulw.ts"));
-    process.env.HERDR_PANE_ID = "model:p1";
-    delete process.env.HC_TERMINAL_ID;
+    process.env.CATALY_HEADLESS_ID = "00000000-0000-4000-8000-000000000002";
     const selector = "selector" in options ? options.selector : "subscription/exact";
     const settings: FakeOptions = {
       session: { id: "model-session", entries: [] },
       flags: { "cataly-role": "lane", "cataly-launch-model": selector },
+      mode: "rpc",
+      hasUI: true,
       ...("model" in options ? { model: options.model } : {}),
       ...("subscription" in options ? { subscription: options.subscription } : {}),
       ...("catalog" in options ? { catalog: [...options.catalog] } : {}),
@@ -126,7 +125,10 @@ for (const [name, options, status, thinking] of [
     const pi = await load(settings);
     try {
       await pi.emit("session_start");
-      const readback = readPaneState(stateDir, "model:p1")?.modelReadback;
+      const readback = (
+        pi.session.entries.find((entry) => entry.customType === "omp-cataly:headless-launch-model")?.data as
+          { proof?: ModelReadback } | undefined
+      )?.proof;
       expect(readback).toMatchObject({
         requested: { provider: selector.split("/")[0], id: selector.split("/").slice(1).join("/") },
         status,

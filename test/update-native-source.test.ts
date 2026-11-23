@@ -2,7 +2,8 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadUpdateConfig, ompPart } from "../src/update/load.ts";
+import { loadUpdateConfig } from "../src/update/load.ts";
+import { ompPart } from "../src/update/native-agent.ts";
 import { nativePromptOptions } from "../src/update/native-prompts.ts";
 
 const directories: string[] = [];
@@ -27,7 +28,6 @@ const load = (argv: readonly string[], engine?: "omp" | "external") => {
     JSON.stringify({
       version: 1,
       target: "cataly",
-      runtime: "herdr",
       root: join(directory, "updates"),
       remote: join(directory, "remote"),
       ref: "refs/heads/main",

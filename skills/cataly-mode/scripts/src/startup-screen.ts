@@ -8,7 +8,7 @@ import type { SessionRef } from "../../../../src/runtime/types.ts";
  *   the end of a pane-wide line by the unwrapped read (`...okNo API key`).
  * - `word`: a phrase that names a failure, not a topic (`rate limit reached`, never bare `rate limit`, `quota` or a
  *   component such as `rate limiter`). It must stand alone; see `standsAlone`. Its gaps are single spaces as printed
- *   (the unwrapped read puts back a space hc cut at a wrap), never `-`, so a kebab-case lane key or brief file name
+ *   (the unwrapped read puts back a space a terminal cut at a wrap), never `-`, so a kebab-case lane key or brief file name
  *   such as `fix-rate-limit-error` is not one.
  * - `value`: an error code (`insufficient_quota`, `QUOTA_EXCEEDED`), counted only where it is a value: after `error`,
  *   `code`, `type` or `status` and a `:` or `=` (`"type":"rate_limit_error"`, `code=quotaExceeded`). The same code

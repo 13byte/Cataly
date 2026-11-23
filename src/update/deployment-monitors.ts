@@ -3,14 +3,7 @@ import { isAbsolute, join } from "node:path";
 import { parseCatalyRole } from "../../skills/cataly-mode/scripts/src/session-compat.ts";
 import { DeploymentHeld } from "./deployment-process.ts";
 import { monitorPolicy } from "./monitor-policy.ts";
-import type {
-  DeploymentConfig,
-  DeploymentRecord,
-  IntakeSpec,
-  MonitorSet,
-  MonitorSpec,
-  ProcessIdentity,
-} from "./deployment-types.ts";
+import type { DeploymentConfig, IntakeSpec, MonitorSet, MonitorSpec, ProcessIdentity } from "./deployment-types.ts";
 
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -171,12 +164,34 @@ export function readMonitorSet(path: string, sessionId: string, trusted = false)
   };
 }
 
-/** Recheck desired intent before stopping an actor, even when the handoff was prepared earlier. */
-export function assertMonitorStopSafe(config: DeploymentConfig, handoff: DeploymentRecord): void {
-  const path = join(config.stateDir, "monitors", `${encodeURIComponent(config.sessionId)}.json`);
-  // Legacy actors may only have the explicitly admitted bootstrap.
-  if (handoff.bootstrap && !lstatSync(path, { throwIfNoEntry: false })) return;
-  readMonitorIntent(path, config.sessionId, false);
+/**
+ * The lead session's desired monitors and managed intake. Captured before its stop: the resumed lead must restore exactly
+ * this set. A once monitor holds the stop; a missing or invalid manifest holds the deployment.
+ */
+export function desiredMonitors(config: Pick<DeploymentConfig, "stateDir">, sessionId: string): MonitorSet {
+  try {
+    return readMonitorSet(join(config.stateDir, "monitors", `${encodeURIComponent(sessionId)}.json`), sessionId);
+  } catch (error) {
+    if (error instanceof DeploymentHeld) throw error;
+    throw new DeploymentHeld(`lead desired monitor state is unavailable: ${(error as Error).message}`);
+  }
+}
+
+/** The managed intake heartbeat is owned, private-write and refreshed since `sinceMs` within its age bound. */
+export function assertFreshIntake(intake: IntakeSpec, sinceMs: number): void {
+  const pulse = lstatSync(intake.path, { throwIfNoEntry: false });
+  if (!pulse) throw new DeploymentHeld("fresh inbound heartbeat has not arrived");
+  if (!pulse.isFile() || (pulse.mode & 0o022) !== 0 || (process.getuid !== undefined && pulse.uid !== process.getuid()))
+    throw new DeploymentHeld("intake heartbeat ownership differs");
+  const at = Number(readFileSync(intake.path, "utf8").trim());
+  if (
+    !Number.isSafeInteger(at) ||
+    at < sinceMs ||
+    pulse.mtimeMs < sinceMs ||
+    at > Date.now() + 1_000 ||
+    Date.now() - at > intake.maxAgeMs
+  )
+    throw new DeploymentHeld("fresh inbound heartbeat has not arrived");
 }
 
 export function sameMonitorSpecs(left: readonly MonitorSpec[], right: readonly MonitorSpec[]): boolean {

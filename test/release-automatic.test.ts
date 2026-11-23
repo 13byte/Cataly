@@ -6,9 +6,10 @@ import { readAutomaticState, setAutomaticEnabled } from "../src/release/automati
 import type { VerifiedBundle } from "../src/release/bundle.ts";
 import { saveJson } from "../src/release/files.ts";
 import { installBundle, rollbackRelease } from "../src/release/install.ts";
-import { supportsReleaseProfile } from "../src/release/capabilities.ts";
+import { headlessReleaseProfiles, nativeMetadata } from "../src/release/capabilities.ts";
 import { loadInstalled, releasePath } from "../src/release/state.ts";
 import { portableFixture as fixture } from "./release-consumer-setup.ts";
+import { boundRelease } from "./release-native-recovery-setup.ts";
 
 // POSIX-only: release installation refuses non-private directories by POSIX mode bits.
 const posix = test.skipIf(process.platform === "win32");
@@ -27,13 +28,11 @@ posix.each([false, true])(
     const one = await installBundle(f.paths, stable(f.release("one").bundle), undefined);
     const config = readFileSync(f.paths.config);
     writeFileSync(join(f.paths.dori, "auth.json"), "owner auth\n", { mode: 0o600 });
-    const candidate = stable(f.release("two").bundle);
-    const capabilities = candidate.files.find((file) => file.path === "release-capabilities.json")?.bytes;
-    for (const profile of [
-      { platform: "linux", arch: "x64", runtime: "herdr" },
-      { platform: "darwin", arch: "arm64", runtime: "hc" },
-    ])
-      expect(supportsReleaseProfile(candidate.manifest, profile, capabilities)).toBe(true);
+    const candidate = stable(boundRelease(f, "two").bundle);
+    const marker = candidate.files.find((file) => file.path === nativeMetadata)?.bytes;
+    expect(
+      headlessReleaseProfiles(candidate.manifest, marker).map(({ platform, arch }) => `${platform}/${arch}`),
+    ).toEqual(["linux/x64", "darwin/arm64"]);
     let checks = 0;
     const acquire = async (signal: AbortSignal) => {
       expect(signal.aborted).toBe(false);
@@ -102,7 +101,7 @@ posix("a live lane or Dori session holds automatic activation without signalling
 posix("a session appearing during the network check holds activation", async () => {
   const f = fixture();
   const one = await installBundle(f.paths, f.release("one").bundle, undefined);
-  const candidate = stable(f.release("two").bundle);
+  const candidate = stable(boundRelease(f, "two").bundle);
   const acquire = async () => {
     const directory = join(f.paths.dori, "state/sessions");
     mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -116,7 +115,7 @@ posix("a session appearing during the network check holds activation", async () 
 posix("rollback pauses automatic updates until explicitly resumed", async () => {
   const f = fixture();
   const one = await installBundle(f.paths, stable(f.release("one").bundle), undefined);
-  const candidate = stable(f.release("two").bundle);
+  const candidate = stable(boundRelease(f, "two").bundle);
   const two = await installBundle(f.paths, candidate, one);
   await rollbackRelease(f.paths, two);
   expect(readAutomaticState(f.paths)).toMatchObject({ enabled: false, outcome: "rollback" });

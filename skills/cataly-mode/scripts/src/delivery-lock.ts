@@ -60,9 +60,9 @@ export const withLaunchLock = <T>(
   waitMs = DELIVERY_WAIT_MS,
 ): Promise<Held<T>> => withLaneLock(deps, key, fn, waitMs, "launch");
 
-/** Native endpoint metadata uses a bare hc address; adoption also accepts the prefixed address. */
+/** Native endpoint metadata uses a bare Tern block id (TERN_PANE); adoption also accepts the prefixed address. */
 export const parseOwnershipRef = (pane: string): SessionRef | undefined =>
-  parseRef(pane) ?? (/^t[0-9a-z]+$/.test(pane) ? { runtime: "hc", id: pane } : undefined);
+  parseRef(pane) ?? (/^[0-9]+$/.test(pane) ? { runtime: "tern", id: pane } : undefined);
 
 /** A pane-less native endpoint needs the same fence as every adoption, since its physical address is unknown. */
 export const withTerminalOwnershipLock = <T>(

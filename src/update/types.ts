@@ -14,7 +14,6 @@ export type UpdateCommand = {
 export type UpdateConfig = {
   readonly version: 1;
   readonly target: "cataly";
-  readonly runtime: "herdr";
   readonly root: string;
   readonly remote: string;
   readonly ref: string;

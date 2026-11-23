@@ -1,15 +1,15 @@
 export const USAGE = `cataly <command> [options]
 
-  harness <command> [args...]          dispatch every upstream harness command (up, inbox, duty, review, merge, loop, backlog, migrate...)
+  harness <command> [args...]          dispatch every upstream harness command (up, inbox, duty, review, merge, loop, backlog...)
   update <command> [options]           verified releases: check, install, status, rollback, cache [--version TAG] [--from DIST]
   update source check|status|apply     own main source updates; apply requires --when idle [--config FILE]
   idle-check [--owner-quiet 30m]       source update eligibility; exit 0 if idle, else 4 [--config FILE]
   lead restart --when idle            same-session managed restart [--config FILE]
   upstream <command> --config FILE     maintainer staging: check, stage, watch, status, snapshot, restore, recover, restart
-  remote --help                       opt-in cross-machine management of native Cataly sessions
+  remote --help                       opt-in management of native Cataly sessions on this machine
   headless --help                     observe a headless lane or answer its exact native dialog locally
   launch <key> --title T --brief FILE --done "merged o/r#N; closed o/r#M" [--thread REF] [--model M] [--cwd DIR]
-         [--runtime headless|hc|herdr] [--wall-minutes N|none] [--token-limit N|none] [--cost-limit N|none]
+         [--runtime headless|tern] [--wall-minutes N|none] [--token-limit N|none] [--cost-limit N|none]
          [--activity-path FILE ...] [--dry-run]
          --template NAME [--set name=value]... replaces --brief; [--after a,b --expires-hours N] queues without starting
          [--request discord:C:M|telegram:CHAT:MID|slack:CHANNEL:TS] the original input ID (metadata only); each launch,
@@ -28,7 +28,7 @@ export const USAGE = `cataly <command> [options]
                                        registered lane interval and verified children; API price estimates, not bills
   quota [--refresh] [--json]            opt-in account limits for display only; no account or credit changes
   sync   [--write]                     registry vs live panes; read-only unless --write
-  boot                                 read-only check after a restart: Slack auth, vanished panes, journals, open worklog items and decisions, stale watches
+  boot                                 read-only check after a restart: Slack auth, vanished sessions, journals, open worklog items and decisions, stale watches
   doctor [--json] [--repo owner/repo]   read-only configuration, adoption and monitor diagnostics; exit 1 on warnings
   monitor-presets [name] [--json]      recommended argv and filters; starts nothing
   report <key> --kind milestone|blocker|question|halted|done --text TEXT [--owner SUMMARY] [--json] [--evidence-file PATH]...
@@ -48,7 +48,7 @@ export const USAGE = `cataly <command> [options]
   pr track <owner/repo#N|pull-url> [--lane K] [--thread REF] / pr untrack <ref> / pr list
   pr watch [--loop MIN] [--ignore-author LOGIN]... [--self LOGIN]
                                        follow tracked PRs after their lane: PR_FEEDBACK, PR_CI_FAIL, PR_HEAD_MOVED, PR_MERGED
-  claim-done [<key>] --evidence TEXT  key defaults to the lane registered for your own session (HC_TERMINAL_ID, HERDR_PANE_ID or TERN_PANE)
+  claim-done [<key>] --evidence TEXT  key defaults to the lane registered for your own session (CATALY_HEADLESS_ID or TERN_PANE)
   object-done <key> --reason TEXT [--reason TEXT ...]
   lesson add <key> --rule TEXT --evidence PATH [--cwd DIR]
   lesson add --global --rule TEXT --evidence REF

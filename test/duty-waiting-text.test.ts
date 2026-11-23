@@ -62,7 +62,8 @@ describe("a waiting lane's target and start", () => {
   });
 
   test("a several-line or escape-laden --for is stored and shown on one line in nudge, board and escalation", async () => {
-    const s = setup();
+    // A Tern block's short ref leaves the board line room for the whole target.
+    const s = setup({ runtime: "tern" });
     const lane = await startLane(s.d, "blocked", s.brief, { group: "w1" });
     const pane = s.w.panes.get(lane.paneId)!;
     pane.status = "idle";

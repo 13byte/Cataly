@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, realpathSync, symlinkSync, writeFileS
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 
 import { launchLane } from "../src/launch.ts";
-import { depsFor, fakeClock, newWorld, withState, type World } from "./fakes.ts";
+import { depsFor, fakeClock, newWorld, sid, withState, type World } from "./fakes.ts";
 
 // The token home follows the config file the OS opens, through links and '..' (#218, #219).
 const T0 = Date.parse("2026-01-01T12:00:00.000Z");
@@ -41,18 +41,19 @@ const osTokenFile = (config: string): string => {
   return realpathSync.native(join(dirname(opened), "slack-token"));
 };
 
-const launchArgv = async (home: string, key: string, config = join(home, "config.json")): Promise<string[][]> => {
+// The env the native lane started with.
+const launchEnv = async (
+  home: string,
+  key: string,
+  config = join(home, "config.json"),
+): Promise<Readonly<Record<string, string | undefined>>> => {
   const brief = join(state.dir, "brief.md");
   writeFileSync(brief, "# brief\n");
   process.env["CATALY_CONFIG"] = config;
   world = newWorld();
-  await launchLane(depsFor(world, fakeClock(T0), join(home, "state"), { runtime: "hc" }), {
-    key,
-    title: "t",
-    brief,
-    done: "closed acme/app#3",
-  });
-  return world.calls.map((c) => [...c]);
+  const deps = { ...depsFor(world, fakeClock(T0), join(home, "state"), { defaultCwd: state.dir }), env: process.env };
+  await launchLane(deps, { key, title: "t", brief, done: "closed acme/app#3" });
+  return world.sessions[sid(1)]?.env ?? {};
 };
 
 test("with a real link, 'link/../config.json' opens far's config, and far is the token home for launcher and lane alike", async () => {
@@ -66,10 +67,10 @@ test("with a real link, 'link/../config.json' opens far's config, and far is the
   tokenFile(near, "xoxb-near\n", 0o600);
   symlinkSync(join(far, "a"), join(near, "link"));
   const raw = `${relative(process.cwd(), near)}${sep}link${sep}..${sep}config.json`;
-  const create = (await launchArgv(near, "link-lane", raw)).find((c) => c[0] === "hc" && c.includes("--bg")) ?? [];
+  const env = await launchEnv(near, "link-lane", raw);
   // The OS resolves the temp directory too: on Windows the short RUNNER~1 name becomes the long one.
-  expect(create).toContain(`CATALY_SLACK_TOKEN_FILE=${osTokenFile(raw)}`);
-  expect(create).toContain(`CATALY_CONFIG=${isAbsolute(raw) ? raw : `${process.cwd()}${sep}${raw}`}`);
+  expect(env["CATALY_SLACK_TOKEN_FILE"]).toBe(osTokenFile(raw));
+  expect(env["CATALY_CONFIG"]).toBe(isAbsolute(raw) ? raw : `${process.cwd()}${sep}${raw}`);
 });
 
 test("a config file that does not exist yet still gets its home where the OS would create it, through the link", async () => {
@@ -82,6 +83,6 @@ test("a config file that does not exist yet still gets its home where the OS wou
   tokenFile(near, "xoxb-near2\n", 0o600);
   symlinkSync(join(far, "a"), join(near, "link"));
   const raw = `${relative(process.cwd(), near)}${sep}link${sep}..${sep}config.json`;
-  const create = (await launchArgv(near, "nolink-lane", raw)).find((c) => c[0] === "hc" && c.includes("--bg")) ?? [];
-  expect(create).toContain(`CATALY_SLACK_TOKEN_FILE=${osTokenFile(raw)}`);
+  const env = await launchEnv(near, "nolink-lane", raw);
+  expect(env["CATALY_SLACK_TOKEN_FILE"]).toBe(osTokenFile(raw));
 });

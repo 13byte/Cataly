@@ -8,21 +8,21 @@ import { freshnessTick } from "../src/freshness.ts";
 import { Registry, type Lane } from "../src/registry.ts";
 import { Reports } from "../src/reports.ts";
 import { run } from "../src/run.ts";
-import { depsFor, fakeClock, newWorld, withState } from "./fakes.ts";
+import { depsFor, fakeClock, newWorld, type World, withState } from "./fakes.ts";
+import { closableLane } from "./native-close-fixture.ts";
 
 const now = Date.parse("2026-01-01T12:21:00Z");
-const lane: Lane = {
+const laneIn = (world: World, status: "idle" | "working", cwd: string): Lane => ({
   key: "demo-lane",
   title: "demo",
   thread: "discord:40",
-  pane: "w:p1",
+  ...closableLane(world, 1, cwd, { status }),
   brief: "/briefs/demo.md",
   done: "merged acme/app#1",
-  cwd: "/repo",
   openedAt: "2026-01-01T12:00:00.000Z",
   lastNudgeAt: now,
   reportProtocol: "jsonl-v1",
-};
+});
 
 test.skipIf(process.platform === "win32").each(["threadReply", "threadDone"] as const)(
   "the saved %s Discord recipe delivers using only the selected config and its explicit token file",
@@ -32,7 +32,6 @@ test.skipIf(process.platform === "win32").each(["threadReply", "threadDone"] as 
       const fixture = legacyDiscordFixture(home.dir, hook === "threadReply" ? join(home.dir, "settings") : home.dir);
       const saved = JSON.stringify({
         stateDir: fixture.stateDir,
-        sessionRuntime: "herdr",
         ompUlwPath: "",
         hooks: { [hook]: legacyDiscordRecipe[hook] },
       });
@@ -46,8 +45,8 @@ test.skipIf(process.platform === "win32").each(["threadReply", "threadDone"] as 
         CATALY_HOME: hook === "threadReply" ? home.dir : undefined,
       });
       const world = newWorld();
-      // A quiet thread can still have an actively working pane. An idle pane this old is held as stalled.
-      if (hook === "threadReply") world.screen = "Working (2m)\n❯ ";
+      // A quiet thread can still have an actively working lane. An idle lane this old is held as stalled.
+      const lane = laneIn(world, hook === "threadReply" ? "working" : "idle", home.dir);
       const deps = depsFor(world, fakeClock(now), fixture.stateDir);
       const registry = new Registry(fixture.stateDir);
       const flow: FlowDeps = {

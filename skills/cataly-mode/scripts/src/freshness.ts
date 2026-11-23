@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { type HeadlessObservation, HeadlessRuntime } from "../../../../src/runtime/headless.ts";
+import { isLegacyRuntime } from "../../../../src/runtime/types.ts";
 
 import { withDeliveryLock } from "./delivery-lock.ts";
 import type { FlowDeps } from "./done-flow.ts";
@@ -73,7 +74,8 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
       continue;
     }
     const ref = sessionOf(lane);
-    if (statusOf(lane) !== "working" || !ref) continue;
+    // A lane still recorded on the removed herdr/hc runtime has no runtime to ask.
+    if (statusOf(lane) !== "working" || !ref || isLegacyRuntime(ref.runtime)) continue;
     // Only launched lanes report through the journal; an adopted lane keeps the screen path even if a record exists.
     let previous: Progress | null = null;
     let screen: string | null = null;

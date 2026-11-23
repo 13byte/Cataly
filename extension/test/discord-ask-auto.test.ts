@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { writePaneState } from "../../skills/cataly-mode/scripts/src/lane-state.ts";
 import { Registry } from "../../skills/cataly-mode/scripts/src/registry.ts";
 import { DiscordAsk } from "../discord-ask.ts";
 import { automaticDiscordAskRoute, bindAskLane } from "../discord-ask-auto.ts";
@@ -10,6 +9,7 @@ import { until } from "./fake-pi.ts";
 
 const cli = join(import.meta.dir, "../../skills/cataly-mode/scripts/src/cli.ts");
 const primary = "109867692300000031";
+const headless = "00000000-0000-4000-8000-000000000002";
 const secondary = "109867692300000032";
 const owner = "109867692300000033";
 const bot = "109867692300000034";
@@ -57,8 +57,7 @@ async function verifyAutomaticAsk(credential: "private file" | "lead environment
     "CATALY_CONFIG",
     "CATALY_DISCORD_API_BASE",
     "CATALY_DISCORD_TOKEN",
-    "HC_TERMINAL_ID",
-    "HERDR_PANE_ID",
+    "CATALY_HEADLESS_ID",
   ] as const;
   const envBefore = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
   let publish = false;
@@ -116,13 +115,12 @@ async function verifyAutomaticAsk(credential: "private file" | "lead environment
     },
   });
   const base = `http://127.0.0.1:${server.port}`;
-  delete process.env.HC_TERMINAL_ID;
   Object.assign(process.env, {
     CATALY_CONFIG: config,
     CATALY_HOME: home,
     CATALY_DISCORD_API_BASE: base,
     CATALY_DISCORD_TOKEN: credential === "lead environment" ? token : "nonmatching-fixture-token",
-    HERDR_PANE_ID: "w1:p2",
+    CATALY_HEADLESS_ID: headless,
   });
   mkdirSync(state, { mode: 0o700 });
   if (credential === "private file") writeFileSync(tokenFile, `${token}\n`, { mode: 0o600 });
@@ -195,22 +193,11 @@ async function verifyAutomaticAsk(credential: "private file" | "lead environment
 
     const session = "exact-lane-session";
     const registry = new Registry(state);
-    writePaneState(state, {
-      paneId: "w1:p2",
-      sessionId: session,
-      role: "lane",
-      pid: process.pid,
-      cwd: home,
-      startedAt: "fixture",
-      updatedAt: "fixture",
-      goal: { status: "none" },
-      approvalPending: false,
-    });
     const lane = {
       key: "worker",
       title: "Worker",
       thread: `discord:${primary}`,
-      sessionRef: { runtime: "herdr" as const, id: "w1:p2" },
+      sessionRef: { runtime: "headless" as const, id: headless },
       brief: "fixture",
       done: "fixture",
       openedAt: "fixture",

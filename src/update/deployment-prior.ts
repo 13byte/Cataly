@@ -1,11 +1,10 @@
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { readSourceBundle } from "../release/source-bundle.ts";
 import type { ActiveDeployment } from "./deployment-active.ts";
 import { DeploymentHeld, managedOmpCommand, sameProcess } from "./deployment-process.ts";
-import { assertRuntimeToolchain, inspectRuntimeToolchain, prepareRuntimeToolchain } from "./deployment-toolchain.ts";
+import { assertRuntimeToolchain, prepareRuntimeToolchain } from "./deployment-toolchain.ts";
 import type { DeploymentConfig, DeploymentRecord, RuntimeIdentity, ToolchainReceipt } from "./deployment-types.ts";
-import { digest } from "./source.ts";
 import { procCmdline } from "./proc.ts";
 
 export function runtimeUsesToolchain(runtime: RuntimeIdentity, receipt: ToolchainReceipt): boolean {
@@ -22,16 +21,6 @@ export function runtimeUsesToolchain(runtime: RuntimeIdentity, receipt: Toolchai
   });
 }
 
-export function verifyLegacyArtifact(config: DeploymentConfig, expectedHash: string): string {
-  if (
-    !config.legacyOmp ||
-    !lstatSync(config.liveSource).isDirectory() ||
-    digest(readFileSync(config.legacyOmp)) !== expectedHash
-  )
-    throw new DeploymentHeld("legacy native override differs from the captured running image or source generation");
-  return config.legacyOmp;
-}
-
 /** The new release's prepared overlay can serve rollback only when the prior source pins the same overlay identity. */
 function priorSourceToolchain(toolchain: ToolchainReceipt, source: string | undefined): ToolchainReceipt {
   if (!toolchain.ompUlw || source === toolchain.ompUlw.source) return toolchain;
@@ -46,7 +35,7 @@ function priorSourceToolchain(toolchain: ToolchainReceipt, source: string | unde
   return { ...toolchain, ompUlw: { ...toolchain.ompUlw, source } };
 }
 
-/** A prior managed receipt outranks a legacy override. Legacy images are admitted only for the first directory conversion. */
+/** A prior managed receipt outranks the prepared one; without it the running lead must already use the prepared image. */
 export async function admitRuntimeToolchains(
   config: DeploymentConfig,
   record: DeploymentRecord,
@@ -73,12 +62,11 @@ export async function admitRuntimeToolchains(
   }
   if (converting || !record.toolchain) await prepareRuntimeToolchain(config, record);
   if (!record.oldToolchain) {
-    if (converting && lstatSync(config.liveSource).isDirectory() && config.legacyOmp) {
-      const legacy = verifyLegacyArtifact(config, runtime.executableHash);
-      record.oldToolchain = await inspectRuntimeToolchain(config, record, legacy, true);
-    } else if (record.toolchain && runtimeUsesToolchain(runtime, record.toolchain))
-      record.oldToolchain = priorSourceToolchain(record.toolchain, record.oldSource);
-    else throw new DeploymentHeld("legacy native conversion needs its exact preserved executable before any stop");
+    if (!record.toolchain || !runtimeUsesToolchain(runtime, record.toolchain))
+      throw new DeploymentHeld(
+        "running native lead has no managed toolchain receipt and differs from the prepared one",
+      );
+    record.oldToolchain = priorSourceToolchain(record.toolchain, record.oldSource);
   }
   const oldToolchain = record.oldToolchain;
   if (!oldToolchain) throw new DeploymentHeld("prior native toolchain receipt is unavailable");

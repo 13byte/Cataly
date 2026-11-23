@@ -14,12 +14,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { LegacyRuntimeError } from "../src/runtime/registry.ts";
 import { parseDeploymentConfig } from "../src/update/deployment.ts";
 import { capturePointer, restorePointer, switchPointer } from "../src/update/deployment-files.ts";
-import { verifyLegacyArtifact } from "../src/update/deployment-prior.ts";
 import { processIdentity, sameProcess } from "../src/update/deployment-process.ts";
 import { terminateBoundProcess } from "../src/update/deployment-signal.ts";
-import { digest } from "../src/update/source.ts";
 
 // The kernels whose process identity deployment can bind.
 const posix = test.skipIf(process.platform !== "linux" && process.platform !== "darwin");
@@ -43,11 +42,6 @@ function fixture() {
       stateDir: "~/.cataly/state",
       bun: process.execPath,
       omp: process.execPath,
-      legacyOmp: "~/private-legacy/omp",
-      herdr: process.execPath,
-      pane: "w1:p1",
-      sessionId: "same-session",
-      model: "openai-codex/gpt-6.1-sol",
       restartLock: "~/.cataly/restart.lock",
       launcherPath: "~/.cataly/fixed-restart-controller",
       healthTimeoutMs: 100,
@@ -63,18 +57,51 @@ function fixture() {
   return { root, config };
 }
 
-test("native stop mode is optional, canonical when absent and rejects malformed values", () => {
+test("deployment config is canonical and names only the headless harness's paths", () => {
   const { root, config } = fixture();
-  expect(Object.hasOwn(config, "nativeStopMode")).toBe(false);
   expect(JSON.stringify(parseDeploymentConfig(config, root))).toBe(JSON.stringify(config));
-  for (const nativeStopMode of ["ui", "signal"] as const) {
-    const selected = parseDeploymentConfig({ ...config, nativeStopMode }, root);
-    expect(selected.nativeStopMode).toBe(nativeStopMode);
-    expect(parseDeploymentConfig(selected, root)).toEqual(selected);
-    expect(digest(JSON.stringify(selected))).not.toBe(digest(JSON.stringify(config)));
+  expect(Object.keys(config).sort()).toEqual(
+    [
+      "bun",
+      "catalyConfig",
+      "catalyHome",
+      "healthTimeoutMs",
+      "home",
+      "launcherPath",
+      "liveSource",
+      "omp",
+      "releaseRoot",
+      "restartLock",
+      "shims",
+      "stateDir",
+      "stopTimeoutMs",
+    ].sort(),
+  );
+  expect(() => parseDeploymentConfig({ ...config, unknownSetting: true }, root)).toThrow("unknown setting");
+});
+
+test("a terminal-era deployment config is refused with the upgrade guard, before any path is admitted", () => {
+  const { root, config } = fixture();
+  const terminal = [
+    { runtime: "herdr" },
+    { runtime: "hc" },
+    { herdr: process.execPath, pane: "w1:p1" },
+    { hc: process.execPath, pane: "t7", hcSession: "fixture" },
+    { herdrSession: "fixture" },
+    { sessionId: "same-session", model: "openai-codex/gpt-6.1-sol" },
+    { nativeStopMode: "ui" },
+    { legacyOmp: "~/private-legacy/omp" },
+  ];
+  for (const fields of terminal) {
+    let error: unknown;
+    try {
+      parseDeploymentConfig({ ...config, ...fields }, root);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error, JSON.stringify(fields)).toBeInstanceOf(LegacyRuntimeError);
+    expect((error as Error).message).toContain(config.catalyConfig);
   }
-  for (const nativeStopMode of [undefined, null, "", "UI", "auto", true, 1, {}])
-    expect(() => parseDeploymentConfig({ ...config, nativeStopMode }, root)).toThrow("nativeStopMode");
 });
 
 it("release-root shims remain stable through source conversion and restore their exact previous links", () => {
@@ -121,21 +148,6 @@ test("only an exact dot selects the release root; traversal, empty segments and 
       parseDeploymentConfig({ ...config, shims: [{ path: config.shims[0]!.path, source }] }, root),
     ).toThrow();
   expect(parseDeploymentConfig(config, root).shims.every((shim) => shim.source === ".")).toBe(true);
-});
-
-test("a preserved legacy artifact is admitted only for a real source directory and its captured bytes", () => {
-  const { root, config } = fixture();
-  mkdirSync(dirname(config.legacyOmp!), { recursive: true });
-  writeFileSync(config.legacyOmp!, "captured executable artifact");
-  const capturedHash = digest(readFileSync(config.legacyOmp!));
-  expect(verifyLegacyArtifact(config, capturedHash)).toBe(config.legacyOmp!);
-  writeFileSync(config.legacyOmp!, "different executable artifact");
-  expect(() => verifyLegacyArtifact(config, capturedHash)).toThrow();
-  writeFileSync(config.legacyOmp!, "captured executable artifact");
-  const release = join(root, "managed-generation");
-  mkdirSync(release);
-  switchPointer(capturePointer(config.liveSource, release, "managed-generation"));
-  expect(() => verifyLegacyArtifact(config, capturedHash)).toThrow();
 });
 
 posix(

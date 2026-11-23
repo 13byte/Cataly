@@ -32,21 +32,13 @@ for (const input of [
       test.serial(
         `${input.name} at the ${boundary} boundary for ${role ?? "ordinary"}`,
         async () => {
-          const keys = [
-            "HOME",
-            "CATALY_CONFIG",
-            "CATALY_STATE_DIR",
-            "CATALY_OMP_ULW_PATH",
-            "HERDR_PANE_ID",
-            "HC_TERMINAL_ID",
-          ];
+          const keys = ["HOME", "CATALY_CONFIG", "CATALY_STATE_DIR", "CATALY_OMP_ULW_PATH", "CATALY_HEADLESS_ID"];
           const before = keys.map((key) => process.env[key]);
           const stateDir = useConfig("");
           const home = dirname(stateDir);
           try {
             process.env["HOME"] = home;
-            delete process.env["HERDR_PANE_ID"];
-            delete process.env["HC_TERMINAL_ID"];
+            delete process.env["CATALY_HEADLESS_ID"];
             if (input.failure === "missing") {
               process.env["CATALY_OMP_ULW_PATH"] = join(
                 home,

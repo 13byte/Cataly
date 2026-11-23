@@ -7,7 +7,7 @@ test("the actual CLI parses --for and preserves plain report compatibility witho
   const f = await waitFixture();
   try {
     const config = join(f.state.dir, "config.json");
-    writeFileSync(config, JSON.stringify({ stateDir: f.state.dir, runtime: "herdr" }));
+    writeFileSync(config, JSON.stringify({ stateDir: f.state.dir, runtime: "tern" }));
     const invoke = async (...args: string[]) => {
       const child = Bun.spawn([process.execPath, join(import.meta.dir, "../src/cli.ts"), ...args], {
         env: {

@@ -2,9 +2,9 @@ import { lstatSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { readActiveDeployment } from "./deployment-active.ts";
 import { captureHandoff, prepareLauncher } from "./deployment-handoff.ts";
-import { captureRuntime, nativeCli } from "./deployment-native.ts";
-import { forwardStopStarted } from "./deployment-native-ui.ts";
+import { captureRuntime } from "./deployment-harness.ts";
 import { DeploymentHeld, sameProcess, underProcess } from "./deployment-process.ts";
+import { forwardStopStarted } from "./deployment-stop.ts";
 import type { DeploymentConfig, DeploymentRecord } from "./deployment-types.ts";
 import { sourceManifest } from "./source.ts";
 
@@ -13,7 +13,7 @@ export function assertPreparedLayout(config: DeploymentConfig, record: Deploymen
     !record.preparedAt ||
     !record.oldSourceHash ||
     !record.pointers ||
-    forwardStopStarted(config, record) ||
+    forwardStopStarted(record) ||
     (record.step !== "prepare" && record.step !== "stop")
   )
     throw new DeploymentHeld("busy hold is no longer before native effects");
@@ -46,10 +46,11 @@ export async function verifyBusyHold(config: DeploymentConfig, record: Deploymen
   assertPreparedLayout(config, record);
   if (!record.oldRuntime || !record.oldMonitors || record.quiesceHash)
     throw new DeploymentHeld("busy hold lacks an intact native handoff");
-  const current = await captureRuntime(config, nativeCli(config), true);
+  const current = await captureRuntime(config, true);
   if (
     current.approvalPending ||
     !sameProcess(record.oldRuntime, current) ||
+    current.ref !== record.oldRuntime.ref ||
     current.startedAt !== record.oldRuntime.startedAt ||
     current.sessionFile !== record.oldRuntime.sessionFile ||
     current.executableHash !== record.oldRuntime.executableHash
@@ -66,7 +67,7 @@ export async function refreshBusyHandoff(config: DeploymentConfig, record: Deplo
   assertPreparedLayout(config, record);
   const previous = record.oldRuntime;
   if (!previous || record.quiesceHash) throw new DeploymentHeld("busy retry has no unconsumed native handoff");
-  const current = await captureRuntime(config, nativeCli(config), true);
+  const current = await captureRuntime(config, true);
   if (current.approvalPending || current.sessionFile !== previous.sessionFile)
     throw new DeploymentHeld("busy retry native approval or session changed");
   if (!sameProcess(previous, current)) {

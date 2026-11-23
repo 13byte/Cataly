@@ -10,7 +10,7 @@ import { leadAddress } from "../src/lead-ref.ts";
 import { Reports } from "../src/reports.ts";
 import { ChosenRuntimes } from "../src/run.ts";
 import { Worklog } from "../src/worklog.ts";
-import { depsFor, fakeClock, newWorld, withState } from "./fakes.ts";
+import { depsFor, fakeClock, newWorld, sid, withState } from "./fakes.ts";
 import { doctorCommand } from "./doctor-fixture.ts";
 
 test.skipIf(process.platform === "win32")(
@@ -46,7 +46,7 @@ test.skipIf(process.platform === "win32")(
         }
       }
       const rt = new LeadRuntime(state.dir);
-      const ref = await rt.create({ name: "lead", role: "lead", cwd: state.dir, container: "tab", env: {} });
+      const ref = await rt.create({ name: "lead", role: "lead", cwd: state.dir, env: {} });
       leadRef = ref;
       writeFileSync(join(state.dir, "roles.json"), JSON.stringify({ lead: `headless:${ref.id}` }));
       const legacy = join(state.dir, "legacy");
@@ -54,10 +54,8 @@ test.skipIf(process.platform === "win32")(
       const world = newWorld();
       const base = depsFor(world, fakeClock(now), state.dir, {
         sessionRuntime: "headless",
-        runtime: "hc",
         leadPane: "<your herdr pane id, from: herdr pane current>",
         sessionsDir: legacy,
-        workspaces: ["lanes"],
         agentCommand: doctorCommand(state.dir),
       });
       const deps = {
@@ -65,10 +63,7 @@ test.skipIf(process.platform === "win32")(
         env: { CATALY_HOME: state.dir },
         rts: new ChosenRuntimes(
           () => ({ kind: "headless", source: "default" }),
-          (kind) => {
-            if (kind !== "headless") throw new Error("terminal backend used in headless scope");
-            return rt;
-          },
+          () => rt,
         ),
       };
       const boot = await bootCheck({
@@ -84,7 +79,10 @@ test.skipIf(process.platform === "win32")(
       expect(doctor.exitCode).toBe(0);
       expect(doctor.findings).toContainEqual(expect.objectContaining({ check: "runtime", severity: "OK" }));
       expect(world.calls).toEqual([]);
-      expect(leadAddress({ ...deps.config, leadPane: "hc:t1" }, deps.env)).toEqual({ reason: "ambiguous" });
+      // An explicit lead that disagrees with the durable one is no address.
+      expect(leadAddress({ ...deps.config, leadPane: `headless:${sid(9)}` }, deps.env)).toEqual({
+        reason: "ambiguous",
+      });
       harnessRole = "duty";
       const wrongRole = await doctorCheck(deps);
       expect(wrongRole.findings).toContainEqual(expect.objectContaining({ check: "runtime", severity: "WARN" }));

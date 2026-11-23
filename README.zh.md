@@ -104,11 +104,21 @@ Cataly 使用你提供的账号和权限工作。对外部系统产生影响的�
 **注意**
 
 当前命令是 `cataly`、`cataly-harness` 和 `omp-cataly`（独立安装）。
-新安装默认使用 `~/.cataly` 或 `~/.omp-cataly`，默认运行时不需要终端后端。
+新安装默认使用 `~/.cataly` 或 `~/.omp-cataly`。Cataly 在 macOS 和 Linux 上默认以 headless OMP 运行；
+Tern 是可选的终端运行时。
 
 请[安装经过验证的当前发行版](docs/releases.md#install-a-current-release)，
-或[无需终端后端即可从 v0.1.3 升级](docs/releases.md#upgrade-a-v013-installation)。
+或[从 v0.1.3 升级](docs/releases.md#upgrade-a-v013-installation)。
 升级保留原安装目录和现有配置。
+
+此版本已移除 herdr 和 hc 终端运行时。仍在使用它们的安装目录会在安装和升级时停止，并显示：
+
+```text
+This Cataly home still uses the herdr/hc terminal runtime, which this version removed.
+1. Close every herdr/hc lane (`cataly status` lists them) with your previous Cataly version.
+2. Remove "runtime" (if it names herdr or hc) and "sessionRuntime" from <configPath>.
+3. Run this command again. Cataly state and OMP sessions are kept; lanes reopen on headless.
+```
 
 </td></tr></table>
 
@@ -123,9 +133,9 @@ Cataly 使用你提供的账号和权限工作。对外部系统产生影响的�
 
 ### 从源码开展工作
 
-请先安装 git 和 Bun 1.4.4+。Linux 和 macOS 的默认配置不需要 herdr 或 hc；详情见
+请先安装 git 和 Bun 1.4.4+（Linux 或 macOS），无需终端服务器；详情见
 [源码版前提条件](docs/releases.md#current-source-bundle)。
-源码 `main` 还提供第三种会话运行时 Tern；详见 [Tern](docs/runtime.md#tern)。
+Tern 是可选的终端运行时；详见 [Tern](docs/runtime.md#tern)。
 
 请使用独立的检出目录，不要使用正在运行的安装或已冻结的用户发行版：
 
@@ -148,7 +158,7 @@ CATALY_INSTALL_MODE=side CATALY_NO_PULL=1 CATALY_SRC="$PWD" bash scripts/install
 
 **重要**
 
-用户发行版的实现也支持隔离的 macOS arm64 / hc 配置，但须由经过验证的发行清单
+用户发行版的实现也支持隔离的 macOS arm64 headless 配置，但须由经过验证的发行清单
 明确声明。这并不表示 macOS 发行版已经发布。Slack 和 Telegram 仍是源码版功能。
 
 </td></tr></table>

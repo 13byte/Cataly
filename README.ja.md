@@ -111,11 +111,21 @@ Cataly は、ユーザーが提供するアカウントと権限で動作しま�
 
 現在のコマンドは `cataly`、`cataly-harness`、`omp-cataly`（分離インストール用）です。
 新規インストール先は `~/.cataly` または `~/.omp-cataly` です。
-既定のランタイムには端末バックエンドが不要です。
+Cataly は macOS と Linux で既定では headless OMP として動作します。Tern は任意の端末ランタイムです。
 
 [検証済みの現行リリースをインストール](docs/releases.md#install-a-current-release)するか、
-[端末バックエンドなしで v0.1.3 から更新](docs/releases.md#upgrade-a-v013-installation)してください。
+[v0.1.3 から更新](docs/releases.md#upgrade-a-v013-installation)してください。
 更新時は既存のインストール先と設定を保持します。
+
+このバージョンでは herdr と hc の端末ランタイムを削除しました。まだそれらを使うインストール先では、
+インストールと更新が次のメッセージで停止します。
+
+```text
+This Cataly home still uses the herdr/hc terminal runtime, which this version removed.
+1. Close every herdr/hc lane (`cataly status` lists them) with your previous Cataly version.
+2. Remove "runtime" (if it names herdr or hc) and "sessionRuntime" from <configPath>.
+3. Run this command again. Cataly state and OMP sessions are kept; lanes reopen on headless.
+```
 
 </td></tr></table>
 
@@ -132,9 +142,9 @@ Discord モニターを説明しています。特定のリリースを、任意
 
 ### ソースから作業する
 
-先に git と Bun 1.4.4+ をインストールしてください。Linux と macOS の標準構成では herdr も hc も不要です。
+先に git と Bun 1.4.4+ をインストールしてください（Linux または macOS）。端末サーバーは不要です。
 詳しくは[ソース版の前提条件](docs/releases.md#current-source-bundle)を参照してください。
-ソースの `main` では、3 つ目のセッションランタイムとして Tern も使えます。[Tern](docs/runtime.md#tern) を参照してください。
+任意の端末ランタイムとして Tern も使えます。[Tern](docs/runtime.md#tern) を参照してください。
 
 稼働中のインストールや固定された利用者向けリリースではなく、別のチェックアウトを使ってください。
 
@@ -159,7 +169,7 @@ CATALY_INSTALL_MODE=side CATALY_NO_PULL=1 CATALY_SRC="$PWD" bash scripts/install
 **重要**
 
 利用者向けの実装は、検証済みリリースマニフェストに明記されている場合、
-分離された macOS arm64 / hc プロファイルにも対応します。これは macOS リリースが
+分離された macOS arm64 の headless プロファイルにも対応します。これは macOS リリースが
 公開済みだという意味ではありません。Slack と Telegram は引き続きソース版の機能です。
 
 </td></tr></table>

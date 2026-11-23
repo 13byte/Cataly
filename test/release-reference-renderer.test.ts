@@ -197,37 +197,3 @@ console.log(JSON.stringify({ profile, home: process.env.DORI_HOME, state: proces
     });
   }
 });
-
-posix("side retirement dispatch retains both caller state roots for the stopped-runtime proof", () => {
-  const { root, paths } = fixture(true);
-  const source = join(root, "selected");
-  const skill = join(source, "skills/dori-mode");
-  const marker = join(source, "release-headless.json");
-  mkdirSync(join(skill, "scripts/src"), { recursive: true });
-  writeFileSync(join(skill, "SKILL.md"), "---\nname: dori-mode\ndescription: Fixture\n---\n");
-  writeFileSync(marker, "{}\n");
-  writeFileSync(
-    join(skill, "scripts/src/cli.ts"),
-    `import { assertStoppedRuntime } from ${JSON.stringify(resolve(import.meta.dir, "../src/release/live.ts"))};
-assertStoppedRuntime(${JSON.stringify(paths)});\n`,
-  );
-  symlinkSync(source, paths.live);
-  installIsolatedReferences(paths, source);
-  for (const [wrapper, stateKey] of [
-    ["cataly", "CATALY_STATE_DIR"],
-    ["omp-cataly", "DORI_STATE_DIR"],
-  ] as const) {
-    const runtime = join(root, stateKey, "runtime");
-    mkdirSync(runtime, { recursive: true });
-    writeFileSync(join(runtime, "active.json"), JSON.stringify({ role: "dori", pid: process.pid }));
-    const result = Bun.spawnSync(
-      [join(paths.cataly, "bin", wrapper), "update", "retire-legacy-roles", "--home", paths.cataly],
-      {
-        cwd: root,
-        env: { HOME: paths.home, PATH: process.env["PATH"], [stateKey]: stateKey },
-      },
-    );
-    expect(result.exitCode).not.toBe(0);
-    expect(result.stderr.toString()).toContain(`Live Cataly PID ${process.pid} holds release activation`);
-  }
-});

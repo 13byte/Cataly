@@ -75,9 +75,9 @@ it("replacement children resolve private Bun and OMP before installed Cataly whi
     expect(observed["result"]).toBe(56);
     expect(observed["tools"]).toEqual([16, 24]);
     expect(observed["home"]).toBe(config.home);
-    expect(observed["pane"]).toBe(config.pane);
-    expect(observed["workspace"]).toBe("w1");
-    expect(observed["namespace"]).toBe("owned-namespace");
+    expect(observed["pane"]).toBeUndefined();
+    expect(observed["workspace"]).toBeUndefined();
+    expect(observed["namespace"]).toBeUndefined();
     expect(observed["telemetry"]).toBe("0");
     expect(observed["tracking"]).toBe("1");
     expect(observed["leakedCapabilities"]).toEqual([]);

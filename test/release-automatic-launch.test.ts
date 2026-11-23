@@ -5,7 +5,6 @@ import { readArchive } from "../src/release/archive.ts";
 import { automaticLaunch, automaticUpdate } from "../src/release/automatic.ts";
 import { readAutomaticState } from "../src/release/automatic-state.ts";
 import type { VerifiedBundle } from "../src/release/bundle.ts";
-import { saveJson } from "../src/release/files.ts";
 import { installBundle } from "../src/release/install.ts";
 import { nativeDirectory } from "../src/release/native.ts";
 import { loadInstalled, releasePath } from "../src/release/state.ts";
@@ -22,12 +21,9 @@ posix("ordinary source directories are never enrolled or checked by the consumer
   expect(readAutomaticState(f.paths).nextCheck).toBe(0);
 });
 
-posix("a candidate without support for the configured host/runtime profile is never activated", async () => {
+posix("a historical terminal-only candidate is never activated", async () => {
   const f = fixture();
   const one = await installBundle(f.paths, f.release("one").bundle, undefined);
-  const config = JSON.parse(readFileSync(f.paths.config, "utf8"));
-  config.sessionRuntime = "headless";
-  saveJson(f.paths.config, config);
   const settings = readFileSync(f.paths.config);
   const pointer = readlinkSync(f.paths.live);
   const next = f.release("two").bundle;
@@ -40,7 +36,7 @@ posix("a candidate without support for the configured host/runtime profile is ne
   expect(readFileSync(f.paths.config)).toEqual(settings);
   expect(readAutomaticState(f.paths)).toMatchObject({
     outcome: "failed",
-    detail: expect.stringContaining("conflicts with preserved config runtime"),
+    detail: expect.stringContaining("/headless"),
   });
 });
 
@@ -214,7 +210,7 @@ posix(
     const settings = "modelRoles:\n  default: owner/model\ndefaultThinkingLevel: ultra\nupdate:\n  auto: false\n";
     const path = join(f.paths.dori, "omp.yml");
     writeFileSync(path, settings, { mode: 0o600 });
-    const candidate = f.release("two").bundle;
+    const candidate = boundRelease(f, "two").bundle;
     await automaticUpdate(f.paths, {
       now: 60,
       acquire: async () => ({ ...candidate, manifest: { ...candidate.manifest, prerelease: false } }),

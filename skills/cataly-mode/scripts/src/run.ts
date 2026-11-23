@@ -1,7 +1,5 @@
 import type { Exec } from "../../../../src/runtime/exec.ts";
-import { HcRuntime } from "../../../../src/runtime/hc/index.ts";
 import { HeadlessRuntime } from "../../../../src/runtime/headless.ts";
-import { HerdrRuntime } from "../../../../src/runtime/herdr/index.ts";
 import { ompStateDir } from "../../../../src/runtime/omp.ts";
 import { Runtimes } from "../../../../src/runtime/registry.ts";
 import { type RuntimeChoice, readRuntimeChoice } from "../../../../src/runtime/select.ts";
@@ -90,14 +88,15 @@ type Env = Readonly<Record<string, string | undefined>>;
 
 /**
  * The runtimes of one process plus the choice that picked the default kind (printed by `cataly boot`). A choice that
- * failed (no runtime detected, a bad CATALY_RUNTIME) is thrown only where a new session would open, `default`: stored
- * lanes (`for`) and the caller's own session (`selfAny`) still resolve.
+ * failed (no runtime detected, a legacy runtime setting, a bad CATALY_RUNTIME) is thrown only where a new session
+ * would open, `default`: stored lanes (`for`) and the caller's own session (`selfAny`) still resolve. `for` on a legacy
+ * herdr/hc ref throws the upgrade guidance naming `configFile`.
  */
 export class ChosenRuntimes extends Runtimes {
   readonly choice: RuntimeChoice | undefined;
   readonly failure: Error | undefined;
 
-  constructor(pick: () => RuntimeChoice, make: (kind: RuntimeKind) => SessionRuntime) {
+  constructor(pick: () => RuntimeChoice, make: (kind: RuntimeKind) => SessionRuntime, configFile?: string) {
     let choice: RuntimeChoice | undefined;
     let failure: Error | undefined;
     try {
@@ -105,10 +104,14 @@ export class ChosenRuntimes extends Runtimes {
     } catch (e) {
       failure = e instanceof Error ? e : new Error(String(e));
     }
-    super(() => {
-      if (!choice) throw failure;
-      return choice.kind;
-    }, make);
+    super(
+      () => {
+        if (!choice) throw failure;
+        return choice.kind;
+      },
+      make,
+      configFile,
+    );
     this.choice = choice;
     this.failure = failure;
   }
@@ -119,6 +122,7 @@ class ScopedRuntimes extends ChosenRuntimes {
   constructor(
     private readonly original: ChosenRuntimes,
     make: (kind: RuntimeKind) => SessionRuntime,
+    configFile: string,
   ) {
     super(
       () => {
@@ -129,6 +133,7 @@ class ScopedRuntimes extends ChosenRuntimes {
         original.for({ runtime: kind, id: "" });
         return make(kind);
       },
+      configFile,
     );
   }
 
@@ -138,8 +143,9 @@ class ScopedRuntimes extends ChosenRuntimes {
 }
 
 type RuntimeConfig = Pick<CatalyConfig, "runtime" | "sessionRuntime" | "stateDir">;
+const configFileOf = (env: Env): string => env["CATALY_CONFIG"] ?? configPath();
 export const runtimeChoice = (config: Partial<RuntimeConfig>, env: Env, terminalOnly = false): RuntimeChoice =>
-  readRuntimeChoice({ env, config, configPath: env["CATALY_CONFIG"] ?? configPath(), terminalOnly });
+  readRuntimeChoice({ env, config, configPath: configFileOf(env), terminalOnly });
 
 const runtimeFactory = (
   config: Partial<RuntimeConfig>,
@@ -153,9 +159,6 @@ const runtimeFactory = (
   };
   const options = { env, sleep: clock.sleep, ...(config.stateDir === undefined ? {} : { stateDir: config.stateDir }) };
   const make: Record<RuntimeKind, () => SessionRuntime> = {
-    // Explicit env owns absence too; undefined would invoke the constructor's process.env default.
-    herdr: () => new HerdrRuntime(exec, env["CATALY_HERDR_SESSION"] ?? "", options),
-    hc: () => new HcRuntime(exec, options),
     tern: () => new TernRuntime(exec, options),
     headless: () => new HeadlessRuntime(config.stateDir ?? ompStateDir(env), env),
   };
@@ -168,7 +171,8 @@ export const runtimesFor = (
   env: Env,
   runner: Runner = run,
   clock: Clock = realClock,
-): ChosenRuntimes => new ChosenRuntimes(() => runtimeChoice(config, env), runtimeFactory(config, env, runner, clock));
+): ChosenRuntimes =>
+  new ChosenRuntimes(() => runtimeChoice(config, env), runtimeFactory(config, env, runner, clock), configFileOf(env));
 
 const built = new WeakMap<object, ChosenRuntimes>();
 
@@ -190,5 +194,7 @@ export const runtimesOf = (
     rts = runtimesFor(deps.config, env, deps.run, deps.clock);
     built.set(deps, rts);
   }
-  return scopedRun ? new ScopedRuntimes(rts, runtimeFactory(deps.config, env, scopedRun, deps.clock)) : rts;
+  return scopedRun
+    ? new ScopedRuntimes(rts, runtimeFactory(deps.config, env, scopedRun, deps.clock), configFileOf(env))
+    : rts;
 };

@@ -8,14 +8,14 @@ test("allows only a real complete CI response bound to the tagged commit, workfl
   await expect(releaseGate(f.manifest, f.reads)).resolves.toBeUndefined();
 });
 
-test("release validation follows exactly the three automatic Linux CI jobs", async () => {
+test("release validation follows exactly the automatic Linux CI job", async () => {
   const workflow = Bun.YAML.parse(await Bun.file(new URL("../.github/workflows/ci.yml", import.meta.url)).text());
   if (!object(workflow) || !object(workflow["jobs"])) throw new Error("CI workflow jobs must be a mapping");
   const names = Object.keys(workflow["jobs"]);
-  expect(names).toEqual(["check", "e2e-herdr", "e2e-hc"]);
+  expect(names).toEqual(["check"]);
   const f = githubFixture(names);
   await expect(releaseGate(f.manifest, f.reads)).resolves.toBeUndefined();
-  // Each workflow job is required on its own: a CI attempt that reports the others but not this one is held.
+  // Each workflow job is required on its own: a CI attempt that does not report it is held.
   for (const name of names) {
     const g = githubFixture(names.filter((other) => other !== name));
     await expect(releaseGate(g.manifest, g.reads)).rejects.toThrow("missing or ambiguous");

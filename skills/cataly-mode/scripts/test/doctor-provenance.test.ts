@@ -3,7 +3,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { doctorCheck } from "../src/doctor.ts";
 import type { ModelReadback } from "../src/lane-state.ts";
-import { agentIn, depsFor, fakeClock, laneState, newWorld, withState } from "./fakes.ts";
+import { agentIn, laneState, ternDeps } from "./fake-tern-world.ts";
+import { fakeClock, newWorld, withState } from "./fakes.ts";
 
 const now = Date.parse("2026-01-01T12:00:00Z");
 const model = { provider: "openai-codex", id: "fixture-model" };
@@ -20,16 +21,15 @@ test("doctor reports native observations separately from configuration and never
   const state = withState();
   try {
     const world = newWorld();
-    const pane = "w1:p1";
-    world.panes = [{ pane_id: pane, workspace_id: "w1", agent: "omp", agent_status: "idle", cwd: "/repo" }];
+    const pane = "5001";
     agentIn(world, pane);
     laneState(state.dir, pane, { role: "cataly", ...{ modelReadback: readback } });
-    const deps = depsFor(world, fakeClock(now), state.dir, {
-      leadPane: pane,
+    const deps = ternDeps(world, fakeClock(now), state.dir, {
+      leadPane: `tern:${pane}`,
       sessionsDir: join(state.dir, "sessions"),
       defaultModel: "configured/other-model",
     });
-    const before = readFileSync(join(state.dir, "sessions", "w1%3Ap1.json"), "utf8");
+    const before = readFileSync(join(state.dir, "sessions", `${pane}.json`), "utf8");
     const result = await doctorCheck({ ...deps, env: { CATALY_DISCORD_TOKEN: "must-not-print-secret" } });
     expect(result.findings).toContainEqual(
       expect.objectContaining({ check: "source", detail: expect.stringContaining("nativeVersion=") }),
@@ -53,8 +53,8 @@ test("doctor reports native observations separately from configuration and never
     );
     expect(JSON.stringify(result)).not.toContain("must-not-print-secret");
     expect(JSON.stringify(result)).toContain("not spending authorization");
-    expect(readFileSync(join(state.dir, "sessions", "w1%3Ap1.json"), "utf8")).toBe(before);
-    expect(world.calls.every((argv) => argv[0] === "ps" || argv[0] === "herdr")).toBe(true);
+    expect(readFileSync(join(state.dir, "sessions", `${pane}.json`), "utf8")).toBe(before);
+    expect(world.calls.every((argv) => argv[0] === "ps" || argv[0] === "tern")).toBe(true);
   } finally {
     state.done();
   }
@@ -64,9 +64,9 @@ test("missing and untrusted native readbacks remain unknown, never configured-mo
   const state = withState();
   try {
     const world = newWorld();
-    const pane = "w1:p1";
-    const deps = depsFor(world, fakeClock(now), state.dir, {
-      leadPane: pane,
+    const pane = "5001";
+    const deps = ternDeps(world, fakeClock(now), state.dir, {
+      leadPane: `tern:${pane}`,
       sessionsDir: join(state.dir, "sessions"),
     });
     const absent = await doctorCheck(deps);
@@ -88,8 +88,7 @@ for (const status of ["mismatch", "unavailable", "unknown", "unrequested"] as co
     const state = withState();
     try {
       const world = newWorld();
-      const pane = "w1:p1";
-      world.panes = [{ pane_id: pane, workspace_id: "w1", agent: "omp", agent_status: "idle", cwd: "/repo" }];
+      const pane = "5001";
       agentIn(world, pane);
       laneState(state.dir, pane, {
         role: "cataly",
@@ -103,7 +102,10 @@ for (const status of ["mismatch", "unavailable", "unknown", "unrequested"] as co
         },
       });
       const result = await doctorCheck(
-        depsFor(world, fakeClock(now), state.dir, { leadPane: pane, sessionsDir: join(state.dir, "sessions") }),
+        ternDeps(world, fakeClock(now), state.dir, {
+          leadPane: `tern:${pane}`,
+          sessionsDir: join(state.dir, "sessions"),
+        }),
       );
       expect(result.findings).toContainEqual(
         expect.objectContaining({ check: "model", detail: expect.stringContaining(`status=${status}`) }),

@@ -32,7 +32,7 @@ test.each(["completed", "failed", "cancelled", "not-observed"] as const)(
     expect(f.reports.read(f.lane.key)?.state).toBe("blocked");
     expect(readFileSync(f.reports.path(f.lane.key), "utf8")).toBe(journal);
     expect(statusOf(await current())).toBe("working");
-    expect(f.world.calls.some((call) => call.includes("send-text") || call[0] === "gh")).toBe(false);
+    expect(f.world.calls.some((call) => (call[0] === "tern" && call[1] === "send") || call[0] === "gh")).toBe(false);
     // A delayed older running snapshot cannot resurrect a wait whose end was already noticed.
     f.observe({ running: [{ id: "bg_1", startTime: T0 }], recent: [] });
     await expect(f.report("job:bg_1")).rejects.toThrow("already ended");

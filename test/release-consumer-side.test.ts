@@ -89,9 +89,7 @@ posix("a side OMP launch bypasses foreign Dori wrappers and clears inherited har
     `#!${process.execPath}\nconsole.log(JSON.stringify({
     home: process.env.DORI_HOME, config: process.env.DORI_CONFIG, command: process.env.DORI_CMD,
     state: process.env.DORI_STATE_DIR, runtime: process.env.DORI_RUNTIME,
-    argv: process.env.DORI_AGENT_ARGV, ulw: process.env.DORI_OMP_ULW_PATH, startup: process.env.DORI_MANAGED_STARTUP,
-    hcSession: process.env.HC_SESSION, terminal: process.env.HC_TERMINAL_ID, socket: process.env.HC_SOCKET,
-    herdrSession: process.env.DORI_HERDR_SESSION, pane: process.env.HERDR_PANE_ID
+    argv: process.env.DORI_AGENT_ARGV, ulw: process.env.DORI_OMP_ULW_PATH, startup: process.env.DORI_MANAGED_STARTUP
   }));\n`,
     { mode: 0o755 },
   );
@@ -114,11 +112,6 @@ posix("a side OMP launch bypasses foreign Dori wrappers and clears inherited har
       DORI_AGENT_ARGV: '["/foreign/omp"]',
       DORI_OMP_ULW_PATH: "/foreign/ulw/index.ts",
       DORI_MANAGED_STARTUP: "1",
-      HC_SESSION: "primary-hc",
-      HC_TERMINAL_ID: "primary-terminal",
-      HC_SOCKET: "primary-socket",
-      DORI_HERDR_SESSION: "primary-herdr",
-      HERDR_PANE_ID: "primary-pane",
     },
   });
   expect(result.exitCode).toBe(0);
@@ -129,33 +122,11 @@ posix("a side OMP launch bypasses foreign Dori wrappers and clears inherited har
     config: f.paths.config,
     command: `'${join(f.paths.dori, "bin/dori-harness")}'`,
   });
-  expect(observed.hcSession).not.toBe("primary-hc");
-  expect(observed.herdrSession).not.toBe("primary-herdr");
   expect(observed.state).toBeUndefined();
   expect(observed.runtime).toBeUndefined();
   expect(observed.argv).toBeUndefined();
   expect(observed.ulw).toBeUndefined();
   expect(observed.startup).toBeUndefined();
-  expect(observed.terminal).toBeUndefined();
-  expect(observed.socket).toBeUndefined();
-  expect(observed.pane).toBeUndefined();
-  const own = Bun.spawnSync([join(f.paths.dori, "bin/omp"), "--version"], {
-    env: {
-      HOME: f.paths.home,
-      PATH: previous,
-      HC_SESSION: observed.hcSession,
-      HC_TERMINAL_ID: "own-terminal",
-      HC_SOCKET: "own-socket",
-      DORI_HERDR_SESSION: observed.herdrSession,
-      HERDR_PANE_ID: "own-pane",
-    },
-  });
-  expect(own.exitCode).toBe(0);
-  expect(JSON.parse(own.stdout.toString())).toMatchObject({
-    terminal: "own-terminal",
-    pane: "own-pane",
-    socket: "own-socket",
-  });
   writeFileSync(f.paths.config, "{}\n");
   expect(ompStateDir({ CATALY_HOME: f.paths.dori, CATALY_CONFIG: f.paths.config })).toBe(join(f.paths.dori, "state"));
 });

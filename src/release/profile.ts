@@ -1,87 +1,40 @@
-import { join } from "node:path";
 import { platform } from "../platform/index.ts";
-import { classifyOmpArgv } from "../runtime/omp-argv.ts";
-import { isSessionRuntime } from "../runtime/select.ts";
-import type { RuntimeKind } from "../runtime/types.ts";
 import { readSetupFile, type SetupSnapshot } from "../setup-files.ts";
 import { object } from "../update/config.ts";
-import { headlessReleaseProfiles, nativeMetadata, supportsReleaseProfile, terminalMetadata } from "./capabilities.ts";
+import { headlessReleaseProfiles, nativeMetadata } from "./capabilities.ts";
 import { controllerReads } from "./controller.ts";
 import type { ConsumerPaths } from "./files.ts";
+import { assertNoLegacyConfig } from "./legacy-runtime.ts";
 import type { ReleaseManifest } from "./types.ts";
 
 type ReleaseProfileBytes = (path: string) => Uint8Array | undefined;
 
-function optionalRuntime(value: unknown, label: string): RuntimeKind | undefined {
-  if (value === undefined) return undefined;
-  if (isSessionRuntime(value)) return value;
-  throw new Error(`${label} must be headless, hc or herdr`);
-}
-
-export function requestedReleaseRuntime(flag?: string): RuntimeKind | undefined {
-  return optionalRuntime(
-    flag ?? ((process.env["CATALY_RUNTIME"] ?? process.env["DORI_RUNTIME"]) || undefined),
-    flag === undefined ? "CATALY_RUNTIME" : "--runtime",
-  );
-}
-
-/** Select and verify against the target payload, not the update command's loaded (possibly legacy) release. */
-export function releaseTargetRuntime(
+/**
+ * Verify against the target payload, not the update command's loaded release: it must run headless on this host, and
+ * the preserved config must not still select herdr/hc (Tern stays). Historical terminal-only releases are refused.
+ */
+export function assertReleaseTarget(
   paths: ConsumerPaths,
   target: { readonly manifest: ReleaseManifest; readonly bytes: ReleaseProfileBytes },
-  options: { readonly snapshot: SetupSnapshot; readonly requested?: RuntimeKind },
-): RuntimeKind {
+  snapshot: SetupSnapshot,
+): void {
   const { manifest, bytes } = target;
-  const terminal = bytes(terminalMetadata);
-  const headless = headlessReleaseProfiles(manifest, bytes(nativeMetadata));
   const host = { platform: platform.os, arch: process.arch };
-  const legacy = { ...host, runtime: platform.legacyReleaseRuntime() };
-  const terminalSupported = supportsReleaseProfile(manifest, legacy, terminal);
-  if (paths.cataly !== join(paths.home, ".dori") && !terminal)
-    throw new Error("Legacy releases do not support isolated homes; keep them in the primary ~/.dori home");
-  const saved = readSetupFile(options.snapshot);
+  const saved = readSetupFile(snapshot);
   const config: unknown = saved === undefined ? {} : JSON.parse(saved.toString("utf8"));
   if (!object(config)) throw new Error("Preserved config must be an object");
-  const selected = optionalRuntime(config["sessionRuntime"], "Preserved config sessionRuntime");
-  const historical = config["runtime"];
-  if (historical !== undefined && historical !== "hc" && historical !== "herdr")
-    throw new Error("Preserved config runtime must be hc or herdr when present");
-  if (headless.length > 0) {
-    const runtime = options.requested ?? selected ?? "headless";
-    const supported =
-      runtime === "headless"
-        ? headless.some((profile) => profile.platform === host.platform && profile.arch === host.arch)
-        : runtime === legacy.runtime && terminalSupported;
-    if (supported) return runtime;
-    throw new Error(`Release ${manifest.tag} does not support ${host.platform}/${host.arch}/${runtime}`);
-  }
-  if (paths.layout !== "legacy")
-    throw new Error("A historical release requires its original consumer home and launcher layout");
-
-  // Older readers ignore sessionRuntime. Do not activate a target that cannot honor that explicit selection
-  // or one whose preserved runtime the older updater would refuse to read.
-  if (saved !== undefined && historical === undefined)
-    throw new Error('Preserved config must explicitly select runtime "hc" or "herdr" for a legacy release');
-  const runtime = options.requested ?? selected ?? historical ?? legacy.runtime;
-  if ((historical !== undefined && historical !== runtime) || (selected !== undefined && selected !== runtime))
-    throw new Error("Selected legacy runtime conflicts with preserved config runtime; leave the config intact");
-  const command = config["agentCommand"];
-  if (Array.isArray(command) && command.every((part) => typeof part === "string")) {
-    const parsed = classifyOmpArgv(command);
-    if (parsed.kind === "omp") {
-      for (const arg of parsed.command.slice(parsed.argsAt)) {
-        if (arg === "--") break;
-        if (arg === "--cataly-role" || arg.startsWith("--cataly-role="))
-          throw new Error("Historical release cannot use the preserved --cataly-role argument");
-      }
-    }
-  }
-  if (runtime !== legacy.runtime || !terminalSupported)
-    throw new Error(`Release ${manifest.tag} does not support ${host.platform}/${host.arch}/${runtime}`);
-  return runtime;
+  assertNoLegacyConfig(config, paths.config);
+  if (config["runtime"] !== undefined && config["runtime"] !== "tern")
+    throw new Error("Preserved config runtime must be tern when present");
+  const session = config["sessionRuntime"];
+  if (session !== undefined && session !== "headless" && session !== "tern")
+    throw new Error("Preserved config sessionRuntime must be headless or tern when present");
+  const profiles = headlessReleaseProfiles(manifest, bytes(nativeMetadata));
+  if (!profiles.some((profile) => profile.platform === host.platform && profile.arch === host.arch))
+    throw new Error(`Release ${manifest.tag} does not support ${host.platform}/${host.arch}/headless`);
 }
 
-/** Leaving the native protocol is intentional only through a verified, explicitly retained rollback. */
+/** A headless installation never returns to a release without the bound native protocol. */
 export function assertUpdateProtocol(current: ReleaseManifest | undefined, target: ReleaseManifest): void {
   if (current && !controllerReads(target, current))
     throw new Error(
@@ -92,5 +45,5 @@ export function assertUpdateProtocol(current: ReleaseManifest | undefined, targe
     (current?.source.files.some((entry) => entry.path === nativeMetadata) &&
       !target.source.files.some((entry) => entry.path === nativeMetadata))
   )
-    throw new Error("Install cannot downgrade the bound runtime protocol; use rollback with its required tools");
+    throw new Error("Install cannot downgrade the bound runtime protocol");
 }

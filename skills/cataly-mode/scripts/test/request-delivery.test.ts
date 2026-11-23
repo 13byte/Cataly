@@ -5,7 +5,7 @@ import { recordExecution, runContext } from "../src/lane-run.ts";
 import { recordSent } from "../src/owes.ts";
 import { type Lane, Registry } from "../src/registry.ts";
 import { Reports, reportId, reportLine } from "../src/reports.ts";
-import { depsFor, fakeClock, newWorld, withState } from "./fakes.ts";
+import { depsFor, fakeClock, nativeLane, newWorld, withState } from "./fakes.ts";
 import { withDiscordCli } from "./discord-fakes.ts";
 import {
   CURRENT_RUN,
@@ -184,7 +184,7 @@ test.each([
     const state = withState();
     try {
       const world = newWorld();
-      world.screen = "Working (1m)";
+      const live = nativeLane(world, 7, { status: "working", sessionId: "native-hook" });
       const deps = depsFor(world, fakeClock(T0 + 30 * MIN), state.dir, {
         hooks: { threadReply: ["notify", "{text}"] },
       });
@@ -192,7 +192,7 @@ test.each([
         key: "hook-lane",
         title: "hook",
         thread,
-        pane: "w:p7",
+        ...live,
         brief: "/b",
         done: "file /done",
         openedAt: new Date(T0).toISOString(),

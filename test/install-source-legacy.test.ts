@@ -5,8 +5,6 @@ import { git, posix, script, setup } from "./install-setup.ts";
 
 const cliProbe = `console.log(JSON.stringify({
   config: process.env.CATALY_CONFIG,
-  namespace: process.env.HC_SESSION,
-  space: process.env.CATALY_HC_SPACE,
   argv: process.argv.slice(2),
 }));\n`;
 const ownerConfig = '{"owner":"unrelated primary"}\n';
@@ -66,16 +64,12 @@ posix("historical installer selectors install a custom side home without pulling
     CATALY_OMP: undefined,
     OMP_CATALY_HOME: undefined,
     OMP_CATALY_BIN_DIR: undefined,
-    OMP_CATALY_HC_SESSION: undefined,
-    OMP_CATALY_HC_SPACE: undefined,
     DORI_INSTALL_MODE: "side",
     DORI_SRC: s.src,
     DORI_NO_PULL: "1",
     DORI_OMP: join(s.root, "bin/omp"),
     OMP_DORI_HOME: base,
     OMP_DORI_BIN_DIR: bin,
-    OMP_DORI_HC_SESSION: "archived-core",
-    OMP_DORI_HC_SPACE: "archived-space",
   });
 
   expect(installed.code, installed.err).toBe(0);
@@ -84,8 +78,6 @@ posix("historical installer selectors install a custom side home without pulling
   expect(launched.exitCode, launched.stderr.toString()).toBe(0);
   expect(JSON.parse(launched.stdout.toString())).toEqual({
     config: join(base, "config.json"),
-    namespace: "archived-core",
-    space: "archived-space",
     argv: ["probe"],
   });
   for (const primary of primaries) {
@@ -96,30 +88,23 @@ posix("historical installer selectors install a custom side home without pulling
   expect(existsSync(join(s.home, "extensions"))).toBe(false);
 });
 
-posix.each([
-  { saved: "old team 'session' $(literal)", explicit: undefined, expected: "old team 'session' $(literal)" },
-  { saved: "old wörkspace\t\n", explicit: undefined, expected: "old wörkspace\t\n" },
-  { saved: "old terminal core", explicit: "new terminal core", expected: "new terminal core" },
-])(
-  "a custom marked side home keeps its old commands and selects namespace $expected",
-  ({ saved, explicit, expected }) => {
-    const s = setup();
-    const base = join(s.home, "old side home");
-    const bin = join(s.home, "global-bin");
-    const sentinel = join(s.root, "old-env-ran");
-    const legacyDispatch = join(base, "bin/omp-dori");
-    const sideConfig = '{"owner":"side configuration"}\n';
-    mkdirSync(join(base, "bin"), { recursive: true });
-    mkdirSync(bin);
-    writeFileSync(join(base, ".omp-dori"), "side\n");
-    writeFileSync(join(base, "config.json"), sideConfig, { mode: 0o600 });
-    writeFileSync(join(s.src, s.cli), cliProbe);
-    writeFileSync(join(s.root, "bin/hc"), '#!/bin/sh\nprintf "%s" "$HC_SESSION"\n', { mode: 0o700 });
-    const previous = Bun.spawnSync(
-      [
-        "bash",
-        "-c",
-        `
+posix("a custom marked side home keeps its old commands without its old terminal namespace", () => {
+  const s = setup();
+  const base = join(s.home, "old side home");
+  const bin = join(s.home, "global-bin");
+  const sentinel = join(s.root, "old-env-ran");
+  const legacyDispatch = join(base, "bin/omp-dori");
+  const sideConfig = '{"owner":"side configuration"}\n';
+  mkdirSync(join(base, "bin"), { recursive: true });
+  mkdirSync(bin);
+  writeFileSync(join(base, ".omp-dori"), "side\n");
+  writeFileSync(join(base, "config.json"), sideConfig, { mode: 0o600 });
+  writeFileSync(join(s.src, s.cli), cliProbe);
+  const previous = Bun.spawnSync(
+    [
+      "bash",
+      "-c",
+      `
       printf 'export DORI_HOME=%q\\nexport DORI_CONFIG=%q\\nexport HC_SESSION=%q\\n' "$1" "$1/config.json" "$2" > "$1/env.sh"
       printf 'printf unsafe > %q\\n' "$3" >> "$1/env.sh"
       printf '#!/usr/bin/env bash\\nset -euo pipefail\\n. %q\\nexec %q %q "$@"\\n' "$1/env.sh" "$4" "$5" > "$1/bin/dori"
@@ -128,49 +113,40 @@ posix.each([
         "$1/bin/omp" "$1/bin/dori" >> "$1/bin/omp-dori"
       chmod 755 "$1/bin/dori" "$1/bin/omp-dori"
     `,
-        "previous-source-install",
-        base,
-        saved,
-        sentinel,
-        "/old installation/bin/bun",
-        join(s.src, "skills/dori-mode/scripts/src/cli.ts"),
-      ],
-      { env: s.env() },
-    );
-    expect(previous.exitCode, previous.stderr.toString()).toBe(0);
-    symlinkSync(legacyDispatch, join(bin, "omp-dori"));
+      "previous-source-install",
+      base,
+      "old terminal core",
+      sentinel,
+      "/old installation/bin/bun",
+      join(s.src, "skills/dori-mode/scripts/src/cli.ts"),
+    ],
+    { env: s.env() },
+  );
+  expect(previous.exitCode, previous.stderr.toString()).toBe(0);
+  symlinkSync(legacyDispatch, join(bin, "omp-dori"));
 
-    const installed = s.install({
-      CATALY_INSTALL_MODE: "", // The marker, not the conflicting historical mode, decides.
-      CATALY_NO_PULL: "1",
-      OMP_CATALY_HOME: base,
-      OMP_CATALY_HC_SESSION: explicit ?? "",
-      DORI_INSTALL_MODE: "primary",
-      OMP_DORI_HOME: join(s.home, "unused"),
-      OMP_DORI_HC_SESSION: "unused-legacy-value",
+  const installed = s.install({
+    CATALY_INSTALL_MODE: "", // The marker, not the conflicting historical mode, decides.
+    CATALY_NO_PULL: "1",
+    OMP_CATALY_HOME: base,
+    DORI_INSTALL_MODE: "primary",
+    OMP_DORI_HOME: join(s.home, "unused"),
+  });
+
+  expect(installed.code, installed.err).toBe(0);
+  expect(existsSync(sentinel)).toBe(false);
+  expect(readFileSync(join(base, "config.json"), "utf8")).toBe(sideConfig);
+  expect(readlinkSync(join(bin, "omp-dori"))).toBe(legacyDispatch);
+  const dispatchers = [join(bin, "omp-dori"), join(bin, "omp-cataly")];
+  for (const command of [join(base, "bin/dori"), ...dispatchers]) {
+    const launched = Bun.spawnSync([command, "hook", "literal ; $()"], { env: s.env() });
+    expect(launched.exitCode, launched.stderr.toString()).toBe(0);
+    expect(JSON.parse(launched.stdout.toString())).toEqual({
+      config: join(base, "config.json"),
+      argv: ["hook", "literal ; $()"],
     });
-
-    expect(installed.code, installed.err).toBe(0);
-    expect(existsSync(sentinel)).toBe(false);
-    expect(readFileSync(join(base, "config.json"), "utf8")).toBe(sideConfig);
-    expect(readlinkSync(join(bin, "omp-dori"))).toBe(legacyDispatch);
-    const dispatchers = [join(bin, "omp-dori"), join(bin, "omp-cataly")];
-    for (const command of [join(base, "bin/dori"), ...dispatchers]) {
-      const launched = Bun.spawnSync([command, "hook", "literal ; $()"], { env: s.env() });
-      expect(launched.exitCode, launched.stderr.toString()).toBe(0);
-      expect(JSON.parse(launched.stdout.toString())).toEqual({
-        config: join(base, "config.json"),
-        namespace: expected,
-        argv: ["hook", "literal ; $()"],
-      });
-    }
-    for (const command of dispatchers) {
-      const launched = Bun.spawnSync([command, "hc", "ls"], { env: s.env() });
-      expect(launched.exitCode, launched.stderr.toString()).toBe(0);
-      expect(launched.stdout.toString()).toBe(expected);
-    }
-  },
-);
+  }
+});
 
 posix.each(["primary", "side"] as const)("a legacy %s reinstall preserves unrelated old-name executables", (mode) => {
   const s = setup();

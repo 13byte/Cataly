@@ -1,6 +1,6 @@
 import type { Exec } from "../exec.ts";
-import { interactiveShellInFront } from "../foreground.ts";
-import { omoScreenIdle } from "../herdr/probe.ts";
+import { interactiveShellInFront } from "../terminal/foreground.ts";
+import { omoScreenIdle } from "../terminal/screen.ts";
 import { isOmpProcess, withOmpState } from "../omp.ts";
 import type { AgentStatus, ForegroundProcess, Probe } from "../types.ts";
 import { idOf, layout, type TernBlock } from "./blocks.ts";
@@ -21,7 +21,7 @@ function processOf(value: unknown): ForegroundProcess | undefined {
   const p = rec(value);
   const name = typeof p?.["name"] === "string" && p["name"] !== "" ? p["name"] : undefined;
   if (p === undefined || name === undefined) return undefined;
-  // As hc: a name-only hint holds delivery like any foreground, but is not bare-shell proof for close recovery.
+  // A name-only hint holds delivery like any foreground, but is not bare-shell proof for close recovery.
   const raw = p["argv"];
   const argv = Array.isArray(raw) ? raw.filter((arg): arg is string => typeof arg === "string") : [name];
   const pid = pidOf(p["pid"]);

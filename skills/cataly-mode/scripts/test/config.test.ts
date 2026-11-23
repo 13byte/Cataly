@@ -1,9 +1,11 @@
 import { afterEach, expect, test } from "bun:test";
 import { join } from "node:path";
 
+import { LegacyRuntimeError } from "../../../../src/runtime/registry.ts";
+
 import { ConfigError, fill, loadConfig } from "../src/config.ts";
 import { footer } from "../src/launch-footer.ts";
-import { withState } from "./fakes.ts";
+import { sid, withState } from "./fakes.ts";
 
 const state = withState();
 afterEach(() => {
@@ -24,7 +26,7 @@ test("OMP paths expand while explicit commands, models and environment overrides
       stateDir: "~/configured-state",
       sessionsDir: "~/custom-sessions",
       ompUlwPath: "~/extensions/ulw/index.ts",
-      leadPane: "w1:p1",
+      leadPane: `headless:${sid(1)}`,
       defaultModel: "provider/custom-model",
       agentCommand: ["custom-agent", "--model", "{model}", "{prompt}"],
       guard: { panesMax: 7 },
@@ -36,10 +38,10 @@ test("OMP paths expand while explicit commands, models and environment overrides
   try {
     process.env["CATALY_CONFIG"] = path;
     process.env["CATALY_STATE_DIR"] = state.dir;
-    process.env["CATALY_LEAD_PANE"] = "w2:p2";
+    process.env["CATALY_LEAD_PANE"] = `headless:${sid(2)}`;
     const c = await loadConfig(undefined, "/home/ana");
     expect(c.stateDir).toBe(state.dir);
-    expect(c.leadPane).toBe("w2:p2");
+    expect(c.leadPane).toBe(`headless:${sid(2)}`);
     // The expansion joins with the platform's separator, as the OS would.
     expect(c.sessionsDir).toBe(join("/home/ana", "custom-sessions"));
     expect(c.ompUlwPath).toBe(join("/home/ana", "extensions", "ulw", "index.ts"));
@@ -90,7 +92,9 @@ test("malformed repoIdentities entries are dropped, so launch still writes its f
     done: "merged acme/app#1",
     openedAt: "2026-01-01T00:00:00Z",
   };
-  expect(footer(lane, "w1:p1", c.repoIdentities)).toContain("  - acme/app: git -c user.name='Example Dev'");
+  expect(footer(lane, `headless:${sid(1)}`, c.repoIdentities)).toContain(
+    "  - acme/app: git -c user.name='Example Dev'",
+  );
   for (const value of [null, "acme", [good]]) {
     await Bun.write(path, JSON.stringify({ repoIdentities: value }));
     expect((await loadConfig(path, "/home/ana")).repoIdentities).toEqual({});
@@ -118,16 +122,39 @@ test("startupWaitSeconds is a nonnegative number of seconds; anything else falls
   }
 });
 
-test("runtime is herdr, hc, tern or absent; any other value stops the load with ConfigError", async () => {
+test("a herdr/hc runtime setting stops the load with the upgrade guidance; tern and headless still load", async () => {
   const path = join(state.dir, "config.json");
-  for (const value of ["herdr", "hc", "tern"] as const) {
-    await Bun.write(path, JSON.stringify({ runtime: value }));
-    expect((await loadConfig(path, "/home/ana")).runtime).toBe(value);
+  for (const legacy of [
+    { runtime: "herdr" },
+    { runtime: "hc" },
+    { sessionRuntime: "herdr" },
+    { sessionRuntime: "hc" },
+  ]) {
+    await Bun.write(path, JSON.stringify(legacy));
+    const error = await loadConfig(path, "/home/ana").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(LegacyRuntimeError);
+    expect((error as Error).message).toContain(
+      `Remove "runtime" (if it names herdr or hc) and "sessionRuntime" from ${path}.`,
+    );
   }
+  await Bun.write(path, JSON.stringify({ runtime: "tern", sessionRuntime: "tern", laneRuntime: "terminal" }));
+  const tern = await loadConfig(path, "/home/ana");
+  expect([tern.runtime, tern.sessionRuntime, tern.laneRuntime]).toEqual(["tern", "tern", "terminal"]);
+  await Bun.write(path, JSON.stringify({ sessionRuntime: "headless", laneRuntime: "headless" }));
+  expect((await loadConfig(path, "/home/ana")).sessionRuntime).toBe("headless");
   await Bun.write(path, JSON.stringify({}));
-  expect((await loadConfig(path, "/home/ana")).runtime).toBeUndefined();
-  for (const value of ["x", "HC", "", null, 1, ["hc"]]) {
-    await Bun.write(path, JSON.stringify({ runtime: value }));
+  const empty = await loadConfig(path, "/home/ana");
+  expect([empty.runtime, empty.sessionRuntime]).toEqual([undefined, undefined]);
+  for (const value of [
+    { runtime: "headless" },
+    { runtime: "x" },
+    { runtime: ["tern"] },
+    { sessionRuntime: "x" },
+    { sessionRuntime: "" },
+    { sessionRuntime: 1 },
+    { laneRuntime: "x" },
+  ]) {
+    await Bun.write(path, JSON.stringify(value));
     await expect(loadConfig(path, "/home/ana")).rejects.toBeInstanceOf(ConfigError);
   }
 });

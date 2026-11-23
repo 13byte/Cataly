@@ -1,6 +1,5 @@
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { retireLegacyRoles } from "./harness-legacy.ts";
 import {
   type Binding,
   checkRegistration,
@@ -9,7 +8,9 @@ import {
   runtimeAt,
   withHarnessLock,
 } from "./harness-native.ts";
+import { recordStoppedLead } from "./harness-native-resume.ts";
 import type { Deps } from "./harness.ts";
+import { retireTerminalRoles } from "./harness-terminal-roles.ts";
 import { nonEmpty, pendingLead } from "./inbox-files.ts";
 import { hasInboxForward } from "./inbox-forward.ts";
 import { inboxSealed, lockInboxFiles, lockRoute, sealNativeInbox } from "./inbox-spool.ts";
@@ -55,10 +56,10 @@ export async function stopNativeHarness(d: Deps): Promise<void> {
   await withHarnessLock(d, async () => {
     const state = nativeInventory(d);
     if (!state) {
-      const retired = await retireLegacyRoles(d);
+      const retired = await retireTerminalRoles(d);
       console.log(
         retired
-          ? `STOPPED retired ${retired} already-gone legacy role registration(s)`
+          ? `STOPPED retired ${retired} already-gone terminal role registration(s)`
           : "STOPPED no owned native harness",
       );
       return;
@@ -134,6 +135,13 @@ export async function stopNativeHarness(d: Deps): Promise<void> {
         checkRegistration(d, role, binding.ref);
         sealNativeInbox(root, binding.ref);
         await rt.stopHarnessRole(binding.ref, role, binding.sessionId ?? seen.get(role)?.sessionId);
+        // The next `up` resumes this lead only if its stop receipt closed exactly this session.
+        if (role === "lead")
+          recordStoppedLead(d, state.stateDir, {
+            ref: binding.ref,
+            sessionId: binding.sessionId ?? seen.get(role)?.sessionId,
+            sessionFile: binding.sessionFile ?? seen.get(role)?.sessionFile,
+          });
         d.store.clearRoles([[role, binding.ref]]);
         delete state.roles[role];
         writePrivate(inventoryPath(d), state);

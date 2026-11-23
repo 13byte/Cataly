@@ -16,7 +16,7 @@ import { freshnessTick } from "../src/freshness.ts";
 import { parseEvent, ReportError } from "../src/report-events.ts";
 import { Reports, reportLine } from "../src/reports.ts";
 import { statusOf, type Lane } from "../src/registry.ts";
-import { depsFor, fakeClock, newWorld, withState } from "./fakes.ts";
+import { depsFor, fakeClock, nativeLane, newWorld, sid, withState } from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00Z");
 
@@ -26,7 +26,6 @@ const lane: Lane = {
   key: "report-lane",
   title: "reports",
   thread: "chat:team/1",
-  pane: "w:p7",
   brief: "/b.md",
   done: "file /done.md",
   openedAt: new Date(T0).toISOString(),
@@ -111,12 +110,10 @@ test("a corrupt journal fails with its line number instead of hiding a lost repo
 test("one corrupt journal is reported once and does not stop the sweep for other lanes", async () => {
   // Given a lane with a corrupt journal and another lane that is silent past the nudge time.
   const world = newWorld();
-  world.panes = [{ pane_id: "w:p7", workspace_id: "w", agent: "pi", agent_status: "idle" }];
-  world.onEnterStatus = "working";
-  world.screen = "Working (1m)\n❯ ";
+  world.onDeliverStatus = "working";
   const deps = depsFor(world, fakeClock(T0 + 30 * MIN), state.dir);
-  await deps.registry.write({ ...lane, key: "bad-lane", pane: "w:p8" });
-  await deps.registry.write(lane);
+  await deps.registry.write({ ...lane, key: "bad-lane", ...nativeLane(world, 8) });
+  await deps.registry.write({ ...lane, ...nativeLane(world, 7) });
   await reports.report("bad-lane", "milestone", "first", T0);
   appendFileSync(reports.path("bad-lane"), "{partial\n");
   await reports.report(lane.key, "milestone", "started", T0);
@@ -128,7 +125,8 @@ test("one corrupt journal is reported once and does not stop the sweep for other
     `nudged ${lane.key}`,
   ]);
   expect(first.find((act) => act.kind === "journal-error")?.detail).toContain("reports.jsonl:2:");
-  expect(world.calls.filter((call) => call[2] === "send-text").map((call) => call[3])).toEqual(["w:p7"]);
+  const delivered = world.calls.filter((call) => call[0] === "headless" && call[1] === "deliver");
+  expect(delivered.map((call) => call[2])).toEqual([sid(7)]);
   expect((await freshnessTick(deps, "/home/test")).map((act) => act.kind)).toEqual([]);
 });
 
@@ -194,9 +192,9 @@ test("unchanged journal reads keep raw, legacy, and reopened progress separate",
 
 test("a quiet freshness tick reads the lane journal once and runs git status once", async () => {
   const world = newWorld();
-  world.screen = "Working (1m)\n❯ ";
   const deps = depsFor(world, fakeClock(T0 + MIN), state.dir);
-  await deps.registry.write({ ...lane, cwd: "/repo", lastReplyAt: T0 + MIN });
+  const native = nativeLane(world, 7, { status: "working" });
+  await deps.registry.write({ ...lane, ...native, cwd: "/repo", lastReplyAt: T0 + MIN });
   reports.report(lane.key, "milestone", "started", T0);
   await freshnessTick(deps, "/home/test");
   const reads = spyOn(fs, "readFileSync");

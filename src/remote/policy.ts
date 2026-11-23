@@ -13,8 +13,9 @@ import {
 import { join } from "node:path";
 import { object } from "./client.ts";
 
-type Policy = { readonly control: boolean; readonly wake: boolean };
-const disabled: Policy = { control: false, wake: false };
+/** Same-host wake of saved sessions. Files written while cross-machine control existed also hold a `control` key. */
+type Policy = { readonly wake: boolean };
+const disabled: Policy = { wake: false };
 const pathOf = (stateDir: string): string => join(stateDir, "remote-policy.json");
 
 export function remotePolicy(stateDir: string): Policy {
@@ -30,16 +31,17 @@ export function remotePolicy(stateDir: string): Policy {
     if (!stat.isFile() || stat.uid !== process.getuid?.() || (stat.mode & 0o077) !== 0 || stat.size > 4096)
       throw new Error("Remote policy must be an owner-only regular file");
     const value = object(JSON.parse(readFileSync(fd, "utf8")));
-    if (typeof value?.["control"] !== "boolean" || typeof value["wake"] !== "boolean")
+    const control = value?.["control"];
+    if (typeof value?.["wake"] !== "boolean" || (control !== undefined && typeof control !== "boolean"))
       throw new Error("Invalid remote policy; refusing remote access");
-    return { control: value["control"], wake: value["wake"] };
+    return { wake: value["wake"] };
   } finally {
     closeSync(fd);
   }
 }
 
-export function setRemotePolicy(stateDir: string, key: keyof Policy, enabled: boolean): Policy {
-  const updated = { ...remotePolicy(stateDir), [key]: enabled };
+export function setRemotePolicy(stateDir: string, enabled: boolean): Policy {
+  const updated = { ...remotePolicy(stateDir), wake: enabled };
   const path = pathOf(stateDir);
   const temporary = `${path}.${randomUUID()}`;
   mkdirSync(stateDir, { recursive: true, mode: 0o700 });

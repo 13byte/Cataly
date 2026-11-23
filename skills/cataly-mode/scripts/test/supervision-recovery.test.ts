@@ -5,7 +5,7 @@ import { fileEvidence } from "../src/evidence.ts";
 import { freshnessTick } from "../src/freshness.ts";
 import type { Runner } from "../src/run.ts";
 import { Supervision } from "../src/supervision.ts";
-import { depsFor, newWorld, type TestState, withState } from "./fakes.ts";
+import { depsFor, nativeLane, newWorld, type TestState, withState } from "./fakes.ts";
 import { coverageFixture, git, start } from "./supervision-coverage.fixture.ts";
 
 let state: TestState;
@@ -93,30 +93,6 @@ test("one unreadable file cannot starve the rest of its window or the final wind
   for (let window = 0; window < 4; window++) expect((await f.sweep()).result.hung).toBe(window === 3);
 }, 20_000);
 
-for (const screen of [">", "compaction failed\n>"]) {
-  test(`ordinary ${screen.includes("compaction") ? "compaction" : "idle"} stalls resume on Working and permit a later nudge and stall`, async () => {
-    const f = coverageFixture(state);
-    const world = newWorld();
-    world.panes.push({ pane_id: "w:p7", workspace_id: "w", agent: "pi", agent_status: "idle" });
-    world.onEnterStatus = "working";
-    const deps = depsFor(world, f.clock, state.dir, { supervision: { gitActivity: false } });
-    const lane = { ...f.lane, pane: "w:p7" };
-    await deps.registry.write(lane);
-    await f.reports.report(lane.key, "milestone", "started", start);
-    f.clock.at = start + 20 * 60_000;
-    world.screen = screen;
-    expect((await freshnessTick(deps, state.dir)).some((act) => act.kind === "stalled")).toBe(true);
-    f.clock.at += 60_000;
-    world.screen = "Working 1m";
-    const resumed = await freshnessTick(deps, state.dir);
-    expect(f.reports.read(lane.key)?.state).toBe("running");
-    expect(resumed).toContainEqual(expect.objectContaining({ kind: "nudged" }));
-    f.clock.at += 60_000;
-    world.screen = ">";
-    expect((await freshnessTick(deps, state.dir)).some((act) => act.kind === "stalled")).toBe(true);
-  }, 30_000);
-}
-
 test("fresh evidence resumes a confirmed stall even while usage remains unknown", async () => {
   const f = coverageFixture(state);
   await f.register();
@@ -144,15 +120,15 @@ test("fresh evidence resumes a confirmed stall even while usage remains unknown"
 test("normal partial coverage is not a recurring supervision error", async () => {
   const f = coverageFixture(state);
   const world = newWorld();
-  world.panes.push({ pane_id: "w:p7", workspace_id: "w", agent: "omp", agent_status: "working" });
+  // One continuing native call that started 21 minutes before the first tick.
+  const native = nativeLane(world, 7, { status: "working", activeSince: start - 21 * 60_000 });
   const deps = depsFor(world, f.clock, state.dir, { supervision: { hungAfterMinutes: 1_000 } });
-  const lane = { ...f.lane, pane: "w:p7" };
+  const lane = { ...f.lane, ...native };
   await deps.registry.write(lane);
   await f.reports.report(lane.key, "milestone", "started", start);
   const run: Runner = (argv, options) => (argv[0] === "git" ? git(argv, options) : deps.run(argv, options));
   for (let turn = 0; turn < 8; turn++) {
     f.clock.at = start + turn * 60_000;
-    world.screen = `Working ${21 + turn}m`;
     expect((await freshnessTick({ ...deps, run }, state.dir)).some((act) => act.kind === "supervision-error")).toBe(
       false,
     );

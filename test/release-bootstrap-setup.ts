@@ -11,8 +11,8 @@ afterEach(() => {
 });
 
 const digest = (data: string | Buffer) => createHash("sha256").update(data).digest("hex");
-export const linux = { platform: "linux", arch: "x64", runtime: "herdr" } as const;
-export const darwin = { platform: "darwin", arch: "arm64", runtime: "hc" } as const;
+export const linux = { platform: "linux", arch: "x64", runtime: "headless" } as const;
+export const darwin = { platform: "darwin", arch: "arm64", runtime: "headless" } as const;
 
 export function fixture(profile: typeof linux | typeof darwin) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "dori-bootstrap-")));
@@ -30,34 +30,14 @@ export function fixture(profile: typeof linux | typeof darwin) {
 { printf '%s\\n' 'Object.defineProperty(process, "platform", {value: "${profile.platform}"}); Object.defineProperty(process, "arch", {value: "${profile.arch}"}); Object.defineProperty(Bun, "version", {value: "1.4.4"});'; cat; } | "${process.execPath}" "$@"
 `,
   );
-  executable("omp", "#!/bin/sh\necho 18.18.8\n");
   executable("git", "#!/bin/sh\nexit 0\n");
-  executable("herdr", "#!/bin/sh\nexit 0\n");
-  executable("hc", "#!/bin/sh\nexit 0\n");
+  // The verified release CLI install.sh forwards to; it records its strict arguments and environment.
   const cli = `import { writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
-const args = parseArgs({ args: process.argv.slice(3), options: { from: { type: "string" }, version: { type: "string" }, home: { type: "string" }, runtime: { type: "string" }, "legacy-session": { type: "string" }, "legacy-migrated-session": { type: "string" } } });
-if (process.argv[2] === "retire-legacy-roles") {
-  writeFileSync(process.env.BOOTSTRAP_RESULT, JSON.stringify({
-    command: process.argv[2], ...args.values, historicalState: process.env.DORI_STATE_DIR,
-  }));
-  process.exit(0);
-}
-writeFileSync(process.env.BOOTSTRAP_RESULT, JSON.stringify({ home: args.values.home, runtime: args.values.runtime,
+const args = parseArgs({ args: process.argv.slice(3), strict: true, options: { from: { type: "string" }, version: { type: "string" }, home: { type: "string" } } });
+writeFileSync(process.env.BOOTSTRAP_RESULT, JSON.stringify({ command: process.argv[2], home: args.values.home,
   env: { home: process.env.CATALY_HOME ?? process.env.DORI_HOME, config: process.env.CATALY_CONFIG ?? process.env.DORI_CONFIG, state: process.env.DORI_STATE_DIR ?? null,
-    runtime: process.env.DORI_RUNTIME ?? null, cmd: process.env.DORI_CMD ?? null, agent: process.env.DORI_AGENT_CMD ?? null,
-    argv: process.env.DORI_AGENT_ARGV ?? null, ulw: process.env.DORI_OMP_ULW_PATH ?? null, startup: process.env.DORI_MANAGED_STARTUP ?? null } }));
-`;
-  const legacyCli = `import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { parseArgs } from "node:util";
-parseArgs({ args: process.argv.slice(3), strict: true, options: { from: { type: "string" }, version: { type: "string" } } });
-const home = join(process.env.HOME, ".dori");
-mkdirSync(home, { recursive: true });
-writeFileSync(join(home, "legacy-installed"), "installed");
-writeFileSync(process.env.BOOTSTRAP_RESULT, JSON.stringify({ home, runtime: "herdr",
-  env: { home: process.env.CATALY_HOME ?? process.env.DORI_HOME, config: process.env.CATALY_CONFIG ?? process.env.DORI_CONFIG, state: process.env.DORI_STATE_DIR ?? null,
-    runtime: process.env.DORI_RUNTIME ?? null, cmd: process.env.DORI_CMD ?? null, agent: process.env.DORI_AGENT_CMD ?? null,
+    runtime: process.env.CATALY_RUNTIME ?? process.env.DORI_RUNTIME ?? null, cmd: process.env.DORI_CMD ?? null, agent: process.env.DORI_AGENT_CMD ?? null,
     argv: process.env.DORI_AGENT_ARGV ?? null, ulw: process.env.DORI_OMP_ULW_PATH ?? null, startup: process.env.DORI_MANAGED_STARTUP ?? null } }));
 `;
   const base = {
@@ -69,21 +49,16 @@ writeFileSync(process.env.BOOTSTRAP_RESULT, JSON.stringify({ home, runtime: "her
     tree: "b".repeat(40),
     prerelease: false,
   };
-  const assets = (capabilities?: unknown, headless?: unknown, omp = headless === undefined ? "18.18.8" : "18.20.0") => {
-    const payload = capabilities === undefined ? undefined : JSON.stringify(capabilities);
+  /** `headless` undefined builds a historical terminal-only release, which this installer refuses. */
+  const assets = (headless?: unknown, omp = headless === undefined ? "18.18.8" : "18.20.0") => {
     const native = headless === undefined ? undefined : JSON.stringify(headless);
-    const consumer = payload === undefined ? legacyCli : cli;
     const files = [
-      ...(payload === undefined
-        ? []
-        : [{ path: "release-capabilities.json", sha256: digest(payload), executable: false }]),
       ...(native === undefined ? [] : [{ path: "release-headless.json", sha256: digest(native), executable: false }]),
-      { path: "src/release/cli.ts", sha256: digest(consumer), executable: false },
+      { path: "src/release/cli.ts", sha256: digest(cli), executable: false },
     ];
     const bytes = archive([
-      ...(payload === undefined ? [] : [{ name: "omp-dori-1.2.3/release-capabilities.json", bytes: payload }]),
       ...(native === undefined ? [] : [{ name: "omp-dori-1.2.3/release-headless.json", bytes: native }]),
-      { name: "omp-dori-1.2.3/src/release/cli.ts", bytes: consumer },
+      { name: "omp-dori-1.2.3/src/release/cli.ts", bytes: cli },
     ]);
     const name = "omp-dori-v1.2.3.tar.gz";
     const metadata = JSON.stringify({
@@ -111,9 +86,9 @@ writeFileSync(process.env.BOOTSTRAP_RESULT, JSON.stringify({ home, runtime: "her
       stderr: "pipe",
     });
   const selected = () => JSON.parse(readFileSync(result, "utf8"));
-  const expected = (home: string, runtime: string) => ({
+  const expected = (home: string) => ({
+    command: "install",
     home,
-    runtime,
     env: {
       home,
       config: join(home, "config.json"),

@@ -4,27 +4,27 @@ import type { FlowDeps } from "../src/done-flow.ts";
 import { freshnessTick } from "../src/freshness.ts";
 import type { Lane } from "../src/registry.ts";
 import { Reports } from "../src/reports.ts";
-import { depsFor, fakeClock, newWorld, type TestState, withState, type World } from "./fakes.ts";
+import { depsFor, fakeClock, nativeLane, newWorld, type TestState, withState, type World } from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00.000Z");
 const MIN = 60_000;
-const lane: Lane = {
-  key: "post-lane",
-  title: "post",
-  thread: "telegram:1/2",
-  pane: "w:p1",
-  brief: "/b.md",
-  done: "closed acme/app#1",
-  openedAt: new Date(T0).toISOString(),
-  reportProtocol: "jsonl-v1",
-};
+let lane: Lane;
 
 let state: TestState;
 let world: World;
 beforeEach(() => {
   state = withState();
   world = newWorld();
-  world.panes = [{ pane_id: "w:p1", workspace_id: "w", agent: "pi", agent_status: "idle" }];
+  lane = {
+    key: "post-lane",
+    title: "post",
+    thread: "telegram:1/2",
+    ...nativeLane(world, 1),
+    brief: "/b.md",
+    done: "closed acme/app#1",
+    openedAt: new Date(T0).toISOString(),
+    reportProtocol: "jsonl-v1",
+  };
 });
 afterEach(() => state.done());
 

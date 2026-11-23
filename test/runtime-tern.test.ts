@@ -225,14 +225,14 @@ describe("list, close, self", () => {
     ]);
   });
 
-  test("self is TERN_PANE; registry selfAny reaches it only when no hc or herdr variable is set", () => {
+  test("self is TERN_PANE; registry selfAny reaches it unless a native lane ID is set, ignoring old herdr/hc ids", () => {
     expect(rig({}, { env: { TERN_PANE: "5001" } }).rt.self()).toEqual(B1);
-    expect(rig({}, { env: { TERN_PANE: "x1" } }).rt.self()).toBeUndefined();
-    expect(rig().rt.self()).toBeUndefined();
+    expect(rig({}, { env: { TERN_PANE: "x1" } }).rt.self() ?? rig().rt.self()).toBeUndefined();
     const rts = new Runtimes("tern", () => rig().rt);
-    expect(rts.selfAny({ TERN_PANE: "5001" })).toEqual(B1);
-    expect(rts.selfAny({ TERN_PANE: "5001", HC_TERMINAL_ID: "t3" })).toEqual({ runtime: "hc", id: "t3" });
-    expect(rts.selfAny({ TERN_PANE: "5001", HERDR_PANE_ID: "w1:p3" })?.runtime).toBe("herdr");
+    expect(rts.selfAny({ TERN_PANE: "5001", HC_TERMINAL_ID: "t3", HERDR_PANE_ID: "w1:p3" })).toEqual(B1);
+    expect(rts.selfAny({ HC_TERMINAL_ID: "t3", HERDR_PANE_ID: "w1:p3" })).toBeUndefined();
+    const native = "00000000-0000-4000-8000-000000000001";
+    expect(rts.selfAny({ TERN_PANE: "5001", CATALY_HEADLESS_ID: native })).toEqual({ runtime: "headless", id: native });
   });
 
   test("kind is tern; refs: tern:<digits> parses, a bare number is not a ref", () => {

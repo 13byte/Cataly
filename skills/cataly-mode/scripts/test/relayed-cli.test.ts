@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { freshnessTick } from "../src/freshness.ts";
 import { Reports, reportId } from "../src/reports.ts";
-import { depsFor, fakeClock, newWorld, withState } from "./fakes.ts";
+import { depsFor, fakeClock, nativeLane, newWorld, withState } from "./fakes.ts";
 
 const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 
@@ -11,7 +11,7 @@ test("report --owner --json and relayed bind the exact report across CLI process
   const state = withState();
   try {
     const world = newWorld();
-    world.screen = "Working (1m)";
+    const live = nativeLane(world, 7, { status: "working" });
     const now = Date.now();
     const clock = fakeClock(now + 60 * 60_000);
     const deps = depsFor(world, clock, state.dir, {
@@ -22,7 +22,7 @@ test("report --owner --json and relayed bind the exact report across CLI process
       key: "relay-lane",
       title: "relay",
       thread: "discord:123",
-      pane: "w:p7",
+      ...live,
       brief: "/b",
       done: "file /done",
       openedAt: new Date(now - 60_000).toISOString(),
