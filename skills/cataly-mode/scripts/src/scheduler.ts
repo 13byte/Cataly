@@ -72,7 +72,7 @@ export class Scheduler {
           job.paused = true; // Consume the one-shot atomically before spawning or skipping it.
           if (job.at <= now - 60_000 || job.last) {
             job.missed++;
-            return;
+            return { missedOneShot: { name: job.name, at: job.at, observedAt: now, missed: job.missed } };
           }
           job.last = { id: randomUUID(), at: job.at, startedAt: now, status: "running", delivery: "pending" };
           return structuredClone(job);
@@ -101,6 +101,12 @@ export class Scheduler {
         return structuredClone(job);
       });
       if (!claimed) continue;
+      if ("missedOneShot" in claimed) {
+        await this.emit(
+          "SCHEDULE_ERROR " + JSON.stringify({ ...claimed.missedOneShot, reason: "one-shot missed", retried: false }),
+        );
+        continue;
+      }
       const task = this.execute(claimed).catch((error: unknown) => {
         this.#failure ??= error;
       });

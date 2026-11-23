@@ -29,7 +29,7 @@ function invoke(...args: string[]) {
 }
 
 test("public CLI preserves offset instant, claims once and reports no next occurrence", () => {
-  const future = new Date(Date.now() + 3_600_000).toISOString();
+  const future = new Date(Date.now() + 3_600_000 + 9 * 3_600_000).toISOString().replace("Z", "+09:00");
   const added = invoke(
     "schedule",
     "add",
@@ -72,4 +72,8 @@ test.each(
   const result = invoke("schedule", "add", "bad", ...flags, "--", "false");
   expect(result.code).toBe(1);
   expect(JSON.parse(invoke("schedule", "list").out).jobs).toEqual([]);
+});
+
+test("missing trigger names both supported alternatives", () => {
+  expect(invoke("schedule", "add", "bad", "--", "false").err).toContain("--at ISO_INSTANT or --cron");
 });

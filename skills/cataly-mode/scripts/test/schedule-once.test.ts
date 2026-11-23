@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ScheduleStore } from "../src/schedule-store.ts";
 import { Scheduler } from "../src/scheduler.ts";
+import { scheduleView, scheduleBoot } from "../src/schedule-view.ts";
 import { scheduleAt } from "../src/schedule-types.ts";
 
 let dir: string;
@@ -26,8 +27,12 @@ const input = () => ({
   cwd: dir,
   deliver: "log" as const,
 });
-async function start(clock = now) {
-  runner = new Scheduler(store, () => clock);
+async function start(clock = now, lines: string[] = []) {
+  runner = new Scheduler(
+    store,
+    () => clock,
+    (line) => lines.push(line),
+  );
   await runner.open();
   return runner;
 }
@@ -53,11 +58,15 @@ test("one-shot claims are durable, execute once and cannot be resumed after rest
 
 test("stale one-shots are counted once and never replayed", async () => {
   await store.add(input(), now - 1);
-  const clock = await start(now + 60_000);
+  const lines: string[] = [];
+  const clock = await start(now + 60_000, lines);
   await clock.tick();
   await clock.tick();
   expect(store.read().jobs[0]).toMatchObject({ paused: true, missed: 1 });
   expect(store.read().jobs[0]?.last).toBeUndefined();
+  expect(lines).toHaveLength(1);
+  expect(lines[0]).toContain("SCHEDULE_ERROR");
+  expect(lines[0]).toContain("one-shot missed");
   await expect(store.pause("once", false, now + 60_000)).rejects.toThrow("consumed");
 });
 
@@ -105,4 +114,42 @@ test("interrupted one-shot claims never replay even with acknowledgement", async
   await clock.tick();
   expect(store.read().jobs[0]).toMatchObject({ paused: true, last: { status: "interrupted", delivery: "unknown" } });
   await expect(store.pause("once", false, now, true)).rejects.toThrow("consumed");
+});
+
+test("59-second-late one-shots still run and expose a completed state", async () => {
+  await store.add(input(), now - 1);
+  const clock = await start(now + 59_999);
+  await clock.tick();
+  await clock.settle();
+  const run = async () => ({ code: 0, out: "", err: "" });
+  expect((await scheduleView(store, run, now)).jobs[0]).toMatchObject({ state: "completed", next: null });
+  expect((await scheduleBoot(dir, run, now)).lines[0]).toContain("state=completed");
+  expect(readFileSync(join(dir, "runs"), "utf8")).toBe("x");
+});
+
+test("missed and user-paused one-shots have different visible states", async () => {
+  await store.add(input(), now - 1);
+  const run = async () => ({ code: 0, out: "", err: "" });
+  await store.pause("once", true, now - 1);
+  expect((await scheduleView(store, run, now)).jobs[0]?.state).toBe("paused");
+  await store.pause("once", false, now - 1);
+  const clock = await start(now + 60_000);
+  await clock.tick();
+  expect((await scheduleView(store, run, now)).jobs[0]?.state).toBe("missed");
+  await store.remove("once");
+  expect(store.read().jobs).toEqual([]);
+});
+
+test.each([
+  { argv: [process.execPath, "-e", "process.exit(7)"], code: 7 },
+  { argv: ["/missing/cataly-command"], code: 127 },
+])("one-shot command failures remain consumed: %j", async ({ argv, code }) => {
+  await store.add({ ...input(), argv: [...argv] }, now - 1);
+  const clock = await start();
+  await clock.tick();
+  await clock.settle();
+  await clock.tick();
+  expect(store.read().jobs[0]).toMatchObject({ paused: true, last: { code, status: "exited" } });
+  const run = async () => ({ code: 0, out: "", err: "" });
+  expect((await scheduleView(store, run, now)).jobs[0]?.state).toBe("failed");
 });

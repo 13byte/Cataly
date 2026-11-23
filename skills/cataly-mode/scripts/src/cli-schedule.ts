@@ -24,6 +24,7 @@ const schedule: Command = async ({ key, positionals, rest, need, opt, values, co
     const at = opt("at");
     if (at !== undefined && (opt("cron") !== undefined || opt("tz") !== undefined))
       die("--at cannot be combined with --cron or --tz");
+    if (at === undefined && !opt("cron")) die("schedule add needs --at ISO_INSTANT or --cron EXPR --tz IANA");
     const trigger = at === undefined ? { cron: need("cron"), tz: need("tz") } : { at: scheduleAt(at) };
     const job = await store.add(
       {
