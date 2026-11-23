@@ -20,12 +20,7 @@ import { HeadlessRuntime } from "./runtime/headless.ts";
 import { openSession } from "./runtime/types.ts";
 import { sameLaneRegistration } from "./store-lanes.ts";
 import { KEY_RE, reservedKey, type Lane } from "./store-types.ts";
-/**
- * The lead's `evidence:` line: each reference is the lane's own input, so a line break or escape in it stays out; the
- * spaces inside one stay, so it names the file the lane gave.
- */
 const evidenceLine = (evidence: readonly string[]): string => `evidence: ${evidence.map(oneName).join(" ")}`;
-/** Activation succeeded; only the lead's notification failed. */
 export class LaneStartNoticeFailure extends Refusal {
   constructor(
     readonly lane: Lane,
@@ -120,7 +115,6 @@ function openLane(lane: Lane | undefined, key: string): Lane {
   if (lane.status === "done" || lane.status === "lost") throw new Refusal(`lane ${key} is ${lane.status}`);
   return lane;
 }
-/** Sets an open lane's priority (1 first, 9 last); the next lock it waits for queues it by that. */
 export function setPriority(d: Deps, key: string, priority: number): Lane {
   return d.store.updateLane(key, (current) => {
     const lane = openLane(current, key);
@@ -128,12 +122,6 @@ export function setPriority(d: Deps, key: string, priority: number): Lane {
     return lane;
   });
 }
-/**
- * Logs a lane's report and tells the lead. Only new evidence moves the progress clock and clears the nudge count; the
- * returned lines say whether it did. `sent` is the delivery to the lead. `--status waiting` records what the lane waits
- * on (`waitingFor`; else the target it already named; else the blocker in the text) and since when; `--status working`
- * clears both.
- */
 export async function report(
   d: Deps,
   key: string,
