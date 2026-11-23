@@ -97,8 +97,9 @@ async function fixture(options?: { role?: "cataly" | "lane"; mode?: string; sub?
     isIdle: () => state.idle,
     hasPendingMessages: () => state.pending,
     getAsyncJobSnapshot: () => ({
-      running: state.job ? [{}] : [],
-      delivery: { queued: 0, delivering: false },
+      running: state.job ? [{ id: "busy", startTime: 1, status: "running" as const, type: "bash", label: "busy" }] : [],
+      recent: [],
+      delivery: { queued: 0, delivering: false, pendingJobIds: [] },
     }),
   });
   fake.api.setModel = async (model) => {
@@ -315,6 +316,7 @@ unixSocketTest("native send preserves input and exposes idempotent receipts, not
     calls.push({ text, options });
     throw new Error("private native rejection");
   };
+  await fake.emit("tool_approval_resolved", { toolCallId: "foreign", sessionId: "different" });
   const steer = { id: "steer", text: "operator steering", steer: true };
   await ask("send", steer);
   expect(calls.at(-1)).toEqual({ text: steer.text, options: { deliverAs: "steer" } });

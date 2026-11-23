@@ -1,6 +1,8 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import type { NativeObservation } from "../../../../src/native-observation.ts";
+
 /**
  * Per-pane state written by the omp-cataly extension from inside a Cataly or lane session and read by the `cataly` CLI.
  * omp exposes no session id in argv or the environment and no goal readback on screen that cataly can trust, so the
@@ -40,6 +42,8 @@ export type PaneState = {
   readonly agentStatus?: "idle" | "working";
   /** Native catalog and selected-model agreement, never billing authorization or a quota balance. */
   readonly modelReadback?: ModelReadback;
+  /** The main session's async jobs and the open approvals as last observed (src/native-observation.ts); absent in older records. */
+  readonly native?: NativeObservation;
 };
 
 /** The native catalog distinguishes literal colon-tagged ids from thinking suffixes. */
