@@ -40,14 +40,10 @@ export function validateCondition(condition: unknown, watch: unknown): void {
       (!Number.isSafeInteger(watch["lastCheckedAt"]) || Number(watch["lastCheckedAt"]) < 0)) ||
     (watch["lastFiredRunId"] !== undefined &&
       (typeof watch["lastFiredRunId"] !== "string" ||
-        !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(watch["lastFiredRunId"])))
-  )
-    bad();
-  if (
-    object(watch, "armed lastOk lastDigest lastCheckedAt lastFiredRunId diagnosticRunId consecutiveErrors") &&
-    watch["diagnosticRunId"] !== undefined &&
-    (typeof watch["diagnosticRunId"] !== "string" ||
-      !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(watch["diagnosticRunId"]))
+        !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(watch["lastFiredRunId"]))) ||
+    (watch["diagnosticRunId"] !== undefined &&
+      (typeof watch["diagnosticRunId"] !== "string" ||
+        !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(watch["diagnosticRunId"])))
   )
     bad();
 }
