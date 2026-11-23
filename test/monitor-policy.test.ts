@@ -80,7 +80,9 @@ test("retry counters cannot roll back and exhaustion cannot stop another generat
   expect(recordedMonitors([start, entry({ op: "start", ...spec, id: "second" }), exhausted]).size).toBe(1);
 });
 
-test.each([1, 2, 3])("new monitor policies require metadata version three, not %s", (version) => {
+// The managed deployment reader enforces POSIX ownership and mode bits; on Windows trusted reads always hold.
+const posix = test.skipIf(process.platform === "win32");
+posix.each([1, 2, 3])("new monitor policies require metadata version three, not %s", (version) => {
   const root = mkdtempSync(join(tmpdir(), "cataly-daemon-policy-"));
   const path = join(root, "owner.json");
   try {
