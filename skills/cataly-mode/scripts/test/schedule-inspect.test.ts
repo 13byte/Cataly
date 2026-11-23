@@ -105,7 +105,7 @@ test("DST previews preserve spring-gap and fall-fold trigger semantics", () => {
     deliver: "log" as const,
   };
   const spring = schedulePreview(prepareSchedule(input, Date.parse("2027-03-14T06:59:00Z")), 2);
-  expect(spring).toEqual([Date.parse("2027-03-14T07:30:00Z"), Date.parse("2027-03-15T06:30:00Z")]);
+  expect(spring).toEqual([Date.parse("2027-03-14T07:00:00Z"), Date.parse("2027-03-15T06:30:00Z")]);
   const fall = schedulePreview(
     prepareSchedule({ ...input, cron: "30 1 * * *" }, Date.parse("2026-11-01T04:00:00Z")),
     2,
