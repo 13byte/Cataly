@@ -68,7 +68,16 @@ export class Scheduler {
         const now = this.now();
         const job = document.jobs.find((entry) => entry.id === seen.id);
         if (this.#stop.signal.aborted || !job || job.paused || job.nextAt > now) return;
-        const cron = scheduleCron(job.cron, job.tz);
+        if (job.at !== undefined) {
+          job.paused = true; // Consume the one-shot atomically before spawning or skipping it.
+          if (job.at <= now - 60_000 || job.last) {
+            job.missed++;
+            return { missedOneShot: { name: job.name, at: job.at, observedAt: now, missed: job.missed } };
+          }
+          job.last = { id: randomUUID(), at: job.at, startedAt: now, status: "running", delivery: "pending" };
+          return structuredClone(job);
+        }
+        const cron = scheduleCron(job.cron!, job.tz!);
         const advance = (): void => {
           const next = cron.nextRun(new Date(job.nextAt));
           if (!next) throw new ScheduleError("cron has no next occurrence: " + job.name);
@@ -92,6 +101,12 @@ export class Scheduler {
         return structuredClone(job);
       });
       if (!claimed) continue;
+      if ("missedOneShot" in claimed) {
+        await this.emit(
+          "SCHEDULE_ERROR " + JSON.stringify({ ...claimed.missedOneShot, reason: "one-shot missed", retried: false }),
+        );
+        continue;
+      }
       const task = this.execute(claimed).catch((error: unknown) => {
         this.#failure ??= error;
       });

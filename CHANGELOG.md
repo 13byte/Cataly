@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Extend opt-in schedules with one-shot `--at` instants, explicit timezone offsets, durable consumption and no restart replay. Related to #214; condition triggers remain separate work. One-shot records make the whole schedule document unreadable to older versions; inspect and remove them with the current CLI before downgrading.
+
 - Use Cataly for the current commands, skill, role and environment. Fresh homes
   default to `~/.cataly` or `~/.omp-cataly`. The verified new bootstrap can
   [upgrade a stopped v0.1.3 installation](docs/releases.md#upgrade-a-v013-installation)
