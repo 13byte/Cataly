@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { finishCondition } from "../src/schedule-condition-finish.ts";
 import { Scheduler } from "../src/scheduler.ts";
 import { ScheduleStore, scheduleOutput } from "../src/schedule-store.ts";
 
@@ -127,4 +128,81 @@ test("error streak warns once, leaves edge armed, and a removed job leaves no wa
   await store.remove("watch");
   await store.add(input("console.log('new')"), now);
   expect(store.read().jobs[0]?.watch).toEqual({ armed: true, consecutiveErrors: 0 });
+});
+
+test("failed probe diagnostics are bounded to one run and exposed without stderr disclosure", async () => {
+  await store.add(input("console.error('secret diagnostic'); process.exit(1)"), now);
+  const lines: string[] = [];
+  const runner = await start(lines);
+  await runner.tick();
+  await runner.settle();
+  const first = store.read().jobs[0]!.last!.id;
+  expect(existsSync(scheduleOutput(dir, first))).toBe(true);
+  now += 30_000;
+  await runner.tick();
+  await runner.settle();
+  const job = store.read().jobs[0]!;
+  expect(job.watch?.diagnosticRunId).toBe(job.last?.id);
+  expect(existsSync(scheduleOutput(dir, first))).toBe(false);
+  expect(readFileSync(scheduleOutput(dir, job.last!.id) + ".stderr", "utf8")).toContain("secret diagnostic");
+  expect(lines.join("")).not.toContain("secret diagnostic");
+});
+
+test("operator stop leaves watch untouched and sends no fake probe-error warning", async () => {
+  await store.add(input("setInterval(() => {}, 100)"), now);
+  const lines: string[] = [];
+  const runner = await start(lines);
+  const before = store.read().jobs[0]!.watch;
+  await runner.tick();
+  runner.stop();
+  await runner.settle();
+  expect(store.read().jobs[0]).toMatchObject({ paused: true, last: { status: "interrupted" }, watch: before });
+  expect(lines).toEqual([]);
+});
+
+test("probe error recovery alerts once with metadata, not private stderr", async () => {
+  await store.add({ ...input(""), argv: ["/missing/cataly-probe"] }, now);
+  const lines: string[] = [];
+  const runner = await start(lines);
+  await runner.tick();
+  await runner.settle();
+  expect(lines[0]).toContain("condition probe error");
+  expect(lines[0]).toContain("stderr");
+  expect(lines[0]).toContain("127");
+  await store.update((doc) => {
+    doc.jobs[0]!.argv = [process.execPath, "-e", "process.exit(1)"];
+  });
+  now += 30_000;
+  await runner.tick();
+  await runner.settle();
+  expect(lines).toHaveLength(2);
+  expect(lines[1]).toContain("condition probe recovered");
+  now += 30_000;
+  await runner.tick();
+  await runner.settle();
+  expect(lines).toHaveLength(2);
+});
+
+test("digest-read failure becomes a saved probe error rather than stopping all schedules", async () => {
+  const job = await store.add(input(""), now);
+  const completed = {
+    id: job.id,
+    at: now,
+    startedAt: now,
+    finishedAt: now,
+    status: "exited" as const,
+    code: 0,
+    signal: null,
+    delivery: "pending" as const,
+  };
+  await store.update((doc) => {
+    doc.jobs[0]!.last = { ...completed, status: "running" };
+  });
+  const lines: string[] = [];
+  expect(await finishCondition(store, { ...job, last: completed }, completed, (line) => lines.push(line))).toBe(false);
+  expect(store.read().jobs[0]).toMatchObject({
+    watch: { armed: true, consecutiveErrors: 1 },
+    last: { conditionFired: false, delivery: "logged" },
+  });
+  expect(store.read().jobs[0]?.last?.error).toContain("stdout digest failed");
 });

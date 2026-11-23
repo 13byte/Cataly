@@ -62,6 +62,8 @@ test("a suppressed rising edge is still consumed until a normal failure", () => 
   next = conditionResult(p, next.watch, receipt(), "a");
   expect(next.fire).toBe(false);
   expect(conditionResult(p, next.watch, receipt(), "b").fire).toBe(false);
+  next = conditionResult(p, next.watch, receipt(1), "");
+  expect(conditionResult(p, next.watch, receipt(), "b").fire).toBe(true);
 });
 
 test("policy and watch reject unknown keys, malformed counts and enum arrays", () => {

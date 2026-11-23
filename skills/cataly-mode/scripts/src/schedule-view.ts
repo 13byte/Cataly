@@ -30,13 +30,23 @@ export async function scheduleView(store: ScheduleStore, run: Runner, now: numbe
     jobs: document.jobs.map((job) => ({
       ...job,
       state: scheduleState(job),
+      ...(job.watch?.diagnosticRunId
+        ? {
+            diagnostic: {
+              output: scheduleOutput(store.stateDir, job.watch.diagnosticRunId),
+              stderr: scheduleOutput(store.stateDir, job.watch.diagnosticRunId) + ".stderr",
+            },
+          }
+        : {}),
       next: job.paused ? null : new Date(job.nextAt).toISOString(),
       ...(job.last
         ? {
             last: {
               ...job.last,
-              ...(job.last.conditionFired === false ? {} : { output: scheduleOutput(store.stateDir, job.last.id) }),
-              ...(job.condition && job.last.conditionFired !== false
+              ...(job.last.conditionFired === false && job.watch?.diagnosticRunId !== job.last.id
+                ? {}
+                : { output: scheduleOutput(store.stateDir, job.last.id) }),
+              ...(job.condition && (job.last.conditionFired !== false || job.watch?.diagnosticRunId === job.last.id)
                 ? { stderr: scheduleOutput(store.stateDir, job.last.id) + ".stderr" }
                 : {}),
               pidIsLive: "unverified",

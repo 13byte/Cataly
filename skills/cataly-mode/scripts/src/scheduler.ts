@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { closeSync, fsyncSync, mkdirSync, openSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
-import { finishCondition } from "./schedule-condition-finish.ts";
+import { finishCondition, interruptCondition } from "./schedule-condition-finish.ts";
 import { deliverSchedule } from "./schedule-delivery.ts";
 import { tryScheduleOwnership } from "./schedule-ownership.ts";
 import { scheduleOutput, type ScheduleStore } from "./schedule-store.ts";
@@ -135,7 +135,13 @@ export class Scheduler {
     mkdirSync(join(this.store.stateDir, "schedule-runs"), { recursive: true, mode: 0o700 });
     const output = scheduleOutput(this.store.stateDir, receipt.id);
     const fd = openSync(output, "wx", 0o600);
-    const stderr = job.condition === undefined ? fd : openSync(output + ".stderr", "wx", 0o600);
+    let stderr: number;
+    try {
+      stderr = job.condition === undefined ? fd : openSync(output + ".stderr", "wx", 0o600);
+    } catch (cause) {
+      closeSync(fd);
+      throw cause;
+    }
     let proc: Subprocess | undefined;
     let code = 127;
     let signal: string | null = null;
@@ -182,6 +188,10 @@ export class Scheduler {
       ...(timedOut ? { timedOut: true } : {}),
       delivery: "pending",
     };
+    if (job.condition !== undefined && this.#stop.signal.aborted) {
+      await interruptCondition(this.store, job, completed);
+      return;
+    }
     if (job.condition !== undefined) {
       if (!(await finishCondition(this.store, job, completed, this.emit))) return;
     } else await this.save(job, completed);

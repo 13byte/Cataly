@@ -10,6 +10,7 @@ export type ScheduleWatch = {
   lastDigest?: string;
   lastCheckedAt?: number;
   lastFiredRunId?: string;
+  diagnosticRunId?: string;
   consecutiveErrors: number;
 };
 export function validateCondition(condition: unknown, watch: unknown): void {
@@ -28,7 +29,7 @@ export function validateCondition(condition: unknown, watch: unknown): void {
   )
     bad();
   if (
-    !object(watch, "armed lastOk lastDigest lastCheckedAt lastFiredRunId consecutiveErrors") ||
+    !object(watch, "armed lastOk lastDigest lastCheckedAt lastFiredRunId diagnosticRunId consecutiveErrors") ||
     typeof watch["armed"] !== "boolean" ||
     !Number.isSafeInteger(watch["consecutiveErrors"]) ||
     Number(watch["consecutiveErrors"]) < 0 ||
@@ -40,6 +41,13 @@ export function validateCondition(condition: unknown, watch: unknown): void {
     (watch["lastFiredRunId"] !== undefined &&
       (typeof watch["lastFiredRunId"] !== "string" ||
         !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(watch["lastFiredRunId"])))
+  )
+    bad();
+  if (
+    object(watch, "armed lastOk lastDigest lastCheckedAt lastFiredRunId diagnosticRunId consecutiveErrors") &&
+    watch["diagnosticRunId"] !== undefined &&
+    (typeof watch["diagnosticRunId"] !== "string" ||
+      !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(watch["diagnosticRunId"]))
   )
     bad();
 }
