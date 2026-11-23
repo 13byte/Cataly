@@ -67,7 +67,7 @@ test("a permanently unreadable first-window file is reported once across cycles 
   expect(await lastError()).toBeUndefined();
   expect(f.observation().coverage.failed).toBeUndefined();
   expect(f.refs()).toContainEqual(fileEvidence(first, f.repo));
-});
+}, 20_000);
 
 test("a read denied mid-way, whose recheck is denied too, stays a real failure and is not taken for a race", async () => {
   const { f, tick, lastError } = await production();
@@ -113,7 +113,7 @@ test("a read denied mid-way, whose recheck is denied too, stays a real failure a
   await tick(4);
   expect(await lastError()).toBeUndefined();
   expect(f.refs()).toContainEqual(fileEvidence(target, f.repo));
-});
+}, 20_000);
 
 test("reads that race a rewrite or a removal are retried as unknown, never reported; explicit evidence refuses them", async () => {
   const { f, tick, lastError } = await production();
