@@ -65,7 +65,7 @@ export const updateBoard = async (options: {
     renameSync(tmp, path);
     const directory = openSync(dir, "r");
     try {
-      fsyncSync(directory);
+      if (process.platform !== "win32") fsyncSync(directory);
     } finally {
       closeSync(directory);
     }
@@ -146,7 +146,7 @@ export const updateBoard = async (options: {
       unlinkSync(path);
       const directory = openSync(dir, "r");
       try {
-        fsyncSync(directory);
+        if (process.platform !== "win32") fsyncSync(directory);
       } finally {
         closeSync(directory);
       }
