@@ -133,3 +133,18 @@ test("a root-only lane grants from its registration, not the skill configuration
   expect(await grant(["--root", address])).toMatchObject({ code: 0, err: "" });
   expect(checkPolicyCommand(policyRef, "sudo true", NOW)).toBeUndefined();
 });
+
+test("--root takes the unique prefix harness status shows and refuses one that names two sessions", async () => {
+  const { store, address, policyRef, grant } = rootPolicy(state.dir);
+  const short = address.slice(0, "headless:".length + 8);
+  expect(checkPolicyCommand(policyRef, "sudo true", NOW)).toContain("BLOCKED");
+  expect(await grant(["--root", short])).toMatchObject({ code: 0, err: "" });
+  expect(checkPolicyCommand(policyRef, "sudo true", NOW)).toBeUndefined();
+  const twin = `${address.slice("headless:".length, "headless:".length + 8)}-0000-4000-8000-000000000000`;
+  store.saveLane({ ...store.lane("demo")!, key: "twin", sessionRef: { runtime: "headless", id: twin } });
+  expect(await grant(["--root", short])).toMatchObject({
+    code: 1,
+    err: expect.stringContaining(`${short} is ambiguous`),
+  });
+  expect(checkPolicyCommand(policyRef, "sudo true", NOW)).toContain("BLOCKED");
+});

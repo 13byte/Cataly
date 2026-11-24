@@ -69,7 +69,7 @@ describe("records written before runtimes existed (IS-3)", () => {
     expect(d.store.lane("old-lane")).toEqual(first.lane!);
   });
 
-  test("cataly status lists the old lane as w1:p3 under a herdr runtime column, the way it prints roles", async () => {
+  test("cataly status lists the old lane as herdr:w1:p3, its runtime named once as the ref's prefix", async () => {
     const { d } = oldHome();
     const { out } = await captureIo(async () => {
       await status(d);
@@ -79,7 +79,7 @@ describe("records written before runtimes existed (IS-3)", () => {
     expect(lines[0]).toBe("RUNTIME headless (from default)");
     expect(lines[1]).toBe("lead=w1:p1 duty=w1:p2");
     expect(lines[2]).toBe(`home=${d.store.root}`);
-    expect(lines.find((l) => l.startsWith("old-lane"))).toMatch(/^old-lane\s+working\s+herdr\s+w1:p3\s/);
+    expect(lines.find((l) => l.startsWith("old-lane"))).toMatch(/^old-lane\s+working\s+herdr:w1:p3\s/);
   });
 
   test("cataly status with a long home path holding spaces and no runtime: the path stays whole on one line", async () => {

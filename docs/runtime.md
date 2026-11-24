@@ -92,6 +92,17 @@ An explicit `launch --runtime` overrides the lane and session settings for that 
 
 `CATALY_RUNTIME`, `sessionRuntime` or `runtime` naming `herdr` or `hc` stops with the upgrade message; any other invalid value is an error. `cataly harness status` prints the choice first, for example `RUNTIME tern (from config)`; sources are `default`, `env`, `config`, `detect:TERN_PANE` and `detect:path`. With no choice it prints `RUNTIME unset:` and a fix. Skill `cataly boot` prints the same selection, or `RUNTIME unavailable:` and a failed check.
 
+After the roles, `cataly harness status` lists the open lanes, the longest without progress first, one line each within 120 columns: key, status, session ref, progress and the last entry. The ref names its runtime once, as its prefix. A headless id is shortened like a git short SHA: its first 8 characters, more when another registered session (a role or a lane of any status) shares them:
+
+```text
+discord-intake        waiting  headless:3f2a9c1d-11 progress 40m (14:20)    waiting: ci:vntrevx/Cataly#812 since 14:25
+docs-license          working  tern:42              progress 25m (14:35)    report 14:35: license headers added
+status-board-readable working  headless:3f2a9c1e    progress 12m (14:48)    report 14:48: rebased on main; touched suit…
+discord-voice         working  headless:3f2a9c1d-12 progress 5m (14:55)     report 14:55: voice route test green
+```
+
+Commands that take a session ref accept the shortened form and resolve it against the registered roles and lanes: `cataly harness send`, `inbox list|ack|resend`, `observe` and `answer`, and skill `cataly policy allow-once --root`. A prefix shorter than 8 characters, one no registered session has, and one more than one has are refused; an ambiguous one lists the full refs it matches. The roles line, `NATIVE` lines, JSON output and stored records keep the full id.
+
 For a registered native lead or duty session, use `cataly harness observe lead`
 or `cataly harness observe duty`. To stop the owned native harness, run
 `cataly harness stop`; busy or blocked agents hold rather than being forced

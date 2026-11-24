@@ -95,8 +95,9 @@ A blocked call records the rule IDs and the command's SHA-256, not the command t
 cataly policy allow-once demo-lane 'denyBash[0]' --reason "Owner approved the blocked attempt"
 ```
 
-For a lane started by the root harness, pass `--root headless:<UUID>` using the
-exact reference from that lane's status. If a skill-registry lane and a root
+For a lane started by the root harness, pass `--root headless:<UUID>`, or the
+unique prefix `cataly harness status` shows for that lane (`headless:3f2a9c1e`);
+an ambiguous or unknown prefix is refused. If a skill-registry lane and a root
 lane share a key, use `--skill` to select the skill-registry lane instead.
 The key alone cannot authorize a different lane with the same name.
 
