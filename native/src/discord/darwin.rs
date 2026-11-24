@@ -40,17 +40,26 @@ pub(super) fn boot_session() -> Option<String> {
     Some(BOOT.get_or_init(|| id).clone())
 }
 
-/// `/usr/sbin/sysctl -n kern.bootsessionuuid` under `LC_ALL=C` with a bounded run time and output. The value
-/// darwin.ts reads with `sysctlbyname` into 64 bytes, so a longer answer is refused like it is there.
+/// `/usr/sbin/sysctl -n kern.bootsessionuuid`. The value darwin.ts reads with `sysctlbyname` into 64 bytes, so a
+/// longer answer is refused like it is there.
 #[cfg(target_os = "macos")]
 fn read_boot_session() -> Option<String> {
+    let text = sysctl(&["kern.bootsessionuuid"], 64)?;
+    let id = text.strip_suffix('\n')?;
+    (!id.is_empty() && id.len() < 64 && !id.contains(['\0', '\n'])).then(|| id.to_owned())
+}
+
+/// `/usr/sbin/sysctl -n <names>` under a cleared environment and `LC_ALL=C`: its whole output, one value per line,
+/// or `None` unless it exits 0 within 2 s with at most `max` bytes of UTF-8.
+#[cfg(target_os = "macos")]
+pub(super) fn sysctl(names: &[&str], max: u64) -> Option<String> {
     use std::io::Read as _;
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
 
-    const MAX: u64 = 64;
     let mut child = Command::new("/usr/sbin/sysctl")
-        .args(["-n", "kern.bootsessionuuid"])
+        .arg("-n")
+        .args(names)
         .env_clear()
         .env("LC_ALL", "C")
         .stdin(Stdio::null())
@@ -58,7 +67,7 @@ fn read_boot_session() -> Option<String> {
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
-    // The answer is one line, far below a pipe's capacity: the child finishes before its output is read.
+    // Each answer is a short line, far below a pipe's capacity: the child finishes before its output is read.
     let deadline = Instant::now() + Duration::from_secs(2);
     let status = loop {
         match child.try_wait() {
@@ -75,13 +84,14 @@ fn read_boot_session() -> Option<String> {
     child
         .stdout
         .take()?
-        .take(MAX + 1)
+        .take(max + 1)
         .read_to_end(&mut out)
         .ok()?;
-    let text = String::from_utf8(out).ok()?;
-    let id = text.strip_suffix('\n')?;
-    (status.success() && !id.is_empty() && id.len() < 64 && !id.contains(['\0', '\n']))
-        .then(|| id.to_owned())
+    let fits = u64::try_from(out.len()).is_ok_and(|len| len <= max);
+    if !status.success() || !fits {
+        return None;
+    }
+    String::from_utf8(out).ok()
 }
 
 /// What TypeScript computes for `pid`: `processIdentity` (src/update/deployment-process.ts) and `processStart`
