@@ -74,19 +74,20 @@ const withLane = async (entries: Entry[], run: (pi: FakePi, inbox: DiscordLaneIn
 
 test("a delivery the previous main recorded as dori-monitor is not sent again", async () => {
   await withLane([{ type: "custom_message", customType: "dori-monitor", content: text }], async (pi, inbox) => {
-    await Bun.sleep(300);
-    await until(() => inbox.next(session, channel) === undefined);
+    // The lane acknowledges a message it already delivered instead of sending it again.
+    expect(inbox.next(session, channel)?.id).toBe(message);
+    await until(() => !inbox.outstanding(session, channel), 15_000);
     expect(pi.sent).toEqual([]);
     expect(pi.userMessages).toEqual([]);
   });
-});
+}, 20_000);
 
 test("a new lane delivery is written as cataly-monitor only", async () => {
   await withLane([], async (pi) => {
-    await until(() => pi.sent.length > 0);
+    await until(() => pi.sent.length > 0, 15_000);
     expect(pi.sent).toEqual([
       { customType: "cataly-monitor", content: text, options: { triggerTurn: true, deliverAs: "aside" } },
     ]);
     expect(pi.sent.every((sent) => sent.customType !== "dori-monitor")).toBe(true);
   });
-});
+}, 20_000);

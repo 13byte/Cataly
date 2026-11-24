@@ -132,7 +132,8 @@ test("receipts and completion records keep their newest state under the current 
     { customType: "omp-cataly:tool-completion", data: { call: "c", job: "j", tool: "bash", cwd: "/w" } },
     { customType: "omp-cataly:admission-rejected", data: { ompCatalyAdmission: admission } },
   ]);
-  // An accepted receipt is newer than the rejection, and a message cannot be appended, so nothing is replayed.
+  // An accepted receipt is newer than the rejection, and the readers resolve that message kind themselves, so the
+  // rejection is not replayed.
   expect(
     record([
       { type: "custom", customType: "omp-dori:admission-rejected", data: { ompDoriAdmission: admission } },

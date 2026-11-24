@@ -1,26 +1,35 @@
-import { MONITOR_MESSAGE, recordedRole, SESSION_WIRE } from "../skills/cataly-mode/scripts/src/session-compat.ts";
+import {
+  MONITOR_MESSAGE,
+  PREVIOUS_MONITOR_MESSAGE,
+  recordedRole,
+  SESSION_WIRE,
+} from "../skills/cataly-mode/scripts/src/session-compat.ts";
 import { COMPLETION_ENTRY } from "../skills/cataly-mode/scripts/src/tool-evidence.ts";
 import { sameMonitorSpecs } from "../src/update/deployment-monitors.ts";
 import { recordedIntake } from "./bootstrap.ts";
 import { MONITOR_ENTRY, type RecordedMonitor, recordedMonitorStates } from "./monitor-state.ts";
 
 /*
- * THE ONE BRIDGE FROM THE PREVIOUS MAIN (the release before the legacy removal) for OMP session entries.
+ * THE SECOND OF TWO ONE-WAY BRIDGES FROM THE PREVIOUS MAIN (the release before the legacy removal) for OMP session
+ * entries. The first is the deployment-record one in `src/update/deployment-previous-main.ts`; that controller path
+ * resumes the lead, and this file is what makes the resumed lead come back with its state.
  *
  * That release recorded session state under `omp-dori:*` names, wrote the lead role as "dori", and delivered Discord
- * lane input and head-admission receipts as `dori-monitor` messages. This extension reads only `omp-cataly:*` and
- * `cataly-monitor`, so a session resumed by any path (`omp --resume`, a lane reopen, the deployment bridge) would
- * otherwise come back without its role, monitors, intake, lane policy, receiver, ask lane or completion receipts.
+ * lane input and head-admission receipts as `dori-monitor` messages. This extension writes only `omp-cataly:*` and
+ * `cataly-monitor`, and the readers of those entries match the current name exactly, so a session resumed by any path
+ * (`omp --resume`, a lane reopen, the deployment bridge) would otherwise come back without its role, monitors, intake,
+ * lane policy, receiver, ask lane or completion receipts.
  *
  * `bridgePreviousMain` appends the current-name equivalent of exactly what the previous readers saw, once, through the
  * same `appendEntry` every other write uses. It never rewrites, reorders or truncates what OMP stored, and a branch that
  * already carries that state appends nothing, so a second resume is a no-op. Everything else stays strict: only this
- * module names the previous spelling.
+ * module maps the previous entry names; the message kind it accepts read-only is `session-compat`'s constant.
  *
- * `dori-monitor` messages are read here but never appended. Their content is model context, and an accepted admission
- * receipt exists only as a `custom_message`; this API appends custom entries, so re-emitting one would put the inbound
- * text into the context a second time. A delivery whose receipt reached the transcript but not the receiver's own
- * record when the previous main stopped therefore stays unresolved, and the receiver's existing recovery line names it.
+ * `dori-monitor` messages are read here but never appended: they are model context, and this API appends custom
+ * entries. The readers that identify such a message accept the previous main's kind directly, read only (the lane's
+ * delivered check, the head-receipt candidate and the native head router), so a delivery it already made is not
+ * repeated and an accepted admission receipt it recorded still resolves. `omp-dori:admission-rejected` is still
+ * bridged, because the readers match that entry type exactly and it carries no model context.
  *
  * Nothing writes these shapes any more; delete this file with the next release.
  */
@@ -35,7 +44,6 @@ export type SessionAppend = (customType: string, data?: unknown) => void;
 
 const PREVIOUS = "omp-dori:";
 const CURRENT = "omp-cataly:";
-const PREVIOUS_MONITOR_MESSAGE = "dori-monitor";
 
 const object = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);

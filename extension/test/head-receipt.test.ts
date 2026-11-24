@@ -51,6 +51,22 @@ posix.each(["accepted", "rejected"] as const)(
   },
 );
 
+posix("an accepted receipt the previous main recorded as dori-monitor still resolves", async () => {
+  // The previous main wrote this kind with its own metadata key; the reader accepts both, and writes neither.
+  const previous = {
+    type: "custom_message",
+    customType: "dori-monitor",
+    id: "previous-entry",
+    details: { ompDoriAdmission: { identity, fingerprint } },
+  };
+  const file = transcript(`${JSON.stringify(previous)}\n`);
+  expect(await headReceipt(file, identity, fingerprint)).toEqual({ outcome: "accepted", receipt: "previous-entry" });
+  expect(await headReceipt(file, "99:10:20:102", fingerprint)).toBeUndefined();
+  // Its metadata key is not read for the current message kind, which the previous main never wrote.
+  const mixed = transcript(`${JSON.stringify({ ...previous, customType: "cataly-monitor" })}\n`);
+  expect(await headReceipt(mixed, identity, fingerprint)).toBeUndefined();
+});
+
 posix("stdout-shaped text and an unterminated native tail are not admission receipts", async () => {
   const body = JSON.stringify(receipt("accepted"));
   const file = transcript(`${JSON.stringify({ type: "message", content: body })}\n${body}`);

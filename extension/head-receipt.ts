@@ -20,9 +20,9 @@ const candidate = (value: unknown) => {
     entry.type === "custom_message" &&
     (entry.customType === MONITOR_MESSAGE || entry.customType === PREVIOUS_MONITOR_MESSAGE);
   const rejected = entry.type === "custom" && entry.customType === REJECTION;
-  // The previous main wrote its accepted receipt under ompDoriAdmission; the current one uses ompCatalyAdmission.
   const fields = accepted ? entry.details : rejected ? entry.data : undefined;
-  const data = fields?.ompCatalyAdmission ?? fields?.ompDoriAdmission;
+  // Each main wrote its own metadata key; neither is read for the other's message kind.
+  const data = entry.customType === PREVIOUS_MONITOR_MESSAGE ? fields?.ompDoriAdmission : fields?.ompCatalyAdmission;
   return data
     ? { ...data, receipt: entry.id, outcome: accepted ? ("accepted" as const) : ("rejected" as const) }
     : undefined;
