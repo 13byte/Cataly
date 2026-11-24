@@ -105,23 +105,18 @@ pub(super) enum CatalyRole {
     Lane,
 }
 
-/// `parseCatalyRole`: the historical `"dori"` spelling is the Cataly role.
+/// `parseCatalyRole`.
 pub(super) fn parse_cataly_role(value: Option<&Value>) -> Option<CatalyRole> {
     match string(value)? {
-        "cataly" | "dori" => Some(CatalyRole::Cataly),
+        "cataly" => Some(CatalyRole::Cataly),
         "lane" => Some(CatalyRole::Lane),
         _ => None,
     }
 }
 
-/// `isCatalyEntry`: `omp-cataly:<name>` or its historical `omp-dori:<name>` spelling.
+/// `isCatalyEntry`: exactly `current`.
 fn is_cataly_entry(value: Option<&Value>, current: &str) -> bool {
-    string(value).is_some_and(|value| {
-        value == current
-            || current
-                .strip_prefix("omp-cataly:")
-                .is_some_and(|name| value.strip_prefix("omp-dori:") == Some(name))
-    })
+    string(value) == Some(current)
 }
 
 /// The `data` of the last `custom` entry named `name` in a `get_entries` reply's data (`findLast(...)?.data`).
@@ -1354,33 +1349,28 @@ mod tests {
     }
 
     #[test]
-    fn cataly_roles_and_entries_accept_the_dori_aliases() {
+    fn cataly_roles_and_entries_are_exact() {
         assert_eq!(
             parse_cataly_role(Some(&json!("cataly"))),
-            Some(CatalyRole::Cataly)
-        );
-        assert_eq!(
-            parse_cataly_role(Some(&json!("dori"))),
             Some(CatalyRole::Cataly)
         );
         assert_eq!(
             parse_cataly_role(Some(&json!("lane"))),
             Some(CatalyRole::Lane)
         );
-        assert_eq!(parse_cataly_role(Some(&json!("Dori"))), None);
+        assert_eq!(parse_cataly_role(Some(&json!("Cataly"))), None);
         assert_eq!(parse_cataly_role(Some(&json!({ "role": "lane" }))), None);
         assert_eq!(parse_cataly_role(None), None);
         let entries = json!({ "entries": [
             { "type": "custom", "customType": "omp-cataly:role", "data": "lane" },
-            { "type": "custom", "customType": "omp-dori:role", "data": "dori" },
             { "type": "message", "customType": "omp-cataly:role", "data": "lane" },
             { "type": "custom", "customType": "omp-other:role", "data": "lane" },
-            { "type": "custom", "customType": "omp-dori:harness-role" },
+            { "type": "custom", "customType": "omp-cataly:harness-role" },
             "custom",
         ] });
         assert_eq!(
             last_custom_data(Some(&entries), "omp-cataly:role"),
-            Some(&json!("dori"))
+            Some(&json!("lane"))
         );
         assert_eq!(
             last_custom_data(Some(&entries), "omp-cataly:harness-role"),

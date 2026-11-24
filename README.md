@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/vntrevx/Cataly/releases/tag/v0.1.2"><img alt="Published preview" src="https://img.shields.io/github/v/release/vntrevx/Cataly?include_prereleases&label=preview&labelColor=2b2d33&color=c8102e"></a>
+  <a href="https://github.com/vntrevx/Cataly/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/vntrevx/Cataly?include_prereleases&label=release&labelColor=2b2d33&color=c8102e"></a>
   <a href="https://github.com/vntrevx/Cataly/actions/workflows/ci.yml?query=branch%3Amain"><img alt="CI on main" src="https://img.shields.io/github/actions/workflow/status/vntrevx/Cataly/ci.yml?branch=main&label=ci&labelColor=2b2d33"></a>
   <a href="LICENSING.md"><img alt="License: SUL 1.0 with a scoped MIT notice" src="https://img.shields.io/badge/license-SUL%201.0%20%2B%20scoped%20MIT-8b9099?labelColor=2b2d33"></a>
   <a href="https://bun.sh"><img alt="Bun 1.4.4 or later" src="https://img.shields.io/badge/bun-%E2%89%A51.4.4-8b9099?labelColor=2b2d33&logo=bun&logoColor=white"></a>
@@ -108,26 +108,25 @@ Here is the workflow on current `main`:
 
 <table width="100%"><tr><td>
 
-**Note**
+**Cataly is a new product, not an upgrade of omp-dori**
+
+This version removes every omp-dori name, the herdr and hc terminal runtimes and
+the omp-ulw overlay. There is no in-place upgrade, migration or rollback from
+omp-dori, an earlier `v0.1.x` release, or a `~/.dori` or `~/.omp-dori` home.
+[Reinstall fresh](docs/releases.md#cataly-is-a-new-product-reinstall-fresh):
+
+1. With your previous version, finish or close the lanes you care about
+   (`cataly status` lists them), then stop it.
+2. Install Cataly into a new home, never the old one.
+3. Copy only the settings and tokens you need by hand.
+4. Replace `DORI_*` and `OMP_DORI_*` exports with their `CATALY_*` names.
+5. Start with `cataly harness up` and open new lanes.
 
 Use `cataly` for operation, `cataly-harness` for the standalone harness, and
 `omp-cataly` for a separate installation. Fresh homes default to `~/.cataly`
-(primary) or `~/.omp-cataly` (side). An upgrade stays in its original home.
-
-[Install a verified current release](docs/releases.md#install-a-current-release)
-or [upgrade an existing v0.1.3 installation](docs/releases.md#upgrade-a-v013-installation).
-The upgrade leaves existing configuration unchanged.
-
+(primary) or `~/.omp-cataly` (side).
+[Install a verified current release](docs/releases.md#install-a-current-release).
 Cataly runs on headless OMP by default on macOS and Linux; Tern is the optional terminal runtime.
-This version removed the herdr and hc terminal runtimes; a home that still uses
-one stops install and upgrade with:
-
-```text
-This Cataly home still uses the herdr/hc terminal runtime, which this version removed.
-1. Close every herdr/hc lane (`cataly status` lists them) with your previous Cataly version.
-2. Remove "runtime" (if it names herdr or hc) and "sessionRuntime" from <configPath>.
-3. Run this command again. Cataly state and OMP sessions are kept; lanes reopen on headless.
-```
 
 </td></tr></table>
 
@@ -149,38 +148,15 @@ The Cataly package exposes `cataly-harness`:
 ```
 
 This installs the harness CLI, not the full OMP and messenger setup. For that
-setup, use one of the options below.
-
-|                | [Published preview](#try-the-published-preview) | [Current source](#work-from-current-source)          |
-| -------------- | ----------------------------------------------- | ---------------------------------------------------- |
-| **Build**      | v0.1.2 prerelease                               | current `main`                                       |
-| **Scope**      | Linux x64 / herdr / Discord                     | headless OMP sessions on Linux and macOS; optional Tern |
-| **OMP**        | independently installed native OMP 18.18.8      | pinned, patched OMP 19.0.1 with the omp-ulw overlay |
-| **Home**       | historical primary `~/.dori`                   | side mode `~/.omp-cataly`                            |
-
-### Try the published preview
-
-The [v0.1.2 prerelease](https://github.com/vntrevx/Cataly/releases/tag/v0.1.2)
-is the published **Linux x64 / herdr / Discord** preview. The tested baseline
-is Ubuntu 24.04 x64, Bun 1.4.4, native OMP 18.18.8, and herdr 0.9.5. This tag
-requires an independently installed OMP and uses the historical `~/.dori` home.
-It does not contain the newer `main` features or toolchain.
-
-1. [Install the exact preview](https://github.com/vntrevx/Cataly/blob/v0.1.2/docs/releases.md#install-the-exact-preview).
-   Check its [prerequisites](https://github.com/vntrevx/Cataly/blob/v0.1.2/docs/releases.md#prerequisites-and-trust)
-   and verify the matching release assets before running their installer.
-2. [Configure your provider and Discord bot, then start Dori](https://github.com/vntrevx/Cataly/blob/v0.1.2/docs/releases.md#your-authentication-and-explicit-startup).
-   Use your own provider account and allowance, bot token, owner ID, and channel ID.
-3. [Enable Discord intake](https://github.com/vntrevx/Cataly/blob/v0.1.2/docs/releases.md#discord-owner-intake).
-   Wait for `INBOUND_READY`, then send a fresh message in the configured channel.
-   Old messages are not replayed on first start.
+setup, [install a verified release](docs/releases.md#install-a-current-release)
+or work from current source.
 
 ### Work from current source
 
 Use a separate checkout with git, Bun 1.4.4+ and a Rust toolchain from
 [rustup](https://rustup.rs). On Linux and macOS sessions
-run on headless OMP by default; no terminal server is needed. The installer prepares the pinned, patched **OMP 19.0.1**
-and **omp-ulw** overlay; a stock `omp` is not a substitute. No preinstalled OMP
+run on headless OMP by default; no terminal server is needed. The installer prepares the pinned, patched **OMP 19.0.1**;
+a stock `omp` is not a substitute. No preinstalled OMP
 is needed. The installer builds the required native Cataly binary with Cargo;
 without a Rust toolchain, or when that build fails, it stops before changing links,
 wrappers or configuration. Releases bundle the binary for Linux x64 and macOS arm64 instead.
@@ -262,7 +238,7 @@ The existing `cataly inbound discord` can launch the Rust monitor with:
 
 | Setting | Value |
 | --- | --- |
-| `CATALY_DISCORD_NATIVE_BIN` | Optional absolute override for the native Cataly binary, used by Discord intake and the headless lane, lead and duty host. `off` selects the legacy Discord commands only; the headless host still uses the bundled or installed binary. |
+| `CATALY_DISCORD_NATIVE_BIN` | Optional absolute override for the native Cataly binary, used by Discord intake and the headless lane, lead and duty host. `off` keeps the TypeScript Discord sends, presence and routing, and Discord intake then refuses to start; the headless host still uses the bundled or installed binary. |
 | `CATALY_DISCORD_NATIVE_WORKSPACE` | Optional absolute workspace override for the native monitor; otherwise it uses `laneWorkspace`. |
 | `CATALY_DISCORD_NATIVE_CHANNEL_ID` | Optional exact channel or thread ID from the inbound list. If unset, use all explicitly listed inbound channels as roots. |
 | `CATALY_DISCORD_THREADS` | Follow active threads under those roots by default. Set `off` to watch only explicit IDs. Direct Rust invocation uses `--follow-threads`. |
@@ -270,8 +246,9 @@ The existing `cataly inbound discord` can launch the Rust monitor with:
 
 Rust owns Gateway heartbeat and resume, REST history and sends, button
 callbacks, and the OMP lane. Each discovered thread has its own cursor, lane,
-and reply destination. Stop the legacy monitor before switching; the
-compatibility launcher imports existing cursors on first use. With the native
+and reply destination. Stop any other Discord receiver on the same state
+before switching; `cataly inbound discord` imports the TypeScript receiver's
+cursors on first use. With the native
 binary installed, supervised monitors share one on-demand Rust process per OMP
 supervisor for ASK replies and head admission against persisted OMP receipts.
 The OMP extension still owns the active session, its admission queue, and
@@ -360,9 +337,9 @@ only want the OMP harness without Discord's networking libraries.
 **Important**
 
 **Support boundary:** Slack and Telegram are retained source integrations, not
-part of the published preview. The installer can support isolated macOS arm64
+part of the consumer releases. The installer can support isolated macOS arm64
 headless consumer profiles declared by a compatible release manifest; no such release is
-claimed here. A merge to `main` does not update the published preview.
+claimed here. A merge to `main` does not update a published release.
 
 </td></tr></table>
 
@@ -386,11 +363,10 @@ change with evidence that it works.
 
 ## Licenses and attribution
 
-Cataly integrates [dori-superagent](https://github.com/sisyphuslabs/dori-superagent),
-[oh-my-pi](https://github.com/can1357/oh-my-pi), and
-[omp-ulw](https://github.com/dbc-hbin/omp-ulw). The dori-superagent-derived
-material retains the [Sustainable Use License 1.0](LICENSE). The existing OMP
-integration retains its [MIT license and copyright notices](LICENSE.integration);
+Cataly is derived from [dori-superagent](https://github.com/sisyphuslabs/dori-superagent)
+and builds on [oh-my-pi](https://github.com/can1357/oh-my-pi). The
+dori-superagent-derived material retains the [Sustainable Use License 1.0](LICENSE).
+The existing OMP integration retains its [MIT license and copyright notices](LICENSE.integration);
 the MIT notice does not apply to the whole repository. Other components keep
 their own terms. See the [licensing guide](LICENSING.md) and [NOTICE](NOTICE) for
 source revisions and modified-copy attribution.

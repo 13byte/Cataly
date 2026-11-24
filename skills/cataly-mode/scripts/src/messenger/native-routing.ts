@@ -107,7 +107,7 @@ class RoutingPipe {
 
 let selected: { readonly binary: string; readonly pipe: RoutingPipe } | undefined;
 
-/** Distinguish absence (legacy installs) from an unknown native outcome (never replay). */
+/** Distinguish absence (no native binary) from an unknown native outcome (never replay). */
 export function nativeRouting(command: object): Promise<unknown> | undefined {
   const binary = discordNativeBinary();
   if (selected && selected.binary !== binary) {

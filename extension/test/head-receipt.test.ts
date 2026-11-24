@@ -37,17 +37,17 @@ posix.each(["accepted", "rejected"] as const)(
 );
 
 posix.each(["accepted", "rejected"] as const)(
-  "the newest exact v0.1.3 %s admission receipt wins over an older Cataly receipt",
+  "the newest exact %s admission receipt wins over an older receipt",
   async (outcome) => {
-    const legacy = {
+    const newer = {
       type: outcome === "accepted" ? "custom_message" : "custom",
-      customType: outcome === "accepted" ? "dori-monitor" : "omp-dori:admission-rejected",
-      id: "dori-entry",
-      [outcome === "accepted" ? "details" : "data"]: { ompDoriAdmission: { identity, fingerprint } },
+      customType: outcome === "accepted" ? "cataly-monitor" : "omp-cataly:admission-rejected",
+      id: "head-entry",
+      [outcome === "accepted" ? "details" : "data"]: { ompCatalyAdmission: { identity, fingerprint } },
     };
     const older = receipt(outcome === "accepted" ? "rejected" : "accepted");
-    const file = transcript(`${JSON.stringify(older)}\n${JSON.stringify(legacy)}\n`);
-    expect(await headReceipt(file, identity, fingerprint)).toEqual({ outcome, receipt: "dori-entry" });
+    const file = transcript(`${JSON.stringify(older)}\n${JSON.stringify(newer)}\n`);
+    expect(await headReceipt(file, identity, fingerprint)).toEqual({ outcome, receipt: "head-entry" });
   },
 );
 

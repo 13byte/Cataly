@@ -99,7 +99,7 @@ impl Observation {
             None => None,
             Some(role) => match role.as_str() {
                 Some("lane") => Some("lane".to_owned()),
-                Some("cataly" | "dori") => Some("cataly".to_owned()),
+                Some("cataly") => Some("cataly".to_owned()),
                 _ => bail!("invalid headless runtime role"),
             },
         };
@@ -328,11 +328,7 @@ struct HostStart<'a> {
 
 const SETSID: [&str; 2] = ["/usr/bin/setsid", "/bin/setsid"];
 
-const HOST_ENV_REMOVED: [&str; 7] = [
-    "HC_TERMINAL_ID",
-    "HERDR_PANE_ID",
-    "HERDR_WORKSPACE_ID",
-    "HERDR_TAB_ID",
+const HOST_ENV_REMOVED: [&str; 3] = [
     "CATALY_HEADLESS_ID",
     "CATALY_ASK_LAUNCHED_LANE",
     "CATALY_HARNESS_ROLE",
@@ -446,7 +442,7 @@ mod tests {
             [
                 ("PATH", "/usr/bin:/bin"),
                 ("SECRET", "s"),
-                ("HERDR_PANE_ID", "w1:p1"),
+                ("CATALY_HEADLESS_ID", "stale"),
             ]
             .map(|(key, value)| (key.to_owned(), value.to_owned())),
         );

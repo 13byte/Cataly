@@ -1,63 +1,22 @@
-import { existsSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
-import { basename, join } from "node:path";
+import { existsSync, renameSync, rmSync } from "node:fs";
+import { basename } from "node:path";
 import {
   appendAll,
   appendQueue,
   doneIds,
   doneKeys,
   INBOX_SUFFIX,
-  inboxFile,
   MOVING,
-  nonEmpty,
   owedFile,
   readQueue,
   recordKeys,
   spooled,
   spoolKey,
 } from "./inbox-files.ts";
-import { refFromText, sameSession } from "./refs.ts";
-import type { SessionRef } from "./runtime/types.ts";
 import type { QueuedMessage } from "./store-types.ts";
 
-// Where an inbox went while a migration by an older binary ran: `<inbox>.jsonl.forward` names the replacement until
-// that migration's final drain removed it, so it is a live redirect (a send holds the route from reading it to writing
-// its message, inbox-spool.ts). This version never writes one; a marker left by an interrupted migration is still
-// followed so its messages are not lost.
-
-const MARKER = ".forward";
-
-/** The session this inbox is forwarded to right now, or undefined. */
-export function forwardOf(root: string, ref: SessionRef): SessionRef | undefined {
-  const marker = `${inboxFile(root, ref)}${MARKER}`;
-  return existsSync(marker) ? markerRef(marker) : undefined;
-}
-
-const markerRef = (marker: string): SessionRef | undefined => {
-  if (!existsSync(marker)) return undefined;
-  const text = readFileSync(marker, "utf8").trim();
-  return text === "" ? undefined : refFromText(text);
-};
-
-/** The old inboxes whose live redirect names `ref`. */
-function movedInto(root: string, ref: SessionRef): string[] {
-  const dir = join(root, "inbox");
-  return readdirSync(dir)
-    .filter((f) => f.endsWith(MARKER))
-    .map((f) => join(dir, f.slice(0, -MARKER.length)))
-    .filter((old) => {
-      const to = markerRef(`${old}${MARKER}`);
-      return to !== undefined && sameSession(to, ref);
-    });
-}
-
-/** A harness stop must not race a writer routing to the same inbox through another ref. */
-export const hasInboxForward = (root: string, ref: SessionRef): boolean =>
-  existsSync(`${inboxFile(root, ref)}${MARKER}`) || movedInto(root, ref).length > 0;
-
-/** True when ref's inbox has entries to move in: spooled beside it, or waiting in an old inbox that names it. */
-export const mergePending = (root: string, ref: SessionRef): boolean =>
-  spooled(inboxFile(root, ref), true).length > 0 ||
-  movedInto(root, ref).some((old) => nonEmpty(old) || nonEmpty(`${old}.merging`) || spooled(old, true).length > 0);
+// Moving entries into a queue: the notices owed to the lead (payLead) and a queue's spool (mergeSpool). Each source
+// file is renamed aside before its entries are appended, so a move cut short is finished next time, exactly once.
 
 /** An entry's identity: its id; else the spool file it came through (one sent message); else at+from+text. */
 const keyOf = (m: QueuedMessage): string =>
@@ -74,7 +33,7 @@ const keyOf = (m: QueuedMessage): string =>
  * key (keyOf), or whose id or spool file it recorded as gone, is not added again. Different ids and different spool
  * files remain distinct even when their timestamps and text match.
  */
-function carryOver(aside: string, from: string, into: string, map: (m: QueuedMessage) => QueuedMessage): void {
+function carryOver(aside: string, from: string, into: string): void {
   const done = doneIds(from);
   const known = doneIds(into);
   recordKeys(
@@ -90,7 +49,7 @@ function carryOver(aside: string, from: string, into: string, map: (m: QueuedMes
     if (seen.has(keyOf(m)) || doneKeys([m]).some((k) => known.has(k))) continue;
     seen.add(keyOf(m));
     for (const k of doneKeys([m])) known.add(k);
-    kept.push(map(m));
+    kept.push(m);
   }
   appendAll(into, kept);
   rmSync(aside, { force: true });
@@ -105,34 +64,9 @@ export function payLead(root: string, into: string): void {
   const aside = `${owed}.merging`;
   if (existsSync(aside) || existsSync(owed)) {
     if (!existsSync(aside)) renameSync(owed, aside);
-    carryOver(aside, owed, into, (m) => m);
+    carryOver(aside, owed, into);
   }
   mergeSpool(owed, into);
-}
-
-/**
- * Moves the entries of every old inbox whose live redirect names `ref` to the end of ref's inbox. Call it under ref's
- * inbox lock. Each old queue is renamed aside first, so an append that races the merge lands in a fresh old file for
- * the next one. The old inbox's spool moves here too: while it names a replacement, only the holder of that inbox's
- * lock moves its spool.
- */
-export function mergeForwarded(root: string, ref: SessionRef): void {
-  const into = inboxFile(root, ref);
-  for (const old of movedInto(root, ref)) {
-    const aside = `${old}.merging`;
-    for (let pass = 0; pass < 2; pass++) {
-      if (!existsSync(aside)) {
-        try {
-          renameSync(old, aside);
-        } catch (e) {
-          if ((e as NodeJS.ErrnoException).code === "ENOENT") break;
-          throw e;
-        }
-      }
-      carryOver(aside, old, into, (m) => m);
-    }
-    mergeSpool(old, into);
-  }
 }
 
 /**
@@ -153,7 +87,7 @@ export function mergeSpool(from: string, into: string): void {
       rmSync(f, { force: true });
       continue;
     }
-    carryOver(f, from, into, (m) => m);
+    carryOver(f, from, into);
   }
   for (const file of spooled(from)) {
     const name = basename(file).replace(new RegExp(`${INBOX_SUFFIX}$`), "");

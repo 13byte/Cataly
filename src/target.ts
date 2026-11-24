@@ -15,15 +15,14 @@ export const knownRefs = (store: Pick<Store, "roles" | "lanes">): SessionRef[] =
 ];
 
 /**
- * Where a send goes, in this order: a prefixed ref (a headless one may be shortened to the unique prefix the lane board
- * shows), a role, an open lane key, a bare herdr pane id (`w1:p3`). A lane named `t7` is that lane; the hc terminal t7
- * is `hc:t7`.
+ * Where a send goes, in this order: a headless ref (it may be shortened to the unique prefix the lane board shows), a
+ * role, an open lane key, a Tern ref (`tern:42`).
  */
 export function resolveTarget(d: Deps, target: string): SessionRef {
-  if (/^(?:herdr|hc|headless):/.test(target)) {
+  if (target.startsWith("headless:")) {
     const ref = parseRef(target) ?? resolveShortRef(target, knownRefs(d.store));
     if (ref) return ref;
-    throw new Refusal(`${target} is not a session ref (herdr:w1:p3, hc:t7 or headless:<uuid or unique prefix>)`);
+    throw new Refusal(`${target} is not a session ref (headless:<uuid or unique prefix>)`);
   }
   if (isRole(target)) {
     const ref = d.store.roles()[target];

@@ -1,7 +1,7 @@
 //! `--wake-lanes`: start a retired Discord lane's exact saved OMP session (`discord-lane-wake.ts`,
 //! `discord-lane-headless-wake.ts`, `discord-lane-wake-pending.ts`, `discord-lane-wake-lease.ts`).
 //!
-//! Every wake runs under a detached `cataly headless-host` started from this same binary, never in a herdr or hc
+//! Every wake runs under a detached `cataly headless-host` started from this same binary, never in a terminal
 //! pane: Rust reserves `<state>/headless/<uuid>/`, claims `started`, streams the `HostStart` record to the host and
 //! attests the result through the host's own `observe` endpoint and the lane extension's `discord-lane.json`.
 //! Registry transitions are `discord-wake-pending:<uuid>` before any side effect, `discord-wake-pending:bound:<uuid>`
@@ -20,7 +20,7 @@ use tokio::io::AsyncReadExt as _;
 use super::command::{WakeCommand, headless_argv, wake_command};
 use super::guard::{Guard, can_launch};
 use super::headless::{self, HeadlessRef};
-use super::registry::{Lane, RESERVED_LANE_KEY, Registry, SessionRef, record_execution, valid_key};
+use super::registry::{Lane, Registry, SessionRef, record_execution, valid_key};
 use super::route::delivery_lock;
 use super::transcript;
 use crate::json::Json;
@@ -38,18 +38,15 @@ const STARTUP_POLL: Duration = Duration::from_millis(250);
 pub(super) const LAUNCH_ENV: &str = "CATALY_DISCORD_LANE_LAUNCH";
 
 /// Never handed to a lane or to OMP: the monitor's IPC wiring, its secrets and its own launch context.
-const PRIVATE_ENV: [&str; 11] = [
+const PRIVATE_ENV: [&str; 8] = [
     "NODE_CHANNEL_FD",
     "NODE_CHANNEL_SERIALIZATION_MODE",
     "CATALY_MONITOR_ADMISSION",
     "CATALY_MONITOR_ADMISSION_PROTOCOL",
-    "DORI_MONITOR_ADMISSION",
     "CATALY_ASK_ROUTING_STATE",
     LAUNCH_ENV,
     "CATALY_DISCORD_TOKEN",
-    "DORI_DISCORD_TOKEN",
     "CATALY_TELEGRAM_TOKEN",
-    "DORI_TELEGRAM_TOKEN",
 ];
 
 pub(super) fn is_pending(epoch: Option<&str>) -> bool {
@@ -403,7 +400,7 @@ async fn start_exact(
         let prior = HeadlessRef::of(&lane).ok_or_else(|| anyhow!("invalid headless ref"))?;
         retired_headless(state, launch, &lane, prior)?
     } else {
-        Err(held("lane uses the removed herdr/hc runtime"))
+        Err(held("only a headless lane can be woken"))
     };
     let retired = match retired {
         Ok(retired) => retired,
@@ -482,7 +479,6 @@ async fn launch_retired(
             let mut next = current;
             // A headless row keeps its fields.
             next.0.set("sessionRef", reference.json());
-            next.0.set("pane", Json::string(&reference.id));
             next.0.set("cwd", Json::string(&retired.cwd));
             next.0.set("sessionFile", Json::string(&retired.file));
             next.0.set(
@@ -536,7 +532,7 @@ async fn launch_retired(
 
 /// `wakeDiscordLane`: request startup of the exact lane session; never types a message or resumes a goal.
 pub(super) async fn wake(state: &Path, launch: &Launch, seen: &Lane) -> Result<Wake> {
-    if !valid_key(seen.key()) || seen.key() == RESERVED_LANE_KEY {
+    if !valid_key(seen.key()) {
         return Ok(held("invalid lane key"));
     }
     let Some(lock) = delivery_lock(state, seen.key(), Duration::ZERO).await? else {
@@ -571,7 +567,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_removed_runtime_lane_is_held_without_reservation() {
+    async fn a_non_headless_lane_is_held_without_reservation() {
         use std::os::unix::fs::DirBuilderExt as _;
         let state = std::env::temp_dir().join(format!("cataly-lane-wake-{}", uuid().unwrap()));
         std::fs::DirBuilder::new()
@@ -579,7 +575,7 @@ mod tests {
             .mode(0o700)
             .create(state.join("lanes"))
             .unwrap();
-        let row = r#"{"key":"aa","thread":"discord:1","sessionRef":{"runtime":"herdr","id":"w1:p1"},"session":"s1","openedAt":"2026-01-01T00:00:00.000Z"}"#;
+        let row = r#"{"key":"aa","thread":"discord:1","sessionRef":{"runtime":"tern","id":"w1:p1"},"session":"s1","openedAt":"2026-01-01T00:00:00.000Z"}"#;
         std::fs::write(state.join("lanes/aa.json"), row).unwrap();
         let launch = Launch {
             command: wake_command(&["omp".to_owned(), "{prompt}".to_owned()]),

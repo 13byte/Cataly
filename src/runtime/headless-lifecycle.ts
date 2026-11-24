@@ -76,16 +76,7 @@ export async function startHost(
   if (!isLoop && binary === undefined) throw new host.HeadlessError(MISSING_BINARY);
   // A competing start/close gets the same exclusive file. Never retry a spawn after ambiguity.
   writeFileSync(join(dir, "started"), "", { flag: "wx", mode: 0o600 });
-  for (const key of [
-    "HC_TERMINAL_ID",
-    "HERDR_PANE_ID",
-    "HERDR_WORKSPACE_ID",
-    "HERDR_TAB_ID",
-    "CATALY_HEADLESS_ID",
-    "CATALY_ASK_LAUNCHED_LANE",
-    "CATALY_HARNESS_ROLE",
-  ])
-    delete env[key];
+  for (const key of ["CATALY_HEADLESS_ID", "CATALY_ASK_LAUNCHED_LANE", "CATALY_HARNESS_ROLE"]) delete env[key];
   if (role === "lead" || role === "duty") env["CATALY_HARNESS_ROLE"] = role;
   const child = await spawnHost(
     dir,

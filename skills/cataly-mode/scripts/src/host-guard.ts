@@ -45,7 +45,7 @@ export const sampleHost = async (
         : (await run(["cat", "/proc/loadavg"])).out;
   const load1 = num(loadText.trim().split(/\s+/)[0], 0);
   // macOS has one definition, the platform adapter's (kern.memorystatus_level, then free pages, then 0); tests inject
-  // it. Linux reads MemAvailable, and an unreadable or malformed /proc/meminfo keeps the legacy 100.
+  // it. Linux reads MemAvailable, and an unreadable or malformed /proc/meminfo keeps the default 100.
   const darwinMemory = os === "darwin" ? (system.memFreePct ? system.memFreePct() : platform.memFreePct()) : null;
   const memInfo =
     darwinMemory !== null ? "" : linux ? readProc("/proc/meminfo") : (await run(["cat", "/proc/meminfo"])).out;

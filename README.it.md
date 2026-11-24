@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/vntrevx/Cataly/releases/tag/v0.1.2"><img alt="Published preview" src="https://img.shields.io/github/v/release/vntrevx/Cataly?include_prereleases&label=preview&labelColor=2b2d33&color=c8102e"></a>
+  <a href="https://github.com/vntrevx/Cataly/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/vntrevx/Cataly?include_prereleases&label=release&labelColor=2b2d33&color=c8102e"></a>
   <a href="https://github.com/vntrevx/Cataly/actions/workflows/ci.yml?query=branch%3Amain"><img alt="CI on main" src="https://img.shields.io/github/actions/workflow/status/vntrevx/Cataly/ci.yml?branch=main&label=ci&labelColor=2b2d33"></a>
   <a href="LICENSING.md"><img alt="License: SUL 1.0 with a scoped MIT notice" src="https://img.shields.io/badge/license-SUL%201.0%20%2B%20scoped%20MIT-8b9099?labelColor=2b2d33"></a>
   <a href="https://bun.sh"><img alt="Bun 1.4.4 or later" src="https://img.shields.io/badge/bun-%E2%89%A51.4.4-8b9099?labelColor=2b2d33&logo=bun&logoColor=white"></a>
@@ -89,10 +89,9 @@ per coding agent e a lane di lavoro tracciate:
 - Pianificazione, monitor e supervisione facoltativi supportano il lavoro
   continuativo quando vengono abilitati esplicitamente.
 
-L'implementazione riunisce
-[dori-superagent](https://github.com/sisyphuslabs/dori-superagent),
-[oh-my-pi](https://github.com/can1357/oh-my-pi) e
-[omp-ulw](https://github.com/dbc-hbin/omp-ulw). Autori, licenze e provenienza
+L'implementazione deriva da
+[dori-superagent](https://github.com/sisyphuslabs/dori-superagent) e si basa su
+[oh-my-pi](https://github.com/can1357/oh-my-pi). Autori, licenze e provenienza
 dei sorgenti restano parte del progetto.
 
 ## Principi operativi
@@ -114,35 +113,30 @@ e rapporti pubblici. La telemetria è disattivata per impostazione predefinita.
 
 <table width="100%"><tr><td>
 
-**Nota**
+**Cataly è un nuovo prodotto, non un aggiornamento di omp-dori**
+
+Questa versione rimuove ogni nome omp-dori, i runtime terminale herdr e hc e
+l'overlay omp-ulw. Non esiste aggiornamento sul posto, migrazione o rollback da
+omp-dori, da una release `v0.1.x` precedente o da una directory di installazione
+`~/.dori` o `~/.omp-dori`.
+[Reinstalla da zero](docs/releases.md#cataly-is-a-new-product-reinstall-fresh):
+
+1. Con la versione precedente, completa o chiudi le lane che ti servono
+   (`cataly status` le elenca), poi arresta quella versione.
+2. Installa Cataly in una nuova directory di installazione, mai in quella vecchia.
+3. Copia a mano solo le impostazioni e i token che ti servono.
+4. Sostituisci gli export `DORI_*` e `OMP_DORI_*` con i corrispondenti nomi `CATALY_*`.
+5. Avvia con `cataly harness up` e apri nuove lane.
 
 I comandi attuali sono `cataly`, `cataly-harness` e `omp-cataly` (installazione
 separata). Le nuove installazioni usano `~/.cataly` oppure `~/.omp-cataly`.
 Cataly funziona su OMP headless per impostazione predefinita in macOS e Linux; Tern è il runtime terminale opzionale.
 
-[Installa una release corrente verificata](docs/releases.md#install-a-current-release)
-o [aggiorna da v0.1.3](docs/releases.md#upgrade-a-v013-installation).
-L’aggiornamento mantiene la directory di installazione e la configurazione esistenti.
-
-Questa versione ha rimosso i runtime terminale herdr e hc. Se una directory di
-installazione li usa ancora, installazione e aggiornamento si fermano con:
-
-```text
-This Cataly home still uses the herdr/hc terminal runtime, which this version removed.
-1. Close every herdr/hc lane (`cataly status` lists them) with your previous Cataly version.
-2. Remove "runtime" (if it names herdr or hc) and "sessionRuntime" from <configPath>.
-3. Run this command again. Cataly state and OMP sessions are kept; lanes reopen on headless.
-```
-
 </td></tr></table>
 
 ### Usare una release pubblicata
 
-La **prerelease v0.1.2** esistente ha un contratto immutabile per
-Linux x64 / herdr / Discord. Rinominare il repository non aggiorna quegli asset
-né introduce il supporto per nuove piattaforme.
-
-Segui la [guida verificata alla release esatta](https://github.com/vntrevx/Cataly/blob/v0.1.2/docs/releases.md#prerequisites-and-trust).
+Segui la [guida verificata a una release corrente](docs/releases.md#install-a-current-release).
 Include prerequisiti, checksum, installazione, la tua autenticazione,
 avvio esplicito e monitor Discord da abilitare su scelta dell'utente.
 Non sostituire una release esatta con un installer arbitrario di `main`.
@@ -161,8 +155,8 @@ cd "$HOME/src/Cataly" || exit 1
 CATALY_INSTALL_MODE=side CATALY_NO_PULL=1 CATALY_SRC="$PWD" bash scripts/install-source.sh
 ```
 
-L'installer da sorgente prepara OMP 19.0.1 con le modifiche e i vincoli del progetto
-e l'overlay ULW; un `omp` standard nel `PATH` non può sostituirli. La modalità side
+L'installer da sorgente prepara OMP 19.0.1 con le modifiche e i vincoli del progetto;
+un `omp` standard nel `PATH` non può sostituirlo. La modalità side
 usa per impostazione predefinita `~/.omp-cataly`, mantiene wrapper e configurazione
 propri e lascia intatta l'installazione primaria `~/.cataly`.
 L'installazione non avvia agenti, ricevitori di messaggi o servizi.

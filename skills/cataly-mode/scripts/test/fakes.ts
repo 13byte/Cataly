@@ -33,7 +33,7 @@ export const nativeLane = (
   w: World,
   n: number,
   patch: Partial<FakeSession> = {},
-): Pick<Lane, "pane" | "sessionRef" | "session" | "sessionFile"> => {
+): Pick<Lane, "sessionRef" | "session" | "sessionFile"> => {
   const id = sid(n);
   const session: FakeSession = {
     status: "idle",
@@ -48,7 +48,6 @@ export const nativeLane = (
   };
   w.sessions[id] = session;
   return {
-    pane: id,
     sessionRef: href(id),
     ...(session.sessionId === undefined ? {} : { session: session.sessionId }),
     ...(session.sessionFile === undefined ? {} : { sessionFile: session.sessionFile }),

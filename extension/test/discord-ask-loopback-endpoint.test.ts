@@ -7,20 +7,19 @@ import { openDiscordAskReceiver } from "../../skills/cataly-mode/scripts/src/mes
 import { load, until } from "./fake-pi.ts";
 
 test.skipIf(process.platform === "win32")(
-  "flagless legacy ASK discovers its loopback receiver and posts without opening the public Gateway",
+  "flagless ASK discovers its loopback receiver and posts without opening the public Gateway",
   async () => {
-    const home = mkdtempSync(join(tmpdir(), "cataly-legacy-ask-"));
+    const home = mkdtempSync(join(tmpdir(), "cataly-loopback-ask-"));
     const config = join(home, "config.json");
     const state = join(home, "state");
     const apiOverride = "http://127.0.0.1:8199/selected";
-    const token = "synthetic-legacy-ask-bot";
+    const token = "synthetic-loopback-ask-bot";
     const [channel, owner, question, reply] = ["10", "11", "12", "13"] as const;
     const env: Readonly<Record<string, string | undefined>> = {
       CATALY_CONFIG: config,
       CATALY_HOME: home,
       CATALY_STATE_DIR: undefined,
-      CATALY_DISCORD_API_BASE: undefined,
-      DORI_DISCORD_API_BASE: apiOverride,
+      CATALY_DISCORD_API_BASE: apiOverride,
       CATALY_HEADLESS_ID: undefined,
       CATALY_HARNESS_ROLE: undefined,
     };
@@ -29,7 +28,7 @@ test.skipIf(process.platform === "win32")(
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
-    writeFileSync(config, JSON.stringify({ stateDir: state, ompUlwPath: "" }));
+    writeFileSync(config, JSON.stringify({ stateDir: state }));
     writeFileSync(join(home, "discord-token"), token, { mode: 0o600 });
     const receiver = openDiscordAskReceiver(state, token, owner, [channel], () => [channel], { apiOverride });
     receiver.refresh();
@@ -63,8 +62,8 @@ test.skipIf(process.platform === "win32")(
     try {
       const pi = await load({
         session: {
-          id: "legacy-ask",
-          entries: [{ type: "custom", customType: "omp-dori:role", data: "dori" }],
+          id: "loopback-ask",
+          entries: [{ type: "custom", customType: "omp-cataly:role", data: "cataly" }],
         },
       });
       const original = pi.ctx;
@@ -85,7 +84,6 @@ test.skipIf(process.platform === "win32")(
         expect(calls[0]).toBe(`POST ${requestPath}`);
         expect(calls.filter((call) => call.startsWith("GET"))).toEqual([]);
         expect(sockets).toBe(0);
-        expect(process.env["CATALY_DISCORD_API_BASE"]).toBeUndefined();
       } finally {
         terminal.resolve(undefined);
         await pi.emit("session_shutdown");

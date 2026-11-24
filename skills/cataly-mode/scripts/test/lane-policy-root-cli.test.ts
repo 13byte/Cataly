@@ -27,19 +27,20 @@ function rootPolicy(configState: string) {
   store.saveLane({
     key,
     sessionRef: { runtime: "headless", id },
-    paneId: id,
-    tabId: "",
     policyBinding: policyRef,
     brief: "/test/root-brief.md",
     cwd: state.dir,
     status: "working",
     createdAt: NOW,
     lastActivityAt: NOW,
+    progressAt: NOW,
+    noticeId: "demo-notice",
+    progressEpoch: 0,
     nudges: 0,
     log: [],
   });
   const config = join(state.dir, "config.json");
-  writeFileSync(config, JSON.stringify({ stateDir: configState, ompUlwPath: "", agentCommand: ["omp"] }));
+  writeFileSync(config, JSON.stringify({ stateDir: configState, agentCommand: ["omp"] }));
   const grant = async (args: readonly string[], callerBinding = "") => {
     const child = Bun.spawn(
       [
@@ -89,7 +90,7 @@ test("an explicit root grant binds the registered reservation and never aliases 
     brief: "/test/brief.md",
     done: "file /test/done",
     thread: "none",
-    pane: "w1:p2",
+    sessionRef: { runtime: "tern", id: "2" },
     openedAt: new Date(NOW).toISOString(),
     lifecycleEpoch,
   });

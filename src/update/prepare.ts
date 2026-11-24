@@ -109,7 +109,7 @@ export async function prepareCandidate(ctx: UpdateContext, job: UpdateJob): Prom
     (
       await runCommand(ctx, job, { name: `prepare:${step}`, argv: ["git", ...safe, ...argv], timeoutMs: 300_000 })
     ).stdout.trim();
-  // Only the opaque local ULW pin is carried below; all Cataly code starts from exact new upstream.
+  // Only the opaque local source-bundle pin is carried below; all Cataly code starts from exact new upstream.
   await git("clone-upstream", ["clone", "--no-local", "--no-hardlinks", "--no-checkout", "--", ctx.config.remote, "."]);
   await git("fetch-pinned-upstream", ["fetch", "--no-auto-maintenance", "--no-tags", "origin", job.upstream]);
   await git("materialize-pinned-upstream", ["checkout", "--detach", job.upstream]);
@@ -118,8 +118,7 @@ export async function prepareCandidate(ctx: UpdateContext, job: UpdateJob): Prom
   }
   const pkg: unknown = JSON.parse(readFileSync(join(job.candidate, "package.json"), "utf8"));
   const name = pkg && typeof pkg === "object" && "name" in pkg ? pkg.name : undefined;
-  const skill = name === "dori-superagent" ? "dori-mode" : name === "cataly" ? "cataly-mode" : undefined;
-  if (!skill || !existsSync(join(job.candidate, "skills", skill, "scripts", "src", "cli.ts"))) {
+  if (name !== "cataly" || !existsSync(join(job.candidate, "skills", "cataly-mode", "scripts", "src", "cli.ts"))) {
     throw new UpdateError("configured remote is not the Cataly source distribution");
   }
   const baseRepo = join(job.directory, "base-upstream");

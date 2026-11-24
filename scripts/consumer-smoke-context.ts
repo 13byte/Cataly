@@ -9,18 +9,7 @@ import { currentNativeHost } from "./release-native.ts";
 export function createConsumerSmokeContext(rawOut: string, tar: string) {
   const out = join(realpathSync(dirname(rawOut)), basename(rawOut));
   assert(!lstatSync(out, { throwIfNoEntry: false }), "Output namespace must not exist");
-  for (const name of [
-    ".cataly",
-    ".omp-cataly",
-    ".dori",
-    ".omp-dori",
-    ".omp",
-    ".agents",
-    ".config",
-    ".cache",
-    ".local",
-    ".bun",
-  ]) {
+  for (const name of [".cataly", ".omp-cataly", ".omp", ".agents", ".config", ".cache", ".local", ".bun"]) {
     const path = join(homedir(), name);
     if (!existsSync(path)) continue;
     const within = relative(realpathSync(path), out);
@@ -62,7 +51,7 @@ export function createConsumerSmokeContext(rawOut: string, tar: string) {
       symlinkSync(realpathSync(path), join(compilerTools, name));
     }
   }
-  // An allowlist, not a spread: no inherited DORI/CATALY/OMP selection, credentials or provider settings cross.
+  // An allowlist, not a spread: no inherited CATALY/OMP selection, credentials or provider settings cross.
   const env = {
     HOME: home,
     PATH: `${tools}:/usr/bin:/bin`,
@@ -114,16 +103,16 @@ export function createConsumerSmokeContext(rawOut: string, tar: string) {
     return result;
   }
   for (const [name, bytes] of Object.entries({
-    ".dori/config.json": '{"sentinel":"primary-config"}\n',
-    ".dori/releases/consumer-owner.json": '{"sentinel":"primary-owner"}\n',
-    ".dori/bin/dori": "primary wrapper sentinel\n",
-    ".agents/skills/dori-mode/SKILL.md": "primary discovery sentinel\n",
+    ".cataly/config.json": '{"sentinel":"primary-config"}\n',
+    ".cataly/releases/consumer-owner.json": '{"sentinel":"primary-owner"}\n',
+    ".cataly/bin/cataly": "primary wrapper sentinel\n",
+    ".agents/skills/cataly-mode/SKILL.md": "primary discovery sentinel\n",
     ".omp/agent/extensions/primary/sentinel.txt": "primary extension sentinel\n",
   })) {
     mkdirSync(dirname(join(home, name)), { recursive: true, mode: 0o700 });
     writeFileSync(join(home, name), bytes, { flag: "wx", mode: 0o600 });
   }
-  const primaryRoots = [join(home, ".dori"), join(home, ".agents"), join(home, ".omp")];
+  const primaryRoots = [join(home, ".cataly"), join(home, ".agents"), join(home, ".omp")];
   const primary = primaryRoots.map(snapshot);
   const unchangedPrimary = () => assert.deepEqual(primaryRoots.map(snapshot), primary, "Primary sentinel tree changed");
   writeFileSync(join(out, "namespace.json"), `${JSON.stringify({ out, home, side, env, primary }, null, 2)}\n`, {

@@ -23,7 +23,7 @@ export function readRuntimeHealth(config: {
     value.paneId !== config.pane ||
     value.sessionId !== config.sessionId ||
     parseCatalyRole(value.role) !== "cataly" ||
-    typeof value.presetLoaded !== "boolean" ||
+    typeof value.configLoaded !== "boolean" ||
     !Number.isSafeInteger(value.pid) ||
     value.pid <= 0 ||
     !Number.isFinite(Date.parse(value.startedAt)) ||

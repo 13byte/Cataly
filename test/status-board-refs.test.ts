@@ -23,14 +23,14 @@ const lane = (key: string, id: string, text = "report text"): Lane => {
   return {
     key,
     sessionRef: href(id),
-    paneId: id,
-    tabId: "",
     brief: "/b.md",
     cwd: "/w",
     status: "working",
     createdAt: at - MIN,
     lastActivityAt: at,
     progressAt: at,
+    noticeId: `notice-${key}`,
+    progressEpoch: 0,
     nudges: 0,
     log: [{ at, kind: "report", text }],
   };

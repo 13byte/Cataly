@@ -249,10 +249,10 @@ export class DiscordLane {
             const route = await discordLaneTarget(root, channel);
             if (route?.session !== session || route.key !== key) return;
           }
-          const allowLegacy = admission.goalAllows(false);
+          const allowPlainInput = admission.goalAllows(false);
           const allowOptedIn = allowReply === true && admission.goalAllows(true);
-          if (!allowLegacy && !allowOptedIn) return;
-          const message = source.next(session, channel, allowLegacy ? undefined : { optedInOnly: true });
+          if (!allowPlainInput && !allowOptedIn) return;
+          const message = source.next(session, channel, allowPlainInput ? undefined : { optedInOnly: true });
           if (!message) return;
           const text = PREFIX + message.text;
           const optedIn = message.reply === true;
@@ -287,7 +287,7 @@ export class DiscordLane {
             };
             return;
           }
-          if ((optedIn ? !allowOptedIn : !allowLegacy) || ctx.hasPendingMessages?.()) return;
+          if ((optedIn ? !allowOptedIn : !allowPlainInput) || ctx.hasPendingMessages?.()) return;
           const input = replies.armNative(text, (parts) =>
             optedIn ? source.enqueueReply(session, channel, { id: message.id, parts }) : undefined,
           );

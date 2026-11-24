@@ -5,8 +5,6 @@
  * - Role: `--cataly-role cataly|lane` is recorded in the session file on session_start and re-read from the session
  *   branch on every session change, so `--resume` keeps it without the flag. Subagents inherit their spawning agent's
  *   role.
- * - A nonempty config `ompUlwPath` applies omp-ulw through a gated API: its event, command and tool handlers run
- *   only in role sessions; load-time registrations stay visible everywhere. Source installs leave it empty for OMP loading.
  * - Pane state (`{stateDir}/sessions/<pane>.json`, read by the `cataly` CLI): session id, goal status and open tool
  *   approvals of the Cataly/lane session running in a Tern block (TERN_PANE).
  *   Native jobs and approval observations use the existing process-bound record.
@@ -41,12 +39,7 @@ import {
   readPaneState,
   writePaneState,
 } from "../skills/cataly-mode/scripts/src/lane-state";
-import {
-  Registry,
-  RESERVED_LANE_KEY,
-  sameLaneGeneration,
-  sessionOf,
-} from "../skills/cataly-mode/scripts/src/registry.ts";
+import { Registry, sameLaneGeneration, sessionOf } from "../skills/cataly-mode/scripts/src/registry.ts";
 import { ReportError } from "../skills/cataly-mode/scripts/src/report-events.ts";
 import { type ReportKind, Reports, reportLine, reportScope } from "../skills/cataly-mode/scripts/src/reports.ts";
 import {
@@ -62,20 +55,11 @@ import {
   toolEvidence,
 } from "../skills/cataly-mode/scripts/src/tool-evidence.ts";
 import { SourceBundleError } from "../src/release/source-bundle.ts";
-import {
-  HEADLESS_LAUNCH_MODEL_ENTRY,
-  LAUNCH_MODEL_FLAG,
-  LEGACY_LAUNCH_MODEL_FLAG,
-} from "../src/runtime/headless-launch-model.ts";
+import { HEADLESS_LAUNCH_MODEL_ENTRY, LAUNCH_MODEL_FLAG } from "../src/runtime/headless-launch-model.ts";
 import { laneEntry as headlessEntry } from "../src/runtime/headless-record.ts";
 import { selfSession } from "../src/runtime/registry.ts";
 import type { MonitorSpec } from "../src/update/deployment-types.ts";
-import {
-  bootstrapMonitors,
-  LEGACY_MONITOR_BOOTSTRAP_FLAG,
-  MONITOR_BOOTSTRAP_FLAG,
-  recordedIntake,
-} from "./bootstrap.ts";
+import { bootstrapMonitors, MONITOR_BOOTSTRAP_FLAG, recordedIntake } from "./bootstrap.ts";
 import { RuntimeHealthWriter } from "./deployment-health.ts";
 import { DiscordAsk, routeFor } from "./discord-ask.ts";
 import { type AskLane, automaticDiscordAskRoute, bindAskLane } from "./discord-ask-auto.ts";
@@ -219,20 +203,11 @@ export interface CatalyApi {
 }
 
 const ROLE_FLAG = "cataly-role";
-const LEGACY_ROLE_FLAG = "dori-role";
 const ROLE_ENTRY = "omp-cataly:role";
 const HARNESS_ROLE_ENTRY = "omp-cataly:harness-role";
 const NATIVE_REF_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const RECEIVER_FLAG = "cataly-lane-receiver";
-const LEGACY_RECEIVER_FLAG = "dori-lane-receiver";
 const RECEIVER_ENTRY = "omp-cataly:discord-lane-receiver";
-const ONLY_IN_ROLE = "works only in Cataly sessions (omp --cataly-role cataly|lane)";
-// A path the managed overlay owns. A POSIX path is cut at `/` only; a backslash is an ordinary name character there,
-// so only Windows reads it as a separator.
-const MANAGED_OVERLAY =
-  process.platform === "win32"
-    ? /[\\/](?:consumer-dependencies[\\/]omp-ulw-[a-f0-9]{40}-[a-f0-9]{64}|\.cache[\\/](?:omp-cataly|omp-dori)[\\/]omp-ulw-[a-f0-9]{64})(?:[\\/]index\.ts)?$/
-    : /\/(?:consumer-dependencies\/omp-ulw-[a-f0-9]{40}-[a-f0-9]{64}|\.cache\/(?:omp-cataly|omp-dori)\/omp-ulw-[a-f0-9]{64})(?:\/index\.ts)?$/;
 // budget-limited halts the goal until a person raises the budget; unknown statuses must never read as "none",
 // which `cataly pause` treats as nothing-to-pause.
 const GOAL_STATUS: Record<string, GoalStatus> = {
@@ -322,7 +297,7 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
     type: "string",
   });
   pi.registerFlag(MONITOR_BOOTSTRAP_FLAG, {
-    description: "Private session-bound monitor bootstrap for an explicit managed legacy handoff",
+    description: "Private session-bound monitor bootstrap for an explicit managed handoff",
     type: "string",
   });
   pi.registerFlag(RECEIVER_FLAG, {
@@ -333,26 +308,15 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
     description: "Require this exact provider/model before accepting a lane launch brief",
     type: "string",
   });
-  for (const name of [LEGACY_ROLE_FLAG, LEGACY_MONITOR_BOOTSTRAP_FLAG, LEGACY_LAUNCH_MODEL_FLAG])
-    pi.registerFlag(name, { type: "string" });
-  pi.registerFlag(LEGACY_RECEIVER_FLAG, { type: "boolean" });
   const installation = extensionInstallation();
-  // Legacy launch authorizations are not implicitly imported by a canonical launch or a flagless resume.
-  const launchEnv =
-    pi.getFlag(ROLE_FLAG) === undefined && parseCatalyRole(pi.getFlag(LEGACY_ROLE_FLAG)) !== undefined
-      ? installation.env
-      : process.env;
+  const launchEnv = process.env;
 
-  const launchModelFlag = () => pi.getFlag(LAUNCH_MODEL_FLAG) ?? pi.getFlag(LEGACY_LAUNCH_MODEL_FLAG);
+  const launchModelFlag = () => pi.getFlag(LAUNCH_MODEL_FLAG);
 
   const policy = lanePolicyHook(pi, recordedRole, launchEnv["CATALY_LANE_POLICY"]);
   let archivedLeadRestricted = false;
   const restrictedLead = () => nativeHarnessRole() === "duty" || archivedLeadRestricted;
-  const appendRole = (role: CatalyRole): void => {
-    // A retired native duty transcript is not a v0.1.3 lead. Its release-specific owner must not acquire intake.
-    if (role === "cataly" && restrictedLead()) pi.appendEntry(ROLE_ENTRY, role);
-    else pi.appendEntry(SESSION_WIRE.role, role === "cataly" ? "dori" : role);
-  };
+  const appendRole = (role: CatalyRole): void => pi.appendEntry(SESSION_WIRE.role, role);
   let role: CatalyRole | undefined;
   const isLead = (): boolean => role === "cataly" && !restrictedLead();
   let stateDir: string | undefined;
@@ -509,7 +473,7 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
       if (delivery.isCurrent())
         pi.sendMessage(
           {
-            customType: delivery.details === undefined ? MONITOR_MESSAGE : SESSION_WIRE.monitorMessage,
+            customType: MONITOR_MESSAGE,
             content,
             display: true,
             ...(delivery.details === undefined ? {} : { details: delivery.details }),
@@ -520,7 +484,7 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
     () => (isLead() ? session?.id : undefined),
     BATCH_MS,
     typeof process.getuid === "function" ? admissions : undefined,
-    installation,
+    installation.env,
     () => stateDir,
   );
   const runtimeHealth = new RuntimeHealthWriter(monitors);
@@ -627,7 +591,7 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
             sessionId: session.id,
             startedAt: entry.reservation.startedAt,
             wanted: recordedMonitors(ctx.sessionManager.getBranch()),
-            presetLoaded: loadError === undefined,
+            configLoaded: loadError === undefined,
           });
         else runtimeHealth.stop();
       } else runtimeHealth.stop();
@@ -685,7 +649,7 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
         sessionId: session.id,
         startedAt: session.startedAt,
         wanted: recordedMonitors(ctx.sessionManager.getBranch()),
-        presetLoaded: loadError === undefined,
+        configLoaded: loadError === undefined,
       });
     else runtimeHealth.stop();
     paneWritten = paneId;
@@ -1014,7 +978,7 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
     if (role && loadError && !warned) {
       warned = true;
       ctx.ui.notify(
-        `omp-cataly: ${loadError}. ${requiredLoadError ? "Required bound source failed; role requests are blocked." : "Running without omo presets."}`,
+        `omp-cataly: ${loadError}. ${requiredLoadError ? "Required bound source failed; role requests are blocked." : "Running without the Cataly config."}`,
         "warning",
       );
     }
@@ -1093,7 +1057,6 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
     if (failed.length) ctx.ui.notify(`omp-cataly: ${lines.at(-1)}`, "warning");
   };
 
-  // Registered before omp-ulw so its restore handlers see this event's role.
   for (const eventName of ["session_start", "session_switch", "session_branch", "session_tree"] as const) {
     pi.on(eventName, async (event, ctx) => {
       const activation = ctx.agent.kind === "main" ? ++remoteActivation : undefined;
@@ -1131,7 +1094,7 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
         const carryRole = carried && (role !== "cataly" || isLead()) ? role : undefined;
         archivedLeadRestricted = restrictArchivedLead(branch);
         role = recorded ?? carryRole;
-        const flagged = pi.getFlag(ROLE_FLAG) ?? pi.getFlag(LEGACY_ROLE_FLAG);
+        const flagged = pi.getFlag(ROLE_FLAG);
         if (role === undefined && eventName === "session_start" && flagged !== undefined) {
           role = parseCatalyRole(flagged);
           if (role) flaggedRole = true;
@@ -1163,7 +1126,7 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
           role === "lane" &&
           !ownsDiscordReceiver &&
           eventName === "session_start" &&
-          (pi.getFlag(RECEIVER_FLAG) === true || pi.getFlag(LEGACY_RECEIVER_FLAG) === true)
+          pi.getFlag(RECEIVER_FLAG) === true
         ) {
           pi.appendEntry(SESSION_WIRE.laneReceiver, id);
           ownsDiscordReceiver = true;
@@ -1505,7 +1468,7 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
       if (!ownRef) throw new ReportError("no open lane is registered for this pane");
       const matching = (await registry.open()).filter((candidate) => {
         const ref = sessionOf(candidate);
-        return candidate.key !== RESERVED_LANE_KEY && ref?.runtime === ownRef.runtime && ref.id === ownRef.id;
+        return ref?.runtime === ownRef.runtime && ref.id === ownRef.id;
       });
       const lane = matching[0];
       if (!lane || matching.length !== 1)
@@ -1625,61 +1588,12 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
     },
   });
 
-  // omp-ulw sees this API: every runtime entry point is a no-op outside role sessions.
-  const gated = new Proxy(pi, {
-    get(target, prop) {
-      if (prop === "on")
-        return (event: string, handler: Handler) =>
-          target.on(event, (payload, ctx) => (role ? handler(payload, ctx) : undefined));
-      if (prop === "registerCommand") {
-        return (name: string, options: CommandOptions) =>
-          target.registerCommand(name, {
-            ...options,
-            handler: async (args, ctx) => {
-              if (role) return options.handler(args, ctx);
-              ctx.ui.notify(`/${name} ${ONLY_IN_ROLE}.`, "warning");
-            },
-          });
-      }
-      if (prop === "registerTool") {
-        return (tool: ToolDefinition) =>
-          target.registerTool<Record<string, unknown>>({
-            ...tool,
-            execute: async (toolCallId, params, signal, onUpdate, ctx) => {
-              if (role) return tool.execute(toolCallId, params, signal, onUpdate, ctx);
-              ctx.ui.notify(`${tool.name} ${ONLY_IN_ROLE}.`, "warning");
-              return { content: [{ type: "text", text: `${tool.name} ${ONLY_IN_ROLE}.` }] };
-            },
-          });
-      }
-      const value: unknown = Reflect.get(target, prop);
-      return typeof value === "function" ? value.bind(target) : value;
-    },
-  });
-
   try {
     const config = await loadConfig(installation.configFile, undefined, installation.env);
     stateDir = config.stateDir;
-    // An empty ompUlwPath means a standalone omp-ulw extension already serves every session; importing it again
-    // would register its commands and handlers twice.
-    if (config.ompUlwPath) {
-      try {
-        // Prepare the runtime-selected dependency through this host's canonical graph before binding the role gate.
-        // The host loader is optional when no embedded dependency is configured.
-        const { importExtensionModule } = await import("@oh-my-pi/pi-coding-agent/extensibility/extensions/loader");
-        const prepared = await importExtensionModule(config.ompUlwPath, import.meta.dir);
-        if (prepared.error) throw new Error(prepared.error);
-        const ulw: unknown = prepared.factory;
-        if (typeof ulw !== "function") throw new Error("its default export is not a function");
-        await ulw(gated);
-      } catch (error) {
-        loadError = `omp-ulw not loaded from ${config.ompUlwPath} (${errorText(error)})`;
-        if (MANAGED_OVERLAY.test(config.ompUlwPath)) requiredLoadError = new SourceBundleError(loadError);
-      }
-    }
   } catch (error) {
     if (error instanceof SourceBundleError) requiredLoadError = error;
-    loadError = `Cataly config not loaded (${errorText(error)}); omp-ulw and pane state are off`;
+    loadError = `Cataly config not loaded (${errorText(error)}); pane state is off`;
   }
   pi.setLabel("omp-cataly");
 }

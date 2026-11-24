@@ -154,19 +154,14 @@ export const fakePi = (options: FakeOptions): FakePi => {
       },
     },
   };
-  // omp-ulw talks to these too; they are outside omp-cataly's own API surface.
-  Object.assign(fake.api, {
-    recordTestCall: (event: string) => void calls.push(event),
-    getAllTools: () => fake.active.map((name) => ({ name })),
-  });
   return fake;
 };
 
-/** Points the Cataly config at `ompUlwPath` and a fresh state dir; returns the state dir. */
-export const useConfig = (ompUlwPath: string): string => {
+/** Points the Cataly config at a fresh state dir; returns the state dir. */
+export const useConfig = (): string => {
   const dir = mkdtempSync(join(tmpdir(), "omp-cataly-ext-"));
   const stateDir = join(dir, "state");
-  writeFileSync(join(dir, "config.json"), JSON.stringify({ stateDir, ompUlwPath }));
+  writeFileSync(join(dir, "config.json"), JSON.stringify({ stateDir }));
   process.env.CATALY_CONFIG = join(dir, "config.json");
   delete process.env.CATALY_STATE_DIR;
   return stateDir;

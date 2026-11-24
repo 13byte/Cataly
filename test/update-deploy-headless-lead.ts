@@ -119,7 +119,7 @@ export function leadHealthWriter(options: {
             pid: seen.pid,
             sessionId: seen.sessionId,
             role: "cataly",
-            presetLoaded: true,
+            configLoaded: true,
             startedAt: seen.startedAt,
             updatedAt: new Date().toISOString(),
             source,

@@ -1,3 +1,5 @@
+//! The per-channel cursor file the TypeScript intake writes (discord-inbound-state.ts), read and mirrored here.
+
 use std::fs::File;
 use std::io::{Read as _, Write as _};
 use std::os::unix::fs::MetadataExt as _;
@@ -30,13 +32,13 @@ pub(in crate::discord) fn read(
     let directory = match open(dir, flags | OFlags::DIRECTORY, Mode::empty()) {
         Ok(fd) => File::from(fd),
         Err(Errno::NOENT) => return Ok(None),
-        Err(error) => return Err(error).context("opening the legacy Discord cursor directory"),
+        Err(error) => return Err(error).context("opening the Discord inbound cursor directory"),
     };
     let uid = rustix::process::geteuid().as_raw();
     let meta = directory.metadata()?;
     ensure!(
         meta.uid() == uid && meta.mode().trailing_zeros() >= 6,
-        "legacy Discord cursor directory is not private"
+        "Discord inbound cursor directory is not private"
     );
     let file = match openat(
         &directory,
@@ -46,7 +48,7 @@ pub(in crate::discord) fn read(
     ) {
         Ok(fd) => File::from(fd),
         Err(Errno::NOENT) => return Ok(None),
-        Err(error) => return Err(error).context("opening the legacy Discord cursor"),
+        Err(error) => return Err(error).context("opening the Discord inbound cursor"),
     };
     let meta = file.metadata()?;
     ensure!(
@@ -54,19 +56,19 @@ pub(in crate::discord) fn read(
             && meta.uid() == uid
             && meta.mode().trailing_zeros() >= 6
             && meta.nlink() == 1,
-        "legacy Discord cursor is not a private regular file"
+        "Discord inbound cursor is not a private regular file"
     );
     let mut bytes = Vec::new();
     file.take(1025).read_to_end(&mut bytes)?;
     ensure!(
         bytes.len() <= 1024,
-        "legacy Discord cursor exceeded its limit"
+        "Discord inbound cursor exceeded its limit"
     );
     let cursor: SavedPosition =
-        serde_json::from_slice(&bytes).context("invalid legacy Discord cursor")?;
+        serde_json::from_slice(&bytes).context("invalid Discord inbound cursor")?;
     ensure!(
         cursor.version == 1 && cursor.channel_id == channel,
-        "legacy Discord cursor does not match the channel"
+        "Discord inbound cursor does not match the channel"
     );
     Ok(Some(if cursor.position == "0" {
         Snowflake::FLOOR
@@ -96,7 +98,7 @@ pub(in crate::discord) fn write(
     let meta = handle.metadata()?;
     ensure!(
         meta.uid() == rustix::process::geteuid().as_raw() && meta.mode().trailing_zeros() >= 6,
-        "legacy Discord cursor directory is not private"
+        "Discord inbound cursor directory is not private"
     );
     let path = format!("{channel}.json");
     let temporary = format!(".{channel}.cataly-native.tmp");

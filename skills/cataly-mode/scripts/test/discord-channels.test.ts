@@ -31,7 +31,8 @@ test("purposes are stored privately, replaced, cleared and validated before anyt
     expect(readFileSync(store.path, "utf8")).toBe("{not json");
     // A hand-edited purpose that set would refuse is damage too, not a record to rewrite.
     for (const purpose of ["", " padded ", "two\nlines", "x".repeat(501)]) {
-      const damaged = JSON.stringify({ "20": { purpose, updatedAt: "2026-11-17T00:00:00.000Z" } });
+      const notes = { "20": { purpose, updatedAt: "2026-11-17T00:00:00.000Z" } };
+      const damaged = JSON.stringify({ version: 1, notes, receipts: {} });
       writeFileSync(store.path, damaged);
       expect(() => store.read()).toThrow(ChannelPurposeError);
       await expect(store.set("30", "fine", undefined, 0)).rejects.toBeInstanceOf(ChannelPurposeError);

@@ -53,7 +53,6 @@ test.skipIf(!runSmoke)(
           stateDir,
           defaultCwd: cwd,
           sessionsDir: join(ompDir, "sessions"),
-          ompUlwPath: "",
           requireModelReadback: true,
           guard: { panesMax: 1, memFreeMinPct: 0, diskFreeMinGb: 0 },
           defaultModel: "cataly-local/headless-fixture",
@@ -130,8 +129,6 @@ test.skipIf(!runSmoke)(
     const registry = new Registry(stateDir);
     const queued = `${key}-queued`;
     try {
-      expect(Bun.which("herdr", { PATH: env.PATH })).toBeNull();
-      expect(Bun.which("hc", { PATH: env.PATH })).toBeNull();
       expect(Bun.which("tern", { PATH: env.PATH })).toBeNull();
       const launch = ["launch", key, "--title", "Live test", "--brief", brief, "--done", `file ${evidence}`];
       await expect(runCli({ ...env, CATALY_LANE_RUNTIME: "terminal" }, ...launch)).rejects.toThrow(

@@ -91,7 +91,7 @@ fn candidate(line: &[u8], identity: &str, fingerprint: &str) -> Result<Option<Ac
     }
     // Only admission entries need decoding. Ordinary OMP entries remain opaque.
     let text = std::str::from_utf8(line).context("invalid native transcript encoding")?;
-    if !text.contains("\"ompCatalyAdmission\"") && !text.contains("\"ompDoriAdmission\"") {
+    if !text.contains("\"ompCatalyAdmission\"") {
         return Ok(None);
     }
     let entry: serde_json::Value = serde_json::from_slice(line)?;
@@ -99,14 +99,8 @@ fn candidate(line: &[u8], identity: &str, fingerprint: &str) -> Result<Option<Ac
         (Some("custom_message"), Some("cataly-monitor")) => {
             (true, &entry["details"]["ompCatalyAdmission"])
         }
-        (Some("custom_message"), Some("dori-monitor")) => {
-            (true, &entry["details"]["ompDoriAdmission"])
-        }
         (Some("custom"), Some("omp-cataly:admission-rejected")) => {
             (false, &entry["data"]["ompCatalyAdmission"])
-        }
-        (Some("custom"), Some("omp-dori:admission-rejected")) => {
-            (false, &entry["data"]["ompDoriAdmission"])
         }
         _ => return Ok(None),
     };

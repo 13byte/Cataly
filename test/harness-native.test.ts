@@ -87,7 +87,6 @@ test.skipIf(!enabled)(
       config,
       JSON.stringify({
         stateDir,
-        ompUlwPath: "",
         defaultModel: "cataly-local/harness-fixture",
         agentCommand: [
           ...omp,
@@ -114,8 +113,6 @@ test.skipIf(!enabled)(
       CATALY_HOME: home,
       CATALY_CONFIG: config,
       CATALY_TELEMETRY: "0",
-      HERDR_PANE_ID: "w8:p8",
-      HC_TERMINAL_ID: "t8",
       NO_PROXY: "127.0.0.1",
     };
     const rt = new HeadlessRuntime(stateDir, env);

@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/vntrevx/Cataly/releases/tag/v0.1.2"><img alt="Published preview" src="https://img.shields.io/github/v/release/vntrevx/Cataly?include_prereleases&label=preview&labelColor=2b2d33&color=c8102e"></a>
+  <a href="https://github.com/vntrevx/Cataly/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/vntrevx/Cataly?include_prereleases&label=release&labelColor=2b2d33&color=c8102e"></a>
   <a href="https://github.com/vntrevx/Cataly/actions/workflows/ci.yml?query=branch%3Amain"><img alt="CI on main" src="https://img.shields.io/github/actions/workflow/status/vntrevx/Cataly/ci.yml?branch=main&label=ci&labelColor=2b2d33"></a>
   <a href="LICENSING.md"><img alt="License: SUL 1.0 with a scoped MIT notice" src="https://img.shields.io/badge/license-SUL%201.0%20%2B%20scoped%20MIT-8b9099?labelColor=2b2d33"></a>
   <a href="https://bun.sh"><img alt="Bun 1.4.4 or later" src="https://img.shields.io/badge/bun-%E2%89%A51.4.4-8b9099?labelColor=2b2d33&logo=bun&logoColor=white"></a>
@@ -79,10 +79,8 @@ Cataly 将聊天工具中的对话连接到原生编程代理运行时和可跟�
   已合并的拉取请求或已发布的版本。
 - 可选的调度、监控器和监督机制在明确启用后支持持续工作。
 
-实现整合了
-[dori-superagent](https://github.com/sisyphuslabs/dori-superagent)、
-[oh-my-pi](https://github.com/can1357/oh-my-pi) 和
-[omp-ulw](https://github.com/dbc-hbin/omp-ulw)。它们的作者、许可证和源码来源
+实现派生自 [dori-superagent](https://github.com/sisyphuslabs/dori-superagent)，
+并以 [oh-my-pi](https://github.com/can1357/oh-my-pi) 为基础。它们的作者、许可证和源码来源
 仍是本项目的一部分。
 
 ## 运行原则
@@ -101,33 +99,27 @@ Cataly 使用你提供的账号和权限工作。对外部系统产生影响的�
 
 <table width="100%"><tr><td>
 
-**注意**
+**Cataly 是一个新产品，而不是 omp-dori 的升级版**
+
+此版本移除了所有 omp-dori 名称、herdr 和 hc 终端运行时以及 omp-ulw 覆盖层。
+无法从 omp-dori、更早的 `v0.1.x` 发行版或 `~/.dori`、`~/.omp-dori` 安装目录进行原地升级、迁移或回滚。
+[请全新安装](docs/releases.md#cataly-is-a-new-product-reinstall-fresh)：
+
+1. 用旧版本完成或关闭你需要的通道（`cataly status` 会列出它们），然后停止旧版本。
+2. 将 Cataly 安装到新的安装目录，不要安装到旧目录。
+3. 只手动复制你需要的设置和令牌。
+4. 将 `DORI_*` 和 `OMP_DORI_*` 的 export 替换为对应的 `CATALY_*` 名称。
+5. 使用 `cataly harness up` 启动，并打开新的通道。
 
 当前命令是 `cataly`、`cataly-harness` 和 `omp-cataly`（独立安装）。
 新安装默认使用 `~/.cataly` 或 `~/.omp-cataly`。Cataly 在 macOS 和 Linux 上默认以 headless OMP 运行；
 Tern 是可选的终端运行时。
 
-请[安装经过验证的当前发行版](docs/releases.md#install-a-current-release)，
-或[从 v0.1.3 升级](docs/releases.md#upgrade-a-v013-installation)。
-升级保留原安装目录和现有配置。
-
-此版本已移除 herdr 和 hc 终端运行时。仍在使用它们的安装目录会在安装和升级时停止，并显示：
-
-```text
-This Cataly home still uses the herdr/hc terminal runtime, which this version removed.
-1. Close every herdr/hc lane (`cataly status` lists them) with your previous Cataly version.
-2. Remove "runtime" (if it names herdr or hc) and "sessionRuntime" from <configPath>.
-3. Run this command again. Cataly state and OMP sessions are kept; lanes reopen on headless.
-```
-
 </td></tr></table>
 
 ### 使用已发布的发行版
 
-现有的 **v0.1.2 预发行版**具有不可变的 Linux x64 / herdr / Discord 契约。
-仓库改名不会升级这些资源文件，也不意味着开始支持新的平台。
-
-请遵循[已验证的精确版本安装步骤](https://github.com/vntrevx/Cataly/blob/v0.1.2/docs/releases.md#prerequisites-and-trust)。
+请遵循[已验证的当前发行版安装步骤](docs/releases.md#install-a-current-release)。
 其中涵盖前提条件、校验和、安装、你自己的认证、显式启动，
 以及选择启用的 Discord 监控器。不要用任意 `main` 安装器替代精确的发行版。
 
@@ -145,8 +137,8 @@ cd "$HOME/src/Cataly" || exit 1
 CATALY_INSTALL_MODE=side CATALY_NO_PULL=1 CATALY_SRC="$PWD" bash scripts/install-source.sh
 ```
 
-源码安装器会准备与项目绑定的修改版 OMP 19.0.1 和 ULW 覆盖层；
-`PATH` 中未经修改的 `omp` 不能替代它们。side 模式默认使用 `~/.omp-cataly`，
+源码安装器会准备与项目绑定的修改版 OMP 19.0.1；
+`PATH` 中未经修改的 `omp` 不能替代它。side 模式默认使用 `~/.omp-cataly`，
 保留自己的包装脚本和配置，不影响主安装 `~/.cataly`。
 安装不会启动代理、聊天消息接收器或服务。
 

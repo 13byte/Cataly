@@ -5,8 +5,8 @@
 //! alert loop, so they are not sampled here. macOS memory is `src/platform/darwin.ts` `darwinMemFreePct`, read the
 //! same way.
 //!
-//! The session count cannot ask herdr or hc (both runtimes are removed). It counts every live headless broker; an
-//! unknown or failed headless observation makes it unknown (-1), as before.
+//! The session count is every live headless broker; an unknown or failed headless observation makes it unknown (-1),
+//! as before.
 
 use std::path::Path;
 

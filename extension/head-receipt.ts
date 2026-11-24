@@ -1,10 +1,10 @@
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { routeNativeHead } from "../skills/cataly-mode/scripts/src/messenger/native-routing.ts";
-import { isCatalyEntry, isMonitorMessage, MONITOR_MESSAGE } from "../skills/cataly-mode/scripts/src/session-compat.ts";
+import { MONITOR_MESSAGE } from "../skills/cataly-mode/scripts/src/session-compat.ts";
 
 type Metadata = { readonly identity?: unknown; readonly fingerprint?: unknown };
-type ReceiptFields = { readonly ompCatalyAdmission?: Metadata; readonly ompDoriAdmission?: Metadata };
+type ReceiptFields = { readonly ompCatalyAdmission?: Metadata };
 const REJECTION = "omp-cataly:admission-rejected";
 const candidate = (value: unknown) => {
   const entry = value as {
@@ -15,13 +15,9 @@ const candidate = (value: unknown) => {
     data?: ReceiptFields;
   } | null;
   if (!entry || typeof entry !== "object") return undefined;
-  const accepted = entry.type === "custom_message" && isMonitorMessage(entry.customType);
-  const rejected = entry.type === "custom" && isCatalyEntry(entry.customType, REJECTION);
-  const fields = accepted ? entry.details : rejected ? entry.data : undefined;
-  const data =
-    entry.customType === MONITOR_MESSAGE || entry.customType === REJECTION
-      ? fields?.ompCatalyAdmission
-      : fields?.ompDoriAdmission;
+  const accepted = entry.type === "custom_message" && entry.customType === MONITOR_MESSAGE;
+  const rejected = entry.type === "custom" && entry.customType === REJECTION;
+  const data = (accepted ? entry.details : rejected ? entry.data : undefined)?.ompCatalyAdmission;
   return data
     ? { ...data, receipt: entry.id, outcome: accepted ? ("accepted" as const) : ("rejected" as const) }
     : undefined;
@@ -64,7 +60,7 @@ export async function headReceipt(
     const receipt = () => {
       if (!terminated || oversized) return undefined;
       const text = Buffer.concat(pieces).toString("utf8");
-      if (!text.includes('"ompCatalyAdmission"') && !text.includes('"ompDoriAdmission"')) return undefined;
+      if (!text.includes('"ompCatalyAdmission"')) return undefined;
       const found = candidate(JSON.parse(text));
       if (found?.identity !== identity) return undefined;
       if (found.fingerprint !== fingerprint || typeof found.receipt !== "string" || !found.receipt)

@@ -125,7 +125,7 @@ if (import.meta.main) {
     if (
       source !== active.source ||
       !health ||
-      !health.presetLoaded ||
+      !health.configLoaded ||
       realpathSync(health.source) !== source ||
       Date.now() - Date.parse(health.updatedAt) > 5_000 ||
       health.extensionHash !== digest(readFileSync(join(source, "extension/index.ts")))

@@ -200,7 +200,7 @@ test("dated owner intake records original-message lag without changing cursor or
   ]);
   const path = join(state.dir, "telegram-lag.jsonl");
   const record = inboundLagLog(path);
-  const store = telegramTestStore(join(state.dir, "telegram-offset"), 900);
+  const store = telegramTestStore(join(state.dir, "tg-off-lag"), 900);
   await pollTelegramInbound(mk(http), store, { ownerId: OWNER }, (inbound) => record(inbound, 1_700_000_002_250));
   const records = readFileSync(path, "utf8")
     .trim()

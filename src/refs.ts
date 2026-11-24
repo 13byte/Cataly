@@ -1,14 +1,8 @@
 import { Refusal } from "./refusal.ts";
-import { formatRef, HEADLESS_ADDRESS, parseRef, type SessionRef } from "./runtime/types.ts";
+import { formatRef, HEADLESS_ADDRESS, type SessionRef } from "./runtime/types.ts";
 
-/**
- * A ref as Cataly stores and prints it beside records written before runtimes existed: a herdr pane bare (`w1:p3`), any
- * other runtime with its prefix (`hc:t7`). roles.json values, inbox file names and delivery notices use this form.
- */
-export const refText = (ref: SessionRef): string => (ref.runtime === "herdr" ? ref.id : formatRef(ref));
-
-/** Reads refText back. A stored value no runtime parses is a pane id an older herdr wrote. */
-export const refFromText = (text: string): SessionRef => parseRef(text) ?? { runtime: "herdr", id: text };
+/** A ref as Cataly stores and prints it (`tern:42`, `headless:<uuid>`); roles.json, inbox and notices use this form. */
+export const refText = (ref: SessionRef): string => formatRef(ref);
 
 export const sameSession = (a: SessionRef, b: SessionRef): boolean => a.runtime === b.runtime && a.id === b.id;
 
@@ -21,7 +15,7 @@ const headlessIds = (known: readonly SessionRef[]): string[] => [
 ];
 
 /**
- * A ref as a person reads it, its runtime named once as its prefix (`tern:42`, `herdr:w1:p3`). A headless id (a UUID)
+ * A ref as a person reads it, its runtime named once as its prefix (`tern:42`). A headless id (a UUID)
  * is cut to its shortest prefix of SHORT_MIN characters or more, never ending in "-", that no other headless id in
  * `known` starts with; `resolveShortRef` reads it back to this ref. `known` must hold every ref that resolution reads
  * (`knownRefs`), so a prefix shown is one it resolves.
