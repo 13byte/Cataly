@@ -111,16 +111,12 @@ Here is the workflow on current `main`:
 **Cataly is a new product, not an upgrade of omp-dori**
 
 This version removes every omp-dori name, the herdr and hc terminal runtimes and
-the omp-ulw overlay. There is no in-place upgrade, migration or rollback from
-omp-dori, an earlier `v0.1.x` release, or a `~/.dori` or `~/.omp-dori` home.
-[Reinstall fresh](docs/releases.md#cataly-is-a-new-product-reinstall-fresh):
-
-1. With your previous version, finish or close the lanes you care about
-   (`cataly status` lists them), then stop it.
-2. Install Cataly into a new home, never the old one.
-3. Copy only the settings and tokens you need by hand.
-4. Replace `DORI_*` and `OMP_DORI_*` exports with their `CATALY_*` names.
-5. Start with `cataly harness up` and open new lanes.
+the omp-ulw overlay, and although omp-dori code cannot be upgraded in place, the
+installer does the move itself: it imports a previous `~/.dori` or `~/.omp-dori`
+home's config, tokens and owner profile into the new home without overwriting
+settings already there, then deletes that home and the links and caches the
+previous version left behind once nothing of it runs
+([how the move works](docs/releases.md#cataly-is-a-new-product-moving-from-omp-dori)).
 
 Use `cataly` for operation, `cataly-harness` for the standalone harness, and
 `omp-cataly` for a separate installation. Fresh homes default to `~/.cataly`

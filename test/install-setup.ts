@@ -52,6 +52,8 @@ export function setup() {
     resolve(import.meta.dir, "../scripts/source-dependencies.ts"),
     join(upstream, "scripts/source-dependencies.ts"),
   );
+  // The installer's one-way bridge from previous installations, run from the checkout being installed.
+  symlinkSync(resolve(import.meta.dir, "../scripts/previous-install"), join(upstream, "scripts/previous-install"));
   writeFileSync(join(upstream, "extension/index.ts"), "export default () => {};\n");
   writeFileSync(join(upstream, cli), "v1\n");
   writeFileSync(
@@ -71,7 +73,7 @@ export function setup() {
   // Record package-manager mutations without installing or linking anything on the host.
   writeFileSync(
     join(bin, "bun"),
-    `#!/bin/sh\ncase "$1" in\n--version) echo "\${INSTALL_TEST_BUN_VERSION:-1.4.4}" ;;\n-e|*/source-dependencies.ts|*/source-configuration.ts|*/skills/cataly-mode/scripts/src/cli.ts) exec ${JSON.stringify(process.execPath)} "$@" ;;\n*) echo "$*" >> ${JSON.stringify(join(root, "bun.log"))} ;;\nesac\n`,
+    `#!/bin/sh\ncase "$1" in\n--version) echo "\${INSTALL_TEST_BUN_VERSION:-1.4.4}" ;;\n-e|*/source-dependencies.ts|*/source-configuration.ts|*/previous-install/cli.ts|*/skills/cataly-mode/scripts/src/cli.ts) exec ${JSON.stringify(process.execPath)} "$@" ;;\n*) echo "$*" >> ${JSON.stringify(join(root, "bun.log"))} ;;\nesac\n`,
   );
   chmodSync(join(bin, "bun"), 0o755);
   writeFileSync(

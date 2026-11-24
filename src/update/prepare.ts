@@ -8,6 +8,7 @@ import { runCommand } from "./process.ts";
 import { carryCatalyPin, changedPaths, digest, freezeSource, sourceManifest } from "./source.ts";
 import { persistJob, saveJson } from "./state.ts";
 import type { UpdateContext, UpdateJob } from "./types.ts";
+import { removeUlwFixture } from "./ulw-fixture.ts";
 
 const SHA = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/;
 
@@ -147,6 +148,8 @@ export async function prepareCandidate(ctx: UpdateContext, job: UpdateJob): Prom
   const inputs = join(job.directory, "inputs");
   mkdirSync(inputs, { mode: 0o700 });
   const base = freezeSource(baseRepo, join(inputs, "base"), "upstream");
+  // A checkout from before the omp-ulw removal may still hold its test fixture, which would hold admission below.
+  removeUlwFixture(ctx.config.localSource);
   const local = freezeSource(ctx.config.localSource, join(inputs, "local"), "local");
   const incoming = freezeSource(job.candidate, join(inputs, "upstream"), "upstream");
   job.inputs = {

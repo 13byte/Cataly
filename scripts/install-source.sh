@@ -155,8 +155,7 @@ configuration_helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/source-confi
 configuration() {
   BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 "$bun_bin" "$configuration_helper" "$1" "$base" "$src" "$mode"
 }
-# Capture before toolchain/checkout/dependency preparation; the receipt contains metadata, never file content.
-if [ "$preview" = 0 ]; then setup_snapshot="$(configuration capture)"; fi
+
 
 # Resolve the install mode before checking every wrapper it writes. File identity follows symlinks,
 # including aliased parents, and catches hard links without trusting an existing wrapper's source.
@@ -279,6 +278,25 @@ if [ "$preview" = 1 ]; then
   configuration preview
   exit 0
 fi
+
+# The one-way bridge from previous installations (scripts/previous-install, from the checkout being installed). Its
+# import converts a home an earlier version wrote and carries an earlier home's settings over; it runs before the
+# configuration snapshot, so they are part of it, and before any toolchain, checkout, link or wrapper change.
+bridge="$src/scripts/previous-install/cli.ts"
+if [ -f "$bridge" ]; then
+  BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 "$bun_bin" "$bridge" import --home "$base" --mode "$mode" ||
+    fail "Import of the previous installation into $base held; nothing was changed."
+fi
+# Capture before toolchain/checkout/dependency preparation; the receipt contains metadata, never file content.
+setup_snapshot="$(configuration capture)"
+# After a successful install the same bridge removes what earlier versions left behind, deletes an earlier home whose
+# settings are here and of which nothing runs, and hands a managed deployment still on the previous main's controller
+# to this one. A held cleanup is reported and retried by the next install; the installation itself succeeded.
+retire_previous() {
+  [ -f "$bridge" ] || return 0
+  BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 "$bun_bin" "$bridge" retire --home "$base" --mode "$mode" --source "$src" ||
+    echo "Previous installation cleanup held for $base; the next install retries" >&2
+}
 
 if [ -n "$omp_bin" ]; then
   check_omp_wrapper_collision
@@ -454,6 +472,7 @@ Sessions run on headless OMP.
 Run cataly harness up from your project to start the harness, or open the lead with
 $base/bin/omp --cataly-role cataly. Installation does not start a messenger or watcher.
 EOF
+  retire_previous
   exit 0
 fi
 
@@ -508,3 +527,4 @@ Sessions run on headless OMP.
 Run omp-cataly harness up from your project to start the harness, or open the lead with
 omp-cataly omp --cataly-role cataly. Installation does not start a messenger or watcher.
 EOF
+retire_previous

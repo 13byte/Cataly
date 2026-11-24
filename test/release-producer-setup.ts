@@ -14,6 +14,7 @@ export function releaseFixture(
     { path: "native-omp.patch", sha256: digest("\n"), executable: false },
     { path: "release-headless.json", sha256: digest("{}\n"), executable: false },
     { path: "scripts/consumer/omp", sha256: digest("#!/bin/sh\n"), executable: true },
+    { path: "scripts/previous-install/cli.ts", sha256: digest("export {};\n"), executable: false },
     { path: "scripts/source-dependencies.ts", sha256: digest("export {};\n"), executable: false },
     { path: "src/cli.ts", sha256: digest("export {};\n"), executable: false },
   ],

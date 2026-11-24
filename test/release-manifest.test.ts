@@ -123,6 +123,7 @@ test.each([
   "native-addon/bun.lock",
   "release-headless.json",
   "scripts/source-dependencies.ts",
+  "scripts/previous-install/cli.ts",
   "scripts/consumer/omp",
 ])("rejects a release without its bound native payload file %s", (path) => {
   const files = releaseFixture().source.files.filter((file) => file.path !== path);

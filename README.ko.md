@@ -109,16 +109,11 @@
 **Cataly는 omp-dori의 업그레이드가 아닌 새 제품입니다**
 
 이 버전에서 omp-dori라는 이름 전부와 herdr·hc 터미널 런타임, omp-ulw 오버레이가
-제거됐습니다. omp-dori, 이전 `v0.1.x` 릴리스, `~/.dori` 또는 `~/.omp-dori` 홈에서는
-제자리 업그레이드, 마이그레이션, 롤백을 할 수 없습니다.
-[새로 설치하세요](docs/releases.md#cataly-is-a-new-product-reinstall-fresh).
-
-1. 이전 버전에서 필요한 레인을 마치거나 닫고(`cataly status`로 목록 확인)
-   이전 버전을 중지하세요.
-2. Cataly를 이전 홈이 아닌 새 홈에 설치하세요.
-3. 필요한 설정과 토큰만 직접 옮기세요.
-4. `DORI_*`, `OMP_DORI_*` export를 해당하는 `CATALY_*` 이름으로 바꾸세요.
-5. `cataly harness up`으로 시작하고 새 레인을 여세요.
+제거됐습니다. omp-dori 코드를 제자리에서 업그레이드할 수는 없지만 이전은 설치
+프로그램이 합니다. 이전 `~/.dori` 또는 `~/.omp-dori` 홈의 설정, 토큰, 소유자
+프로필을 새 홈으로 가져오고(이미 있는 설정은 덮어쓰지 않습니다), 그 홈에서 실행
+중인 것이 없으면 이전 홈과 이전 버전이 남긴 링크와 캐시를 삭제합니다
+([이전 방법](docs/releases.md#cataly-is-a-new-product-moving-from-omp-dori)).
 
 운영 명령은 `cataly`, 독립 하네스는 `cataly-harness`, 별도 설치 래퍼는
 `omp-cataly`입니다. 새 설치의 기본 홈은 기본 모드 `~/.cataly`, Side 모드

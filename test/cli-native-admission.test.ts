@@ -119,10 +119,12 @@ test("an explicitly configured external OMP needs no native receipt, but the man
       join(alias, "releases", "releases", basename(source), "scripts", "consumer", "omp"),
     );
   }
+  // Windows may name the temp root by its 8.3 short form; the error names the long one, as realpathSync.native does.
+  const lock = join(realpathSync.native(source), "native-omp.lock");
   for (const executable of managedPaths) {
     const managed = invoke(executable);
     expect(managed.exitCode === 0 ? { unexpectedlyAccepted: executable } : null).toBeNull();
     expect(managed.stdout.toString()).toBe("");
-    expect(managed.stderr.toString()).toContain(join(source, "native-omp.lock"));
+    expect(managed.stderr.toString()).toContain(lock);
   }
 }, 20_000);

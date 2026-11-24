@@ -166,6 +166,8 @@ export function fixture(side = false): ConsumerFixture {
       "skills/cataly-mode/references/config.example.json": '{"stateDir":"~/.cataly/state"}\n',
       "release-headless.json": readFileSync(resolve(import.meta.dir, "../release-headless.json")),
       "scripts/consumer/omp": launcher ?? readFileSync(resolve(import.meta.dir, "../scripts/consumer/omp")),
+      // A release carries the installer's one-way bridge from previous installations.
+      "scripts/previous-install/cli.ts": "export {};\n",
     };
     for (const path of NATIVE_FILES) contents[path] = readFileSync(join(nativeTemplate(), path));
     for (const [path, bytes] of Object.entries(contents)) {

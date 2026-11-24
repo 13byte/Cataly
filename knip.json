@@ -6,6 +6,7 @@
         "scripts/update-supervisor.ts",
         "scripts/source-dependencies.ts",
         "scripts/source-configuration.ts",
+        "scripts/previous-install/cli.ts",
         "scripts/check-native-doctor.ts",
         "scripts/verify-consumer-release.ts",
         "scripts/consumer-smoke-candidate.ts",

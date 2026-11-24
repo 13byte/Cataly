@@ -8,10 +8,6 @@ import { bootId, procExe, procExeTarget, procStat } from "./proc.ts";
 export class DeploymentHeld extends Error {}
 export class DeploymentBusy extends DeploymentHeld {}
 export class DeploymentRetryable extends DeploymentHeld {}
-/** One-time manual move for a lead whose records an earlier Cataly wrote. */
-export const EARLIER_CATALY_MOVE =
-  "was written by an earlier Cataly; stop the harness (cataly harness stop), deploy, then cataly harness up " +
-  "(see docs/releases.md#managed-deployments-across-the-legacy-removal)";
 export const processIdentity = (pid: number): ProcessIdentity | undefined => {
   if (!Number.isSafeInteger(pid) || pid <= 0) return undefined;
   try {
@@ -61,9 +57,7 @@ export function underProcess(pid: number, root: number): boolean {
 /** The prepared parent and its descendants use the same fence and pinned Cataly extension. */
 export function managedOmpCommand(toolchain: ToolchainReceipt, source: string | undefined): readonly string[] {
   if (source !== toolchain.extensionSource)
-    throw new DeploymentHeld(
-      `managed extension source differs from its prepared toolchain; its receipt ${EARLIER_CATALY_MOVE}`,
-    );
+    throw new DeploymentHeld("managed extension source differs from its prepared toolchain");
   return [toolchain.omp, "--config", toolchain.nativeConfig, "--no-extensions", "-e", join(source, "extension")];
 }
 

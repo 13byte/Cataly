@@ -62,7 +62,7 @@ Develop in an ordinary source checkout, never inside a frozen installed release.
 Use `cataly` for the primary CLI, `cataly-harness` for the standalone harness,
 and `omp-cataly` for isolated operation. `omp` remains the OMP command.
 Cataly is a new product with no upgrade path from omp-dori; see
-[the release guide](docs/releases.md#cataly-is-a-new-product-reinstall-fresh).
+[the release guide](docs/releases.md#cataly-is-a-new-product-moving-from-omp-dori).
 
 To install a selected checkout alongside a primary installation without pulling
 (it builds the required native Cataly binary, so install Rust with [rustup](https://rustup.rs) first;
@@ -104,11 +104,6 @@ The rename does not weaken the existing tag, commit, workflow, or check bindings
 bun run dev:setup                              # once, and after lockfile or pin changes
 bun run test:local [root|skill|ext|all] [args] # default: all three suites
 ```
-
-A checkout from before the omp-ulw removal may still hold the gitignored
-`ref/omp-ulw/` fixture. Delete the leftover `ref/` directory once
-(`rm -rf ref`); otherwise `cataly upstream` holds with
-`local source admission held: ref`.
 
 `dev:setup` runs the `run:` steps of `.github/actions/setup` (`fixtures: all`)
 verbatim, so the installs, the native host check against `native-omp.lock`

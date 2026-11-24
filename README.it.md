@@ -116,17 +116,13 @@ e rapporti pubblici. La telemetria è disattivata per impostazione predefinita.
 **Cataly è un nuovo prodotto, non un aggiornamento di omp-dori**
 
 Questa versione rimuove ogni nome omp-dori, i runtime terminale herdr e hc e
-l'overlay omp-ulw. Non esiste aggiornamento sul posto, migrazione o rollback da
-omp-dori, da una release `v0.1.x` precedente o da una directory di installazione
-`~/.dori` o `~/.omp-dori`.
-[Reinstalla da zero](docs/releases.md#cataly-is-a-new-product-reinstall-fresh):
-
-1. Con la versione precedente, completa o chiudi le lane che ti servono
-   (`cataly status` le elenca), poi arresta quella versione.
-2. Installa Cataly in una nuova directory di installazione, mai in quella vecchia.
-3. Copia a mano solo le impostazioni e i token che ti servono.
-4. Sostituisci gli export `DORI_*` e `OMP_DORI_*` con i corrispondenti nomi `CATALY_*`.
-5. Avvia con `cataly harness up` e apri nuove lane.
+l'overlay omp-ulw, e anche se il codice omp-dori non si aggiorna sul posto è
+l'installer a fare il passaggio: importa configurazione, token e profilo del
+proprietario di una directory `~/.dori` o `~/.omp-dori` precedente nella nuova
+directory, senza sovrascrivere le impostazioni già presenti, poi elimina quella
+precedente e i link e le cache lasciati dalla versione precedente quando nulla di
+essa è più in esecuzione
+([come funziona il passaggio](docs/releases.md#cataly-is-a-new-product-moving-from-omp-dori)).
 
 I comandi attuali sono `cataly`, `cataly-harness` e `omp-cataly` (installazione
 separata). Le nuove installazioni usano `~/.cataly` oppure `~/.omp-cataly`.

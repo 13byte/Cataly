@@ -1,13 +1,8 @@
 import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseCatalyRole } from "../../skills/cataly-mode/scripts/src/session-compat.ts";
-import {
-  DeploymentHeld,
-  EARLIER_CATALY_MOVE,
-  processIdentity,
-  sameProcess,
-  underProcess,
-} from "./deployment-process.ts";
+import { DeploymentHeld, processIdentity, sameProcess, underProcess } from "./deployment-process.ts";
+import { currentHealth } from "./deployment-previous-main.ts";
 import type { MonitorProcessIdentity, RuntimeHealth, RuntimeIdentity } from "./deployment-types.ts";
 import { procCmdline } from "./proc.ts";
 
@@ -22,7 +17,7 @@ export function readRuntimeHealth(config: {
   if (!stat) return undefined;
   if (!stat.isFile() || (stat.mode & 0o022) !== 0 || (process.getuid !== undefined && stat.uid !== process.getuid()))
     throw new DeploymentHeld("runtime health ownership differs");
-  const value = JSON.parse(readFileSync(path, "utf8")) as RuntimeHealth;
+  const value = currentHealth(JSON.parse(readFileSync(path, "utf8"))) as RuntimeHealth;
   if (
     value.version !== 1 ||
     !Array.isArray(value.monitors) ||
@@ -37,7 +32,7 @@ export function readRuntimeHealth(config: {
     Date.parse(value.updatedAt) < Date.parse(value.startedAt) ||
     Date.parse(value.updatedAt) > Date.now() + 1_000
   )
-    throw new DeploymentHeld(`runtime health schema differs; the health file ${EARLIER_CATALY_MOVE}`);
+    throw new DeploymentHeld("runtime health schema differs");
   return { ...value, role: "cataly" };
 }
 

@@ -10,6 +10,7 @@ import { observeDeploymentHealth, waitDeploymentHealth } from "./deployment-heal
 import { assertPreparedLayout, refreshBusyHandoff, verifyBusyHold } from "./deployment-hold.ts";
 import { waitForRestartLock } from "./deployment-lock.ts";
 import { prepareRelease, validateDeploymentInput } from "./deployment-prepare.ts";
+import { currentRecord } from "./deployment-previous-main.ts";
 import { acquireRestartLock, DeploymentBusy, DeploymentHeld, DeploymentRetryable } from "./deployment-process.ts";
 import { restartDeployment } from "./deployment-restart.ts";
 import { readRestartIntent } from "./deployment-restart-state.ts";
@@ -36,7 +37,7 @@ export async function deployRelease(
   const inputHash = digest(JSON.stringify(input));
   const configHash = previous?.configHash ?? digest(JSON.stringify(config));
   const id = previous?.id ?? randomUUID();
-  const record: DeploymentRecord = previous ?? {
+  const record: DeploymentRecord = currentRecord(previous) ?? {
     version: 1,
     id,
     inputHash,
@@ -62,7 +63,7 @@ export async function deployRelease(
   const resume = (): void => {
     const journal = join(current.directory, "deployment.json");
     if (!previous || !lstatSync(journal, { throwIfNoEntry: false })) return;
-    const durable = JSON.parse(readFileSync(journal, "utf8")) as DeploymentRecord;
+    const durable = currentRecord(JSON.parse(readFileSync(journal, "utf8")) as DeploymentRecord);
     if (
       durable.id !== id ||
       durable.inputHash !== inputHash ||

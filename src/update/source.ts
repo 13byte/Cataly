@@ -27,8 +27,9 @@ export function assertSourceAdmission(manifest: SourceManifest, kind: SourceKind
     );
   });
   if (omitted.length) {
-    const leftover = omitted.includes("ref") ? "; delete the leftover ref/ directory (the former omp-ulw fixture)" : "";
-    throw new UpdateError(`${kind} source admission held: ${omitted.join(", ")}${leftover}`);
+    // The former omp-ulw fixture is removed before local admission; what stays in ref/ is not Cataly's.
+    const ref = omitted.includes("ref") ? "; ref/ holds files Cataly did not create" : "";
+    throw new UpdateError(`${kind} source admission held: ${omitted.join(", ")}${ref}`);
   }
 }
 

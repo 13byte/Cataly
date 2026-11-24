@@ -50,10 +50,14 @@ try {
   };
   const stat = (path) => lstatSync(path, { throwIfNoEntry: false });
   let home, configPath, configEntry, config = {};
-  const selectHome = () => {
+  const resolveSelectedHome = () => {
     const selectedHome = explicitHome ?? (mode === "side" ? join(homedir(), ".omp-cataly") : primaryHome);
     if (!isAbsolute(selectedHome)) fail("--home / OMP_CATALY_HOME must be an absolute installation home");
     home = resolve(selectedHome);
+  };
+  resolveSelectedHome();
+  const selectHome = () => {
+    resolveSelectedHome();
     const actualHome = physical(home);
     const actualPrimary = physical(primaryHome);
     const withinPrimary = relative(actualPrimary, actualHome);
@@ -68,6 +72,22 @@ try {
       (sourceStat && (!sourceStat.isSymbolicLink() ||
         dirname(resolve(home, readlinkSync(source))) !== join(home, "releases/releases"))))
       fail(`Source-owned installation at ${home}; choose another home`);
+    configPath = join(home, "config.json");
+    configEntry = stat(configPath);
+    if (configEntry) {
+      if (!configEntry.isFile() || configEntry.isSymbolicLink() || configEntry.uid !== process.getuid() || (configEntry.mode & 0o022))
+        fail("Unsafe preserved config: expected an owned regular file without group/world write permission");
+      config = JSON.parse(readFileSync(configPath, "utf8"));
+      if (!object(config)) fail("Preserved config must be an object");
+    }
+  };
+  // An earlier version's wrappers are removed by the bridge below, so the early check accepts exactly those; the
+  // check after the bridge is strict.
+  const checkWrappers = (early = false) => {
+    const isPrimary = home === primaryHome;
+    const source = join(home, "src");
+    // A target only an omp-dori installer made: the bridge removes it.
+    const previous = /(?:^|\/)(?:bin\/(?:dori|dori-harness|omp-dori)$|skills\/dori-mode\/)/;
     for (const [name, target] of [
       ["cataly", "skills/cataly-mode/scripts/src/cli.ts"], ["cataly-harness", "src/cli.ts"],
       ["omp", null], ["omp-cataly", null],
@@ -79,22 +99,21 @@ try {
       const actual = entry?.isSymbolicLink() ? resolve(dirname(path), readlinkSync(path)) : undefined;
       const managedNative = name === "omp" && isPrimary && consumerOwner && actual &&
         /^[a-f0-9]{40}-[a-f0-9]{16}\/scripts\/consumer\/omp$/.test(relative(join(home, "releases/releases"), actual));
-      if (entry && !managedSide && !managedNative && (!target || actual !== join(source, target)))
+      const old = early && entry?.isSymbolicLink() && previous.test(readlinkSync(path));
+      if (entry && !managedSide && !managedNative && !old && (!target || actual !== join(source, target)))
         fail(`Unmanaged wrapper at ${path}; choose another home`);
     }
-    configPath = join(home, "config.json");
-    configEntry = stat(configPath);
-    if (configEntry) {
-      if (!configEntry.isFile() || configEntry.isSymbolicLink() || configEntry.uid !== process.getuid() || (configEntry.mode & 0o022))
-        fail("Unsafe preserved config: expected an owned regular file without group/world write permission");
-      config = JSON.parse(readFileSync(configPath, "utf8"));
-      if (!object(config)) fail("Preserved config must be an object");
-    }
+  };
+  // A home an earlier version wrote is converted in place by the bridge below; validate it afterwards too.
+  const checkPreserved = () => {
+    selectHome();
+    checkWrappers();
+    if (config.runtime !== undefined && config.runtime !== "tern") fail("Preserved config runtime must be tern when present");
+    if (config.sessionRuntime !== undefined && !["headless", "tern"].includes(config.sessionRuntime))
+      fail("Preserved config sessionRuntime must be headless or tern when present");
   };
   selectHome();
-  if (config.runtime !== undefined && config.runtime !== "tern") fail("Preserved config runtime must be tern when present");
-  if (config.sessionRuntime !== undefined && !["headless", "tern"].includes(config.sessionRuntime))
-    fail("Preserved config sessionRuntime must be headless or tern when present");
+  checkWrappers(true);
   if (!atLeast(Bun.version, [1, 4, 4])) fail("Bun 1.4.4+ is required");
   if (!Bun.which("git")) fail("git is required; install it before Cataly");
   const fetchBytes = async (url, limit) => {
@@ -238,6 +257,19 @@ try {
   writeFileSync(join(dist, "release-manifest.json"), metadata, { flag: "wx", mode: 0o600 });
   writeFileSync(join(dist, "SHA256SUMS"), sumsBytes, { flag: "wx", mode: 0o600 });
   writeFileSync(join(dist, manifest.archive.name), archive, { flag: "wx", mode: 0o600 });
+  // The one-way bridge from previous installations, shipped by this release. It runs from the extracted source, which
+  // is the version being installed: first the import, before the installer reads the preserved configuration, then,
+  // after a successful install, the cleanup and the handover of a managed deployment.
+  const bridge = join(extracted, "scripts/previous-install/cli.ts");
+  const bridged = lstatSync(bridge, { throwIfNoEntry: false })?.isFile() === true;
+  const bridgeRun = (phase) => Bun.spawnSync(
+    [process.execPath, bridge, phase, "--home", home, "--mode", mode, ...(phase === "retire" ? ["--source", join(home, "src")] : [])],
+    { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+  if (bridged) {
+    const imported = bridgeRun("import");
+    if (imported.exitCode !== 0) fail(`Import of the previous installation into ${home} held; nothing was installed`);
+  }
+  checkPreserved();
   const env = { ...process.env };
   for (const key of ["HOME", "CONFIG", "STATE_DIR", "RUNTIME", "CMD", "AGENT_CMD", "AGENT_ARGV", "MANAGED_STARTUP"])
     delete env[`CATALY_${key}`];
@@ -248,6 +280,8 @@ try {
   const child = Bun.spawn(childArgs,
     { stdin: "inherit", stdout: "inherit", stderr: "inherit", env });
   process.exitCode = await child.exited;
+  if (process.exitCode === 0 && bridged && bridgeRun("retire").exitCode !== 0)
+    console.error(`Previous installation cleanup held for ${home}; the next install retries`);
 } catch (error) {
   console.error(`Cataly bootstrap held: ${error instanceof Error ? error.message : String(error)}`);
   process.exitCode = 1;

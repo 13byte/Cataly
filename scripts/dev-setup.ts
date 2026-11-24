@@ -5,10 +5,12 @@
  *
  * The action's own `run:` scripts execute verbatim under the pinned Bun, umask 022 and a private /tmp TMPDIR, so the
  * installs, the native host version check and every fixture pin stay defined only in the action. Its `uses:` steps are
- * replaced by the Bun that package.json `packageManager` pins. Every step is idempotent and runs again.
+ * replaced by the Bun that package.json `packageManager` pins. Every step is idempotent and runs again. A checkout from
+ * before the omp-ulw removal loses that former fixture (`ref/omp-ulw`) first.
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
+import { removeUlwFixture } from "../src/update/ulw-fixture.ts";
 import { ensurePinnedBun, pinnedBunVersion, requirePosix, runUnderPinnedBun, withPrivateTmp } from "./dev-bun.ts";
 
 const ACTION = ".github/actions/setup/action.yml";
@@ -116,6 +118,7 @@ if (import.meta.main) {
   process.umask(0o022);
   const started = performance.now();
   const root = resolve(import.meta.dir, "..");
+  removeUlwFixture(root, (line) => console.log(`dev:setup: ${line}`));
   const bunVersion = pinnedBunVersion(root);
   runUnderPinnedBun(bunVersion, await ensurePinnedBun(root, bunVersion));
   const env = await runSteps(root, bunVersion, join(root, "target", "dev-fixtures"));

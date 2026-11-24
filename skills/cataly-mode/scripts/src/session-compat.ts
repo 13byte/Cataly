@@ -18,3 +18,21 @@ export const SESSION_WIRE = {
 
 export const MONITOR_MESSAGE = SESSION_WIRE.monitorMessage;
 export const isMonitorMessage = (value: unknown): boolean => value === MONITOR_MESSAGE;
+
+/**
+ * The previous main's kind for the same monitor message: lane input, monitor notices and head-admission receipts.
+ * Those transcripts are live data, so the readers that identify such a message accept both kinds; only
+ * {@link MONITOR_MESSAGE} is ever written.
+ */
+export const PREVIOUS_MONITOR_MESSAGE = "dori-monitor";
+
+type RecordedEntry = { readonly type: string; readonly customType?: string; readonly data?: unknown };
+
+/** The newest recorded role that parses; an unrecognized value leaves the previous one in place. */
+export const recordedRole = (branch: readonly RecordedEntry[]): "cataly" | "lane" | undefined => {
+  let role: "cataly" | "lane" | undefined;
+  for (const entry of branch)
+    if (entry.type === "custom" && isCatalyEntry(entry.customType, SESSION_WIRE.role))
+      role = parseCatalyRole(entry.data) ?? role;
+  return role;
+};

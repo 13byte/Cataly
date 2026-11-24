@@ -102,14 +102,10 @@ Cataly 使用你提供的账号和权限工作。对外部系统产生影响的�
 **Cataly 是一个新产品，而不是 omp-dori 的升级版**
 
 此版本移除了所有 omp-dori 名称、herdr 和 hc 终端运行时以及 omp-ulw 覆盖层。
-无法从 omp-dori、更早的 `v0.1.x` 发行版或 `~/.dori`、`~/.omp-dori` 安装目录进行原地升级、迁移或回滚。
-[请全新安装](docs/releases.md#cataly-is-a-new-product-reinstall-fresh)：
-
-1. 用旧版本完成或关闭你需要的通道（`cataly status` 会列出它们），然后停止旧版本。
-2. 将 Cataly 安装到新的安装目录，不要安装到旧目录。
-3. 只手动复制你需要的设置和令牌。
-4. 将 `DORI_*` 和 `OMP_DORI_*` 的 export 替换为对应的 `CATALY_*` 名称。
-5. 使用 `cataly harness up` 启动，并打开新的通道。
+omp-dori 代码无法原地升级，但迁移由安装程序完成：它会把之前的 `~/.dori` 或
+`~/.omp-dori` 目录中的配置、令牌和所有者资料导入新的安装目录（不会覆盖已有的
+设置），然后在该目录中没有任何进程运行后删除该目录以及旧版本留下的链接和缓存
+（[迁移方式](docs/releases.md#cataly-is-a-new-product-moving-from-omp-dori)）。
 
 当前命令是 `cataly`、`cataly-harness` 和 `omp-cataly`（独立安装）。
 新安装默认使用 `~/.cataly` 或 `~/.omp-cataly`。Cataly 在 macOS 和 Linux 上默认以 headless OMP 运行；

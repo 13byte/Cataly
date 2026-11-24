@@ -1,14 +1,12 @@
 # Public releases and support
 
-## Cataly is a new product: reinstall fresh
+## Cataly is a new product: moving from omp-dori
 
-Cataly is a new product, not an upgrade of omp-dori. This version removes every omp-dori name, the herdr and hc terminal runtimes and the omp-ulw overlay. There is no in-place upgrade, migration or rollback from omp-dori, an earlier `v0.1.x` release, or a `~/.dori` or `~/.omp-dori` home.
+Cataly is a new product, not an upgrade of omp-dori. This version removes every omp-dori name, the herdr and hc terminal runtimes and the omp-ulw overlay. There is no in-place upgrade of omp-dori code, and no rollback to it.
 
-1. With your previous version, finish or close the lanes you care about (`cataly status` lists them), then stop it.
-2. [Install Cataly](#install-a-current-release) into a new home. Never point it at the old one; if the old home is `~/.cataly` or `~/.omp-cataly`, pass `--home` with another directory.
-3. Copy only what you need by hand: settings from the old `config.json` and your tokens. Do not copy `releases/`, `bin/`, `skills/` or `roles.json`.
-4. Replace `DORI_*` and `OMP_DORI_*` exports in your shell profile with their `CATALY_*` names.
-5. Start with `cataly harness up` and open new lanes. Old lanes are not resumed.
+The installer does the move. It imports the config, messenger tokens and owner profile of a previous `~/.dori`, `~/.omp-dori`, `DORI_HOME` or `OMP_DORI_HOME` installation into the new home in the current format, validated by the current loader, and never overwrites a setting the new home already has. It then deletes that home once the import verifies and nothing of it still runs, and removes the links, commands and caches the previous version left behind; a home still in use is kept and the next install retries. A `~/.cataly` that an earlier version installed from source is converted in place.
+
+Old lanes are not resumed. Finish or close the lanes you care about before installing (`cataly status` lists them), then start with `cataly harness up` and open new lanes.
 
 The ULW commands and skills are no longer installed. OMP's own `goal` tool and any skills you install yourself remain available.
 
@@ -33,7 +31,7 @@ See the [OMP 19 port and per-hunk audit](native-omp-19.md) and [automatic native
 
 Current releases install only headless profiles for Linux x64 or macOS arm64, declared by the release's bound `release-headless.json`. Slack and Telegram remain source features. The maintainer source-container recipe is separate from the public release installer; it is not a published consumer image.
 
-Releases published before the Cataly rename use the omp-dori release format. This controller does not install, update or roll back to them; see [reinstall fresh](#cataly-is-a-new-product-reinstall-fresh). The immutable `v0.1.0` and `v0.1.1` tags are superseded unpublished release attempts with zero release assets, not stable published releases. See the [release history](../CHANGELOG.md#superseded-unpublished-tags) for the draft-identity and first-upload failures.
+Releases published before the Cataly rename use the omp-dori release format. This controller does not install, update or roll back to them; see [moving from omp-dori](#cataly-is-a-new-product-moving-from-omp-dori). The immutable `v0.1.0` and `v0.1.1` tags are superseded unpublished release attempts with zero release assets, not stable published releases. See the [release history](../CHANGELOG.md#superseded-unpublished-tags) for the draft-identity and first-upload failures.
 
 Linux x64 identifies the platform and architecture, not a tested matrix of Linux distributions. Qualify the specific distribution and toolchain against the release's actual clean-consumer evidence; other Linux distributions remain compatibility targets with unverified consumer behavior.
 
@@ -437,7 +435,7 @@ An explicit rollback pauses automatic updates until `cataly update auto enable`;
 
 **Distribution boundary:** this only applies after installing a release containing the launch hook. Source-owned homes and custom source/ref/path installations are not silently migrated. A merged PR alone does not publish a release or update installed clients; until a compatible newer stable release exists, an eligible launch keeps its current installation. Source users continue their explicit source-install/update procedure.
 
-An installation of a release published before the Cataly rename never updates to Cataly, automatically or manually; [reinstall fresh](#cataly-is-a-new-product-reinstall-fresh). Current installers select references from the verified target on update or rollback and hold on missing or changed renderer source or modified owned settings.
+An installation of a release published before the Cataly rename never updates to Cataly, automatically or manually; install Cataly and it [moves your settings over](#cataly-is-a-new-product-moving-from-omp-dori). Current installers select references from the verified target on update or rollback and hold on missing or changed renderer source or modified owned settings.
 
 ## Troubleshooting and support reports
 
@@ -487,15 +485,9 @@ cataly upstream <check|stage|watch|status|snapshot|restore|recover|restart> --co
 
 This is the former porting updater, with no `cataly update stage/watch` alias. Its worker/reviewer models, checks, promotion policy, recovery and external supervisor remain documented in the [staged-update reference](../skills/cataly-mode/references/scripts.md#staged-cataly-updates). Maintainers supply their own model/provider authentication and, only when publishing, repository permissions. A ready source candidate is not a consumer release or an automatic live deployment.
 
-### Managed deployments across the legacy removal
+### Managed deployments from the previous main
 
-A managed source deployment (`cataly upstream` promotion or `cataly update source`) cannot replace a lead that runs a commit from before the legacy removal: the lead's health file and the deployment's `active.json` toolchain receipt changed shape (`presetLoaded` became `configLoaded`; receipts now bind `extensionSource`). The deployment holds with `runtime health schema differs` or `managed extension source differs from its prepared toolchain` before stopping anything, and an old controller would roll the new lead back. Managed deployment needs a running lead, so move across this commit once by hand:
-
-1. Stop the harness with the running code: `cataly harness stop`. It records the lead session for the next `up`.
-2. Deploy this commit to `deployment.liveSource`: fast-forward the checkout it resolves to, or repoint the link to a fresh clone of this commit. In that checkout run `bun install --frozen-lockfile` in the root, `skills/cataly-mode/scripts` and `extension`, then `cargo build --locked --release --bin cataly --target-dir target/managed`.
-3. Start the harness from the new source: `cataly harness up`. It resumes the stopped lead session.
-
-The old `active.json` names an actor that no longer runs, so the next managed deployment ignores it. As at a first conversion, that deployment admits the lead only when it runs the native image the deployment prepares.
+A lead that the previous main started (before the legacy removal) writes its runtime health with `presetLoaded`, and that main's controller recorded toolchain receipts that pin the extension through the removed omp-ulw overlay. This version's controller reads both in the current shape, so its first managed deployment replaces such a lead through the ordinary path: the releasing source's `cataly harness stop`, the pointer switch, `cataly harness up` resuming the recorded lead session, health readback and, on failure, rollback to that session. Every other hold still applies. A controller that still runs the previous main holds that deployment before it stops anything, because it cannot prepare the removed overlay, so the previous version keeps running. The installer therefore hands such a deployment over itself: for a source-mode supervisor whose controller still holds `omp-ulw.overlay.lock`, it runs this version's `update source apply --when idle` once, from the version being installed, and that deployment switches the controller link through the ordinary path above. An upstream-mode supervisor starts no model work for a controller change, so the installer only prints that the move completes when its next deployment runs this version; if a source deployment cannot move yet, the same line is printed and the next install retries.
 
 ## Building and publishing releases
 

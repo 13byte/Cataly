@@ -116,17 +116,13 @@ aktiviert sie; `DO_NOT_TRACK=1` hat Vorrang.
 **Cataly ist ein neues Produkt, kein Upgrade von omp-dori**
 
 Diese Version entfernt alle omp-dori-Namen, die Terminal-Laufzeiten herdr und hc
-sowie das omp-ulw-Overlay. Es gibt kein direktes Upgrade, keine Migration und kein
-Rollback von omp-dori, einem früheren `v0.1.x`-Release oder einem
-Installationsverzeichnis `~/.dori` oder `~/.omp-dori`.
-[Neu installieren](docs/releases.md#cataly-is-a-new-product-reinstall-fresh):
-
-1. Schließe oder beende mit deiner bisherigen Version die Lanes, die dir wichtig
-   sind (`cataly status` listet sie auf), und stoppe danach die bisherige Version.
-2. Installiere Cataly in ein neues Installationsverzeichnis, nie in das alte.
-3. Übernimm nur die Einstellungen und Tokens, die du brauchst, von Hand.
-4. Ersetze `DORI_*`- und `OMP_DORI_*`-Exporte durch ihre `CATALY_*`-Namen.
-5. Starte mit `cataly harness up` und öffne neue Lanes.
+sowie das omp-ulw-Overlay, und obwohl sich omp-dori-Code nicht direkt aktualisieren
+lässt, übernimmt der Installer den Umzug selbst: Er übernimmt Konfiguration, Tokens
+und Besitzerprofil eines bisherigen `~/.dori`- oder `~/.omp-dori`-Verzeichnisses in
+das neue Installationsverzeichnis, ohne dort vorhandene Einstellungen zu
+überschreiben, und löscht danach das bisherige Verzeichnis sowie die Links und
+Caches der bisherigen Version, sobald nichts daraus mehr läuft
+([So läuft der Umzug](docs/releases.md#cataly-is-a-new-product-moving-from-omp-dori)).
 
 Die aktuellen Befehle heißen `cataly`, `cataly-harness` und `omp-cataly` (separate
 Installation). Neue Installationen verwenden `~/.cataly` beziehungsweise

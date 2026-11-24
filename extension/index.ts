@@ -46,6 +46,7 @@ import {
   isCatalyEntry,
   MONITOR_MESSAGE,
   parseCatalyRole,
+  recordedRole,
   SESSION_WIRE,
 } from "../skills/cataly-mode/scripts/src/session-compat.ts";
 import {
@@ -72,6 +73,7 @@ import { MONITOR_ENTRY, recordedMonitors, recordedMonitorStates, type RecordedMo
 import { sameMonitorSpecs } from "../src/update/deployment-monitors.ts";
 import { NativeRemote } from "./native-remote.ts";
 import { DUTY_INVARIANTS, ROLE_INVARIANTS } from "./role-invariants.ts";
+import { bridgePreviousMain } from "./session-bridge.ts";
 import {
   bumpAttempts,
   MAX_CONTINUATIONS,
@@ -202,7 +204,6 @@ export interface CatalyApi {
 }
 
 const ROLE_FLAG = "cataly-role";
-const ROLE_ENTRY = "omp-cataly:role";
 const HARNESS_ROLE_ENTRY = "omp-cataly:harness-role";
 const NATIVE_REF_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const RECEIVER_FLAG = "cataly-lane-receiver";
@@ -239,14 +240,6 @@ const restrictArchivedLead = (branch: readonly SessionEntry[]): boolean => {
 const headlessRemoteId = (ctx: CatalyContext, role: CatalyRole | undefined): string | undefined => {
   const id = nativeHeadlessId(ctx);
   if (role === "lane" && id) return `headless:${id}`;
-};
-
-const recordedRole = (branch: readonly SessionEntry[]): CatalyRole | undefined => {
-  let role: CatalyRole | undefined;
-  for (const entry of branch)
-    if (entry.type === "custom" && isCatalyEntry(entry.customType, ROLE_ENTRY))
-      role = parseCatalyRole(entry.data) ?? role;
-  return role;
 };
 
 const goalOf = (goal: Goal | null | undefined): PaneState["goal"] =>
@@ -1063,7 +1056,16 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
         headContext = undefined;
         monitors.invalidateAdmissions();
       }
-      const branch = ctx.sessionManager.getBranch();
+      let branch = ctx.sessionManager.getBranch();
+      // The previous main's session entries are appended under the current names before anything reads this branch.
+      if (bridgePreviousMain((type, data) => pi.appendEntry(type, data), branch)) {
+        branch = ctx.sessionManager.getBranch();
+        try {
+          await ctx.sessionManager.ensureOnDisk?.();
+        } catch (error) {
+          ctx.ui.notify(`Cataly session state could not be persisted (${errorText(error)}).`, "warning");
+        }
+      }
       const inherited = ctx.agent.kind === "sub" ? await policy.inherit(ctx) : undefined;
       let flaggedRole = false;
       if (ctx.agent.kind === "sub") {

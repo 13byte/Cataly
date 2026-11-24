@@ -5,6 +5,7 @@ import { matchesDeploymentConfigHash } from "./deployment-config.ts";
 import { saveDeploymentJson } from "./deployment-files.ts";
 import { captureRuntime } from "./deployment-harness.ts";
 import { leadRuntimeHealth, monitorProcessReceipts } from "./deployment-monitor-receipts.ts";
+import { currentReceipt } from "./deployment-previous-main.ts";
 import { runtimeUsesToolchain } from "./deployment-prior.ts";
 import { actorEnv, command, DeploymentHeld, sameProcess } from "./deployment-process.ts";
 import { assertRuntimeToolchain } from "./deployment-toolchain.ts";
@@ -28,12 +29,17 @@ export type ActiveDeployment = {
 };
 
 export function readActiveDeployment(config: DeploymentConfig): ActiveDeployment | undefined {
+  let active: ActiveDeployment;
   try {
-    return JSON.parse(readFileSync(join(config.releaseRoot, "active.json"), "utf8")) as ActiveDeployment;
+    active = JSON.parse(readFileSync(join(config.releaseRoot, "active.json"), "utf8")) as ActiveDeployment;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
   }
+  // A malformed receipt stays as written, for the ordinary checks that hold on it.
+  return typeof active === "object" && active !== null
+    ? { ...active, toolchain: currentReceipt(active.toolchain) }
+    : active;
 }
 
 /** Observe the current deployment without activating it; native verification retains its cache leases. */

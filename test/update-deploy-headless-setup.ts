@@ -44,7 +44,7 @@ type Inventory = {
  * loaded from that source; the real extension writes the same runtime health receipt. Each lead runs a default intake
  * monitor named by its session's desired manifest; a `prelude` replaces it and the caller owns the monitors and their
  * manifest. `prelude` runs inside each lead process before its host starts, and `onLead` sees every live lead the health
- * writer observes.
+ * writer observes. With `previousMain`, a lead loaded from the old release writes the previous main's health shape.
  */
 export async function headlessDeployment(
   options: {
@@ -52,6 +52,7 @@ export async function headlessDeployment(
     readonly healthy?: (source: string) => boolean;
     readonly prelude?: string;
     readonly onLead?: (lead: { readonly sessionId: string; readonly pid: number }) => void;
+    readonly previousMain?: boolean;
   } = {},
 ) {
   const root = realpathSync(mkdtempSync("/tmp/cdh-"));
@@ -163,6 +164,7 @@ export async function headlessDeployment(
     healthy: options.healthy ?? (() => true),
     ...(monitor ? { manifest: monitor.manifest } : {}),
     ...(options.onLead ? { onLead: options.onLead } : {}),
+    ...(options.previousMain ? { previousMain: (source: string) => source === oldSource } : {}),
   });
 
   if (options.start !== false) {

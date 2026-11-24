@@ -40,6 +40,7 @@ const REQUIRED = [
   "native-addon/bun.lock",
   "release-headless.json",
   "scripts/source-dependencies.ts",
+  "scripts/previous-install/cli.ts",
   "scripts/consumer/omp",
 ] as const;
 

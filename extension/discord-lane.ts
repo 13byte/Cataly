@@ -34,7 +34,11 @@ import {
   statusOf,
 } from "../skills/cataly-mode/scripts/src/registry.ts";
 import { realClock } from "../skills/cataly-mode/scripts/src/run.ts";
-import { isMonitorMessage, SESSION_WIRE } from "../skills/cataly-mode/scripts/src/session-compat.ts";
+import {
+  isMonitorMessage,
+  PREVIOUS_MONITOR_MESSAGE,
+  SESSION_WIRE,
+} from "../skills/cataly-mode/scripts/src/session-compat.ts";
 import { selfSession } from "../src/runtime/registry.ts";
 import type { SessionRef } from "../src/runtime/types.ts";
 import { discordAskToken, routeFor } from "./discord-ask.ts";
@@ -166,11 +170,15 @@ export class DiscordLane {
       }
     };
 
+    // A message this lane already delivered: the previous main's kind counts, read only, so it is never repeated.
     const delivered = (text: string) =>
       ctx.sessionManager
         .getBranch()
         .some(
-          (entry) => entry.type === "custom_message" && isMonitorMessage(entry.customType) && entry.content === text,
+          (entry) =>
+            entry.type === "custom_message" &&
+            (isMonitorMessage(entry.customType) || entry.customType === PREVIOUS_MONITOR_MESSAGE) &&
+            entry.content === text,
         );
 
     const replies = new DiscordLaneReplies(() => (ownsPane() ? ctx.sessionManager.getBranch() : []));

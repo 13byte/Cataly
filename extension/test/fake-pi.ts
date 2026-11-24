@@ -12,8 +12,10 @@ export type Entry = {
   type: string;
   customType?: string;
   data?: unknown;
+  details?: unknown;
   mode?: string;
   message?: unknown;
+  content?: unknown;
 };
 export type FakeSession = { id: string; file?: string; entries: Entry[] };
 type Agent = CatalyContext["agent"];
@@ -37,6 +39,8 @@ export type FakePi = {
   tools: Map<string, Tool>;
   active: string[];
   messages: Array<{ content: string; options: unknown }>;
+  /** Every `sendMessage` with its custom message kind, which `messages` leaves out. */
+  sent: Array<{ customType: string; content: string; options: unknown }>;
   userMessages: string[];
   notes: string[];
   statuses: Map<string, string>;
@@ -61,6 +65,7 @@ export const fakePi = (options: FakeOptions): FakePi => {
     tools: new Map(),
     active: options.active ?? ["read", "bash"],
     messages: [],
+    sent: [],
     userMessages: [],
     notes: [],
     statuses: new Map(),
@@ -145,8 +150,10 @@ export const fakePi = (options: FakeOptions): FakePi => {
         fake.handlers.set(event, list);
       },
       appendEntry: (customType, data) => void fake.session.entries.push({ type: "custom", customType, data }),
-      sendMessage: (message, sendOptions) =>
-        void fake.messages.push({ content: message.content, options: sendOptions }),
+      sendMessage: (message, sendOptions) => {
+        fake.messages.push({ content: message.content, options: sendOptions });
+        fake.sent.push({ customType: message.customType, content: message.content, options: sendOptions });
+      },
       sendUserMessage: async (text) => void fake.userMessages.push(text),
       getActiveTools: () => [...fake.active],
       setActiveTools: async (names) => {
