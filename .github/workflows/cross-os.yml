@@ -41,6 +41,13 @@ jobs:
       - name: Extension tests
         if: ${{ !cancelled() }}
         run: bun run test:extension
+      # The whole native suite, so every macOS-only Rust test runs somewhere: the launch-guard memory and disk readers
+      # and the receiver and activity identities compare with the TypeScript readers through the bun setup put on PATH.
+      - name: Native tests
+        if: ${{ !cancelled() }}
+        run: |
+          bun --version
+          cargo test --locked
       - name: Darwin arm64 headless consumer release
         if: ${{ !cancelled() && github.event_name != 'pull_request' }}
         run: |

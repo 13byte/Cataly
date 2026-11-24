@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The memory guard now works on macOS, with one definition everywhere. The Discord wake guard, the `cataly guard`/`can-launch`/launch-queue guard and the harness loop all read macOS free memory as `kern.memorystatus_level`, the kernel value `memory_pressure` prints as "System-wide memory free percentage". When that is unreadable they fall back to free pages over `hw.memsize`; when neither is readable they report 0%, which holds launches. Previously the native wake guard read `/proc/meminfo`, which macOS lacks, so it never held a launch for memory, and the TypeScript guard ran `memory_pressure` and reported 100% when it failed. On macOS the native guard also reads disk through `statfs` like `df` does; `statvfs` truncates block counts to 32 bits. Linux is unchanged: an unreadable `/proc/meminfo` still reads 100%.
+
 - Native Discord intake opens its queue and lane inbox when an ancestor of the state directory is a symbolic link, such as macOS's `/var -> /private/var` above `$TMPDIR`; previously it exited at startup. A state directory that is itself a link is still refused.
 
 - Automatic Discord ASK routing works on macOS as well as Linux. The native receiver now publishes its route on macOS with the libproc process start the TypeScript lookup reads, and the native `--activity-file` writer records the same process identity as TypeScript (start, boot session, executable and image); previously both failed closed without procfs, so ASK stayed in the native OMP dialog. Building the native binary on macOS now needs the Xcode Command Line Tools, whose libclang and SDK generate the `libproc` bindings.
