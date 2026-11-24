@@ -1,7 +1,13 @@
 import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseCatalyRole } from "../../skills/cataly-mode/scripts/src/session-compat.ts";
-import { DeploymentHeld, processIdentity, sameProcess, underProcess } from "./deployment-process.ts";
+import {
+  DeploymentHeld,
+  EARLIER_CATALY_MOVE,
+  processIdentity,
+  sameProcess,
+  underProcess,
+} from "./deployment-process.ts";
 import type { MonitorProcessIdentity, RuntimeHealth, RuntimeIdentity } from "./deployment-types.ts";
 import { procCmdline } from "./proc.ts";
 
@@ -31,7 +37,7 @@ export function readRuntimeHealth(config: {
     Date.parse(value.updatedAt) < Date.parse(value.startedAt) ||
     Date.parse(value.updatedAt) > Date.now() + 1_000
   )
-    throw new DeploymentHeld("runtime health schema differs");
+    throw new DeploymentHeld(`runtime health schema differs; the health file ${EARLIER_CATALY_MOVE}`);
   return { ...value, role: "cataly" };
 }
 

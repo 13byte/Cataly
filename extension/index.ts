@@ -54,7 +54,6 @@ import {
   completionReceipt,
   toolEvidence,
 } from "../skills/cataly-mode/scripts/src/tool-evidence.ts";
-import { SourceBundleError } from "../src/release/source-bundle.ts";
 import { HEADLESS_LAUNCH_MODEL_ENTRY, LAUNCH_MODEL_FLAG } from "../src/runtime/headless-launch-model.ts";
 import { laneEntry as headlessEntry } from "../src/runtime/headless-record.ts";
 import { selfSession } from "../src/runtime/registry.ts";
@@ -321,7 +320,6 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
   const isLead = (): boolean => role === "cataly" && !restrictedLead();
   let stateDir: string | undefined;
   let loadError: string | undefined;
-  let requiredLoadError: SourceBundleError | undefined;
   let warned = false;
   let lifecycleRegistered = false;
   /** The session whose monitor bootstrap was rejected: it stays role-less until a session_start bootstraps it again. */
@@ -434,7 +432,7 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
   const admissions = new HeadAdmissions(
     () => {
       const ctx = headContext;
-      if (!isLead() || !ctx || !stateDir || requiredLoadError || typeof process.getuid !== "function") return;
+      if (!isLead() || !ctx || !stateDir || typeof process.getuid !== "function") return;
       const manager = ctx.sessionManager;
       const id = manager.getSessionId();
       const file = manager.getSessionFile();
@@ -627,9 +625,7 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
       sessionId: session.id,
       ...(sessionFile ? { sessionFile } : {}),
       ...(role === "lane" && askLane ? { discordLaneKey: askLane.key } : {}),
-      ...(role === "lane" && ctx.mode === "tui" && !requiredLoadError && !ownsDiscordReceiver
-        ? { discordLaneInbox: true }
-        : {}),
+      ...(role === "lane" && ctx.mode === "tui" && !ownsDiscordReceiver ? { discordLaneInbox: true } : {}),
       ...(discordReceiver ? { discordLaneReceiver: discordReceiver } : {}),
       cwd: ctx.cwd,
       pid: process.pid,
@@ -894,7 +890,6 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
       !owner ||
       !ownerRole ||
       (ownerRole === "cataly" && !isLead()) ||
-      requiredLoadError ||
       ctx.sessionManager.getSessionId() !== owner.id ||
       typeof process.getuid !== "function" ||
       (ctx.mode !== "tui" && !headless)
@@ -977,14 +972,11 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
     }
     if (role && loadError && !warned) {
       warned = true;
-      ctx.ui.notify(
-        `omp-cataly: ${loadError}. ${requiredLoadError ? "Required bound source failed; role requests are blocked." : "Running without the Cataly config."}`,
-        "warning",
-      );
+      ctx.ui.notify(`omp-cataly: ${loadError}. Running without the Cataly config.`, "warning");
     }
     await syncTools();
     savePane(ctx);
-    if (role === "lane" && stateDir && !requiredLoadError) {
+    if (role === "lane" && stateDir) {
       const nativeId = nativeHeadlessId(ctx);
       const native = nativeId ? ({ runtime: "headless", id: nativeId } as const) : undefined;
       discordLane.start(
@@ -1149,7 +1141,6 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
           ctx.agent.kind === "main" &&
           ctx.mode === "tui" &&
           role === "lane" &&
-          !requiredLoadError &&
           launchEnv["CATALY_DISCORD_WAKE_SESSION"] === ctx.sessionManager.getSessionId()
         )
           appendRole(role);
@@ -1162,7 +1153,6 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
             (eventName === "session_start" || eventName === "session_switch") &&
             stateDir &&
             role &&
-            !requiredLoadError &&
             (harness ||
               headlessRemoteId(ctx, role) ||
               (ctx.mode === "tui" && (role === "lane" || isLead()) && (!pane || !paneHeldByAnother(pane)))) &&
@@ -1183,7 +1173,6 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
             harness &&
             nativeId &&
             remoteJournalReady &&
-            !requiredLoadError &&
             role === "cataly" &&
             eventName === "session_start" &&
             ctx.sessionManager.ensureOnDisk
@@ -1207,12 +1196,7 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
         if (persistRole && role && !recordedRole(ctx.sessionManager.getBranch())) appendRole(role);
         policy.sync(role, ctx, eventName, event, flaggedRole, inherited);
       }
-      if (
-        eventName === "session_start" &&
-        ctx.agent.kind === "main" &&
-        !requiredLoadError &&
-        headlessRemoteId(ctx, role)
-      ) {
+      if (eventName === "session_start" && ctx.agent.kind === "main" && headlessRemoteId(ctx, role)) {
         const sessionId = ctx.sessionManager.getSessionId();
         const refId = process.env["CATALY_HEADLESS_ID"];
         if (launchSessionIds.has(sessionId) && refId) {
@@ -1296,10 +1280,6 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
 
   // OMP chains prompt replacements in extension/handler order; append to the prompt this handler receives.
   pi.on("before_agent_start", async (event, ctx) => {
-    if (role && requiredLoadError) {
-      ctx.abort();
-      throw requiredLoadError;
-    }
     assertLaunchModel(ctx);
     if (
       ctx.agent.kind === "main" &&
@@ -1319,10 +1299,6 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
   });
 
   pi.on("before_provider_request", (_event, ctx) => {
-    if (role && requiredLoadError) {
-      ctx.abort();
-      throw requiredLoadError;
-    }
     assertLaunchModel(ctx);
     if (
       ctx.agent.kind === "main" &&
@@ -1459,7 +1435,7 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (!isCurrentLane(ctx))
         throw new ReportError("cataly_report works only in a lane's main session (omp --cataly-role lane)");
-      if (stateDir === undefined || requiredLoadError)
+      if (stateDir === undefined)
         throw new ReportError(`cataly_report needs the Cataly config: ${loadError ?? "not loaded"}`);
       const activation = evidenceActivation;
       const source = ctx.sessionManager.getSessionId();
@@ -1592,7 +1568,6 @@ export default async function ompCataly(pi: CatalyApi): Promise<void> {
     const config = await loadConfig(installation.configFile, undefined, installation.env);
     stateDir = config.stateDir;
   } catch (error) {
-    if (error instanceof SourceBundleError) requiredLoadError = error;
     loadError = `Cataly config not loaded (${errorText(error)}); pane state is off`;
   }
   pi.setLabel("omp-cataly");

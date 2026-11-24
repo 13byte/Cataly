@@ -26,7 +26,10 @@ export function assertSourceAdmission(manifest: SourceManifest, kind: SourceKind
       )
     );
   });
-  if (omitted.length) throw new UpdateError(`${kind} source admission held: ${omitted.join(", ")}`);
+  if (omitted.length) {
+    const leftover = omitted.includes("ref") ? "; delete the leftover ref/ directory (the former omp-ulw fixture)" : "";
+    throw new UpdateError(`${kind} source admission held: ${omitted.join(", ")}${leftover}`);
+  }
 }
 
 /** Source only, including dirty/untracked local adaptations. Links and special files fail rather than following secrets. */

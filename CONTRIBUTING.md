@@ -105,6 +105,11 @@ bun run dev:setup                              # once, and after lockfile or pin
 bun run test:local [root|skill|ext|all] [args] # default: all three suites
 ```
 
+A checkout from before the omp-ulw removal may still hold the gitignored
+`ref/omp-ulw/` fixture. Delete the leftover `ref/` directory once
+(`rm -rf ref`); otherwise `cataly upstream` holds with
+`local source admission held: ref`.
+
 `dev:setup` runs the `run:` steps of `.github/actions/setup` (`fixtures: all`)
 verbatim, so the installs, the native host check against `native-omp.lock`
 and the `cargo build --locked --release --bin cataly` of the native headless

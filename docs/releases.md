@@ -487,6 +487,16 @@ cataly upstream <check|stage|watch|status|snapshot|restore|recover|restart> --co
 
 This is the former porting updater, with no `cataly update stage/watch` alias. Its worker/reviewer models, checks, promotion policy, recovery and external supervisor remain documented in the [staged-update reference](../skills/cataly-mode/references/scripts.md#staged-cataly-updates). Maintainers supply their own model/provider authentication and, only when publishing, repository permissions. A ready source candidate is not a consumer release or an automatic live deployment.
 
+### Managed deployments across the legacy removal
+
+A managed source deployment (`cataly upstream` promotion or `cataly update source`) cannot replace a lead that runs a commit from before the legacy removal: the lead's health file and the deployment's `active.json` toolchain receipt changed shape (`presetLoaded` became `configLoaded`; receipts now bind `extensionSource`). The deployment holds with `runtime health schema differs` or `managed extension source differs from its prepared toolchain` before stopping anything, and an old controller would roll the new lead back. Managed deployment needs a running lead, so move across this commit once by hand:
+
+1. Stop the harness with the running code: `cataly harness stop`. It records the lead session for the next `up`.
+2. Deploy this commit to `deployment.liveSource`: fast-forward the checkout it resolves to, or repoint the link to a fresh clone of this commit. In that checkout run `bun install --frozen-lockfile` in the root, `skills/cataly-mode/scripts` and `extension`, then `cargo build --locked --release --bin cataly --target-dir target/managed`.
+3. Start the harness from the new source: `cataly harness up`. It resumes the stopped lead session.
+
+The old `active.json` names an actor that no longer runs, so the next managed deployment ignores it. As at a first conversion, that deployment admits the lead only when it runs the native image the deployment prepares.
+
 ## Building and publishing releases
 
 The root `package.json.version` is canonical. From the actual committed release source, build the first preview with:
