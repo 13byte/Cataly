@@ -6,6 +6,7 @@ import { dutyTick } from "../src/duty.ts";
 import { hhmm } from "../src/fit.ts";
 import { report, startLane } from "../src/lanes.ts";
 import { laneBoard } from "../src/status-view.ts";
+import { knownRefs } from "../src/target.ts";
 import { setup } from "./harness-setup.ts";
 import { captureIo } from "./inbox-setup.ts";
 
@@ -123,11 +124,11 @@ describe("a waiting lane", () => {
     // A Tern block's short ref leaves room for the last entry; a headless UUID ref, never cut, takes that room first.
     const { w, d, lane } = await waitingLane({ waitingFor: "CI 812", runtime: "tern" });
     const since = hhmm(lane.createdAt);
-    const [line] = laneBoard(d.store.lanes(), w.clock);
+    const [line] = laneBoard(d.store.lanes(), w.clock, knownRefs(d.store));
     expect(line).toContain(`waiting: CI 812 since ${since} | report`);
     expect(Bun.stringWidth(line!)).toBeLessThanOrEqual(120);
     await report(d, "blocked", "x", { status: "waiting", waitingFor: "ＬＯＮＧ ＴＡＲＧＥＴ ".repeat(8) });
-    const [long] = laneBoard(d.store.lanes(), w.clock);
+    const [long] = laneBoard(d.store.lanes(), w.clock, knownRefs(d.store));
     expect(long).toMatch(new RegExp(`waiting: ＬＯＮＧ .*… since ${since}`));
     expect(Bun.stringWidth(long!)).toBeLessThanOrEqual(120);
   });

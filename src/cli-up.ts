@@ -14,6 +14,7 @@ import { HeadlessRuntime } from "./runtime/headless.ts";
 import { openSession, type SessionRef, type TerminalRuntime } from "./runtime/types.ts";
 import { RuntimeChoiceError } from "./runtime/select.ts";
 import { laneBoard } from "./status-view.ts";
+import { knownRefs } from "./target.ts";
 
 function renderPrompt(d: Deps, name: "lead.md" | "duty.md"): string {
   const dir = join(d.store.root, "prompts");
@@ -106,6 +107,6 @@ export async function status(d: Deps): Promise<void> {
   for (const line of [runtimeLine(d), `lead=${show(roles.lead)} duty=${show(roles.duty)}`, `home=${d.store.root}`])
     console.log(line);
   for (const line of await nativeHarnessStatus(d)) console.log(line);
-  for (const line of laneBoard(d.store.lanes(), d.now())) console.log(line);
+  for (const line of laneBoard(d.store.lanes(), d.now(), knownRefs(d.store))) console.log(line);
   for (const line of lockLines({ ...lockEnv(d.store.root), now: d.now })) console.log(line);
 }

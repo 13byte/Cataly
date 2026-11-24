@@ -54,16 +54,20 @@ describe("a waiting lane after an upgrade", () => {
     expect(Bun.stringWidth(first)).toBeLessThanOrEqual(120);
   });
 
-  // A key and a ref together 55 to 61 columns wide leave the waiting text just under what it needs beside them.
+  // A key and a ref together 61 to 67 columns wide leave the waiting text just under what it needs beside them.
   test("a waiting lane beside a long key and ref keeps `since HH:MM` whole, on a line of its own if need be", async () => {
     const s = setup();
     const key = `k${"-long".repeat(8)}`;
     const lane = await startLane(s.d, key, s.brief, { group: "w1" });
     await report(s.d, key, "x", { status: "waiting", waitingFor: "the release build on the shared runner" });
-    for (const width of [55, 58, 61]) {
+    for (const width of [61, 64, 67]) {
       const id = `${"w".repeat(width - key.length - 3)}:p3`;
       const lanes = s.d.store.lanes().map((l) => ({ ...l, sessionRef: { ...l.sessionRef, id } }));
-      const lines = laneBoard(lanes, s.w.clock);
+      const lines = laneBoard(
+        lanes,
+        s.w.clock,
+        lanes.map((l) => l.sessionRef),
+      );
       const wait = lines.find((l) => l.includes("waiting: "));
       expect(wait).toMatch(new RegExp(`waiting: \\S.* since ${hhmm(lane.createdAt)}( \\| .*)?$`));
       for (const l of lines) expect(Bun.stringWidth(l)).toBeLessThanOrEqual(120);

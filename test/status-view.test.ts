@@ -24,26 +24,31 @@ const lane = (key: string, status: Lane["status"], progressMinAgo: number, text 
   };
 };
 
+/** The board of these lanes, each shortened ref resolved against their refs alone. */
+const board = (lanes: Lane[]): string[] =>
+  laneBoard(
+    lanes,
+    NOW,
+    lanes.map((l) => l.sessionRef),
+  );
+
 describe("the lane board", () => {
   test("open lanes first, longest without progress on top; closed lanes fold into one line each", () => {
-    const lines = laneBoard(
-      [
-        lane("fresh", "working", 5),
-        lane("old-done", "done", 900),
-        lane("stuck", "waiting", 130),
-        lane("new-done", "done", 35),
-        lane("ready-one", "ready", 20),
-        lane("gone", "lost", 60),
-      ],
-      NOW,
-    );
+    const lines = board([
+      lane("fresh", "working", 5),
+      lane("old-done", "done", 900),
+      lane("stuck", "waiting", 130),
+      lane("new-done", "done", 35),
+      lane("ready-one", "ready", 20),
+      lane("gone", "lost", 60),
+    ]);
     expect(lines.map((l) => l.split(" ")[0])).toEqual(["stuck", "ready-one", "fresh", "lost", "done"]);
     const at = hhmm(NOW - 130 * MIN);
     // A record from before `--for` names its last report as the target and waits since its last progress; the last
     // entry follows, cut to the 120 columns.
     expect(lines[0]).toMatch(
       new RegExp(
-        `^stuck\\s+waiting\\s+herdr\\s+w1:p3\\s+progress 2h10m \\(${at}\\)\\s+waiting: report text since ${at} \\| rep`,
+        `^stuck\\s+waiting\\s+herdr:w1:p3\\s+progress 2h10m \\(${at}\\)\\s+waiting: report text since ${at} \\| rep`,
       ),
     );
     expect(Bun.stringWidth(lines[0]!)).toBeLessThanOrEqual(120);
@@ -54,7 +59,7 @@ describe("the lane board", () => {
     // Fullwidth letters take two terminal columns each, like CJK text; the sample is neutral filler.
     const long =
       "operator note: ＷＩＤＥ ＴＥＸＴ ＣＵＴ ＨＥＲＥ ＯＮ Ａ ＷＨＯＬＥ ＣＨＡＲＡＣＴＥＲ\nsecond line ".repeat(6);
-    for (const line of laneBoard([lane("long-lane-key-width-24ch", "working", 61 * 60, long)], NOW)) {
+    for (const line of board([lane("long-lane-key-width-24ch", "working", 61 * 60, long)])) {
       expect(Bun.stringWidth(line)).toBeLessThanOrEqual(120);
       expect(line).toContain("progress 2d13h");
       expect(line).not.toContain("\n");
@@ -72,8 +77,9 @@ describe("the lane board", () => {
   test("two maximum-length keys sharing a prefix both show whole, with the rest of the line within 120 columns", () => {
     const a = `lane-${"k".repeat(35)}a`;
     const b = `lane-${"k".repeat(35)}b`;
-    const hc = { ...lane(b, "working", 70), sessionRef: { runtime: "hc" as const, id: "t1b2c3d4e5f6g7h8" } };
-    const lines = laneBoard([lane(a, "waiting", 90), hc], NOW);
+    const id = "t1b2c3d4e5f6g7h8i9j0k1";
+    const hc = { ...lane(b, "working", 70), sessionRef: { runtime: "hc" as const, id } };
+    const lines = board([lane(a, "waiting", 90), hc]);
     // The waiting lane's target and time do not fit beside these columns: they go on the indented line, whole.
     expect(lines).toHaveLength(3);
     expect(lines[0]!.split(" ")[0]).toBe(a);
@@ -82,12 +88,12 @@ describe("the lane board", () => {
       new RegExp(`^ {2}progress 1h30m \\(${t}\\) +waiting: report text since ${t} \\| report ${t}`),
     );
     expect(lines[2]!.split(" ")[0]).toBe(b);
-    expect(lines[2]).toContain(" hc:t1b2c3d4e5f6g7h8 ");
+    expect(lines[2]).toContain(` hc:${id} `);
     for (const line of lines) expect(Bun.stringWidth(line)).toBeLessThanOrEqual(120);
     // Columns too wide for the rest move it below the lane's name; the name, status and ref wrap whole, never cut.
-    const wide = { ...lane(a, "working", 5), sessionRef: { runtime: "hc" as const, id: `t${"z".repeat(60)}` } };
-    const two = laneBoard([wide], NOW);
-    expect(two).toEqual([`${a} working  hc`, `hc:t${"z".repeat(60)}`, expect.stringMatching(/^ {2}progress 5m /)]);
+    const wide = { ...lane(a, "working", 5), sessionRef: { runtime: "hc" as const, id: `t${"z".repeat(80)}` } };
+    const two = board([wide]);
+    expect(two).toEqual([`${a} working`, `hc:t${"z".repeat(80)}`, expect.stringMatching(/^ {2}progress 5m /)]);
     for (const line of two) expect(Bun.stringWidth(line)).toBeLessThanOrEqual(120);
   });
 
@@ -104,8 +110,8 @@ describe("the lane board", () => {
       };
       expect(key).toHaveLength(41);
       expect(Bun.stringWidth(`hc:${id}`)).toBe(22);
-      const lines = laneBoard([waiting], NOW);
-      expect(lines[0]).toBe(`${key} waiting  hc    hc:${id}`);
+      const lines = board([waiting]);
+      expect(lines[0]).toBe(`${key} waiting  hc:${id}`);
       expect(lines[1]).toContain("  progress 45m ");
       expect(lines[1]).toContain("waiting: ");
       expect(lines[1]).toContain(` since ${hhmm(waiting.waitingSince)}`);
@@ -126,8 +132,8 @@ describe("the lane board", () => {
       waitingFor: target,
       waitingSince: NOW - 30 * MIN,
     };
-    const lines = laneBoard([waiting], NOW);
-    expect(lines.slice(0, 2)).toEqual([`${key} waiting  hc`, `hc:${id}`]);
+    const lines = board([waiting]);
+    expect(lines.slice(0, 2)).toEqual([`${key} waiting`, `hc:${id}`]);
     expect(lines[2]).toContain(`progress 45m (${hhmm(NOW - 45 * MIN)})`);
     expect(lines[2]).toContain(` since ${hhmm(waiting.waitingSince)}`);
     expect(lines.slice(3)).toEqual([`  ${target}`]);
@@ -135,7 +141,7 @@ describe("the lane board", () => {
   });
 
   test("terminal escapes, carriage returns and bidi overrides in a lane's text stay on its one line as spaces", () => {
-    const [line] = laneBoard([lane("esc", "working", 5, "red \u001b[31mALERT\u001b[0m\rover\u202eturn\nnext")], NOW);
+    const [line] = board([lane("esc", "working", 5, "red \u001b[31mALERT\u001b[0m\rover\u202eturn\nnext")]);
     expect(line).toMatch(/report \d\d:\d\d: red \[31mALERT \[0m over turn next$/);
     expect(oneLine("a\u0007\u2028b\t\tc")).toBe("a b c");
   });

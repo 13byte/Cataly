@@ -7,6 +7,7 @@ import { hhmm } from "../src/fit.ts";
 import { report, startLane } from "../src/lanes.ts";
 import { blockerOf } from "../src/progress.ts";
 import { laneBoard } from "../src/status-view.ts";
+import { knownRefs } from "../src/target.ts";
 import { setup } from "./harness-setup.ts";
 import { captureIo } from "./inbox-setup.ts";
 
@@ -75,7 +76,7 @@ describe("a waiting lane's target and start", () => {
     s.w.clock = lane.createdAt + 10 * MIN;
     await dutyTick(s.d);
     expect(pane.received.at(-1)!.split("\n")[0]).toContain(`Waiting on ${shown} since`);
-    const [line] = laneBoard(s.d.store.lanes(), s.w.clock);
+    const [line] = laneBoard(s.d.store.lanes(), s.w.clock, knownRefs(s.d.store));
     expect(line).toContain(`waiting: ${shown} since`);
     s.w.clock = lane.createdAt + 40 * MIN;
     await dutyTick(s.d);

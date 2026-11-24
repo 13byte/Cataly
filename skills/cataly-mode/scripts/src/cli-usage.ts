@@ -17,7 +17,7 @@ export const USAGE = `cataly <command> [options]
   queue list | start <key> | cancel <key>
                                        start only on explicit command after verified predecessors, host capacity and expiry checks
   adopt  <key> --pane ID --title T --brief FILE --done "..." [--thread REF]
-  policy allow-once <key> <denyBash[index]> [--root <headless:UUID> | --skill] --reason TEXT
+  policy allow-once <key> <denyBash[index]> [--root <headless:UUID|prefix> | --skill] --reason TEXT
                                        admit one attempt of the last blocked command after owner approval; native approvals still apply
   lanes [--thread REF] [--open]        list registered lanes, optionally for one exact thread
   status [<key>] [--json]              read-only lane, runtime, journal, decision and monitor observations
