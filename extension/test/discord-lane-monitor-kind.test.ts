@@ -75,7 +75,6 @@ const withLane = async (entries: Entry[], run: (pi: FakePi, inbox: DiscordLaneIn
 test("a delivery the previous main recorded as dori-monitor is not sent again", async () => {
   await withLane([{ type: "custom_message", customType: "dori-monitor", content: text }], async (pi, inbox) => {
     await Bun.sleep(300);
-    console.log("DEBUG", JSON.stringify({ sent: pi.sent, next: inbox.next(session, channel) }));
     await until(() => inbox.next(session, channel) === undefined);
     expect(pi.sent).toEqual([]);
     expect(pi.userMessages).toEqual([]);
