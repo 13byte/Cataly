@@ -106,7 +106,9 @@ impl LaneInbox {
             directory.is_dir() && directory.uid() == uid && directory.mode().trailing_zeros() >= 6,
             "Discord lane inbox directory must be private and owned by this user"
         );
-        let path = dir.join("inbox.sqlite");
+        // SQLITE_OPEN_NOFOLLOW refuses a symlink in any path component, such as macOS's `/var -> /private/var`
+        // above `$TMPDIR`. The inbox directory itself is not a link (checked above), so resolve only its ancestors.
+        let path = fs::canonicalize(&dir)?.join("inbox.sqlite");
         match OpenOptions::new()
             .create_new(true)
             .write(true)
@@ -305,6 +307,26 @@ mod tests {
         fs::set_permissions(db, std::os::unix::fs::PermissionsExt::from_mode(0o644)).unwrap();
         assert!(LaneInbox::open(&state).is_err());
         fs::remove_dir_all(state).unwrap();
+    }
+
+    #[test]
+    fn a_symlinked_ancestor_opens_but_a_symlinked_inbox_directory_does_not() {
+        let real = temp();
+        let link = real.with_extension("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        // macOS's $TMPDIR sits under /var -> /private/var.
+        drop(LaneInbox::open(&link).unwrap());
+        assert!(real.join("discord-lanes/inbox.sqlite").is_file());
+        let aliased = temp();
+        DirBuilder::new()
+            .mode(0o700)
+            .create(real.join("target"))
+            .unwrap();
+        std::os::unix::fs::symlink(real.join("target"), aliased.join("discord-lanes")).unwrap();
+        assert!(LaneInbox::open(&aliased).is_err());
+        fs::remove_file(link).unwrap();
+        fs::remove_dir_all(real).unwrap();
+        fs::remove_dir_all(aliased).unwrap();
     }
 
     #[test]

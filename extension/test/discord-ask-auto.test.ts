@@ -36,10 +36,11 @@ test("only the launched lane's exact native session can reuse its recorded bindi
   expect(bindAskLane(entries, "session-a", undefined, record)).toBeUndefined();
 });
 
-// The live receiver is the native monitor; it writes a POSIX-private cursor and receiver lease.
+// The live receiver is the native monitor; it writes a POSIX-private cursor and receiver lease. It publishes the
+// receiver route only with a procfs process identity (native/src/discord/receiver.rs fails closed elsewhere).
 const nativeBinary = process.env["CATALY_DISCORD_NATIVE_BIN"];
-const posix = test.skipIf(process.platform === "win32" || !nativeBinary || nativeBinary === "off");
-posix.each(["private file", "lead environment"] as const)(
+const linux = test.skipIf(process.platform !== "linux" || !nativeBinary || nativeBinary === "off");
+linux.each(["private file", "lead environment"] as const)(
   "live Discord accepts an owner ASK reply using %s credentials",
   verifyAutomaticAsk,
   12_000,

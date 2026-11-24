@@ -320,6 +320,9 @@ can use it only with a live receiver authenticated with the same credential.
 This compatibility path does not apply to lanes. Continue to load the token
 only in the receiver child for new setups. No settings file is created or edited.
 Restart the receiver when updating so it reports its current routes.
+Automatic routing currently requires Linux: the native receiver publishes its
+route only when it can confirm its own process identity through procfs, so on
+macOS ASK stays in the native OMP dialog.
 
 Eligible single-choice questions show native Discord buttons, with the
 checked option labeled **Recommended**. Only the configured owner can

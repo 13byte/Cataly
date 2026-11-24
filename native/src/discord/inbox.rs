@@ -74,6 +74,9 @@ impl Inbox {
             directory.is_dir() && directory.uid() == uid && directory.mode().trailing_zeros() >= 6,
             "Discord queue directory must be owned and private"
         );
+        // SQLITE_OPEN_NOFOLLOW refuses a symlink in any path component, such as macOS's `/var -> /private/var`
+        // above `$TMPDIR`. The queue directory itself is not a link (checked above), so resolve only its ancestors.
+        let root = fs::canonicalize(root)?;
         let path = root.join("gateway.sqlite");
         if !check_file(&path, uid)? {
             match OpenOptions::new()
