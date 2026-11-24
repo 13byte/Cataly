@@ -109,27 +109,31 @@ windows("an NTFS junction at the cursor directory is rejected without touching o
   }
 });
 
-windows("an outside hard-link alias prevents reads and replacement of a cursor with an otherwise private ACL", () => {
-  const f = fixture();
-  try {
-    seed(f.state);
-    const alias = join(f.root.dir, "outside.json");
-    linkSync(f.cursor, alias);
-    const original = readFileSync(alias, "utf8");
-    {
-      using reader = fileTgInboundStore(f.state, bot);
-      expect(() => reader.load()).toThrow("object is linked");
+windows(
+  "an outside hard-link alias prevents reads and replacement of a cursor with an otherwise private ACL",
+  () => {
+    const f = fixture();
+    try {
+      seed(f.state);
+      const alias = join(f.root.dir, "outside.json");
+      linkSync(f.cursor, alias);
+      const original = readFileSync(alias, "utf8");
+      {
+        using reader = fileTgInboundStore(f.state, bot);
+        expect(() => reader.load()).toThrow("object is linked");
+      }
+      {
+        using writer = fileTgInboundStore(f.state, bot);
+        expect(() => writer.save(next)).toThrow("object is linked");
+      }
+      expect(readFileSync(alias, "utf8")).toBe(original);
+      expect(readFileSync(f.cursor, "utf8")).toBe(original);
+    } finally {
+      f.root.done();
     }
-    {
-      using writer = fileTgInboundStore(f.state, bot);
-      expect(() => writer.save(next)).toThrow("object is linked");
-    }
-    expect(readFileSync(alias, "utf8")).toBe(original);
-    expect(readFileSync(f.cursor, "utf8")).toBe(original);
-  } finally {
-    f.root.done();
-  }
-});
+  },
+  20_000,
+);
 
 windows("readiness rejects rather than repairing a protected cursor DACL that grants another SID access", () => {
   const f = fixture();

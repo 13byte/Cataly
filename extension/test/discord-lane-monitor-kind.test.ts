@@ -12,6 +12,9 @@ import { withState } from "../../skills/cataly-mode/scripts/test/fakes.ts";
 import { DiscordLane } from "../discord-lane.ts";
 import { type Entry, fakePi, type FakePi, until } from "./fake-pi.ts";
 
+// The lane inbox requires an owner-only directory and a uid check, neither of which exists on Windows.
+const posix = test.skipIf(process.platform === "win32");
+
 const pane = "6300";
 const session = "lane-monitor-kind";
 const channel = "900000000000000111";
@@ -72,22 +75,30 @@ const withLane = async (entries: Entry[], run: (pi: FakePi, inbox: DiscordLaneIn
   }
 };
 
-test("a delivery the previous main recorded as dori-monitor is not sent again", async () => {
-  await withLane([{ type: "custom_message", customType: "dori-monitor", content: text }], async (pi, inbox) => {
-    // The lane acknowledges a message it already delivered instead of sending it again.
-    expect(inbox.next(session, channel)?.id).toBe(message);
-    await until(() => !inbox.outstanding(session, channel), 15_000);
-    expect(pi.sent).toEqual([]);
-    expect(pi.userMessages).toEqual([]);
-  });
-}, 20_000);
+posix(
+  "a delivery the previous main recorded as dori-monitor is not sent again",
+  async () => {
+    await withLane([{ type: "custom_message", customType: "dori-monitor", content: text }], async (pi, inbox) => {
+      // The lane acknowledges a message it already delivered instead of sending it again.
+      expect(inbox.next(session, channel)?.id).toBe(message);
+      await until(() => !inbox.outstanding(session, channel), 15_000);
+      expect(pi.sent).toEqual([]);
+      expect(pi.userMessages).toEqual([]);
+    });
+  },
+  20_000,
+);
 
-test("a new lane delivery is written as cataly-monitor only", async () => {
-  await withLane([], async (pi) => {
-    await until(() => pi.sent.length > 0, 15_000);
-    expect(pi.sent).toEqual([
-      { customType: "cataly-monitor", content: text, options: { triggerTurn: true, deliverAs: "aside" } },
-    ]);
-    expect(pi.sent.every((sent) => sent.customType !== "dori-monitor")).toBe(true);
-  });
-}, 20_000);
+posix(
+  "a new lane delivery is written as cataly-monitor only",
+  async () => {
+    await withLane([], async (pi) => {
+      await until(() => pi.sent.length > 0, 15_000);
+      expect(pi.sent).toEqual([
+        { customType: "cataly-monitor", content: text, options: { triggerTurn: true, deliverAs: "aside" } },
+      ]);
+      expect(pi.sent.every((sent) => sent.customType !== "dori-monitor")).toBe(true);
+    });
+  },
+  20_000,
+);
