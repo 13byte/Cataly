@@ -1,6 +1,5 @@
 import {
   chmodSync,
-  cpSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -11,7 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { headlessReleaseProfiles, nativeMetadata, terminalMetadata } from "../src/release/capabilities.ts";
+import { headlessReleaseProfiles, nativeMetadata } from "../src/release/capabilities.ts";
 import { validateReleaseManifest } from "../src/release/manifest.ts";
 import type { ReleaseManifest } from "../src/release/types.ts";
 import { isReleaseVersion, releaseVersion } from "../src/release/version.ts";
@@ -31,8 +30,8 @@ import {
 export type Distribution = { manifest: ReleaseManifest; assets: Record<string, Buffer> };
 
 /**
- * Package committed blobs plus the generated legacy shims and native binaries: the running host's own, rebuilt here,
- * and any other host's from `nativeInput` (see `readNativeInputs`).
+ * Package committed blobs plus the native binaries: the running host's own, rebuilt here, and any other host's from
+ * `nativeInput` (see `readNativeInputs`).
  */
 export function buildRelease(
   root: string,
@@ -67,7 +66,7 @@ export async function packageReleaseTree(
   const binaries = readNativeInputs(nativeInput, local);
   const temporary = realpathSync(mkdtempSync(join(tmpdir(), "cataly-release-")));
   try {
-    const archiveRoot = `omp-dori-${releaseVersion}`;
+    const archiveRoot = `cataly-${releaseVersion}`;
     const source = join(temporary, archiveRoot);
     const committed = await committedSource(root, tree, source);
     if (lstatSync(join(source, "native-bin"), { throwIfNoEntry: false }))
@@ -82,28 +81,6 @@ export async function packageReleaseTree(
       writeFileSync(artifact, binary, { flag: "wx" });
       chmodSync(artifact, 0o755);
     }
-    // The archived v1 updater needs these paths, not a duplicate copy of the old skill or runtime.
-    const legacySkill = join(source, "skills/dori-mode");
-    const currentSkill = join(source, "skills/cataly-mode");
-    mkdirSync(join(legacySkill, "scripts/src"), { recursive: true, mode: 0o700 });
-    // An upgraded primary's old discovery link is still its skill:// root. Traversal to a sibling is not allowed.
-    // Only copy read-only skill resources; all executable code goes through the one canonical CLI.
-    for (const resource of ["SKILL.md", "references", "assets"])
-      cpSync(join(currentSkill, resource), join(legacySkill, resource), {
-        recursive: true,
-        errorOnExist: true,
-        force: false,
-      });
-    const example = readFileSync(join(currentSkill, "references/config.example.json"), "utf8");
-    writeFileSync(
-      join(legacySkill, "references/config.example.json"),
-      example.replaceAll("~/.cataly/", "~/.dori/").replaceAll('"--cataly-role"', '"--dori-role"'),
-    );
-    const cli = join(legacySkill, "scripts/src/cli.ts");
-    writeFileSync(cli, '#!/usr/bin/env bun\nimport "../../../cataly-mode/scripts/src/cli.ts";\n', {
-      flag: "wx",
-      mode: 0o755,
-    });
     const observed = sourceManifest(source);
     const packageData: unknown = JSON.parse(readFileSync(join(source, "package.json"), "utf8"));
     if (
@@ -118,23 +95,17 @@ export async function packageReleaseTree(
       "LICENSE.integration",
       "NOTICE",
       "install.sh",
-      "omp-ulw.lock",
       "native-omp.lock",
       "native-omp.patch",
-      "omp-ulw.overlay.lock",
-      "omp-ulw.patch",
       "native-addon/package.json",
       "native-addon/bun.lock",
       "scripts/source-dependencies.ts",
       "scripts/consumer/omp",
-      terminalMetadata,
       nativeMetadata,
     ]) {
       if (!observed.files.some((file) => file.path === name)) throw new Error(`Committed release is missing ${name}`);
     }
-    const pin = readFileSync(join(source, "omp-ulw.lock"), "utf8").trim();
-    const native = readSourceBundle(source, true);
-    if (readSourceBundle(source).lock.commit !== pin) throw new Error("Committed ULW base and overlay differ");
+    const native = readSourceBundle(source);
     const paths = new Set([archiveRoot]);
     for (const file of observed.files) {
       let parent = dirname(`${archiveRoot}/${file.path}`);
@@ -170,30 +141,21 @@ export async function packageReleaseTree(
     const archive = await command(["gzip", "-n", "-9", "-c"], temporary, tar);
     if (!sameManifest(observed, sourceManifest(source))) throw new Error("Source changed during release packaging");
     const manifest = validateReleaseManifest({
-      version: 1,
-      product: "omp-dori",
+      version: 2,
+      product: "cataly",
       releaseVersion,
       tag: `v${releaseVersion}`,
       commit,
       tree,
       prerelease,
       archive: {
-        name: `omp-dori-v${releaseVersion}.tar.gz`,
+        name: `cataly-v${releaseVersion}.tar.gz`,
         root: archiveRoot,
         sha256: digest(archive),
         bytes: archive.length,
       },
       source: observed,
-      requirements: {
-        platform: "linux",
-        arch: "x64",
-        bun: "1.4.4",
-        omp: native.lock.nativeVersion,
-        // Frozen v1 requirement value: updaters installed before the headless-only cutover validate it exactly.
-        runtime: "herdr",
-        messenger: "discord",
-      },
-      ompUlw: { repository: "https://github.com/dbc-hbin/omp-ulw.git", commit: pin },
+      requirements: { omp: native.lock.nativeVersion },
     });
     const profiles = headlessReleaseProfiles(manifest, readFileSync(join(source, nativeMetadata)));
     for (const host of nativeHosts) {

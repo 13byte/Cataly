@@ -57,11 +57,11 @@ struct WakeMonitor {
     warned: HashSet<String>,
 }
 
-/// The idempotency nonce of one reply part. Its `dori-lane:` prefix is kept: a v0.1.3 reply may already exist
-/// remotely although its local receipt is still pending.
+/// The idempotency nonce of one reply part: a reply may already exist remotely although its local receipt is
+/// still pending.
 fn reply_nonce(bot: &str, channel: &str, part: &ReplyPart) -> String {
     let digest = Sha256::digest(format!(
-        "dori-lane:{bot}:{channel}:{}:{}",
+        "cataly-lane:{bot}:{channel}:{}:{}",
         part.id, part.part
     ));
     crate::util::hex(&digest[..12])
@@ -257,12 +257,12 @@ mod tests {
 
     #[test]
     fn nonce_matches_the_typescript_derivation() {
-        // createHash("sha256").update("dori-lane:11:22:33:0").digest("hex").slice(0, 24)
+        // createHash("sha256").update("cataly-lane:11:22:33:0").digest("hex").slice(0, 24)
         let part = ReplyPart {
             id: "33".into(),
             part: 0,
             text: String::new(),
         };
-        assert_eq!(reply_nonce("11", "22", &part), "4e3c7b432ffc57fdd7ece69c");
+        assert_eq!(reply_nonce("11", "22", &part), "ca542282507c3958fdb9d2db");
     }
 }

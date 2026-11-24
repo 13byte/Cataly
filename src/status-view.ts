@@ -2,7 +2,7 @@
 // folded into one line each, every line within WIDTH terminal columns except a key, ref, link or id wider than that,
 // kept whole.
 import { ageText, fitEnd, hhmm, indented, oneLine, padCols, WIDTH, wrap } from "./fit.ts";
-import { progressOf, waitingOn, waitingSinceOf, waitingTarget } from "./progress.ts";
+import { waitingOn, waitingSinceOf, waitingTarget } from "./progress.ts";
 import { shortRef } from "./refs.ts";
 import type { SessionRef } from "./runtime/types.ts";
 import type { Lane } from "./store-types.ts";
@@ -36,7 +36,7 @@ function tailOf(l: Lane, cols: number): string {
  * below. A waiting target the line cut follows whole on one indented line: a cut link or job id names nothing to check.
  */
 function laneLine(l: Lane, now: number, ref: string, cols: { key: number; ref: number }): string[] {
-  const since = progressOf(l);
+  const since = l.progressAt;
   const id = [padCols(l.key, cols.key), padCols(l.status, 8), padCols(ref, cols.ref)].join(" ");
   const progress = padCols(`progress ${ageText(now - since)} (${hhmm(since)})`, 23);
   const body = (room: number) => fitEnd(`${progress} ${tailOf(l, room - 24)}`.trimEnd(), room);
@@ -61,7 +61,7 @@ function closedLine(status: string, lanes: readonly Lane[], now: number): string
 export function laneBoard(lanes: readonly Lane[], now: number, known: readonly SessionRef[]): string[] {
   const open = lanes
     .filter((l) => l.status === "working" || l.status === "waiting" || l.status === "ready")
-    .sort((a, b) => progressOf(a) - progressOf(b));
+    .sort((a, b) => a.progressAt - b.progressAt);
   const rows = open.map((l) => ({ l, ref: shortRef(l.sessionRef, known) }));
   const widest = (texts: readonly string[]) => Math.max(0, ...texts.map((t) => Bun.stringWidth(t)));
   const cols = { key: widest(open.map((l) => l.key)), ref: widest(rows.map((r) => r.ref)) };

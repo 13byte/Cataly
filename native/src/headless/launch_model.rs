@@ -365,7 +365,7 @@ mod tests {
             Some("")
         );
         assert_eq!(
-            launch_model_from_argv(&argv(&["--dori-launch-model=a/b", "--cataly-launch-model"])),
+            launch_model_from_argv(&argv(&["--cataly-launch-model"])),
             None
         );
     }
@@ -524,18 +524,6 @@ mod tests {
             )
             .is_none()
         );
-    }
-
-    #[test]
-    fn the_last_launch_model_entry_wins_including_the_dori_alias() {
-        let model = "fixture/initial";
-        let mut data = entries(model, "matched", None);
-        let mut legacy = data["entries"][1].clone();
-        legacy["customType"] = json!("omp-dori:headless-launch-model");
-        legacy["data"]["proof"]["status"] = json!("unavailable");
-        data["entries"].as_array_mut().unwrap().push(legacy);
-        let readback = read_launch_model(Some(&data), &binding(model)).unwrap();
-        assert_eq!(readback.status, ReadbackStatus::Unavailable);
     }
 
     #[test]

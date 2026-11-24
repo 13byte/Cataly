@@ -1,7 +1,7 @@
 import { afterEach } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { parseDeploymentConfig } from "../src/update/deployment.ts";
 import type { DeploymentInput, DeploymentRecord } from "../src/update/deployment-types.ts";
 import { sourceManifest } from "../src/update/source.ts";
@@ -58,8 +58,12 @@ export function preparationFixture(published: Readonly<Record<string, string>> =
   put("skills/cataly-mode/scripts/src/cli.ts", "#!/usr/bin/env bun\nconsole.log('fixture');\n");
   chmodSync(join(remote, "skills/cataly-mode/scripts/src/cli.ts"), 0o755);
   put("extension/index.ts", "export default function extension() {}\n");
-  put("omp-ulw.lock", `${"a".repeat(40)}\n`);
-  tracked.push("src/app.ts", "skills/cataly-mode/scripts/src/cli.ts", "extension/index.ts", "omp-ulw.lock");
+  tracked.push("src/app.ts", "skills/cataly-mode/scripts/src/cli.ts", "extension/index.ts");
+  // This checkout's native source bundle; the configured private OMP reports its locked version.
+  for (const name of ["native-omp.lock", "native-omp.patch"]) {
+    put(name, readFileSync(resolve(import.meta.dir, "..", name), "utf8"));
+    tracked.push(name);
+  }
   for (const [path, value] of Object.entries(published)) {
     put(path, value);
     tracked.push(path);
@@ -71,8 +75,11 @@ export function preparationFixture(published: Readonly<Record<string, string>> =
   git(remote, "commit", "-m", "Published source fixture");
   const candidate = join(directory, "candidate");
   git(directory, "clone", "--no-local", "--", remote, candidate);
-  mkdirSync(join(candidate, "ref/omp-ulw"), { recursive: true });
-  writeFileSync(join(candidate, "ref/omp-ulw/index.ts"), "export const opaquePin = 'preserved';\n");
+  const omp = join(directory, "omp");
+  const { nativeVersion } = JSON.parse(readFileSync(join(remote, "native-omp.lock"), "utf8")) as {
+    nativeVersion: string;
+  };
+  writeFileSync(omp, `#!/bin/sh\nprintf '%s\\n' ${JSON.stringify(nativeVersion)}\n`, { mode: 0o755 });
   const home = join(directory, "operator-home");
   mkdirSync(join(home, ".cataly/state"), { recursive: true });
   writeFileSync(join(home, ".cataly/config.json"), '{"owner":"unchanged"}\n');
@@ -86,7 +93,7 @@ export function preparationFixture(published: Readonly<Record<string, string>> =
       catalyConfig: join(home, ".cataly/config.json"),
       stateDir: join(home, ".cataly/state"),
       bun: process.execPath,
-      omp: process.execPath,
+      omp,
       restartLock: "operator-home/.cataly/restart.lock",
       launcherPath: "operator-home/.cataly/bin/managed-restart",
       healthTimeoutMs: 100,

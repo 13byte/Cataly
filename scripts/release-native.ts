@@ -158,7 +158,7 @@ export function assertNativeHosts(manifest: ReleaseManifest): void {
 async function buildCommitted(root: string, tree: string, host: NativeHost): Promise<Buffer> {
   const temporary = realpathSync(mkdtempSync(join(tmpdir(), "cataly-release-")));
   try {
-    const source = join(temporary, `omp-dori-${releaseVersion}`);
+    const source = join(temporary, `cataly-${releaseVersion}`);
     return await buildNativeRelease(source, temporary, host, await committedSource(root, tree, source));
   } finally {
     rmSync(temporary, { recursive: true, force: true });

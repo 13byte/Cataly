@@ -199,7 +199,7 @@ async fn assert_launch(lane: &Lane, seen: &Value) -> PathBuf {
     );
     assert_eq!(
         launch["env"],
-        json!({"CATALY_HEADLESS_ID": lane.id, "PI_NOTIFICATIONS": "off", "CATALY_HARNESS_ROLE": null, "HERDR_PANE_ID": null})
+        json!({"CATALY_HEADLESS_ID": lane.id, "PI_NOTIFICATIONS": "off", "CATALY_HARNESS_ROLE": null})
     );
     assert_eq!(launch["cwd"], seen["cwd"]);
     assert_eq!(

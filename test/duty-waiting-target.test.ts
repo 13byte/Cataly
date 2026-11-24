@@ -23,7 +23,7 @@ async function longWait(target = URL, runtime?: "tern") {
   const s = setup(runtime ? { runtime } : {});
   const key = `k${"-long".repeat(8)}`;
   const lane = await startLane(s.d, key, s.brief, { group: "w1" });
-  const pane = s.w.panes.get(lane.paneId)!;
+  const pane = s.w.panes.get(lane.sessionRef.id)!;
   pane.status = "idle";
   await report(s.d, key, "WAITING: CI", { status: "waiting", waitingFor: target });
   const at = (min: number) => {
@@ -95,7 +95,7 @@ describe("a long waiting target or evidence link", () => {
   test("the escalation names the whole last evidence under its line when the line cut it", async () => {
     const { w, d, lead, brief } = setup();
     const lane = await startLane(d, "talker", brief, { group: "w1" });
-    w.panes.get(lane.paneId)!.status = "idle";
+    w.panes.get(lane.sessionRef.id)!.status = "idle";
     await report(d, "talker", "CI is running", { evidence: [URL] });
     w.clock = lane.createdAt + 41 * MIN;
     expect(await dutyTick(d)).toContainEqual({ lane: "talker", action: "escalated" });
@@ -128,7 +128,7 @@ describe("a link wider than a line", () => {
   test("is named whole on one line under the escalation's last evidence", async () => {
     const { w, d, lead, brief } = setup();
     const lane = await startLane(d, "talker", brief, { group: "w1" });
-    w.panes.get(lane.paneId)!.status = "idle";
+    w.panes.get(lane.sessionRef.id)!.status = "idle";
     await report(d, "talker", "CI is running", { evidence: [WIDE] });
     w.clock = lane.createdAt + 41 * MIN;
     expect(await dutyTick(d)).toContainEqual({ lane: "talker", action: "escalated" });
@@ -157,7 +157,7 @@ describe("a path with spaces wider than a line", () => {
     mkdirSync(join(file, ".."), { recursive: true });
     writeFileSync(file, "ok");
     const lane = await startLane(d, "talker", brief, { group: "w1" });
-    w.panes.get(lane.paneId)!.status = "idle";
+    w.panes.get(lane.sessionRef.id)!.status = "idle";
     w.clock = lane.createdAt + MIN;
     await report(d, "talker", "built", { evidence: [file] });
     expect(d.store.lane("talker")!.lastEvidence?.ref).toBe(file);
@@ -208,7 +208,7 @@ describe("a name with runs of spaces", () => {
     mkdirSync(join(file, ".."), { recursive: true });
     writeFileSync(file, "ok");
     const lane = await startLane(d, "talker", brief, { group: "w1" });
-    w.panes.get(lane.paneId)!.status = "idle";
+    w.panes.get(lane.sessionRef.id)!.status = "idle";
     w.clock = lane.createdAt + MIN;
     const { progress } = await report(d, "talker", "built", { evidence: [file] });
     expect(progress[0]).toEndWith(`end${sep}result  log.txt`);

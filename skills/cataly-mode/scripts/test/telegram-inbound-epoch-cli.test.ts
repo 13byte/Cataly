@@ -78,12 +78,10 @@ const run = async (
 };
 
 test(
-  "legacy high offsets cannot confirm away a fresh lower Telegram update",
+  "a first start polls without an offset and saves a private versioned cursor",
   async () => {
     const state = withCliState();
     try {
-      const legacy = join(state.dir, "telegram-offset");
-      writeFileSync(legacy, "1000");
       const result = await run(state.dir, [message(5, 41, "new epoch")]);
       expect({ code: result.code, err: result.err }).toEqual({ code: 0, err: "" });
       expect(result.inbound).toEqual(['INBOUND dm 5250 - 5 mid=41 5250 "new epoch"']);
@@ -95,7 +93,6 @@ test(
         "setMessageReaction",
       ]);
       expect(result.requests.find((request) => request.method === "getUpdates")?.params).not.toHaveProperty("offset");
-      expect(readFileSync(legacy, "utf8")).toBe("1000");
       const saved = JSON.parse(readFileSync(cursorPath(state.dir), "utf8"));
       expect(saved).toMatchObject({ version: 1, botId: 900, offset: 6 });
       expect(saved.seen).toHaveLength(1);

@@ -136,7 +136,7 @@ impl LaneInbox {
             .map_err(|_| anyhow::anyhow!("Discord lane inbox owner failed"))
     }
 
-    /// `add(session, message)`: a legacy input the lane may answer in its own transcript.
+    /// `add(session, message)`: a plain input, without a reply request, the lane may answer in its own transcript.
     pub(super) fn add(&self, session: &str, channel: &str, id: &str, text: &str) -> Result<()> {
         self.db()?
             .prepare_cached(INSERT)?
@@ -333,11 +333,11 @@ mod tests {
     fn add_is_idempotent_and_only_replied_inputs_wake() {
         let state = temp();
         let inbox = LaneInbox::open(&state).unwrap();
-        inbox.add("s", "1", "10", "legacy").unwrap();
+        inbox.add("s", "1", "10", "plain").unwrap();
         assert_eq!(inbox.pending_sessions(Some(ME)).unwrap(), []);
         inbox.add_with_reply("s", "1", "11", "first", ME).unwrap();
         inbox.add_with_reply("s", "1", "11", "second", ME).unwrap();
-        // A legacy row with the same key never gains a reply request.
+        // A plain row with the same key never gains a reply request.
         inbox.add_with_reply("s", "1", "10", "again", ME).unwrap();
         assert_eq!(
             inbox.count("SELECT count(*) FROM inbox WHERE id='11' AND text='first'"),

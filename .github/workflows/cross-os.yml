@@ -57,12 +57,9 @@ jobs:
           bun -e 'if (process.platform !== "darwin" || process.arch !== "arm64") throw new Error("Darwin arm64 is required")'
           gtar="$(command -v gtar)"
           "$gtar" --version
-          baseline=97371823c4936f7e83f656cfa6ca9d446ecf1995
-          git merge-base --is-ancestor "$baseline" HEAD
-          git worktree add --detach "$RUNNER_TEMP/consumer-baseline" "$baseline"
           git worktree add --detach "$RUNNER_TEMP/consumer-candidate" HEAD
           bun "$RUNNER_TEMP/consumer-candidate/scripts/verify-consumer-release.ts" \
-            --source-a "$RUNNER_TEMP/consumer-baseline" --source-b "$RUNNER_TEMP/consumer-candidate" \
+            --source "$RUNNER_TEMP/consumer-candidate" \
             --tar-bin "$gtar" \
             --out "/private/tmp/odcr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 

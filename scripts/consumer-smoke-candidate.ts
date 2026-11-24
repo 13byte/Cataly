@@ -39,7 +39,7 @@ async function packageCandidate(root: string, scratch: string, dist: string) {
   const manifest = await packageReleaseTree({ root: scratch, commit, tree }, dist, true);
   const native = new Set(nativeHosts.map(nativeReleasePath));
   assert.deepEqual(
-    manifest.source.files.filter((entry) => !entry.path.startsWith("skills/dori-mode/") && !native.has(entry.path)),
+    manifest.source.files.filter((entry) => !native.has(entry.path)),
     expected,
     "Local candidate tree changed the captured working bytes",
   );

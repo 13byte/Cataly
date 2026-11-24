@@ -49,6 +49,6 @@ export function nativeBinary(root = fileURLToPath(new URL("..", import.meta.url)
   return firstNativeBinary(isAbsolute(home) ? [...tree, join(home, "bin", "cataly-native")] : tree);
 }
 
-/** Discord-native intake, sends, presence and routing; `off` keeps the legacy Discord paths. */
+/** Discord-native intake, sends, presence and routing; `off` keeps the TypeScript Discord paths. */
 export const discordNativeBinary = (): string | undefined =>
   disabled(process.env[NATIVE_BINARY_ENV]) ? undefined : nativeBinary();

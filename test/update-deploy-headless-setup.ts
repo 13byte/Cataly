@@ -44,7 +44,7 @@ type Inventory = {
  * loaded from that source; the real extension writes the same runtime health receipt. Each lead runs a default intake
  * monitor named by its session's desired manifest; a `prelude` replaces it and the caller owns the monitors and their
  * manifest. `prelude` runs inside each lead process before its host starts, and `onLead` sees every live lead the health
- * writer observes.
+ * writer observes. With `previousMain`, a lead loaded from the old release writes the previous main's health shape.
  */
 export async function headlessDeployment(
   options: {
@@ -52,6 +52,7 @@ export async function headlessDeployment(
     readonly healthy?: (source: string) => boolean;
     readonly prelude?: string;
     readonly onLead?: (lead: { readonly sessionId: string; readonly pid: number }) => void;
+    readonly previousMain?: boolean;
   } = {},
 ) {
   const root = realpathSync(mkdtempSync("/tmp/cdh-"));
@@ -88,7 +89,6 @@ export async function headlessDeployment(
       ...defaultConfig(config.catalyHome),
       stateDir: config.stateDir,
       defaultCwd: work,
-      ompUlwPath: "",
       defaultModel: "fixture/initial",
       agentCommand: [omp, "--model", "{model}", "{prompt}"],
     }),
@@ -101,16 +101,6 @@ export async function headlessDeployment(
   ownReleaseRoot(config);
   const nativeConfig = join(config.releaseRoot, "native-config.json");
   writeFileSync(nativeConfig, JSON.stringify({ update: { auto: false } }), { mode: 0o600 });
-  const toolchain: ToolchainReceipt = {
-    omp,
-    bun: process.execPath,
-    nativeVersion,
-    ompEntry: realpathSync(omp),
-    ompEntryHash: digest(readFileSync(omp)),
-    bunHash: digest(readFileSync(process.execPath)),
-    nativeConfig,
-    nativeConfigHash: digest(readFileSync(nativeConfig)),
-  };
   const oldSource = join(config.releaseRoot, "releases", "previous");
   release(oldSource, "previous");
   symlinkSync(oldSource, config.liveSource);
@@ -127,6 +117,19 @@ export async function headlessDeployment(
   };
   const newSource = join(config.releaseRoot, "releases", `${input.commit}-${input.sourceHash.slice(0, 16)}`);
   release(newSource, "next");
+  // The configured executable's receipt, pinned to the new release's extension as preparation leaves it.
+  const toolchain: ToolchainReceipt = {
+    omp,
+    bun: process.execPath,
+    nativeVersion,
+    ompEntry: realpathSync(omp),
+    ompEntryHash: digest(readFileSync(omp)),
+    bunHash: digest(readFileSync(process.execPath)),
+    nativeConfig,
+    nativeConfigHash: digest(readFileSync(nativeConfig)),
+    nativeOverride: true,
+    extensionSource: newSource,
+  };
   const id = crypto.randomUUID();
   // Prepared exactly as `prepareRelease` leaves it: the published clone and its native toolchain receipt.
   const record: DeploymentRecord = {
@@ -161,10 +164,11 @@ export async function headlessDeployment(
     healthy: options.healthy ?? (() => true),
     ...(monitor ? { manifest: monitor.manifest } : {}),
     ...(options.onLead ? { onLead: options.onLead } : {}),
+    ...(options.previousMain ? { previousMain: (source: string) => source === oldSource } : {}),
   });
 
   if (options.start !== false) {
-    await startHarness(config, oldSource, toolchain, work);
+    await startHarness(config, oldSource, { ...toolchain, extensionSource: oldSource }, work);
     await until(async () => {
       const seen = await lead();
       const desired = !monitor || (seen?.sessionId && existsSync(desiredPath(config, seen.sessionId)));

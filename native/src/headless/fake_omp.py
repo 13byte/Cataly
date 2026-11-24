@@ -27,7 +27,7 @@ def log(text):
         file.write(text)
 
 
-names = ("CATALY_HEADLESS_ID", "PI_NOTIFICATIONS", "CATALY_HARNESS_ROLE", "HERDR_PANE_ID")
+names = ("CATALY_HEADLESS_ID", "PI_NOTIFICATIONS", "CATALY_HARNESS_ROLE")
 log(json.dumps({"pid": os.getpid(), "argv": argv, "cwd": os.getcwd(), "env": {k: os.environ.get(k) for k in names}}) + "\n")
 
 
@@ -66,7 +66,7 @@ for line in sys.stdin:
         entries = [{"type": "custom", "customType": "omp-cataly:role", "data": proven}]
         harness = os.environ.get("CATALY_HARNESS_ROLE")
         if harness:
-            entries.append({"type": "custom", "customType": "omp-dori:harness-role",
+            entries.append({"type": "custom", "customType": "omp-cataly:harness-role",
                             "data": {"role": harness, "refId": os.environ["CATALY_HEADLESS_ID"]}})
         ack({"entries": entries})
     elif kind == "goal":

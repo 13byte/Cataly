@@ -14,14 +14,14 @@ afterEach(() => {
   delete process.env["CATALY_PROMPTS_DIR"];
 });
 
-describe("a waiting lane after an upgrade", () => {
-  test("a prompts directory made before nudge-waiting.md existed still nudges a waiting lane, counted once sent", async () => {
+describe("a waiting lane's nudge and board line", () => {
+  test("a prompts directory without nudge-waiting.md still nudges a waiting lane, counted once sent", async () => {
     const s = setup();
     const lane = await startLane(s.d, "blocked", s.brief, { group: "w1" });
-    const pane = s.w.panes.get(lane.paneId)!;
+    const pane = s.w.panes.get(lane.sessionRef.id)!;
     pane.status = "idle";
     await report(s.d, "blocked", "WAITING: CI", { status: "waiting", waitingFor: "CI run 812" });
-    // The user's own prompts as an older cataly shipped them: every template but nudge-waiting.md.
+    // The user's own prompts: every template but nudge-waiting.md.
     const own = join(s.d.store.root, "own-prompts");
     mkdirSync(own, { recursive: true });
     for (const f of readdirSync(PROMPTS).filter((f) => f !== "nudge-waiting.md"))
@@ -39,7 +39,7 @@ describe("a waiting lane after an upgrade", () => {
     const key = `k${"-long".repeat(8)}`;
     expect(key).toHaveLength(41);
     const lane = await startLane(s.d, key, s.brief, { group: "w1" });
-    const pane = s.w.panes.get(lane.paneId)!;
+    const pane = s.w.panes.get(lane.sessionRef.id)!;
     pane.status = "idle";
     await report(s.d, key, "x", {
       status: "waiting",

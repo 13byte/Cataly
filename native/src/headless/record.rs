@@ -319,7 +319,7 @@ mod tests {
         let entry = lane_entry(&state, &id).unwrap().unwrap();
         assert_eq!(entry.dir, dir);
         assert_eq!(entry.reservation.str("role"), Some("duty-loop"));
-        write_private(&dir.join("reservation.json"), &reservation("dori")).unwrap();
+        write_private(&dir.join("reservation.json"), &reservation("unknown")).unwrap();
         assert!(lane_entry(&state, &id).is_err());
         fs::remove_dir_all(&state).unwrap();
     }
