@@ -2,7 +2,7 @@
 
 ## Current source bundle
 
-Current source and releases declaring a verified headless profile use a bound OMP and omp-ulw toolchain. Cataly runs on headless OMP by default on macOS and Linux; the optional [Tern](runtime.md#tern) terminal runtime is a source feature outside the consumer release path. Install git and Bun 1.4.4+. Every installation also needs the native Cataly binary: releases bundle it for Linux x64 and macOS arm64, and source installation builds it with Cargo, so install a Rust toolchain with [rustup](https://rustup.rs) before installing from source. You do not need a terminal server, a stock `omp` on `PATH`, provider credentials or global native-cache changes to prepare it. Authentication is a separate step before starting an agent.
+Current source and releases declaring a verified headless profile use a bound OMP and omp-ulw toolchain. Cataly runs on headless OMP by default on macOS and Linux; the optional [Tern](runtime.md#tern) terminal runtime is a source feature outside the consumer release path. Install git and Bun 1.4.4+. Every installation also needs the native Cataly binary: releases bundle it for Linux x64 and macOS arm64, and source installation builds it with Cargo, so install a Rust toolchain with [rustup](https://rustup.rs) before installing from source; on macOS the build also needs the Xcode Command Line Tools (`xcode-select --install`), whose libclang and SDK generate its `libproc` bindings. You do not need a terminal server, a stock `omp` on `PATH`, provider credentials or global native-cache changes to prepare it. Authentication is a separate step before starting an agent.
 
 `native-omp.lock` and `native-omp.patch` bind upstream [oh-my-pi](https://github.com/can1357/oh-my-pi) commit `f40f335845f0b136453d12fec8d6057011082766` (19.0.1), the patch SHA-256, resulting Git tree and modified-file SHA-256/modes. The home-local cache is `~/.cache/omp-cataly/native-<platform>-<arch>-<full-source-identity>`. Preparation installs frozen upstream dependencies and the separately frozen official `@oh-my-pi/pi-natives@19.0.1` package from `native-addon/`. It probes the actual addon and copies those version-matched bytes through the existing workspace loader seam; receipts bind the actual addon, Bun and launcher bytes. Rust is unchanged. The addon release stamp establishes its release compatibility, **not** the source delta or binary equivalence to a rebuilt OMP executable.
 
@@ -320,9 +320,9 @@ can use it only with a live receiver authenticated with the same credential.
 This compatibility path does not apply to lanes. Continue to load the token
 only in the receiver child for new setups. No settings file is created or edited.
 Restart the receiver when updating so it reports its current routes.
-Automatic routing currently requires Linux: the native receiver publishes its
-route only when it can confirm its own process identity through procfs, so on
-macOS ASK stays in the native OMP dialog.
+Automatic routing works on Linux and macOS: the native receiver publishes its
+route with its own process identity, read through procfs on Linux and libproc
+on macOS, so a receiver whose PID was reused is never chosen.
 
 Eligible single-choice questions show native Discord buttons, with the
 checked option labeled **Recommended**. Only the configured owner can

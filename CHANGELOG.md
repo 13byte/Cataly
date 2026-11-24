@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- Native Discord intake opens its queue and lane inbox when an ancestor of the state directory is a symbolic link, such as macOS's `/var -> /private/var` above `$TMPDIR`; previously it exited at startup. A state directory that is itself a link is still refused. Automatic Discord ASK routing is documented as Linux-only, since the native receiver publishes its route only with a procfs process identity.
+- Native Discord intake opens its queue and lane inbox when an ancestor of the state directory is a symbolic link, such as macOS's `/var -> /private/var` above `$TMPDIR`; previously it exited at startup. A state directory that is itself a link is still refused.
+
+- Automatic Discord ASK routing works on macOS as well as Linux. The native receiver now publishes its route on macOS with the libproc process start the TypeScript lookup reads, and the native `--activity-file` writer records the same process identity as TypeScript (start, boot session, executable and image); previously both failed closed without procfs, so ASK stayed in the native OMP dialog. Building the native binary on macOS now needs the Xcode Command Line Tools, whose libclang and SDK generate the `libproc` bindings.
 
 - The native Cataly binary is now part of every installation. Releases bundle it for Linux x64 and macOS arm64 (`native-bin/<platform>-<arch>/cataly`, digested in the source manifest; the macOS binary comes from a reproducible build on a macOS arm64 release job), and the release gate refuses a distribution without both. Source installation builds it with Cargo before changing links, wrappers or configuration, and now stops with guidance to install Rust with rustup, or to use a release, when no Rust toolchain is available or the build fails, instead of continuing without it.
 

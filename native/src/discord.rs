@@ -11,6 +11,8 @@ mod activity;
 mod admission;
 mod api;
 mod context;
+#[cfg(any(target_os = "macos", test))]
+mod darwin;
 mod gateway;
 mod inbound;
 mod inbox;
