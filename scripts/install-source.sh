@@ -9,6 +9,9 @@
 # Source omp-ulw uses the bound lock+overlay by default; OMP_ULW_REF explicitly selects an unpatched branch/tag/commit.
 # Primary mode discovers it globally; side mode loads it only through the isolated omp-cataly omp wrapper.
 # Optional paths: CATALY_SRC, OMP_ULW_SRC, OMP_ULW_REPO, SKILLS_DIR, OMP_EXTENSIONS_DIR, OMP_CATALY_HOME, OMP_CATALY_BIN_DIR.
+# The native Cataly binary is required: the checkout's native-bin/<platform>-<arch>/cataly, or a Cargo build of its
+# Rust crate (of the incoming commit, before a pull moves the checkout). Without either, the install stops before
+# moving the checkout or changing links, wrappers or configuration.
 set -euo pipefail
 
 # Translate only source-installer inputs. An explicitly set Cataly spelling, even empty, wins.
@@ -445,6 +448,43 @@ if [ -n "$omp_bin" ]; then
   at_least "$min_omp" "${BASH_REMATCH[1]}" || fail "CATALY_OMP must be $min_omp or newer"
 fi
 (umask 077; mkdir -p "$base")
+
+# The native Cataly binary is required. Obtain it for the tree being installed before any dependency, link, wrapper
+# or configuration change and, when pulling, before the checkout moves: a host that cannot provide it leaves the
+# existing installation running its current commit.
+native_controller=""
+native_prepared=""
+native_build_dir=""
+trap '[ -z "$native_build_dir" ] || rm -rf "$native_build_dir"' EXIT
+# prepare_native_controller TREE UNCHANGED: TREE is the source that will be installed; UNCHANGED ends failure messages.
+prepare_native_controller() {
+  local tree="$1" unchanged="$2" host candidate rust_host release
+  native_prepared=1
+  host="$("$bun_bin" -e 'console.log(`${process.platform}-${process.arch}`)')"
+  # A packaged binary is never committed (release-only path), so it is read from the checkout itself.
+  candidate="$src/native-bin/$host/cataly"
+  if present "$candidate"; then
+    [ ! -L "$src/native-bin" ] && [ ! -L "$src/native-bin/$host" ] ||
+      fail "Native Cataly package must not traverse a directory link: $candidate"
+    native_controller="$candidate"
+  else
+    # Source trees from before the Rust crate have no native binary to install.
+    [ -f "$tree/Cargo.toml" ] && [ -f "$tree/Cargo.lock" ] && [ -f "$tree/native/src/main.rs" ] || return 0
+    release="or install a Cataly release, which bundles the binary for linux-x64 and darwin-arm64"
+    if ! command -v cargo >/dev/null || ! rust_host="$(rustc -vV 2>/dev/null | awk '$1 == "host:" { print $2 }')" ||
+      [[ ! "$rust_host" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+      fail "Cataly requires its native binary: $src has no native-bin/$host/cataly, and building it needs a Rust toolchain (cargo and rustc). Install Rust with rustup (https://rustup.rs) and run this installer again, $release. $unchanged"
+    fi
+    [ -n "$native_build_dir" ] || native_build_dir="$(mktemp -d "${TMPDIR:-/tmp}/cataly-native-build.XXXXXX")"
+    if ! (cd "$tree" && cargo build --locked --release --bin cataly --target "$rust_host" --target-dir "$native_build_dir/target"); then
+      fail "Cataly requires its native binary, and building it with Cargo failed; cargo's message above says why. Fix the build (rustup update installs a current Rust) and run this installer again, $release. $unchanged"
+    fi
+    native_controller="$native_build_dir/target/$rust_host/release/cataly"
+  fi
+  [ -f "$native_controller" ] && [ -x "$native_controller" ] && [ ! -L "$native_controller" ] ||
+    fail "Native Cataly is not an executable regular file: $native_controller"
+}
+
 if [ ! -e "$src/.git" ]; then
   (umask 077; git clone --quiet --depth 1 "$repo" "$src")
 elif [[ "${CATALY_NO_PULL:-}" =~ ^(1|true|yes)$ ]]; then
@@ -452,20 +492,35 @@ elif [[ "${CATALY_NO_PULL:-}" =~ ^(1|true|yes)$ ]]; then
 elif ! (umask 077; git -C "$src" fetch --quiet); then
   echo "Could not fetch updates for $src; git's message above says why." >&2
   exit 1
-elif ! (umask 077; git -C "$src" merge --ff-only --quiet '@{u}'); then
-  if git -C "$src" rev-parse --verify --quiet '@{u}' >/dev/null &&
-    [ -n "$(git -C "$src" status --porcelain)$(git -C "$src" rev-list '@{u}..HEAD')" ]; then
-    echo "Could not update $src. Local work in that checkout:" >&2
-    git -C "$src" status --short --branch >&2
-    git -C "$src" log --oneline '@{u}..HEAD' >&2
-    echo "To keep it and install the checkout as it is, run scripts/install-source.sh again with CATALY_NO_PULL=1." >&2
-  else
-    echo "Could not update $src; git's message above says why." >&2
+else
+  # Build the incoming commit's binary from an export of that commit while the checkout still runs the current one.
+  # A diverged checkout skips this and reports its local work below.
+  if incoming="$(git -C "$src" rev-parse --verify --quiet '@{u}^{commit}')" &&
+    [ "$incoming" != "$(git -C "$src" rev-parse HEAD)" ] &&
+    git -C "$src" merge-base --is-ancestor HEAD "$incoming"; then
+    native_build_dir="$(mktemp -d "${TMPDIR:-/tmp}/cataly-native-build.XXXXXX")"
+    mkdir "$native_build_dir/source"
+    git -C "$src" archive --format=tar "$incoming" | tar -xf - -C "$native_build_dir/source"
+    prepare_native_controller "$native_build_dir/source" \
+      "$src stays at its current commit; links, wrappers and configuration were not changed."
   fi
-  exit 1
+  if ! (umask 077; git -C "$src" merge --ff-only --quiet '@{u}'); then
+    if git -C "$src" rev-parse --verify --quiet '@{u}' >/dev/null &&
+      [ -n "$(git -C "$src" status --porcelain)$(git -C "$src" rev-list '@{u}..HEAD')" ]; then
+      echo "Could not update $src. Local work in that checkout:" >&2
+      git -C "$src" status --short --branch >&2
+      git -C "$src" log --oneline '@{u}..HEAD' >&2
+      echo "To keep it and install the checkout as it is, run scripts/install-source.sh again with CATALY_NO_PULL=1." >&2
+    else
+      echo "Could not update $src; git's message above says why." >&2
+    fi
+    exit 1
+  fi
 fi
 [ -f "$src/skills/cataly-mode/scripts/src/cli.ts" ] ||
   fail "$src still has a pre-Cataly source layout; select an updated checkout with CATALY_SRC."
+[ -n "$native_prepared" ] ||
+  prepare_native_controller "$src" "Links, wrappers and configuration were not changed."
 if [ -z "$omp_bin" ]; then
   # The installer holds the native cache lease until it has written the wrapper below that names the identity.
   native="$(CATALY_NATIVE_LEASE_PID=$$ "$bun_bin" "$src/scripts/source-dependencies.ts" native "$src" "$HOME")"
@@ -552,38 +607,11 @@ write_generated() (
   mv -f "$scratch" "$path"
 )
 
-install_native_controller() (
-  local binary="" host candidate rust_host build_dir
-  if [ -d "$src/native-bin" ]; then
-    host="$("$bun_bin" -e 'console.log(`${process.platform}-${process.arch}`)')"
-    candidate="$src/native-bin/$host/cataly"
-    if present "$candidate"; then
-      [ ! -L "$src/native-bin" ] && [ ! -L "$src/native-bin/$host" ] ||
-        fail "Native Cataly package must not traverse a directory link: $candidate"
-      binary="$candidate"
-    fi
-  fi
-  if [ -z "$binary" ]; then
-    # Older source trees have no Rust crate; keep their install and Bun CLI unchanged.
-    [ -f "$src/Cargo.toml" ] && [ -f "$src/Cargo.lock" ] && [ -f "$src/native/src/main.rs" ] || return 0
-    if ! command -v cargo >/dev/null || ! rust_host="$(rustc -vV | awk '$1 == "host:" { print $2 }')" ||
-      [[ ! "$rust_host" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-      echo "Native Cataly needs a Rust toolchain; keeping the existing CLI." >&2
-      return 0
-    fi
-    build_dir="$(mktemp -d "${TMPDIR:-/tmp}/cataly-native-build.XXXXXX")"
-    trap 'rm -rf "$build_dir"' EXIT
-    if ! (cd "$src" && cargo build --locked --release --bin cataly --target "$rust_host" --target-dir "$build_dir"); then
-      echo "Native Cataly build failed; keeping the existing CLI." >&2
-      return 0
-    fi
-    binary="$build_dir/$rust_host/release/cataly"
-  fi
-  [ -f "$binary" ] && [ -x "$binary" ] && [ ! -L "$binary" ] ||
-    fail "Native Cataly is not an executable regular file: $binary"
+install_native_controller() {
+  [ -n "$native_controller" ] || return 0
   (umask 077; mkdir -p "$base/bin")
-  write_generated "$base/bin/cataly-native" 700 < "$binary"
-)
+  write_generated "$base/bin/cataly-native" 700 < "$native_controller"
+}
 
 if [ "$mode" = primary ]; then
   mkdir -p "$skills" "$extensions"

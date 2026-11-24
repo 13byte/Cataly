@@ -5,7 +5,7 @@
  */
 import type { Subprocess } from "bun";
 import { resolve } from "node:path";
-import { discordNativeBinary } from "../skills/cataly-mode/scripts/src/cli-discord-binary.ts";
+import { discordNativeBinary } from "../src/native-binary.ts";
 import {
   ASK_RELAY_PROTOCOL,
   ASK_RELAY_STATE,

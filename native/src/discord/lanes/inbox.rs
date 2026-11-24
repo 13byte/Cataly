@@ -118,7 +118,7 @@ impl LaneInbox {
             Err(error) => return Err(error).context("creating Discord lane inbox"),
         }
         for suffix in ["", "-wal", "-shm", "-journal"] {
-            check_file(&super::util::sibling(&path, suffix), directory.uid())?;
+            check_file(&crate::util::sibling(&path, suffix), directory.uid())?;
         }
         let db = Connection::open_with_flags(
             path,
@@ -257,7 +257,7 @@ mod tests {
     fn temp() -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "cataly-lane-inbox-{}",
-            super::super::util::uuid().unwrap()
+            crate::util::uuid().unwrap()
         ));
         DirBuilder::new().mode(0o700).create(&dir).unwrap();
         dir

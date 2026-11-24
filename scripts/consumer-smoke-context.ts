@@ -3,6 +3,7 @@ import { existsSync, lstatSync, mkdirSync, realpathSync, symlinkSync, writeFileS
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { snapshot } from "./consumer-smoke-inspect.ts";
+import { currentNativeHost } from "./release-native.ts";
 
 /** All writes and all child selections belong to one previously nonexistent namespace. */
 export function createConsumerSmokeContext(rawOut: string, tar: string) {
@@ -45,14 +46,14 @@ export function createConsumerSmokeContext(rawOut: string, tar: string) {
     assert(path, `Missing prerequisite: ${name}`);
     symlinkSync(realpathSync(path), join(tools, name));
   }
-  const compilerEnv =
-    process.platform === "linux" && process.arch === "x64"
-      ? {
-          PATH: `${compilerTools}:${tools}:/usr/bin:/bin`,
-          RUSTUP_HOME: process.env["RUSTUP_HOME"] ?? join(homedir(), ".rustup"),
-          RUSTUP_TOOLCHAIN: process.env["RUSTUP_TOOLCHAIN"],
-        }
-      : undefined;
+  // The producer rebuilds this host's native binary, so it alone sees the Rust toolchain and system linker.
+  const compilerEnv = currentNativeHost()
+    ? {
+        PATH: `${compilerTools}:${tools}:/usr/bin:/bin`,
+        RUSTUP_HOME: process.env["RUSTUP_HOME"] ?? join(homedir(), ".rustup"),
+        RUSTUP_TOOLCHAIN: process.env["RUSTUP_TOOLCHAIN"],
+      }
+    : undefined;
   if (compilerEnv) {
     mkdirSync(compilerTools, { mode: 0o700 });
     for (const name of ["cargo", "rustc"]) {

@@ -64,7 +64,9 @@ and `omp-cataly` for isolated operation. `omp` remains the OMP command.
 Historical release names are kept only where the compatibility protocol needs
 them; see [the release guide](docs/releases.md#upgrade-a-v013-installation).
 
-To install a selected checkout alongside a primary installation without pulling:
+To install a selected checkout alongside a primary installation without pulling
+(it builds the required native Cataly binary, so install Rust with [rustup](https://rustup.rs) first;
+without it the installer stops before changing links, wrappers or configuration):
 
 ```bash
 CATALY_INSTALL_MODE=side CATALY_NO_PULL=1 CATALY_SRC="$PWD" bash scripts/install-source.sh
@@ -79,7 +81,7 @@ See [source installation](docs/releases.md#source-checkouts-for-maintainers).
 Current source prepares `native-omp.lock` / `native-omp.patch` and
 `omp-ulw.overlay.lock` / `omp-ulw.patch`. Use the generated primary
 `~/.cataly/bin/omp` or side `omp-cataly omp`, not stock OMP on `PATH`. The official
-addon has its own frozen `native-addon/bun.lock`; no Cargo build is required.
+addon has its own frozen `native-addon/bun.lock`; it needs no Cargo build.
 Changing these defaults requires real isolated installation evidence as well as
 source checks. See [bound source identities](docs/releases.md#current-source-bundle).
 
@@ -87,7 +89,8 @@ Consumers use the [verified release guide](docs/releases.md) and
 `cataly update check|install|status|rollback`. Maintainer porting and recovery use
 `cataly upstream ... --config FILE`; that separate interface may use configured
 models and publication permissions. Consumer release management uses neither.
-Build fixed assets with `bun scripts/release.ts build --out DIST --prerelease`.
+Build fixed assets with `bun scripts/release.ts build --out DIST --prerelease`; a public
+release also needs `--native DIR` holding the macOS arm64 binary from `bun scripts/release.ts native --out DIR`.
 The [exact-commit release procedure](docs/releases.md#building-and-publishing-releases)
 describes the publication gates. The tag/scheduled workflow guards, ULW publisher,
 and exact-commit release checks require the canonical identity `vntrevx/Cataly`;
@@ -110,17 +113,22 @@ bun run test:local [root|skill|ext|all] [args] # default: all three suites
 ```
 
 `dev:setup` runs the `run:` steps of `.github/actions/setup` (`fixtures: all`)
-verbatim, so the installs, the native host check against `native-omp.lock` and
-the omp-ulw compatibility pin stay defined in one place. It uses the running Bun
+verbatim, so the installs, the native host check against `native-omp.lock`,
+the omp-ulw compatibility pin and the `cargo build --locked --release --bin
+cataly` of the native headless host stay defined in one place; it needs a stable
+Rust toolchain. It uses the running Bun
 when it matches `packageManager` in `package.json`, otherwise it installs that
 version under `target/bun-<version>/` (checked against the release's
 `SHASUMS256.txt`). Fixtures live under `target/dev-fixtures/`, and it writes
-`target/dev-env.sh` with the pinned Bun first on `PATH`, `CATALY_TEST_OMP_ROOT`
-and `CATALY_TEST_COMPAT_ULW_ENTRY`. A second run reuses the compatibility
-checkout and finishes in about a second.
+`target/dev-env.sh` with the pinned Bun first on `PATH`, `CATALY_TEST_OMP_ROOT`,
+`CATALY_TEST_COMPAT_ULW_ENTRY` and `CATALY_DISCORD_NATIVE_BIN` (the built
+`target/release/cataly`, which hosts every headless lane, lead and duty the
+tests start). A second run reuses the compatibility checkout and an up-to-date
+Cargo build.
 
 `test:local` sources that file, re-executes itself under the pinned Bun if
-another Bun started it, and runs the suites with CI's package scripts. Extra
+another Bun started it, rebuilds `target/release/cataly` so it matches your Rust
+sources, and runs the suites with CI's package scripts. Extra
 arguments go to `bun test`; root paths are relative to the checkout, skill and
 extension paths to their suite directory, e.g.
 `bun run test:local ext test/index.test.ts`. It changes only its own process

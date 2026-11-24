@@ -7,11 +7,11 @@ use anyhow::Result;
 
 use super::LaneHold;
 use super::headless;
-use super::json::Json;
 use super::lock::{Lock, take_lock};
 use super::registry::{Lane, RESERVED_LANE_KEY, Registry, SessionRef, pane_role, pane_state};
-use super::util::{safe_int, signalable};
 use super::wake::is_pending;
+use crate::json::Json;
+use crate::util::{safe_int, signalable};
 
 /// `DELIVERY_WAIT_MS`.
 pub(super) const DELIVERY_WAIT: Duration = Duration::from_secs(30);
@@ -269,7 +269,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::discord::lanes::util::uuid;
+    use crate::util::uuid;
 
     struct State(PathBuf);
 

@@ -3,7 +3,7 @@ description: Install Bun 1.4.4, restore the Bun install cache, install the works
 
 inputs:
   fixtures:
-    description: Test fixtures to prepare; none installs dependencies only, host binds the native OMP host, all adds the ULW and compatibility fixtures.
+    description: Test fixtures to prepare; none installs dependencies only, host binds the native OMP host, all adds the ULW and compatibility fixtures and builds the native Cataly binary that hosts headless lanes.
     required: false
     default: none
 
@@ -60,3 +60,14 @@ runs:
     - name: Install cataly-mode script dependencies
       shell: bash
       run: cd "$GITHUB_WORKSPACE/skills/cataly-mode/scripts" && bun install --frozen-lockfile
+    - name: Build the native Cataly headless host
+      if: ${{ inputs.fixtures == 'all' }}
+      shell: bash
+      run: |
+        if ! command -v cargo >/dev/null; then
+          echo "Headless lane, lead and duty tests run on the native Cataly binary; install stable Rust (https://rustup.rs)." >&2
+          exit 1
+        fi
+        cargo --version
+        cargo build --locked --release --bin cataly --manifest-path "$GITHUB_WORKSPACE/Cargo.toml"
+        printf 'CATALY_DISCORD_NATIVE_BIN=%s\n' "$GITHUB_WORKSPACE/target/release/cataly" >> "$GITHUB_ENV"

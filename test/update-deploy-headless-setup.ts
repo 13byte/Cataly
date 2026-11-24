@@ -25,6 +25,7 @@ import type {
   ToolchainReceipt,
 } from "../src/update/deployment-types.ts";
 import { digest, sourceManifest } from "../src/update/source.ts";
+import { installNativeHost } from "./fixtures/native-host.ts";
 import { desiredPath, intakeMonitor, leadHealthWriter, writeFakeOmp } from "./update-deploy-headless-lead.ts";
 import { release, repoCli, until } from "./update-headless-lead-setup.ts";
 
@@ -76,6 +77,9 @@ export async function headlessDeployment(
   const work = join(config.home, "work");
   for (const dir of [config.stateDir, join(config.stateDir, "activity"), work, join(root, "h/omp-bin"), sessions])
     mkdirSync(dir, { recursive: true });
+  // Every release here runs this checkout's CLI, so `harness up` (with the deployment's allowlisted environment) finds
+  // the host where installs keep it. Preparation's same-commit tree binary is covered by update-deploy-native.test.ts.
+  installNativeHost(config.catalyHome);
   const monitor = options.prelude === undefined ? intakeMonitor(root, config, work) : undefined;
   writeFakeOmp(omp, sessions, nativeVersion, options.prelude ?? monitor!.prelude);
   writeFileSync(

@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
-import { discordNativeBinary } from "../cli-discord-binary.ts";
+import { discordNativeBinary } from "../../../../../src/native-binary.ts";
 
 const LIMIT = 128 * 1024;
 const WAIT_MS = 10_000;

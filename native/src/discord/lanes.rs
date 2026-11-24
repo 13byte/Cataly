@@ -20,12 +20,10 @@ mod command;
 mod guard;
 mod headless;
 mod inbox;
-mod json;
 pub(in crate::discord) mod lock;
 mod registry;
 mod route;
 mod transcript;
-mod util;
 mod wake;
 
 use inbox::{LaneInbox, ReplyIdentity, ReplyPart};
@@ -66,7 +64,7 @@ fn reply_nonce(bot: &str, channel: &str, part: &ReplyPart) -> String {
         "dori-lane:{bot}:{channel}:{}:{}",
         part.id, part.part
     ));
-    util::hex(&digest[..12])
+    crate::util::hex(&digest[..12])
 }
 
 impl Lanes {
@@ -78,7 +76,7 @@ impl Lanes {
         owner: Snowflake,
         wake: bool,
     ) -> Result<Self> {
-        util::absolute(cataly_state, "--cataly-state")?;
+        crate::util::absolute(cataly_state, "--cataly-state")?;
         let wake = if wake {
             let launch = wake::Launch::from_env()?;
             let Ok(lock) = take_lock(&cataly_state.join("discord-lane-monitor.lock"), true)? else {

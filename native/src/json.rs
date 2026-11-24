@@ -1,8 +1,9 @@
-//! Insertion-ordered JSON for records the TypeScript CLI also rewrites.
+//! Insertion-ordered JSON for records the TypeScript CLI also rewrites, and `JSON.parse`-compatible input.
 //!
 //! `serde_json::Map` sorts keys in this build, while `JSON.stringify` keeps insertion order and object spreads keep
 //! a key where it already was. Lane registry rows are rewritten with exactly those semantics.
 
+use std::borrow::Cow;
 use std::fmt;
 
 use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
@@ -10,7 +11,7 @@ use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 use serde_json::Number;
 
 #[derive(Clone, Debug, PartialEq)]
-pub(super) enum Json {
+pub enum Json {
     Null,
     Bool(bool),
     Number(Number),
@@ -20,7 +21,7 @@ pub(super) enum Json {
 }
 
 impl Json {
-    pub(super) fn get(&self, key: &str) -> Option<&Self> {
+    pub(crate) fn get(&self, key: &str) -> Option<&Self> {
         match self {
             Self::Object(fields) => fields.iter().find(|(name, _)| name == key).map(|(_, v)| v),
             _ => None,
@@ -28,30 +29,32 @@ impl Json {
     }
 
     /// A string field; absent, null and non-strings are `None`.
-    pub(super) fn str(&self, key: &str) -> Option<&str> {
+    pub(crate) fn str(&self, key: &str) -> Option<&str> {
         self.get(key).and_then(Self::as_str)
     }
 
-    pub(super) const fn as_str(&self) -> Option<&str> {
+    pub(crate) const fn as_str(&self) -> Option<&str> {
         match self {
             Self::String(text) => Some(text.as_str()),
             _ => None,
         }
     }
 
-    pub(super) fn as_f64(&self) -> Option<f64> {
+    #[cfg(feature = "discord")]
+    pub(crate) fn as_f64(&self) -> Option<f64> {
         match self {
             Self::Number(number) => number.as_f64(),
             _ => None,
         }
     }
 
-    pub(super) const fn is_object(&self) -> bool {
+    pub(crate) const fn is_object(&self) -> bool {
         matches!(self, Self::Object(_))
     }
 
     /// JavaScript truthiness of a field (`undefined` is falsy).
-    pub(super) fn truthy(&self, key: &str) -> bool {
+    #[cfg(any(test, feature = "discord"))]
+    pub(crate) fn truthy(&self, key: &str) -> bool {
         self.get(key).is_some_and(|value| match value {
             Self::Null | Self::Bool(false) => false,
             Self::Number(number) => number.as_f64().is_some_and(|n| n != 0.0 && !n.is_nan()),
@@ -61,7 +64,7 @@ impl Json {
     }
 
     /// `{ ...this, [key]: value }`: an existing key keeps its position, a new key is appended.
-    pub(super) fn set(&mut self, key: &str, value: Self) {
+    pub(crate) fn set(&mut self, key: &str, value: Self) {
         if let Self::Object(fields) = self {
             let at = fields
                 .iter()
@@ -75,11 +78,11 @@ impl Json {
         }
     }
 
-    pub(super) fn string(text: &str) -> Self {
+    pub(crate) fn string(text: &str) -> Self {
         Self::String(text.to_owned())
     }
 
-    pub(super) fn object(fields: Vec<(&str, Self)>) -> Self {
+    pub(crate) fn object(fields: Vec<(&str, Self)>) -> Self {
         Self::Object(
             fields
                 .into_iter()
@@ -89,12 +92,13 @@ impl Json {
     }
 
     /// `JSON.stringify(value)`.
-    pub(super) fn compact(&self) -> String {
+    pub(crate) fn compact(&self) -> String {
         serde_json::to_string(self).unwrap_or_default()
     }
 
     /// `JSON.stringify(value, null, 1)`.
-    pub(super) fn pretty1(&self) -> String {
+    #[cfg(any(test, feature = "discord"))]
+    pub(crate) fn pretty1(&self) -> String {
         let mut out = Vec::new();
         let mut serializer = serde_json::Serializer::with_formatter(
             &mut out,
@@ -195,9 +199,76 @@ impl<'de> Deserialize<'de> for Json {
     }
 }
 
+/// The UTF-16 surrogate a `\uXXXX` escape at `at` names, if it names one.
+fn surrogate_at(bytes: &[u8], at: usize) -> Option<u16> {
+    let escape = bytes.get(at..at + 6)?;
+    if !escape.starts_with(b"\\u") {
+        return None;
+    }
+    let unit = u16::from_str_radix(std::str::from_utf8(&escape[2..]).ok()?, 16).ok()?;
+    (0xD800..=0xDFFF).contains(&unit).then_some(unit)
+}
+
+/// `bytes` with every unpaired surrogate escape (`"\ud83d"` alone, or a lone `"\udc00"`) replaced by `\ufffd`.
+/// `JSON.parse` keeps such a code unit and any UTF-8 consumer then sees U+FFFD; `serde_json` refuses the text.
+/// Valid pairs and every other byte are unchanged, and nothing is copied when there is nothing to replace.
+fn unpaired_surrogates(bytes: &[u8]) -> Cow<'_, [u8]> {
+    let mut out: Option<Vec<u8>> = None;
+    let (mut at, mut copied) = (0, 0);
+    while at < bytes.len() {
+        if bytes[at] != b'\\' {
+            at += 1;
+            continue;
+        }
+        match surrogate_at(bytes, at) {
+            Some(0xD800..=0xDBFF)
+                if matches!(surrogate_at(bytes, at + 6), Some(0xDC00..=0xDFFF)) =>
+            {
+                at += 12;
+            }
+            Some(_) => {
+                let out = out.get_or_insert_with(|| Vec::with_capacity(bytes.len()));
+                out.extend_from_slice(&bytes[copied..at]);
+                out.extend_from_slice(b"\\ufffd");
+                at += 6;
+                copied = at;
+            }
+            // Any other escape, `\\` included, is two bytes this pass never looks inside.
+            None => at += 2,
+        }
+    }
+    out.map_or(Cow::Borrowed(bytes), |mut out| {
+        out.extend_from_slice(&bytes[copied..]);
+        Cow::Owned(out)
+    })
+}
+
+/// Parses JSON text as `JSON.parse` admits it, including unpaired surrogate escapes (read as U+FFFD).
+pub fn parse_js<T: de::DeserializeOwned>(bytes: &[u8]) -> serde_json::Result<T> {
+    serde_json::from_slice(&unpaired_surrogates(bytes))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unpaired_surrogate_escapes_parse_like_json_parse() {
+        let value: serde_json::Value = parse_js(
+            br#"{"a":"x\ud83d","b":"\udc00y","c":"\ud83d\ude00","d":"\\ud83d","e":"\ud83d\ud83d"}"#,
+        )
+        .unwrap();
+        assert_eq!(value["a"], "x\u{fffd}");
+        assert_eq!(value["b"], "\u{fffd}y");
+        assert_eq!(value["c"], "\u{1f600}");
+        assert_eq!(value["d"], "\\ud83d");
+        assert_eq!(value["e"], "\u{fffd}\u{fffd}");
+        assert!(matches!(
+            unpaired_surrogates(br#"{"c":"\ud83d\ude00"}"#),
+            Cow::Borrowed(_)
+        ));
+        assert!(serde_json::from_slice::<serde_json::Value>(br#""\ud83d""#).is_err());
+    }
 
     #[test]
     fn keeps_insertion_order_like_json_stringify() {

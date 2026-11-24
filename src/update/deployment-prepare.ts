@@ -5,6 +5,7 @@ import type { DeploymentConfig, DeploymentInput, DeploymentRecord } from "./depl
 import { assertSourceAdmission, digest, sameManifest, sourceManifest } from "./source.ts";
 
 import { hasControl } from "./config.ts";
+import { prepareNativeHost } from "./deployment-native.ts";
 import { prepareRuntimeToolchain } from "./deployment-toolchain.ts";
 
 const SHA = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/;
@@ -117,6 +118,7 @@ export async function prepareRelease(
   if (candidate.ulwPresent) mkdirSync(join(record.releasePath, "ref/omp-ulw"), { recursive: true, mode: 0o700 });
   if (!sameManifest(sourceManifest(record.releasePath), candidate))
     throw new DeploymentHeld("release lost the frozen opaque pin");
+  await prepareNativeHost(config, record, signal);
   if (record.preparedAt) {
     if (lstatSync(join(record.releasePath, "native-omp.lock"), { throwIfNoEntry: false }))
       await prepareRuntimeToolchain(config, record);

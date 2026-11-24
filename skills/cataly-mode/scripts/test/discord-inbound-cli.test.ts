@@ -144,10 +144,8 @@ posix("--wake-lanes and --activity-file hand the lane launch and activity path t
       "3",
     ]);
     const launch = JSON.parse(result.fact("LAUNCH") ?? "null");
-    expect(Object.keys(launch).sort()).toEqual(["agentCommand", "broker", "env", "guard", "sessionsDir", "wakeConfig"]);
+    expect(Object.keys(launch).sort()).toEqual(["agentCommand", "env", "guard", "sessionsDir", "wakeConfig"]);
     expect(launch.agentCommand.at(-1)).toBe("{prompt}");
-    const broker = resolve(import.meta.dir, "../../../../src/runtime/headless-broker.ts");
-    expect(launch.broker).toEqual([process.execPath, broker]);
     expect(launch.wakeConfig).toBe(resolve(import.meta.dir, "../src/discord-lane-wake.yml"));
     expect(launch.guard).toMatchObject({ panesMax: expect.any(Number) });
     expect(launch.env["CATALY_CONFIG"]).toEndWith("config.json");

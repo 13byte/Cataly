@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use super::util::has_control;
+use crate::util::has_control;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct WakeCommand {

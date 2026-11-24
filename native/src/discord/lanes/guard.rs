@@ -9,7 +9,7 @@ use std::path::Path;
 use serde::Deserialize;
 
 use super::headless;
-use super::util::{RECORD_LIMIT, read_limited};
+use crate::util::{RECORD_LIMIT, read_limited};
 
 /// `GuardThresholds` from the loaded config.
 #[derive(Clone, Debug, Deserialize)]

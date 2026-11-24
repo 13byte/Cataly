@@ -11,7 +11,8 @@ const directories: string[] = [];
 afterEach(() => {
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
-export function preparationFixture() {
+/** `published` adds tracked files to the published commit, e.g. a Cargo crate whose native host preparation builds. */
+export function preparationFixture(published: Readonly<Record<string, string>> = {}) {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), "cataly-deploy-prepare-")));
   directories.push(directory);
   const remote = join(directory, "published");
@@ -59,6 +60,10 @@ export function preparationFixture() {
   put("extension/index.ts", "export default function extension() {}\n");
   put("omp-ulw.lock", `${"a".repeat(40)}\n`);
   tracked.push("src/app.ts", "skills/cataly-mode/scripts/src/cli.ts", "extension/index.ts", "omp-ulw.lock");
+  for (const [path, value] of Object.entries(published)) {
+    put(path, value);
+    tracked.push(path);
+  }
   git(remote, "init", "-b", "main");
   git(remote, "config", "user.name", "Cataly deployment fixture");
   git(remote, "config", "user.email", "deployment@example.invalid");

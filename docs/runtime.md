@@ -9,6 +9,36 @@ owning runtime. The herdr and hc runtimes were removed; a home that still uses
 them stops with the [upgrade message](releases.md#upgrading-from-a-terminal-runtime).
 The headless host needs a Unix socket, so on Windows only Tern can run sessions.
 
+Every headless session has its own detached host process under
+`<state>/headless/<uuid>/`. For the lead, duty and lanes it is the native
+Cataly binary, `cataly headless-host <dir>`: it owns the OMP `rpc-ui` child,
+the owner-only Unix socket the CLI and extension talk to, and the
+`stopped.json` receipt. The two scheduling loops, `duty-loop` and
+`hourly-loop`, are Bun processes (`src/runtime/headless-loop.ts`) with no OMP
+child. The CLI picks the binary in this order, never from the current directory
+or `PATH`:
+
+1. `CATALY_DISCORD_NATIVE_BIN`, when it is an absolute path;
+2. the binaries of the code tree the CLI runs from, same commit by
+   construction: the release-bundled `native-bin/<platform>-<arch>/cataly`,
+   then `target/managed/release/cataly`, which only a managed source
+   deployment writes (it runs `cargo build --locked --release --bin cataly`
+   while preparing the release, before anything stops, and holds when Rust is
+   missing or the build fails). A developer's own `target/release` build is
+   never used; point the override at it instead;
+3. the installed `$CATALY_HOME/bin/cataly-native`, where `CATALY_HOME` defaults
+   to `~/.cataly`.
+
+Without any of them, starting a lane, the lead or duty fails with the
+[reinstall guidance](releases.md#troubleshooting-and-support-reports). A host
+that exits before proving startup is named in the error with its path, so an
+old build without `headless-host` is visible; rebuild or reinstall it. A binary
+built for another `native-omp.lock` refuses the OMP version and reports that
+instead.
+`CATALY_DISCORD_NATIVE_BIN=off` disables only the Discord-native features; the
+headless host still resolves through steps 2 and 3. A Discord lane wake starts
+its host from the running Discord monitor binary itself.
+
 The [release guide](releases.md) separates current install profiles from the
 historical v0.1.2 preview. Cross-OS CI does not by itself establish live
 consumer support.

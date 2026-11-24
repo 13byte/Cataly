@@ -1,6 +1,7 @@
 /**
- * `bun run dev:setup`: prepare this checkout the way CI's `.github/actions/setup` does with `fixtures: all`, then write
- * target/dev-env.sh (pinned Bun first on PATH, CATALY_TEST_OMP_ROOT, CATALY_TEST_COMPAT_ULW_ENTRY).
+ * `bun run dev:setup`: prepare this checkout the way CI's `.github/actions/setup` does with `fixtures: all`, including
+ * its `cargo build --locked --release --bin cataly` of the native headless host, then write target/dev-env.sh (pinned
+ * Bun first on PATH, CATALY_TEST_OMP_ROOT, CATALY_TEST_COMPAT_ULW_ENTRY, CATALY_DISCORD_NATIVE_BIN).
  *
  * The action's own `run:` scripts execute verbatim under the pinned Bun, umask 022 and a private /tmp TMPDIR, so the
  * installs, the native host version check and every fixture pin stay defined only in the action. Its `uses:` steps are
@@ -13,7 +14,7 @@ import { ensurePinnedBun, pinnedBunVersion, requirePosix, runUnderPinnedBun, wit
 
 const ACTION = ".github/actions/setup/action.yml";
 const COMPAT_ENV = "CATALY_TEST_COMPAT_ULW_ENTRY";
-const REQUIRED_ENV = ["CATALY_TEST_OMP_ROOT", COMPAT_ENV] as const;
+const REQUIRED_ENV = ["CATALY_TEST_OMP_ROOT", COMPAT_ENV, "CATALY_DISCORD_NATIVE_BIN"] as const;
 
 interface Step {
   readonly name: string;

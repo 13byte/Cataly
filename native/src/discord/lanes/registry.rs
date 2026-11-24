@@ -13,9 +13,9 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow, bail};
 
-use super::json::Json;
 use super::lock::take_lock;
-use super::util::{RECORD_LIMIT, iso, private_dirs, read_limited, replace_file, safe_int};
+use crate::json::Json;
+use crate::util::{RECORD_LIMIT, iso, private_dirs, read_limited, replace_file, safe_int};
 
 /// `RESERVED_LANE_KEY`.
 pub(super) const RESERVED_LANE_KEY: &str = "lead";
@@ -240,7 +240,7 @@ impl Registry {
 
     fn write_now(&self, lane: &Lane) -> Result<()> {
         let path = self.path(lane.key());
-        let temporary = super::util::sibling(&path, &format!(".{}.tmp", std::process::id()));
+        let temporary = crate::util::sibling(&path, &format!(".{}.tmp", std::process::id()));
         replace_file(&path, &temporary, &lane.0.pretty1())
     }
 
@@ -251,7 +251,7 @@ impl Registry {
         change: impl FnOnce(Option<Lane>) -> Result<Option<Lane>> + Send,
     ) -> Result<Option<Lane>> {
         fs::create_dir_all(&self.dir)?;
-        let lock_path = super::util::sibling(&self.path(key), ".lock");
+        let lock_path = crate::util::sibling(&self.path(key), ".lock");
         let deadline = tokio::time::Instant::now() + REGISTRY_WAIT;
         let lock = loop {
             match take_lock(&lock_path, false)? {
@@ -475,7 +475,7 @@ fn run_context(state: &Path, lane: &Lane, run: Option<&str>) -> Result<Option<Co
         }
     }
     Ok(run
-        .filter(|run| super::util::is_uuid(run, true))
+        .filter(|run| crate::util::is_uuid(run, true))
         .and_then(|run| contexts.into_iter().find(|(id, _)| id == run))
         .map(|(_, context)| context))
 }
@@ -511,7 +511,7 @@ pub(super) fn record_execution(
         return Ok(());
     };
     let run = lane.0.str("runId");
-    if !is_request_id(request) || !run.is_some_and(|run| super::util::is_uuid(run, true)) {
+    if !is_request_id(request) || !run.is_some_and(|run| crate::util::is_uuid(run, true)) {
         bail!("invalid launch identity for {}", lane.key());
     }
     let previous = run_context(state, lane, run)?;

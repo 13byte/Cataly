@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { accessSync, constants, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { parseArgs } from "node:util";
 import { readArchive } from "../src/release/archive.ts";
 import { validateReleaseManifest } from "../src/release/manifest.ts";
 import { createConsumerSmokeContext } from "./consumer-smoke-context.ts";
+import { assertNativeExecutable, currentNativeHost, nativeHosts, nativeReleasePath } from "./release-native.ts";
 
 const { values } = parseArgs({
   options: {
@@ -21,11 +22,8 @@ assert(
 );
 const sourceA = realpathSync(values["source-a"]);
 const sourceB = realpathSync(values["source-b"]);
-assert(
-  (process.platform === "linux" && process.arch === "x64") ||
-    (process.platform === "darwin" && process.arch === "arm64"),
-  "Requires Linux x64 or Darwin arm64",
-);
+const host = currentNativeHost();
+assert(host, "Requires Linux x64 or Darwin arm64");
 const tar = values["tar-bin"] ?? Bun.which(process.platform === "darwin" ? "gtar" : "tar");
 assert(tar, "A real GNU tar is required by the production release builder; supply --tar-bin");
 const { out, side, tools, run, unchangedPrimary } = createConsumerSmokeContext(values.out, tar);
@@ -75,18 +73,21 @@ assert.equal(a.tag, "v0.1.3");
 assert.equal(a.commit, "97371823c4936f7e83f656cfa6ca9d446ecf1995", "Source A must be the actual old tagged updater");
 assert.equal(b.tag, "v0.1.4");
 const crossesNativeGeneration = b.requirements.omp.startsWith("19.");
-const controllerPath = "native-bin/linux-x64/cataly";
-const controller = b.source.files.find(({ path }) => path === controllerPath);
-if (process.platform === "linux") {
-  assert(controller?.executable, "Linux release lacks an executable native controller");
-  const archive = readFileSync(join(distB, b.archive.name));
-  const payload = readArchive(archive, b).find(({ path }) => path === controllerPath);
-  assert(payload && payload.bytes.length > 20, "Linux release lacks the native executable payload");
-  assert.equal(payload.bytes.subarray(0, 6).toString("hex"), "7f454c460201", "Expected little-endian ELF64");
-  assert.equal(payload.bytes.readUInt16LE(18), 62, "Expected machine type x86-64");
-} else {
-  assert.equal(controller, undefined, "Darwin smoke must remain source-only");
+// A local candidate rebuilds only this host's native binary; the public producer also receives the other host's.
+const controllerPath = nativeReleasePath(host);
+for (const other of nativeHosts.filter((entry) => entry !== host)) {
+  const foreign = nativeReleasePath(other);
+  assert(!b.source.files.some(({ path }) => path === foreign), `Local smoke unexpectedly bundles ${foreign}`);
 }
+assert(
+  b.source.files.find(({ path }) => path === controllerPath)?.executable,
+  "Release lacks an executable native controller",
+);
+const controller = readArchive(readFileSync(join(distB, b.archive.name)), b).find(
+  ({ path }) => path === controllerPath,
+);
+assert(controller, "Release lacks the native executable payload");
+assertNativeExecutable(host, controller.bytes);
 for (const resource of ["SKILL.md", "references/setup.md", "assets/cataly-avatar.png"]) {
   const canonical = b.source.files.find((file) => file.path === `skills/cataly-mode/${resource}`);
   const historical = b.source.files.find((file) => file.path === `skills/dori-mode/${resource}`);
@@ -122,6 +123,10 @@ await run("fresh-bootstrap", [
   "--home",
   side,
 ]);
+// The installed release activates the bundled binary for this host in its own source tree.
+const installedController = join(side, "src", controllerPath);
+accessSync(installedController, constants.X_OK);
+assert(readFileSync(installedController).equals(controller.bytes), "Installed native controller differs");
 const config = JSON.parse(readFileSync(join(side, "config.json"), "utf8"));
 assert.equal(config.runtime, undefined);
 assert.equal(config.sessionRuntime, undefined);

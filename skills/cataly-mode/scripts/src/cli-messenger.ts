@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { InboundActivityError } from "../../../../src/update/source-activity.ts";
 
 import { type Command, die, envSlackToken, every, messageText, slackAuth } from "./cli-context.ts";
-import { discordNativeBinary } from "./cli-discord-binary.ts";
+import { discordNativeBinary } from "../../../../src/native-binary.ts";
 import { reactDiscord, sendDiscord, threadDiscord } from "./cli-discord-ops.ts";
 import { channelDiscord } from "./cli-discord-purpose.ts";
 import { discordClock, openDiscordSocket, untilStopped } from "./cli-discord-gateway.ts";

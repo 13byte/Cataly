@@ -177,10 +177,13 @@ It does not contain the newer `main` features or toolchain.
 
 ### Work from current source
 
-Use a separate checkout with git and Bun 1.4.4+. On Linux and macOS sessions
+Use a separate checkout with git, Bun 1.4.4+ and a Rust toolchain from
+[rustup](https://rustup.rs). On Linux and macOS sessions
 run on headless OMP by default; no terminal server is needed. The installer prepares the pinned, patched **OMP 19.0.1**
 and **omp-ulw** overlay; a stock `omp` is not a substitute. No preinstalled OMP
-or Cargo is needed for this default setup.
+is needed. The installer builds the required native Cataly binary with Cargo;
+without a Rust toolchain, or when that build fails, it stops before changing links,
+wrappers or configuration. Releases bundle the binary for Linux x64 and macOS arm64 instead.
 Tern is the optional terminal runtime; see [Tern](docs/runtime.md#tern).
 
 To inspect configuration changes first, add `--preview` to the final command below;
@@ -259,7 +262,7 @@ The existing `cataly inbound discord` can launch the Rust monitor with:
 
 | Setting | Value |
 | --- | --- |
-| `CATALY_DISCORD_NATIVE_BIN` | Optional absolute Rust binary override; set `off` for legacy Discord commands. |
+| `CATALY_DISCORD_NATIVE_BIN` | Optional absolute override for the native Cataly binary, used by Discord intake and the headless lane, lead and duty host. `off` selects the legacy Discord commands only; the headless host still uses the bundled or installed binary. |
 | `CATALY_DISCORD_NATIVE_WORKSPACE` | Optional absolute workspace override for the native monitor; otherwise it uses `laneWorkspace`. |
 | `CATALY_DISCORD_NATIVE_CHANNEL_ID` | Optional exact channel or thread ID from the inbound list. If unset, use all explicitly listed inbound channels as roots. |
 | `CATALY_DISCORD_THREADS` | Follow active threads under those roots by default. Set `off` to watch only explicit IDs. Direct Rust invocation uses `--follow-threads`. |
@@ -307,9 +310,9 @@ message. For a channel, use `--to CHANNEL_ID` or a unique `--to '#name'`
 in `CATALY_DISCORD_GUILD_ID`. The direct command emits a JSON delivery receipt.
 Long fenced Markdown closes and reopens its code block at each UTF-16-safe cut.
 Use `target/release/cataly discord-presence` to run only the Gateway presence connection.
-Linux x64 release archives contain the checksummed Rust binary. Source installs
-on supported Unix hosts build it with Cargo when a toolchain is available.
-Discord intake has no fallback: installations without that binary must build it.
+Release archives contain the checksummed Rust binary for Linux x64 and macOS arm64.
+Source installs build it with Cargo and stop before changing links, wrappers or
+configuration when no Rust toolchain is available or the build fails.
 
 Ordinary owner text runs with OMP's tools disabled; attachments are not
 downloaded. Follow-ups reuse the saved session, and the OMP process exits

@@ -173,10 +173,11 @@ Bun 1.4.4, 네이티브 OMP 18.18.8, herdr 0.9.5입니다. 별도로 설치한 O
 
 ### 현재 소스에서 시작하기
 
-git과 Bun 1.4.4 이상을 준비해 별도 체크아웃을 사용하세요. Linux와 macOS에서 세션은
+git, Bun 1.4.4 이상, [rustup](https://rustup.rs)으로 설치한 Rust 툴체인을 준비해 별도 체크아웃을 사용하세요. Linux와 macOS에서 세션은
 기본적으로 headless OMP로 실행되며 터미널 서버가 필요 없습니다. 소스 설치기는 고정된 패치 버전 **OMP 19.0.1**과 **omp-ulw** 오버레이를
-준비합니다. 기본 설치에는 사전에 설치한 OMP나 Cargo가 필요 없고, 일반 배포판 `omp`로
-이 구성을 대체하지 않습니다.
+준비합니다. 기본 설치에는 사전에 설치한 OMP가 필요 없고, 일반 배포판 `omp`로
+이 구성을 대체하지 않습니다. 설치기는 필수 네이티브 Cataly 바이너리를 Cargo로 빌드하며,
+Rust 툴체인이 없거나 빌드가 실패하면 링크·래퍼·설정을 바꾸기 전에 중단합니다. 릴리스에는 Linux x64와 macOS arm64용 바이너리가 포함됩니다.
 선택 사항인 터미널 런타임으로 Tern을 쓸 수 있습니다. [Tern](docs/runtime.md#tern)을 참고하세요.
 
 ```bash
@@ -243,7 +244,7 @@ OMP 프로세스를 닫습니다. 결과가 불명확하면 롤백된 것으로 
 
 | 설정 | 값 |
 | --- | --- |
-| `CATALY_DISCORD_NATIVE_BIN` | 선택 사항. Rust 바이너리의 절대 경로. `off`는 기존 Discord 경로를 선택합니다. |
+| `CATALY_DISCORD_NATIVE_BIN` | 선택 사항. 네이티브 Cataly 바이너리의 절대 경로로, Discord 인입과 headless 레인·리드·듀티 호스트가 사용합니다. `off`는 기존 Discord 경로만 선택하며, headless 호스트는 계속 번들 또는 설치된 바이너리를 사용합니다. |
 | `CATALY_DISCORD_NATIVE_WORKSPACE` | 선택 사항. 네이티브 작업 디렉터리의 절대 경로. 생략하면 `laneWorkspace`를 사용합니다. |
 | `CATALY_DISCORD_NATIVE_CHANNEL_ID` | 선택 사항. 인입 목록의 채널 또는 스레드 하나를 지정합니다. 생략하면 명시적으로 등록한 인입 채널 전체를 루트로 사용합니다. |
 | `CATALY_DISCORD_THREADS` | 기본적으로 루트 아래의 활성 스레드를 따라갑니다. `off`면 명시한 ID만 처리합니다. Rust를 직접 실행할 때는 `--follow-threads`를 씁니다. |
@@ -285,9 +286,9 @@ Rust 바이너리가 설치되거나 배포본에 포함되어 있으면 `cataly
 `CATALY_DISCORD_GUILD_ID` 안의 고유한 채널 이름을 지정합니다. 직접 호출은
 JSON 전송 영수증을 반환합니다. 긴 코드 블록은 UTF-16 경계를 지키며 조각마다
 닫고 다시 엽니다. 온라인 상태만 유지하려면 `target/release/cataly discord-presence`를 사용하세요.
-Linux x64 배포본에는 체크섬으로 검증하는 Rust 바이너리가 포함됩니다.
-지원되는 Unix의 소스 설치는 Cargo가 있으면 직접 빌드합니다.
-바이너리가 없는 기존 설치는 기존 CLI를 그대로 사용합니다.
+Linux x64와 macOS arm64 배포본에는 체크섬으로 검증하는 Rust 바이너리가 포함됩니다.
+소스 설치는 Cargo로 직접 빌드하며, Rust 툴체인이 없거나 빌드가 실패하면
+링크·래퍼·설정을 바꾸기 전에 중단합니다.
 
 소유자의 일반 텍스트는 도구 없이 실행하고, 첨부 파일은 다운로드하지 않습니다.
 같은 채널·스레드에서 저장된 세션을 재사용하되, 실행이 끝나면 OMP 프로세스는
