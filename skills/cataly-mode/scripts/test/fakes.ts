@@ -121,6 +121,12 @@ export const withState = (): TestState => {
   return { dir, done: () => rmSync(dir, { recursive: true, force: true }) };
 };
 
+/** On Windows, `inbound telegram` refuses before reading any other argument. */
+export const refusedOnWindows = (args: readonly string[], err: string): string =>
+  process.platform === "win32" && args[0] === "inbound" && args[1] === "telegram"
+    ? "Telegram intake is not supported on Windows"
+    : err;
+
 /** Runtimes whose only runtime is the world's fake headless supervisor. */
 export const fakeRuntimes = (w: World, stateDir: string): ChosenRuntimes => {
   const runtime = new FakeHeadless(w, stateDir);

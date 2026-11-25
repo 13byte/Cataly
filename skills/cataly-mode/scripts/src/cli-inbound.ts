@@ -8,6 +8,7 @@ import { ThreadLedger } from "./messenger/thread-ledger.ts";
 import { realClock } from "./run.ts";
 
 export const inboundCommand: Command = async ({ key, loopMinutes, config, deps, values, opt }) => {
+  if (key === "telegram" && process.platform === "win32") die("Telegram intake is not supported on Windows");
   const minutes = loopMinutes();
   const context = values["context"] === true;
   if (context && key !== "discord") die("--context is supported for discord only");
