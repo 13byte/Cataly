@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { laneLaunchEnv } from "../src/slack-token.ts";
-import { withState } from "./fakes.ts";
+import { refusedOnWindows, withState } from "./fakes.ts";
 
 for (const ambientInLauncher of [false, true]) {
   test(`lane overrides terminal-server messenger tokens even when launcher has them: ${ambientInLauncher}`, async () => {
@@ -90,7 +90,9 @@ for (const [platform, args] of [
       );
       expect(child.exitCode).toBe(1);
       expect(child.stdout.toString()).toBe("");
-      expect(child.stderr.toString().trim()).toBe(`CATALY_${platform.toUpperCase()}_TOKEN is not set`);
+      expect(child.stderr.toString().trim()).toBe(
+        refusedOnWindows(args, `CATALY_${platform.toUpperCase()}_TOKEN is not set`),
+      );
     } finally {
       state.done();
     }

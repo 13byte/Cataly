@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { ChannelPurposeError, DiscordChannels } from "../src/messenger/discord-channels.ts";
 import { ids, withDiscordCli } from "./discord-fakes.ts";
-import { withState } from "./fakes.ts";
+import { refusedOnWindows, withState } from "./fakes.ts";
 
 test("purposes are stored privately, replaced, cleared and validated before anything is written", async () => {
   const state = withState();
@@ -79,7 +79,7 @@ test("cataly channel discord sets a looked-up channel's purpose, lists and clear
       [["inbound", "telegram", "--context"], "--context is supported for discord only"],
     ] as const) {
       const r = await f.invoke([...args]);
-      expect([r.code, r.err, r.keys]).toEqual([1, err, []]);
+      expect([r.code, r.err, r.keys]).toEqual([1, refusedOnWindows(args, err), []]);
     }
   });
 }, 60_000);
