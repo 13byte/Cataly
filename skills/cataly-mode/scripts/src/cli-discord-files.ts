@@ -24,8 +24,8 @@ const NATIVE_REQUIRED =
 /**
  * Admits each path through the artifact gate: an explicit `artifactRoots` root holds it lexically and physically, no
  * component is hidden, sensitive or a dependency directory, its type is listed, and it is a regular file that stayed
- * unchanged while its SHA-256 was streamed. Count and sizes are refused before a file's first byte is read. Every
- * refusal names the path as given.
+ * unchanged while its SHA-256 was streamed. Count and sizes are refused before a file's first byte is read, and a
+ * refused file is named by its path as given.
  */
 const admitFiles = async (roots: readonly ArtifactRoot[], paths: readonly string[]): Promise<AdmittedFile[]> => {
   if (paths.length > LIMITS.count)
