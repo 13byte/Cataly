@@ -282,6 +282,10 @@ Use `--reply MESSAGE_ID` to reply or `--edit MESSAGE_ID` to update a single
 message. For a channel, use `--to CHANNEL_ID` or a unique `--to '#name'`
 in `CATALY_DISCORD_GUILD_ID`. The direct command emits a JSON delivery receipt.
 Long fenced Markdown closes and reopens its code block at each UTF-16-safe cut.
+`--file SHA256:BYTES:PATH` (repeatable) attaches a file to one new message; the
+binary sends only bytes of that size and hash, and exits 3 when the upload may
+exist but was not confirmed. `cataly send discord --file PATH` supplies them
+after its `artifactRoots` path gate.
 Use `target/release/cataly discord-presence` to run only the Gateway presence connection.
 Release archives contain the checksummed Rust binary for Linux x64 and macOS arm64.
 Source installs build it with Cargo and stop before changing links, wrappers or

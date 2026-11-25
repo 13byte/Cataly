@@ -259,7 +259,11 @@ Rust 바이너리가 설치되거나 배포본에 포함되어 있으면 `cataly
 `--edit MESSAGE_ID`를 사용합니다. `--to`에는 채널 ID 또는
 `CATALY_DISCORD_GUILD_ID` 안의 고유한 채널 이름을 지정합니다. 직접 호출은
 JSON 전송 영수증을 반환합니다. 긴 코드 블록은 UTF-16 경계를 지키며 조각마다
-닫고 다시 엽니다. 온라인 상태만 유지하려면 `target/release/cataly discord-presence`를 사용하세요.
+닫고 다시 엽니다. `--file SHA256:BYTES:PATH`(반복 가능)는 새 메시지 하나에 파일을
+첨부합니다. 바이너리는 그 크기와 해시가 일치하는 바이트만 보내며, 업로드가
+이루어졌을 수 있지만 확인되지 않으면 종료 코드 3으로 끝납니다.
+`cataly send discord --file PATH`는 `artifactRoots` 경로 검사를 통과한 파일에 대해
+이 값을 채워 넘깁니다. 온라인 상태만 유지하려면 `target/release/cataly discord-presence`를 사용하세요.
 Linux x64와 macOS arm64 배포본에는 체크섬으로 검증하는 Rust 바이너리가 포함됩니다.
 소스 설치는 Cargo로 직접 빌드하며, Rust 툴체인이 없거나 빌드가 실패하면
 링크·래퍼·설정을 바꾸기 전에 중단합니다.
