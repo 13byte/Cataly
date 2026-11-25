@@ -7,7 +7,10 @@ import { withFilesCli } from "./discord-files-fixture.ts";
 const thread = ["send", "discord", "--thread", ids.thread];
 const posix = test.skipIf(process.platform === "win32");
 const refusal = (path: string, why: string) => `discord send: file ${JSON.stringify(path)}: ${why}`;
-const NO_ROOT = "artifact requires an explicitly configured containing root";
+/** The refusal names the configuration key and the file an operator edits; the fixture's is in its state directory. */
+const noRoot = (stateDir: string) =>
+  `send --file requires an artifactRoots entry containing it; add {"path": "<absolute directory>"} to ` +
+  `artifactRoots in ${join(stateDir, "config.json")}`;
 const PROTECTED = "artifact has a hidden, sensitive or dependency path";
 const TYPE = "artifact file type is not allowed";
 const MIB = 1024 * 1024;
@@ -22,7 +25,7 @@ test("without a configured artifact root every file is refused before any reques
     const chart = f.file("chart.png");
     for (const roots of [null, []]) {
       const r = await f.invoke([...thread, "--file", chart], { roots, environment: gated(f.stateDir) });
-      expect([r.code, r.out, r.err, r.keys]).toEqual([1, "", refusal(chart, NO_ROOT), []]);
+      expect([r.code, r.out, r.err, r.keys]).toEqual([1, "", refusal(chart, noRoot(f.stateDir)), []]);
     }
   });
 }, 60_000);
@@ -76,7 +79,7 @@ test("the bot token and SSH keys of the home directory cannot be attached, whate
     writeFileSync(join(sibling, "report.txt"), "sibling\n");
     for (const path of [token, key, outside, join(f.root, "..", "outside.txt"), join(sibling, "report.txt")]) {
       const r = await f.invoke([...thread, "--file", path], { environment });
-      expect([r.code, r.out, r.err, r.keys]).toEqual([1, "", refusal(path, NO_ROOT), []]);
+      expect([r.code, r.out, r.err, r.keys]).toEqual([1, "", refusal(path, noRoot(f.stateDir)), []]);
     }
     // Even a root as wide as the home directory does not admit them.
     for (const path of [token, key]) {

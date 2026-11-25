@@ -11,8 +11,10 @@ use sha2::{Digest as _, Sha256};
 
 use crate::discord::api::MAX_FILE_BYTES_TOGETHER as MAX_TOTAL_BYTES;
 
-/// Discord's 10 attachments per message and its documented 20 MiB per file. Together the files may have 24 MiB:
-/// its 25 MiB request limit less the headroom kept for the text and the multipart framing.
+/// Discord's documented limits: 10 attachments per message (JSON error 30015,
+/// <https://docs.discord.com/developers/topics/opcodes-and-status-codes#json>) and 20 MiB per file
+/// (<https://docs.discord.com/developers/reference#uploading-files>). Together the files may have 24 MiB: its
+/// 25 MiB request limit less the headroom kept for the text and the multipart framing.
 const MAX_FILES: usize = 10;
 const MAX_FILE_BYTES: u64 = 20 * 1024 * 1024;
 

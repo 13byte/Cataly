@@ -1,20 +1,30 @@
 /** `cataly send discord --file`: the artifact gate admits each file here; the native sender verifies and posts it. */
+import { resolve } from "node:path";
 import type { ArtifactRoot } from "./artifact-config.ts";
-import { ArtifactError, inspectArtifact } from "./artifact-files.ts";
+import { ArtifactError, artifactWithin, inspectArtifact } from "./artifact-files.ts";
 import { type Command, die, messageText } from "./cli-context.ts";
 import { discordNativeBinary } from "../../../../src/native-binary.ts";
 import { type AdmittedFile, nativeDiscordSend } from "./cli-discord-native-send.ts";
 import { confirmDiscordSend } from "./cli-discord-ops.ts";
+import { configPath } from "./config.ts";
 import { discordInboundEnv } from "./messenger/discord-inbound-state.ts";
 import { renderDiscordTables } from "./messenger/discord-markdown.ts";
 import { guardText, MessengerError } from "./messenger/http.ts";
 import { DISCORD_LIMIT } from "./messenger/split.ts";
 
 /**
- * Discord's 10 attachments per message and its documented 20 MiB per file. Together the files may have 24 MiB: its
- * 25 MiB request limit less the 1 MiB the native sender keeps for the text and the multipart framing.
+ * Discord's documented limits: 10 attachments per message (JSON error 30015,
+ * https://docs.discord.com/developers/topics/opcodes-and-status-codes#json) and 20 MiB per file
+ * (https://docs.discord.com/developers/reference#uploading-files). Together the files may have 24 MiB: its 25 MiB
+ * request limit (https://docs.discord.com/developers/resources/message#create-message-limitations) less the 1 MiB the
+ * native sender keeps for the text and the multipart framing.
  */
 const LIMITS = { count: 10, fileBytes: 20 * 1024 * 1024, totalBytes: 24 * 1024 * 1024 } as const;
+
+/** No configured root holds the path: the refusal names the key and where an operator approves a directory. */
+const noRoot = (): string =>
+  `send --file requires an artifactRoots entry containing it; add {"path": "<absolute directory>"} to ` +
+  `artifactRoots in ${configPath()}`;
 
 const NATIVE_REQUIRED =
   "send discord --file requires the native Cataly binary; nothing was sent. Build it with " +
@@ -34,6 +44,8 @@ const admitFiles = async (roots: readonly ArtifactRoot[], paths: readonly string
   let total = 0;
   for (const path of paths) {
     try {
+      const written = resolve(path);
+      if (!roots.some((root) => artifactWithin(root.path, written))) throw new ArtifactError(noRoot());
       const file = await inspectArtifact(roots, path, "private", (size) => {
         if (size === 0) throw new ArtifactError("the file is empty");
         if (size > LIMITS.fileBytes)

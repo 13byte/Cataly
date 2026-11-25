@@ -7,7 +7,8 @@ use serde_json::{Value, json};
 
 use super::{DiscordApi, Receipt, Snowflake, http::Payload, text_body};
 
-/// Discord takes at most 25 MiB in one message request.
+/// Discord takes at most 25 MiB in one message request:
+/// <https://docs.discord.com/developers/resources/message#create-message-limitations>.
 const MAX_REQUEST_BYTES: u64 = 25 * 1024 * 1024;
 /// Kept for the JSON part and the part headers. The longest text, a reply and ten files whose names are as long as
 /// a path can be need under a third of it, so a request within the file limit never reaches the request limit.
