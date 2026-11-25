@@ -7,6 +7,14 @@ use serde_json::{Value, json};
 
 use super::{DiscordApi, Receipt, Snowflake, http::Payload, text_body};
 
+/// Discord takes at most 25 MiB in one message request.
+const MAX_REQUEST_BYTES: u64 = 25 * 1024 * 1024;
+/// Kept for the JSON part and the part headers. The longest text, a reply and ten files whose names are as long as
+/// a path can be need under a third of it, so a request within the file limit never reaches the request limit.
+const FRAMING_HEADROOM: u64 = 1024 * 1024;
+/// The most bytes the files of one message may have together: the request limit less the framing headroom.
+pub(in crate::discord) const MAX_FILE_BYTES_TOGETHER: u64 = MAX_REQUEST_BYTES - FRAMING_HEADROOM;
+
 /// One file of a message: the name Discord shows and the exact bytes.
 pub(in crate::discord) struct FilePart<'a> {
     pub(in crate::discord) name: &'a str,
@@ -171,5 +179,36 @@ mod tests {
         expected.extend_from_slice("--B\r\nContent-Disposition: form-data; name=\"files[1]\"; filename=\"\u{acb0}\u{acfc}.md\"\r\nContent-Type: application/octet-stream\r\n\r\nsecond\r\n".as_bytes());
         expected.extend_from_slice(b"--B--\r\n");
         assert_eq!(body, expected);
+    }
+
+    #[test]
+    fn framing_of_the_largest_message_stays_inside_its_headroom() {
+        // Ten files named with 4095 bytes each, the most a path allows, of the byte that costs most in both
+        // parts (a control character: six bytes as JSON, one in the header), under the longest text and a
+        // reply in the widest channel.
+        let name = "\u{1}".repeat(4095);
+        let files: Vec<FilePart<'_>> = (0..10)
+            .map(|_| FilePart {
+                name: &name,
+                bytes: &[],
+            })
+            .collect();
+        let widest = id(&u64::MAX.to_string());
+        let payload = files_body(
+            widest,
+            Some(widest),
+            &"\u{1}".repeat(2000),
+            &files,
+            &"f".repeat(24),
+        );
+        let boundary = format!("cataly-{}", "f".repeat(32));
+        let framing = u64::try_from(multipart(&boundary, &payload, &files).len()).unwrap();
+        assert!(
+            framing > 256 * 1024 && framing <= FRAMING_HEADROOM / 3,
+            "{framing}"
+        );
+        // So the largest admitted files always leave the request under Discord's limit.
+        assert_eq!(MAX_FILE_BYTES_TOGETHER, 24 * 1024 * 1024);
+        assert!(MAX_FILE_BYTES_TOGETHER + framing < MAX_REQUEST_BYTES);
     }
 }

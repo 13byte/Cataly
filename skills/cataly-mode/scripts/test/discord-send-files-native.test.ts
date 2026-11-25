@@ -190,7 +190,7 @@ withNative(
 );
 
 withNative(
-  "ten files and a file of exactly the per-file size are admitted",
+  "ten files, and files at exactly the per-file and the combined limit, fit one request",
   async () => {
     await withFilesCli(async (f) => {
       const parts = Array.from({ length: 10 }, (_, index) => f.file(`part-${index}.txt`, `part ${index}\n`));
@@ -198,11 +198,21 @@ withNative(
       expect([ten.code, ten.err, ten.keys]).toEqual([0, "", [post]]);
       expect(ten.uploads[0]?.parts.map((part) => part.field)).toEqual(parts.map((_, index) => `files[${index}]`));
       expect(ten.out.split("\n")).toHaveLength(11);
+      // 20 MiB is Discord's limit per file; 20 MiB + 4 MiB is the 24 MiB that files may have together.
+      const mib = 1024 * 1024;
       const full = f.file("full.mp4", "");
-      truncateSync(full, 10 * 1024 * 1024);
-      const sent = await f.invoke([...thread, "--file", full], { environment });
+      truncateSync(full, 20 * mib);
+      const rest = f.file("rest.mp4", "");
+      truncateSync(rest, 4 * mib);
+      const sent = await f.invoke([...reply, "--text", "t".repeat(2000), "--file", full, "--file", rest], {
+        environment,
+      });
       expect([sent.code, sent.err, sent.keys]).toEqual([0, "", [post]]);
-      expect(sent.uploads[0]?.parts[0]?.size).toBe(10 * 1024 * 1024);
+      expect(sent.uploads[0]?.parts.map((part) => part.size)).toEqual([20 * mib, 4 * mib]);
+      // The request also carries the longest text and the multipart framing, and stays under Discord's 25 MiB.
+      const request = sent.uploads[0]?.requestBytes ?? 0;
+      expect(request).toBeGreaterThan(24 * mib + 2000);
+      expect(request).toBeLessThan(25 * mib);
     });
   },
   120_000,

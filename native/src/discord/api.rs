@@ -13,7 +13,7 @@ mod extra;
 mod files;
 mod http;
 pub(in crate::discord) use extra::{PartPost, RestStatus};
-pub(in crate::discord) use files::FilePart;
+pub(in crate::discord) use files::{FilePart, MAX_FILE_BYTES_TOGETHER};
 
 pub(super) struct DiscordApi {
     client: Client,

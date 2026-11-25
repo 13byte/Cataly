@@ -11,10 +11,10 @@ import { guardText, MessengerError } from "./messenger/http.ts";
 import { DISCORD_LIMIT } from "./messenger/split.ts";
 
 /**
- * Discord's 10 attachments per message. The sizes stay below its documented 20 MiB per file, and the total leaves
- * room for the multipart framing under its 25 MiB request limit.
+ * Discord's 10 attachments per message and its documented 20 MiB per file. Together the files may have 24 MiB: its
+ * 25 MiB request limit less the 1 MiB the native sender keeps for the text and the multipart framing.
  */
-const LIMITS = { count: 10, fileBytes: 10 * 1024 * 1024, totalBytes: 24 * 1024 * 1024 } as const;
+const LIMITS = { count: 10, fileBytes: 20 * 1024 * 1024, totalBytes: 24 * 1024 * 1024 } as const;
 
 const NATIVE_REQUIRED =
   "send discord --file requires the native Cataly binary; nothing was sent. Build it with " +

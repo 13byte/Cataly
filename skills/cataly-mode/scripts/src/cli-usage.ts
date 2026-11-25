@@ -105,7 +105,7 @@ export const USAGE = `cataly <command> [options]
                                        Discord splits text past 2000 characters (SENT lists every id); --reply and opt-in --render-tables (bounded pipe tables) are Discord only
                                        Slack accepts slack:WORKSPACE:ACCOUNT:CHANNEL and refuses a different authenticated account
   send discord (--to TARGET | --thread ID) --file PATH [--file PATH]... [--text TEXT | --text-file PATH|-] [--reply ID]
-                                       attach up to 10 files from artifactRoots (10 MiB each, 24 MiB together) to one new message;
+                                       attach up to 10 files from artifactRoots (20 MiB each, 24 MiB together) to one new message;
                                        needs the native binary; prints SENT and one SENT_ATTACHMENT receipt (id, name, size, sha256) per file
   thread discord create --to CHANNEL --title T [--text T] [--tag NAME]... [--message ID]
                                        --message opens the thread on that message of a text channel

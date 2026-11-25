@@ -135,13 +135,15 @@ test("count and size limits are refused before any request", async () => {
       [],
     ]);
     const empty = sized("empty.txt", 0);
-    const large = sized("large.mp4", 10 * MIB + 1);
-    const nine = ["a.mp4", "b.mp4", "c.mp4"].map((name) => sized(name, 9 * MIB));
+    // One byte over Discord's 20 MiB per file, and one byte over the 24 MiB that files may have together.
+    const large = sized("large.mp4", 20 * MIB + 1);
+    const full = sized("full.mp4", 20 * MIB);
+    const beyond = sized("beyond.mp4", 4 * MIB + 1);
     for (const [paths, path, why] of [
       [[empty], empty, "the file is empty"],
-      [[large], large, `${10 * MIB + 1} bytes exceed the ${10 * MIB}-byte limit per file`],
-      [[small[0]!, large], large, `${10 * MIB + 1} bytes exceed the ${10 * MIB}-byte limit per file`],
-      [nine, nine[2]!, `the files exceed the ${24 * MIB}-byte limit per message`],
+      [[large], large, `${20 * MIB + 1} bytes exceed the ${20 * MIB}-byte limit per file`],
+      [[small[0]!, large], large, `${20 * MIB + 1} bytes exceed the ${20 * MIB}-byte limit per file`],
+      [[full, beyond], beyond, `the files exceed the ${24 * MIB}-byte limit per message`],
     ] as const) {
       const r = await f.invoke([...thread, ...flags(paths)], { environment });
       expect([r.code, r.out, r.err, r.keys]).toEqual([1, "", refusal(path, why), []]);

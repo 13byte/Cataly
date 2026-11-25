@@ -14,6 +14,8 @@ export const sha256 = (bytes: string | Uint8Array): string => createHash("sha256
 type Part = { readonly field: string; readonly filename: string; readonly size: number; readonly sha256: string };
 type Upload = {
   readonly authorization: string | null;
+  /** The size of the whole request body, as its `Content-Length` declares it. */
+  readonly requestBytes: number;
   readonly type: string;
   readonly payload: Record<string, unknown>;
   readonly parts: readonly Part[];
@@ -77,6 +79,7 @@ const received = async (request: Request): Promise<Upload> => {
   } else payload = await request.json();
   return {
     authorization: request.headers.get("authorization"),
+    requestBytes: Number(request.headers.get("content-length")),
     type,
     payload: (payload ?? {}) as Record<string, unknown>,
     parts,

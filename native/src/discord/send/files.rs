@@ -9,11 +9,12 @@ use anyhow::{Context, Result, ensure};
 use rustix::fs::{Mode, OFlags, open};
 use sha2::{Digest as _, Sha256};
 
-/// Discord's 10 attachments per message. The sizes stay below its documented 20 MiB per file, and the total leaves
-/// room for the multipart framing under its 25 MiB request limit.
+use crate::discord::api::MAX_FILE_BYTES_TOGETHER as MAX_TOTAL_BYTES;
+
+/// Discord's 10 attachments per message and its documented 20 MiB per file. Together the files may have 24 MiB:
+/// its 25 MiB request limit less the headroom kept for the text and the multipart framing.
 const MAX_FILES: usize = 10;
-const MAX_FILE_BYTES: u64 = 10 * 1024 * 1024;
-const MAX_TOTAL_BYTES: u64 = 24 * 1024 * 1024;
+const MAX_FILE_BYTES: u64 = 20 * 1024 * 1024;
 
 /// `<sha256>:<bytes>:<path>`: an absolute path with the identity its caller admitted.
 #[derive(Clone, Debug)]
@@ -192,23 +193,37 @@ mod tests {
 
     #[test]
     fn refuses_more_files_or_bytes_than_one_message_carries() {
-        let path = scratch("part.bin");
-        let block = vec![7_u8; usize::try_from(MAX_FILE_BYTES).unwrap()];
-        std::fs::write(&path, &block).unwrap();
-        let digest = crate::util::hex(&Sha256::digest(&block));
-        // A file of exactly the per-file size is admitted, and so are two of them.
-        let full = admitted(&digest, MAX_FILE_BYTES, &path);
-        assert_eq!(load(&[full.clone(), full.clone()]).unwrap().len(), 2);
-        let error = load(&[full.clone(), full.clone(), full.clone()])
-            .err()
-            .unwrap();
+        let path = scratch("full.bin");
+        let sized = |name: &str, bytes: u64| {
+            let path = path.with_file_name(name);
+            let block = vec![7_u8; usize::try_from(bytes).unwrap()];
+            std::fs::write(&path, &block).unwrap();
+            admitted(&crate::util::hex(&Sha256::digest(&block)), bytes, &path)
+        };
+        // Exactly the per-file limit and exactly the limit for all files together are admitted.
+        let full = sized("full.bin", MAX_FILE_BYTES);
+        let rest = sized("rest.bin", MAX_TOTAL_BYTES - MAX_FILE_BYTES);
+        let loaded = load(&[full.clone(), rest.clone()]).unwrap();
+        let total: usize = loaded.iter().map(|file| file.bytes.len()).sum();
+        assert_eq!(u64::try_from(total).unwrap(), MAX_TOTAL_BYTES);
+        // One byte more, per file or together, is refused from the admitted sizes alone.
+        let beyond = |file: &Admitted| Admitted {
+            size: file.size + 1,
+            ..file.clone()
+        };
+        let error = load(&[beyond(&full)]).err().unwrap();
+        assert!(
+            error.to_string().contains("exceeds 20971520 bytes"),
+            "{error}"
+        );
+        let error = load(&[full, beyond(&rest)]).err().unwrap();
         assert!(
             error
                 .to_string()
                 .contains("exceed 25165824 bytes in one message"),
             "{error}"
         );
-        let error = load(&vec![full; MAX_FILES + 1]).err().unwrap();
+        let error = load(&vec![rest; MAX_FILES + 1]).err().unwrap();
         assert!(error.to_string().contains("at most 10 files"), "{error}");
         std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
