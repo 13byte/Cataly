@@ -73,6 +73,9 @@ if (flags.values["render-tables"] !== undefined && (command !== "send" || flags.
     die("--render-tables is supported for discord only");
   die(renderTablesUsage);
 }
+// A file dropped by another command or platform would look delivered.
+if (flags.values["file"] !== undefined && (command !== "send" || flags.positionals[0] !== "discord"))
+  die("--file requires cataly send discord");
 if (flags.values["qualified-routes"] !== undefined) {
   if (command !== "inbound" || flags.positionals[0] !== "slack") die(qualifiedRoutesUsage);
   if (flags.tokens.some((token) => token.kind === "option" && token.name === "qualified-routes" && token.inlineValue))

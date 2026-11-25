@@ -39,6 +39,8 @@ export const tagIds = (forum: DcChannel, names: readonly string[]): string[] =>
   });
 
 export const sendDiscord: Command = async (cli) => {
+  // Flag-selected like the --source thread module: a text send never loads the artifact gate.
+  if (cli.values["file"] !== undefined) return (await import("./cli-discord-files.ts")).sendDiscordWithFiles(cli);
   const { need, opt, values, config } = cli;
   const thread = opt("thread");
   const to = thread === undefined ? need("to") : undefined;
@@ -77,7 +79,8 @@ export const sendDiscord: Command = async (cli) => {
   }
 };
 
-async function confirmDiscordSend(
+/** `receipts` are further receipt lines of the same delivery, printed directly after its `SENT` line. */
+export async function confirmDiscordSend(
   config: Parameters<Command>[0]["config"],
   delivery: {
     readonly reply: string | undefined;
@@ -87,6 +90,7 @@ async function confirmDiscordSend(
     readonly rawText: string;
   },
   dc?: Discord,
+  receipts: readonly string[] = [],
 ): Promise<void> {
   const { reply, target, ids, replyConfirmed, rawText } = delivery;
   if (reply !== undefined) {
@@ -98,7 +102,7 @@ async function confirmDiscordSend(
     // An accepted plain fallback sends the answer, but it does not settle the exact owner request.
     if (replyConfirmed) await recordSent(config.stateDir, target, reply, ids, Date.now());
   }
-  console.log(`SENT ${ids.join(" ")}`);
+  console.log([`SENT ${ids.join(" ")}`, ...receipts].join("\n"));
   if (reply !== undefined && replyConfirmed && config.recall?.enabled)
     await (
       await import("./messenger/recall-discord.ts")

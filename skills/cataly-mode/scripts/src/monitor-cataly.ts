@@ -94,6 +94,7 @@ export const CATALY_VALUE_OPTIONS: Record<string, true> = {
   text: true,
   edit: true,
   "text-file": true,
+  file: true,
   reply: true,
   tag: true,
   message: true,

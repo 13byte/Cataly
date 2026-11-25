@@ -48,6 +48,7 @@ export const parseSkillFlags = (rest: string[]) =>
       resolve: { type: "string" },
       edit: { type: "string" },
       "text-file": { type: "string" },
+      file: { type: "string", multiple: true },
       reply: { type: "string" },
       "render-tables": { type: "boolean" },
       tag: { type: "string", multiple: true },
