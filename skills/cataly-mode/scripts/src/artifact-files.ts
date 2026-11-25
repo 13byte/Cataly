@@ -71,6 +71,8 @@ export const inspectArtifact = async (
   roots: readonly ArtifactRoot[],
   input: string,
   visibility: "private" | "public",
+  /** Called with the size before any byte is read; throw an `ArtifactError` to refuse the file unhashed. */
+  admit?: (size: number) => void,
 ): Promise<ArtifactFile> => {
   let fd: number | undefined;
   try {
@@ -92,6 +94,7 @@ export const inspectArtifact = async (
     if (!same(before, fstatSync(fd, { bigint: true }))) throw new ArtifactError("artifact changed while opening");
     const size = Number(before.size);
     if (!Number.isSafeInteger(size)) throw new ArtifactError("artifact size is not safely representable");
+    admit?.(size);
     const hash = createHash("sha256");
     for await (const chunk of createReadStream(realPath, { fd, autoClose: false, end: Math.max(0, size - 1) }))
       hash.update(chunk);

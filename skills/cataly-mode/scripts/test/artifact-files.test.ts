@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdirSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { artifactWithin, inspectArtifact } from "../src/artifact-files.ts";
+import { ArtifactError, artifactWithin, inspectArtifact } from "../src/artifact-files.ts";
 import { withState } from "./fakes.ts";
 
 let state: ReturnType<typeof withState>;
@@ -32,6 +32,21 @@ test("hashes actual bytes, including an empty file, and never guesses a private 
       url: null,
     });
   }
+});
+test("a caller learns the size after the path is admitted and can refuse the file by it", async () => {
+  const text = "actual evidence\n";
+  const path = file("report.txt", text);
+  const sizes: number[] = [];
+  const inspected = await inspectArtifact(roots(), path, "private", (size) => sizes.push(size));
+  expect([sizes, inspected.size]).toEqual([[Buffer.byteLength(text)], Buffer.byteLength(text)]);
+  const refuse = () => {
+    throw new ArtifactError("too large for this caller");
+  };
+  await expect(inspectArtifact(roots(), path, "private", refuse)).rejects.toThrow("too large for this caller");
+  // The path rules come first: a refused path is never sized.
+  const hidden = file(".hidden/report.txt", text);
+  await expect(inspectArtifact(roots(), hidden, "private", (size) => sizes.push(size))).rejects.toThrow("hidden");
+  expect(sizes).toHaveLength(1);
 });
 test("public URLs encode each path component including parentheses and non-ASCII bytes", async () => {
   const path = file("part one/\uacb0\uacfc (v1).HTML");
