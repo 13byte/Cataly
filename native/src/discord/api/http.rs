@@ -7,6 +7,16 @@ use serde_json::Value;
 
 use super::DiscordApi;
 
+/// A multipart upload may need longer than the client's 8 s request timeout.
+const UPLOAD_DEADLINE: Duration = Duration::from_secs(120);
+
+/// What a request carries: a JSON value, or a finished multipart form under its boundary.
+#[derive(Clone, Copy)]
+pub(super) enum Payload<'a> {
+    Json(&'a Value),
+    Multipart { boundary: &'a str, body: &'a [u8] },
+}
+
 impl DiscordApi {
     pub(super) async fn call(
         &self,
@@ -15,15 +25,35 @@ impl DiscordApi {
         body: Option<&Value>,
         auth: bool,
     ) -> Result<Vec<u8>> {
+        self.request(method, path, body.map(Payload::Json), auth)
+            .await
+    }
+
+    /// One request, sent again at most once after a 429 that asks for five seconds or less.
+    pub(super) async fn request(
+        &self,
+        method: Method,
+        path: &str,
+        payload: Option<Payload<'_>>,
+        auth: bool,
+    ) -> Result<Vec<u8>> {
         let url = self.base.join(path)?;
         for trial in 0..2 {
             let mut request = self.client.request(method.clone(), url.clone());
             if auth {
                 request = request.header(header::AUTHORIZATION, self.authorization.clone());
             }
-            if let Some(body) = body {
-                request = request.json(body);
-            }
+            request = match payload {
+                Some(Payload::Json(body)) => request.json(body),
+                Some(Payload::Multipart { boundary, body }) => request
+                    .header(
+                        header::CONTENT_TYPE,
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .timeout(UPLOAD_DEADLINE)
+                    .body(body.to_vec()),
+                None => request,
+            };
             let mut response = request
                 .send()
                 .await

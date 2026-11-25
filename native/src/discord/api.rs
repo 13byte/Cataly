@@ -10,8 +10,10 @@ use serde_json::{Value, json};
 use super::{BotProfile, Message, Snowflake};
 
 mod extra;
+mod files;
 mod http;
 pub(in crate::discord) use extra::{PartPost, RestStatus};
+pub(in crate::discord) use files::FilePart;
 
 pub(super) struct DiscordApi {
     client: Client,
@@ -26,6 +28,16 @@ pub(super) struct Receipt {
     message_reference: Option<Reference>,
     #[serde(rename = "type")]
     kind: Option<u8>,
+    /// What Discord stored for each file of this message, in the order the files were sent.
+    #[serde(default)]
+    pub(super) attachments: Vec<Attachment>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct Attachment {
+    pub(super) id: Snowflake,
+    pub(super) filename: String,
+    pub(super) size: u64,
 }
 
 #[derive(Deserialize)]

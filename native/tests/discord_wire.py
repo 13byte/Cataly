@@ -1,7 +1,7 @@
 """Small loopback Discord wire fixture; uses no bot token, network service or dependencies."""
 
 from base64 import b64encode
-from hashlib import sha1
+from hashlib import sha1, sha256
 from http.server import BaseHTTPRequestHandler
 import json
 from queue import Empty, Queue
@@ -51,6 +51,20 @@ class World:
 
 def message(ident, text, user="10", channel="20"):
     return {"id": ident, "channel_id": channel, "type": 0, "author": {"id": user}, "content": text}
+
+
+def multipart(headers, raw):
+    """A message with files: its `payload_json` fields plus `files`, each with its size and SHA-256."""
+    data, files = {}, []
+    for part in raw.split(b"--" + headers.get_param("boundary").encode())[1:-1]:
+        head, _, body = part.partition(b"\r\n\r\n")
+        head, body = head.decode(), body.removesuffix(b"\r\n")
+        if 'name="payload_json"' in head:
+            data = json.loads(body)
+        else:
+            field, name = (head.split(f'{key}="', 1)[1].split('"', 1)[0] for key in (" name", "filename"))
+            files.append({"field": field, "filename": name, "size": len(body), "sha256": sha256(body).hexdigest()})
+    return {**data, "files": files}
 
 
 class Discord(BaseHTTPRequestHandler):
@@ -107,7 +121,9 @@ class Discord(BaseHTTPRequestHandler):
                 self.json({}, 404)
 
     def do_POST(self):
-        data = json.loads(self.rfile.read(int(self.headers["content-length"])))
+        raw = self.rfile.read(int(self.headers["content-length"]))
+        form = self.headers.get_content_type() == "multipart/form-data"
+        data = multipart(self.headers, raw) if form else json.loads(raw)
         if self.path.startswith("/api/v10/interactions/"):
             assert self.headers.get("Authorization") is None
             assert self.path.endswith("/callback-local-only/callback")
@@ -128,8 +144,10 @@ class Discord(BaseHTTPRequestHandler):
             self.world.replies.put(data)
             self.world.bound += 1
             reference = None if self.world.force_plain_reply else data.get("message_reference")
+            stored = [{"id": str(900 + index), "filename": file["filename"], "size": file["size"]}
+                      for index, file in enumerate(data.get("files", []))]
             self.json({"id": "300" if card else str(301 + self.world.bound), "channel_id": channel,
-                       "type": 19 if reference else 0, "message_reference": reference})
+                       "type": 19 if reference else 0, "message_reference": reference, "attachments": stored})
         else:
             self.json({}, 404)
 

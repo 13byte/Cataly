@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
@@ -63,7 +64,7 @@ enum Command {
     /// Run the native Discord intake, approvals and reply transport in the foreground.
     #[cfg(all(unix, feature = "discord"))]
     Discord(Box<discord::Options>),
-    /// Send or edit Discord text from standard input without launching OMP.
+    /// Send or edit Discord text from standard input, or attach verified files, without launching OMP.
     #[cfg(all(unix, feature = "discord"))]
     DiscordSend(discord::SendOptions),
     /// Keep a Discord bot online without starting the inbox or OMP.
@@ -101,7 +102,7 @@ async fn saved_file(path: &Path) -> Result<PathBuf> {
 }
 
 #[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<()> {
+async fn main() -> Result<ExitCode> {
     let cli = Cli::parse();
     let omp = omp::Executable::new(&cli.omp, &cli.cwd, cli.model.as_deref())?;
     match cli.command {
@@ -155,7 +156,7 @@ async fn main() -> Result<()> {
         #[cfg(all(unix, feature = "discord"))]
         Command::Discord(options) => Box::pin(discord::run(&omp, &cli.cwd, *options)).await?,
         #[cfg(all(unix, feature = "discord"))]
-        Command::DiscordSend(options) => Box::pin(discord::send(options)).await?,
+        Command::DiscordSend(options) => return Box::pin(discord::send(options)).await,
         #[cfg(all(unix, feature = "discord"))]
         Command::DiscordPresence => Box::pin(discord::presence()).await?,
         #[cfg(unix)]
@@ -163,5 +164,5 @@ async fn main() -> Result<()> {
         #[cfg(unix)]
         Command::HeadlessHost { dir } => headless::run(&dir).await?,
     }
-    Ok(())
+    Ok(ExitCode::SUCCESS)
 }

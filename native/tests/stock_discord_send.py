@@ -2,7 +2,10 @@
 
 import json
 import subprocess
+import tempfile
 from collections.abc import Sequence
+from hashlib import sha256
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -54,4 +57,33 @@ def exercise_send(binary: str, env: dict[str, str], world: "World") -> None:
     for args in [("--to", "21"), ("--thread", "20", "--edit", "300", "--reply", "100")]:
         denied = run("no effect", *args)
         assert denied.returncode != 0, denied
+    assert world.replies.empty() and world.cleared.empty()
+
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "결과 report.txt"
+        path.write_bytes(b"stock file\n")
+        stored = {"filename": path.name, "size": 11, "sha256": sha256(b"stock file\n").hexdigest()}
+        admitted = f"{stored['sha256']}:11:{path}"
+        world.rate_limit = True
+        result = run("with a file", "--thread", "20", "--reply", "100", "--file", admitted)
+        assert result.returncode == 0, result.stderr
+        receipt = json.loads(result.stdout)
+        assert receipt["replyConfirmed"] is True and len(receipt["ids"]) == 1, receipt
+        assert receipt["attachments"] == [{"id": "900", **stored}], receipt
+        posted = world.replies.get(timeout=2)
+        assert posted["files"] == [{"field": "files[0]", **stored}] and posted["content"] == "with a file", posted
+        assert posted["attachments"] == [{"id": 0, "filename": path.name}] and posted["enforce_nonce"] is True, posted
+        assert posted["message_reference"] == first["message_reference"], posted
+        # The rate-limited attempt and its single retry carried the same enforced nonce.
+        assert world.nonces[-2:] == [posted["nonce"]] * 2 and len(posted["nonce"]) == 24, world.nonces
+        # Bytes that no longer match the admitted size and SHA-256 are refused before any request.
+        path.write_bytes(b"other file\n")
+        for stale in (admitted, f"{stored['sha256']}:10:{path}"):
+            changed = run("", "--thread", "20", "--file", stale)
+            assert changed.returncode == 1 and "changed after it was admitted" in changed.stderr, changed
+        current = f"{sha256(path.read_bytes()).hexdigest()}:11:{path}"
+        world.reject_text = "refused file"
+        refused = run(world.reject_text, "--thread", "20", "--file", current)
+        assert refused.returncode == 1 and "nothing was posted" in refused.stderr, refused
+        assert run("no effect", "--thread", "20", "--edit", "300", "--file", current).returncode == 2
     assert world.replies.empty() and world.cleared.empty()
